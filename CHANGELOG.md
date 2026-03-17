@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Bump GitHub Actions (`checkout`, `setup-node`, `upload-artifact`) from v4 to v5 for Node.js 24 compatibility
+
+### Fixed
+
+- Suppress unused variable warning for `mode` parameter on Windows in `write_bytes`
+- Move `std::io::Write` import into `#[cfg(unix)]` block in vault backup to fix unused import warning on Windows
+
 ## [0.99.10] - 2026-03-17
 
 ### Changed

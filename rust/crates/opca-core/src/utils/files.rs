@@ -32,6 +32,7 @@ pub fn write_bytes(
     overwrite: bool,
     create_dirs: bool,
     atomic: bool,
+    #[cfg_attr(not(unix), allow(unused_variables))]
     mode: u32,
 ) -> Result<PathBuf, OpcaError> {
     let file_path = expand_path(path.as_ref());

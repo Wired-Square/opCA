@@ -195,10 +195,9 @@ pub async fn vault_default_filename(state: State<'_, AppState>) -> Result<String
 
 /// Write backup bytes to a file with restrictive permissions (0o600).
 fn write_backup_file(path: &str, data: &[u8]) -> Result<(), String> {
-    use std::io::Write;
-
     #[cfg(unix)]
     {
+        use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
