@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Rsync backup store connection test now handles daemon module syntax (`host::module`) correctly — previously the module name was included in the hostname, causing DNS resolution failure
 - Suppress unused variable warning for `mode` parameter on Windows in `write_bytes`
 - Move `std::io::Write` import into `#[cfg(unix)]` block in vault backup to fix unused import warning on Windows
 

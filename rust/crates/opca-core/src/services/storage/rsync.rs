@@ -29,20 +29,34 @@ impl StorageRsync {
         Ok(rest.to_string())
     }
 
-    /// Extract `user@host` (or just `host`) from an rsync URI for SSH
-    /// connectivity testing.
+    /// Extract the host (and optional user) from an rsync URI for connectivity
+    /// testing.  Handles both SSH-style paths (`user@host/path`) and rsync
+    /// daemon module syntax (`user@host::module`).
     fn parse_host(uri: &str) -> Result<String, OpcaError> {
         let rest = uri
             .strip_prefix("rsync://")
             .ok_or_else(|| OpcaError::Storage(format!("Invalid rsync URI: {uri}")))?;
 
-        // Take everything before the first '/' after the authority
-        let host = rest.split('/').next().unwrap_or(rest);
+        // Strip the path or module portion — `::` (daemon) takes precedence
+        // over `/` (SSH path).
+        let host = if let Some(idx) = rest.find("::") {
+            &rest[..idx]
+        } else {
+            rest.split('/').next().unwrap_or(rest)
+        };
+
         if host.is_empty() {
             return Err(OpcaError::Storage("Empty rsync host".to_string()));
         }
 
         Ok(host.to_string())
+    }
+
+    /// Returns `true` when the URI uses rsync daemon module syntax (`host::module`).
+    fn is_daemon_uri(uri: &str) -> bool {
+        uri.strip_prefix("rsync://")
+            .map(|rest| rest.contains("::"))
+            .unwrap_or(false)
     }
 }
 
@@ -76,21 +90,38 @@ impl StorageBackend for StorageRsync {
     fn test_connection(&self, uri: &str) -> Result<(), OpcaError> {
         let host = Self::parse_host(uri)?;
 
-        let output = Command::new("ssh")
-            .args([
-                "-o", "ConnectTimeout=5",
-                "-o", "BatchMode=yes",
-                &host,
-                "true",
-            ])
-            .output()
-            .map_err(|e| OpcaError::Storage(format!("Failed to run ssh: {e}")))?;
+        if Self::is_daemon_uri(uri) {
+            // Rsync daemon module — test with `rsync --list-only host::module`
+            let destination = Self::parse_destination(uri)?;
+            let output = Command::new("rsync")
+                .args(["--contimeout=5", "--list-only", &destination])
+                .output()
+                .map_err(|e| OpcaError::Storage(format!("Failed to run rsync: {e}")))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(OpcaError::Storage(format!(
-                "SSH connection to {host} failed: {stderr}"
-            )));
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(OpcaError::Storage(format!(
+                    "Rsync connection to {host} failed: {stderr}"
+                )));
+            }
+        } else {
+            // SSH-based rsync — test SSH connectivity
+            let output = Command::new("ssh")
+                .args([
+                    "-o", "ConnectTimeout=5",
+                    "-o", "BatchMode=yes",
+                    &host,
+                    "true",
+                ])
+                .output()
+                .map_err(|e| OpcaError::Storage(format!("Failed to run ssh: {e}")))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(OpcaError::Storage(format!(
+                    "SSH connection to {host} failed: {stderr}"
+                )));
+            }
         }
 
         Ok(())
@@ -138,8 +169,42 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_host_daemon_module() {
+        let host =
+            StorageRsync::parse_host("rsync://fileserver.example.com::opca-backup").unwrap();
+        assert_eq!(host, "fileserver.example.com");
+    }
+
+    #[test]
+    fn test_parse_host_daemon_module_with_user() {
+        let host =
+            StorageRsync::parse_host("rsync://deploy@fileserver.example.com::opca-backup")
+                .unwrap();
+        assert_eq!(host, "deploy@fileserver.example.com");
+    }
+
+    #[test]
     fn test_parse_host_empty() {
         let result = StorageRsync::parse_host("rsync://");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_is_daemon_uri() {
+        assert!(StorageRsync::is_daemon_uri(
+            "rsync://fileserver.example.com::opca-backup"
+        ));
+        assert!(!StorageRsync::is_daemon_uri(
+            "rsync://deploy@host.example.com/var/www/"
+        ));
+    }
+
+    #[test]
+    fn test_parse_destination_daemon_module() {
+        let dest = StorageRsync::parse_destination(
+            "rsync://fileserver.example.com::opca-backup",
+        )
+        .unwrap();
+        assert_eq!(dest, "fileserver.example.com::opca-backup");
     }
 }
