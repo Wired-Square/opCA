@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Certificate naming: items are now named `CRT_{serial}_{cn}` instead of just the CN, making each item uniquely identifiable
+- Certificate renewal and revocation no longer rename the original 1Password item
+- Renewal guard now checks certificate status (rejects revoked) instead of comparing title to serial
 - OpenVPN: Profiles tab is now the default view and appears first in the tab bar
 - Bump GitHub Actions (`checkout`, `setup-node`, `upload-artifact`) from v4 to v5 for Node.js 24 compatibility
 

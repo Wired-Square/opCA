@@ -574,6 +574,10 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let signed_cert = self.sign_certificate(&csr, &cert_type)?;
         bundle.update_certificate(signed_cert)?;
 
+        // Update title to CRT_{serial}_{cn}
+        let serial = bundle.get_certificate_attrib("serial")?.unwrap_or_default();
+        bundle.title = format!("CRT_{serial}_{item_title}");
+
         // Check if the cert will outlive the CA
         let warning = self.check_cert_issuance_warning();
 
@@ -706,13 +710,13 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let cert_record = db.query_cert(lookup, true)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
-        let item_serial = cert_record.serial.clone();
         let item_title = cert_record.title.clone()
             .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
 
-        if item_title == item_serial {
+        let status = cert_record.status.as_deref().unwrap_or("");
+        if status == "Revoked" {
             return Err(OpcaError::Other(
-                "Cannot renew a certificate that has already been acted on".into(),
+                "Cannot renew a revoked certificate".into(),
             ));
         }
 
@@ -721,7 +725,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 
         let csr_pem = cert_bundle.csr_pem()
             .ok_or_else(|| OpcaError::Other(format!(
-                "CSR not found for certificate '{item_title}' (serial {item_serial}); cannot renew."
+                "CSR not found for certificate '{item_title}'; cannot renew."
             )))?;
 
         let csr = X509Req::from_pem(csr_pem.as_bytes())
@@ -731,13 +735,13 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let signed_cert = self.sign_certificate(&csr, &cert_type)?;
         cert_bundle.update_certificate(signed_cert)?;
 
+        // Update title with new serial
+        let new_serial = cert_bundle.get_certificate_attrib("serial")?.unwrap_or_default();
+        let cn = cert_bundle.get_certificate_attrib("cn")?.unwrap_or_default();
+        cert_bundle.title = format!("CRT_{new_serial}_{cn}");
+
         // Check if the renewed cert will outlive the CA
         let warning = self.check_cert_issuance_warning();
-
-        // Rename old to serial number
-        if item_title != item_serial {
-            self.rename_certbundle(&item_title, &item_serial, false)?;
-        }
 
         // Store updated bundle
         self.store_certbundle_for(&cert_bundle, None, None, false)?;
@@ -761,17 +765,11 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
         let item_serial = cert.serial.clone();
-        let item_title = cert.title.clone()
-            .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
 
         let db = self.ca_database.as_mut().unwrap();
         db.process_ca_database(Some(&item_serial))?;
 
         self.store_ca_database()?;
-
-        if item_title != item_serial {
-            self.rename_certbundle(&item_title, &item_serial, false)?;
-        }
 
         Ok(true)
     }
