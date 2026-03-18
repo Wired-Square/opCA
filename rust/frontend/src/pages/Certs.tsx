@@ -4,6 +4,7 @@ import { listCerts, listExternalCerts } from "../api/certs";
 import { formatDate } from "../utils/dates";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
+import SearchInput from "../components/SearchInput";
 import type { CertListItem, ExternalCertListItem } from "../api/types";
 
 type Tab = "local" | "external";
@@ -12,6 +13,7 @@ export default function Certs() {
   const navigate = useNavigate();
   const [tab, setTab] = createSignal<Tab>("local");
   const [filter, setFilter] = createSignal("all");
+  const [search, setSearch] = createSignal("");
 
   const [localCerts, { refetch: refetchLocal }] = createResource<CertListItem[]>(listCerts);
   const [externalCerts, { refetch: refetchExternal }] = createResource<ExternalCertListItem[]>(listExternalCerts);
@@ -20,17 +22,27 @@ export default function Certs() {
   const loading = () => certs().loading;
 
   const filteredLocal = () => {
-    const items = localCerts() ?? [];
+    let items = localCerts() ?? [];
     const f = filter();
-    if (f === "all") return items;
-    return items.filter((c) => c.status?.toLowerCase() === f);
+    if (f !== "all") items = items.filter((c) => c.status?.toLowerCase() === f);
+    const q = search().toLowerCase();
+    if (q) items = items.filter((c) =>
+      [c.serial, c.cn, c.cert_type, c.status, c.expiry_date ? formatDate(c.expiry_date) : null]
+        .some((v) => v?.toLowerCase().includes(q))
+    );
+    return items;
   };
 
   const filteredExternal = () => {
-    const items = externalCerts() ?? [];
+    let items = externalCerts() ?? [];
     const f = filter();
-    if (f === "all") return items;
-    return items.filter((c) => c.status?.toLowerCase() === f);
+    if (f !== "all") items = items.filter((c) => c.status?.toLowerCase() === f);
+    const q = search().toLowerCase();
+    if (q) items = items.filter((c) =>
+      [c.serial, c.cn, c.issuer, c.status, c.expiry_date ? formatDate(c.expiry_date) : null, c.import_date ? formatDate(c.import_date) : null]
+        .some((v) => v?.toLowerCase().includes(q))
+    );
+    return items;
   };
 
   const statusBadgeClass = (status: string | null) =>
@@ -46,6 +58,7 @@ export default function Certs() {
       <div class="page-header">
         <h2>Certificates</h2>
         <div class="header-actions">
+          <SearchInput value={search()} onInput={setSearch} />
           <select
             class="status-filter"
             value={filter()}

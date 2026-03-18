@@ -14,6 +14,7 @@ import {
 } from "../api/openvpn";
 import { formatDate } from "../utils/dates";
 import Spinner from "../components/Spinner";
+import SearchInput from "../components/SearchInput";
 import VaultPicker from "../components/VaultPicker";
 import type {
   OpenVpnServerParams,
@@ -24,7 +25,7 @@ import type {
 type Tab = "client" | "server" | "profiles";
 
 export default function OpenVPN() {
-  const [tab, setTab] = createSignal<Tab>("client");
+  const [tab, setTab] = createSignal<Tab>("profiles");
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
 
@@ -54,8 +55,18 @@ export default function OpenVPN() {
   // ── Profiles tab state ────────────────────────────────────────
   const [profiles, { refetch: refetchProfiles }] =
     createResource<OpenVpnProfileItem[]>(listOpenVpnProfiles);
+  const [profileSearch, setProfileSearch] = createSignal("");
   const [selectedProfile, setSelectedProfile] = createSignal<OpenVpnProfileItem | null>(null);
   const [destVault, setDestVault] = createSignal("");
+
+  const filteredProfiles = () => {
+    const items = profiles() ?? [];
+    const q = profileSearch().toLowerCase();
+    if (!q) return items;
+    return items.filter((p) =>
+      [p.cn, p.created_date ? formatDate(p.created_date) : null].some((v) => v?.toLowerCase().includes(q))
+    );
+  };
 
   function switchTab(t: Tab) {
     setTab(t);
@@ -226,6 +237,12 @@ export default function OpenVPN() {
 
       <div class="tab-bar">
         <button
+          class={`tab-btn ${tab() === "profiles" ? "tab-active" : ""}`}
+          onClick={() => switchTab("profiles")}
+        >
+          Profiles
+        </button>
+        <button
           class={`tab-btn ${tab() === "client" ? "tab-active" : ""}`}
           onClick={() => switchTab("client")}
         >
@@ -236,12 +253,6 @@ export default function OpenVPN() {
           onClick={() => switchTab("server")}
         >
           Server
-        </button>
-        <button
-          class={`tab-btn ${tab() === "profiles" ? "tab-active" : ""}`}
-          onClick={() => switchTab("profiles")}
-        >
-          Profiles
         </button>
       </div>
 
@@ -437,6 +448,7 @@ export default function OpenVPN() {
       <Show when={tab() === "profiles"}>
         <div class="tab-content">
           <div class="profiles-header">
+            <SearchInput value={profileSearch()} onInput={setProfileSearch} />
             <button class="btn-ghost" onClick={() => refetchProfiles()} disabled={profiles.loading}>
               Refresh
             </button>
@@ -446,11 +458,11 @@ export default function OpenVPN() {
             <Spinner message="Loading profiles..." />
           </Show>
 
-          <Show when={!profiles.loading && (profiles() ?? []).length === 0}>
+          <Show when={!profiles.loading && filteredProfiles().length === 0}>
             <p class="text-muted">No VPN profiles found.</p>
           </Show>
 
-          <Show when={(profiles() ?? []).length > 0}>
+          <Show when={filteredProfiles().length > 0}>
             <div class="profile-table-wrap">
               <table class="profile-table">
                 <thead>
@@ -460,7 +472,7 @@ export default function OpenVPN() {
                   </tr>
                 </thead>
                 <tbody>
-                  <For each={profiles()}>
+                  <For each={filteredProfiles()}>
                     {(profile) => (
                       <tr
                         class={`profile-row ${selectedProfile()?.cn === profile.cn ? "profile-row-selected" : ""}`}
@@ -653,6 +665,8 @@ export default function OpenVPN() {
         .profiles-header {
           display: flex;
           justify-content: flex-end;
+          gap: 8px;
+          align-items: center;
         }
 
         .profile-table-wrap {

@@ -1,6 +1,7 @@
 import { Show, For, createSignal, createResource } from "solid-js";
 import { listCsrs, getCsrInfo, createCsr, decodeCsr, signCsr } from "../api/csr";
 import Spinner from "../components/Spinner";
+import SearchInput from "../components/SearchInput";
 import type { CsrListItem, CreateCsrResult, DecodeCsrResult, SignCsrResult } from "../api/types";
 
 type Tab = "list" | "create" | "sign";
@@ -16,6 +17,7 @@ const CSR_TYPES = [
 export default function CSR() {
   const [tab, setTab] = createSignal<Tab>("list");
   const [csrs, { refetch }] = createResource<CsrListItem[]>(() => listCsrs());
+  const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal<CsrListItem | null>(null);
   const [detail, setDetail] = createSignal<CreateCsrResult | null>(null);
   const [loadingDetail, setLoadingDetail] = createSignal(false);
@@ -183,6 +185,15 @@ export default function CSR() {
     }
   }
 
+  const filteredCsrs = () => {
+    const items = csrs() ?? [];
+    const q = search().toLowerCase();
+    if (!q) return items;
+    return items.filter((c) =>
+      [c.cn, c.csr_type, c.email, c.status, c.created_date].some((v) => v?.toLowerCase().includes(q))
+    );
+  };
+
   function statusClass(status: string | null): string {
     switch (status) {
       case "Pending": return "status-pending";
@@ -196,9 +207,12 @@ export default function CSR() {
       <div class="page-header">
         <h2>Certificate Signing Requests</h2>
         <Show when={tab() === "list"}>
-          <button class="btn-ghost" onClick={() => refetch()} disabled={csrs.loading}>
-            Refresh
-          </button>
+          <div class="header-actions">
+            <SearchInput value={search()} onInput={setSearch} />
+            <button class="btn-ghost" onClick={() => refetch()} disabled={csrs.loading}>
+              Refresh
+            </button>
+          </div>
         </Show>
       </div>
 
@@ -234,11 +248,11 @@ export default function CSR() {
             <p class="page-error">{String(csrs.error)}</p>
           </Show>
 
-          <Show when={!csrs.loading && (csrs() ?? []).length === 0}>
+          <Show when={!csrs.loading && filteredCsrs().length === 0}>
             <p class="text-muted">No CSRs found.</p>
           </Show>
 
-          <Show when={(csrs() ?? []).length > 0}>
+          <Show when={filteredCsrs().length > 0}>
             <div class="csr-table-wrap">
               <table class="csr-table">
                 <thead>
@@ -251,7 +265,7 @@ export default function CSR() {
                   </tr>
                 </thead>
                 <tbody>
-                  <For each={csrs()}>
+                  <For each={filteredCsrs()}>
                     {(csr) => (
                       <tr
                         class={`csr-row ${selected()?.cn === csr.cn ? "csr-row-selected" : ""}`}
@@ -593,6 +607,12 @@ export default function CSR() {
 
         .page-header h2 {
           margin: 0;
+        }
+
+        .header-actions {
+          display: flex;
+          gap: 8px;
+          align-items: center;
         }
 
         .page-error {

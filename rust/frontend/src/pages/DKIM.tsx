@@ -2,6 +2,7 @@ import { Show, For, createSignal, createResource } from "solid-js";
 import { listDkimKeys, getDkimInfo, createDkimKey, deleteDkimKey, verifyDkimDns, deployDkimRoute53 } from "../api/dkim";
 import { formatDate } from "../utils/dates";
 import Spinner from "../components/Spinner";
+import SearchInput from "../components/SearchInput";
 import type { DkimKeyItem, DkimKeyDetail, DkimVerifyResult } from "../api/types";
 
 type Tab = "keys" | "create";
@@ -16,6 +17,17 @@ export default function DKIM() {
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
   const [copied, setCopied] = createSignal(false);
+
+  const [search, setSearch] = createSignal("");
+
+  const filteredKeys = () => {
+    const items = keys() ?? [];
+    const q = search().toLowerCase();
+    if (!q) return items;
+    return items.filter((k) =>
+      [k.domain, k.selector, k.created_at].some((v) => v?.toLowerCase().includes(q))
+    );
+  };
 
   // Create form signals
   const [domain, setDomain] = createSignal("");
@@ -166,9 +178,12 @@ export default function DKIM() {
       <div class="page-header">
         <h2>DKIM Key Management</h2>
         <Show when={tab() === "keys"}>
-          <button class="btn-ghost" onClick={() => refetch()} disabled={keys.loading}>
-            Refresh
-          </button>
+          <div class="header-actions">
+            <SearchInput value={search()} onInput={setSearch} />
+            <button class="btn-ghost" onClick={() => refetch()} disabled={keys.loading}>
+              Refresh
+            </button>
+          </div>
         </Show>
       </div>
 
@@ -198,11 +213,11 @@ export default function DKIM() {
             <p class="page-error">{String(keys.error)}</p>
           </Show>
 
-          <Show when={!keys.loading && (keys() ?? []).length === 0}>
+          <Show when={!keys.loading && filteredKeys().length === 0}>
             <p class="text-muted">No DKIM keys found.</p>
           </Show>
 
-          <Show when={(keys() ?? []).length > 0}>
+          <Show when={filteredKeys().length > 0}>
             <div class="dkim-table-wrap">
               <table class="dkim-table">
                 <thead>
@@ -213,7 +228,7 @@ export default function DKIM() {
                   </tr>
                 </thead>
                 <tbody>
-                  <For each={keys()}>
+                  <For each={filteredKeys()}>
                     {(key) => (
                       <tr
                         class={`dkim-row ${selected()?.domain === key.domain && selected()?.selector === key.selector ? "dkim-row-selected" : ""}`}
@@ -383,6 +398,12 @@ export default function DKIM() {
 
         .page-header h2 {
           margin: 0;
+        }
+
+        .header-actions {
+          display: flex;
+          gap: 8px;
+          align-items: center;
         }
 
         .page-error {

@@ -2,6 +2,7 @@ import { Show, For, createSignal, createResource } from "solid-js";
 import { getDatabaseInfo, getActionLog } from "../api/database";
 import { uploadCaDatabase } from "../api/ca";
 import Spinner from "../components/Spinner";
+import SearchInput from "../components/SearchInput";
 import type { DatabaseInfo, LogEntry } from "../api/types";
 
 type Tab = "log" | "statistics" | "config";
@@ -10,8 +11,18 @@ export default function Database() {
   const [tab, setTab] = createSignal<Tab>("log");
   const [info, { refetch }] = createResource<DatabaseInfo>(getDatabaseInfo);
   const [log, { refetch: refetchLog }] = createResource<LogEntry[]>(getActionLog);
+  const [logSearch, setLogSearch] = createSignal("");
   const [uploading, setUploading] = createSignal(false);
   const [uploadResult, setUploadResult] = createSignal<string | null>(null);
+
+  const filteredLog = () => {
+    const items = log() ?? [];
+    const q = logSearch().toLowerCase();
+    if (!q) return items;
+    return items.filter((e) =>
+      [e.action, e.detail, formatLogTime(e.timestamp)].some((v) => v?.toLowerCase().includes(q))
+    );
+  };
 
   const hasPrivateStore = () => !!info()?.config.ca_private_store;
 
@@ -41,6 +52,9 @@ export default function Database() {
       <div class="page-header">
         <h2>Database</h2>
         <div class="header-actions">
+          <Show when={tab() === "log"}>
+            <SearchInput value={logSearch()} onInput={setLogSearch} />
+          </Show>
           <button class="btn-ghost" onClick={refresh} disabled={info.loading}>
             {info.loading ? "Loading\u2026" : "Refresh"}
           </button>
@@ -76,7 +90,7 @@ export default function Database() {
 
       <div class="tab-content">
         <Show when={tab() === "log"}>
-          <LogTab log={log} />
+          <LogTab entries={filteredLog} loading={log.loading} />
         </Show>
         <Show when={tab() === "statistics"}>
           <StatisticsTab info={info} />
@@ -91,29 +105,27 @@ export default function Database() {
   );
 }
 
-function LogTab(props: { log: () => LogEntry[] | undefined }) {
+function LogTab(props: { entries: () => LogEntry[]; loading: boolean }) {
   return (
-    <Show when={props.log()} fallback={<Spinner message="Loading…" />}>
-      {(entries) => (
-        <Show when={entries().length > 0} fallback={<p class="text-muted">No activity recorded yet.</p>}>
-          <div class="log-list">
-            <For each={[...entries()].reverse()}>
-              {(entry) => (
-                <div class={`log-entry ${entry.success ? "" : "log-error"}`}>
-                  <span class="log-time">{formatLogTime(entry.timestamp)}</span>
-                  <span class={`log-status ${entry.success ? "log-ok" : "log-fail"}`}>
-                    {entry.success ? "\u2713" : "\u2717"}
-                  </span>
-                  <span class="log-action">{entry.action}</span>
-                  <Show when={entry.detail}>
-                    <span class="log-detail">{entry.detail}</span>
-                  </Show>
-                </div>
-              )}
-            </For>
-          </div>
-        </Show>
-      )}
+    <Show when={!props.loading} fallback={<Spinner message="Loading…" />}>
+      <Show when={props.entries().length > 0} fallback={<p class="text-muted">No activity recorded yet.</p>}>
+        <div class="log-list">
+          <For each={[...props.entries()].reverse()}>
+            {(entry) => (
+              <div class={`log-entry ${entry.success ? "" : "log-error"}`}>
+                <span class="log-time">{formatLogTime(entry.timestamp)}</span>
+                <span class={`log-status ${entry.success ? "log-ok" : "log-fail"}`}>
+                  {entry.success ? "\u2713" : "\u2717"}
+                </span>
+                <span class="log-action">{entry.action}</span>
+                <Show when={entry.detail}>
+                  <span class="log-detail">{entry.detail}</span>
+                </Show>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
     </Show>
   );
 }

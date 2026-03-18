@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Search input on list views: Certificates, CSR, DKIM, OpenVPN profiles, and Database activity log now support client-side text search across all visible columns
 - Vault backup: optional "Generate" button creates a strong random password (URL-safe base64, 32 bytes)
 - Vault backup: optional "Store password in 1Password" saves the encryption password as a Password item in the current vault
 - Vault backup: optional "Transfer backup to store" uploads the encrypted backup to the configured backup store (rsync/S3)
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- OpenVPN: Profiles tab is now the default view and appears first in the tab bar
 - Bump GitHub Actions (`checkout`, `setup-node`, `upload-artifact`) from v4 to v5 for Node.js 24 compatibility
 
 ### Fixed
