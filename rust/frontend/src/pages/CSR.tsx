@@ -2,16 +2,14 @@ import { Show, For, createSignal, createResource } from "solid-js";
 import { listCsrs, getCsrInfo, createCsr, decodeCsr, signCsr } from "../api/csr";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
+import { CERT_TYPES } from "../api/types";
 import type { CsrListItem, CreateCsrResult, DecodeCsrResult, SignCsrResult } from "../api/types";
 
 type Tab = "list" | "create" | "sign";
 
 const CSR_TYPES = [
   { value: "appledev", label: "Apple Development" },
-  { value: "device", label: "Device" },
-  { value: "webserver", label: "Web Server" },
-  { value: "vpnclient", label: "VPN Client" },
-  { value: "vpnserver", label: "VPN Server" },
+  ...CERT_TYPES,
 ];
 
 export default function CSR() {

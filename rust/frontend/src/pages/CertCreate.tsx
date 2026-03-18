@@ -2,13 +2,12 @@ import { createSignal, Show, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
 import { getCaConfig, uploadCaDatabase } from "../api/ca";
-
-const CERT_TYPES = ["Device", "Web Server", "VPN Client", "VPN Server"];
+import { CERT_TYPES } from "../api/types";
 
 export default function CertCreate() {
   const navigate = useNavigate();
   const [cn, setCn] = createSignal("");
-  const [certType, setCertType] = createSignal("Device");
+  const [certType, setCertType] = createSignal("device");
   const [keySize, setKeySize] = createSignal<number | undefined>(undefined);
   const [sanInput, setSanInput] = createSignal("");
   const [sans, setSans] = createSignal<string[]>([]);
@@ -95,7 +94,7 @@ export default function CertCreate() {
             onChange={(e) => setCertType(e.currentTarget.value)}
           >
             <For each={CERT_TYPES}>
-              {(t) => <option value={t}>{t}</option>}
+              {(t) => <option value={t.value}>{t.label}</option>}
             </For>
           </select>
         </div>

@@ -52,6 +52,13 @@ export interface CaConfig {
 // Certificates
 // ---------------------------------------------------------------------------
 
+export const CERT_TYPES = [
+  { value: "device", label: "Device" },
+  { value: "webserver", label: "Web Server" },
+  { value: "vpnclient", label: "VPN Client" },
+  { value: "vpnserver", label: "VPN Server" },
+] as const;
+
 export interface CertListItem {
   serial: string | null;
   cn: string | null;
