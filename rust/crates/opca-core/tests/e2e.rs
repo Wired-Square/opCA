@@ -244,6 +244,25 @@ fn t23_cert_renew() {
 }
 
 #[test]
+fn t23b_cert_rekey() {
+    skip_unless_integration!();
+
+    let state = STATE.lock().unwrap();
+    let s = state.as_ref().expect("t01 must run first");
+    let op = make_op(&s.vault);
+
+    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+
+    let lookup = CertLookup::Title(s.server_cert_title.clone());
+    let (new_pem, _warning) = ca
+        .rekey_certificate_bundle(&lookup)
+        .expect("rekey failed");
+
+    assert!(new_pem.contains("BEGIN CERTIFICATE"));
+    eprintln!("[e2e] Rekeyed cert for {}", s.server_cert_title);
+}
+
+#[test]
 fn t24_cert_revoke() {
     skip_unless_integration!();
 

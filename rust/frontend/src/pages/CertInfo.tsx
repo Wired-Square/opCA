@@ -1,6 +1,6 @@
 import { Show, For, createSignal, createResource, createEffect } from "solid-js";
 import { useParams, useNavigate } from "@solidjs/router";
-import { getCertInfo, backfillCert, revokeCert, renewCert } from "../api/certs";
+import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert } from "../api/certs";
 import { getCaConfig, uploadCaDatabase } from "../api/ca";
 import { formatDate } from "../utils/dates";
 import TzToggle from "../components/TzToggle";
@@ -15,7 +15,7 @@ export default function CertInfo() {
     (serial: string) => getCertInfo(serial),
   );
   const [confirming, setConfirming] = createSignal(false);
-  const [acting, setActing] = createSignal(false);
+  const [acting, setActing] = createSignal<string | false>(false);
   const [error, setError] = createSignal<string | null>(null);
   const [copied, setCopied] = createSignal(false);
   const [backfilling, setBackfilling] = createSignal(false);
@@ -63,7 +63,7 @@ export default function CertInfo() {
   async function handleRevoke() {
     const serial = params.serial as string;
     if (!serial) return;
-    setActing(true);
+    setActing("revoke");
     setError(null);
     setShowUploadPrompt(false);
     try {
@@ -78,10 +78,27 @@ export default function CertInfo() {
     }
   }
 
+  async function handleRekey() {
+    const serial = params.serial as string;
+    if (!serial) return;
+    setActing("rekey");
+    setError(null);
+    setShowUploadPrompt(false);
+    try {
+      await rekeyCert(serial);
+      refetch();
+      await maybeShowUploadPrompt();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setActing(false);
+    }
+  }
+
   async function handleRenew() {
     const serial = params.serial as string;
     if (!serial) return;
-    setActing(true);
+    setActing("renew");
     setError(null);
     setShowUploadPrompt(false);
     try {
@@ -191,24 +208,37 @@ export default function CertInfo() {
 
               <div class="cert-actions">
                 <Show when={d().status === "Valid"}>
-                  <button class="btn-primary" onClick={handleRenew} disabled={acting()}>
-                    {acting() ? "Renewing…" : "Renew"}
-                  </button>
-                  <Show when={!confirming()}>
-                    <button class="btn-danger" onClick={() => setConfirming(true)} disabled={acting()}>
+                  <Show when={!acting() || acting() === "rekey"}>
+                    <button class="btn-primary" onClick={handleRekey} disabled={!!acting()}>
+                      {acting() === "rekey" ? "Rekeying…" : "Rekey"}
+                    </button>
+                  </Show>
+                  <Show when={!acting() || acting() === "renew"}>
+                    <button class="btn-primary" onClick={handleRenew} disabled={!!acting()}>
+                      {acting() === "renew" ? "Renewing…" : "Renew"}
+                    </button>
+                  </Show>
+                  <Show when={!acting() && !confirming()}>
+                    <button class="btn-danger" onClick={() => setConfirming(true)}>
                       Revoke
                     </button>
                   </Show>
                   <Show when={confirming()}>
-                    <div class="confirm-inline">
-                      <span class="text-warning">Are you sure?</span>
-                      <button class="btn-danger" onClick={handleRevoke} disabled={acting()}>
-                        {acting() ? "Revoking…" : "Confirm Revoke"}
-                      </button>
-                      <button class="btn-ghost" onClick={() => setConfirming(false)}>
-                        Cancel
-                      </button>
-                    </div>
+                    <Show when={!acting() || acting() === "revoke"}>
+                      <div class="confirm-inline">
+                        <Show when={!acting()}>
+                          <span class="text-warning">Are you sure?</span>
+                        </Show>
+                        <button class="btn-danger" onClick={handleRevoke} disabled={!!acting()}>
+                          {acting() === "revoke" ? "Revoking…" : "Confirm Revoke"}
+                        </button>
+                        <Show when={!acting()}>
+                          <button class="btn-ghost" onClick={() => setConfirming(false)}>
+                            Cancel
+                          </button>
+                        </Show>
+                      </div>
+                    </Show>
                   </Show>
                 </Show>
               </div>

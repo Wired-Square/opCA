@@ -258,6 +258,9 @@ pub enum CertAction {
         external: bool,
     },
 
+    /// Rekey a x509 certificate (renew with a new private key)
+    Rekey(CertIdentifier),
+
     /// Renew a x509 certificate
     Renew(CertIdentifier),
 

@@ -109,6 +109,7 @@ fn main() {
             commands::cert::create_cert,
             commands::cert::revoke_cert,
             commands::cert::renew_cert,
+            commands::cert::rekey_cert,
             commands::cert::import_cert,
             commands::files::read_text_file,
             commands::dkim::list_dkim_keys,

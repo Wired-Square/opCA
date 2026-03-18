@@ -802,6 +802,46 @@ impl CertificateBundle {
     }
 
     // -----------------------------------------------------------------------
+    // Rekey
+    // -----------------------------------------------------------------------
+
+    /// Generate a new private key and CSR, preserving the certificate's subject
+    /// and SAN attributes.
+    ///
+    /// Used for rekeying — the caller should then re-sign the new CSR to produce
+    /// a fresh certificate that uses the new key pair.
+    pub fn regenerate_key_and_csr(&mut self) -> Result<(), OpcaError> {
+        // Backfill CN from certificate if not in config (lost on 1Password round-trip)
+        if self.config.cn.is_none() {
+            self.config.cn = self.certificate.as_ref().and_then(extract_cn);
+        }
+        // Backfill SANs from certificate if not in config
+        if self.config.alt_dns_names.is_none() {
+            if let Some(cert) = self.certificate.as_ref() {
+                if let Some(san_ext) = cert.subject_alt_names() {
+                    let dns_names: Vec<String> = san_ext
+                        .iter()
+                        .filter_map(|name| name.dnsname().map(String::from))
+                        .collect();
+                    if !dns_names.is_empty() {
+                        self.config.alt_dns_names = Some(dns_names);
+                    }
+                }
+            }
+        }
+
+        let key_size = self.public_key_size().unwrap_or(2048);
+        let cn = self.config.cn.as_deref().ok_or_else(|| {
+            OpcaError::InvalidCertificate("CN is required for rekeying".into())
+        })?;
+        let new_key = Self::generate_private_key(key_size)?;
+        let new_csr = Self::build_csr(cn, &new_key, &self.config)?;
+        self.private_key = Some(new_key);
+        self.csr = Some(new_csr);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Validity checks
     // -----------------------------------------------------------------------
 

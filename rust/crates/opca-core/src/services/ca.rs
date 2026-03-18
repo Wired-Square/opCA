@@ -751,6 +751,66 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         Ok((pem, warning))
     }
 
+    /// Rekey a previously signed certificate — generate a new private key and
+    /// CSR, then sign it to produce a fresh certificate.
+    ///
+    /// Returns the rekeyed certificate PEM and an optional warning if the
+    /// certificate would outlive the CA.
+    pub fn rekey_certificate_bundle(
+        &mut self,
+        lookup: &CertLookup,
+    ) -> Result<(String, Option<CertIssuanceWarning>), OpcaError> {
+        info!("[ca] rekeying certificate {lookup:?}");
+        let db = self.ca_database.as_ref()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
+
+        let cert_record = db.query_cert(lookup, true)?
+            .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
+
+        let item_title = cert_record.title.clone()
+            .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
+
+        let status = cert_record.status.as_deref().unwrap_or("");
+        if status == "Revoked" {
+            return Err(OpcaError::Other(
+                "Cannot rekey a revoked certificate".into(),
+            ));
+        }
+
+        let mut cert_bundle = self.retrieve_certbundle(&item_title)?
+            .ok_or_else(|| OpcaError::CertificateNotFound(item_title.clone()))?;
+
+        // Generate a new private key and CSR, preserving subject attributes
+        cert_bundle.regenerate_key_and_csr()?;
+
+        let csr_pem = cert_bundle.csr_pem()
+            .ok_or_else(|| OpcaError::Other(
+                "CSR not available after rekeying".into(),
+            ))?;
+
+        let csr = X509Req::from_pem(csr_pem.as_bytes())
+            .map_err(|e| OpcaError::Crypto(format!("Parse CSR: {e}")))?;
+
+        let cert_type = cert_bundle.cert_type.clone();
+        let signed_cert = self.sign_certificate(&csr, &cert_type)?;
+        cert_bundle.update_certificate(signed_cert)?;
+
+        // Update title with new serial
+        let new_serial = cert_bundle.get_certificate_attrib("serial")?.unwrap_or_default();
+        let cn = cert_bundle.get_certificate_attrib("cn")?.unwrap_or_default();
+        cert_bundle.title = format!("CRT_{new_serial}_{cn}");
+
+        // Check if the rekeyed cert will outlive the CA
+        let warning = self.check_cert_issuance_warning();
+
+        // Store updated bundle (new key, CSR, and cert)
+        self.store_certbundle_for(&cert_bundle, None, None, false)?;
+        self.store_ca_database()?;
+
+        let pem = cert_bundle.certificate_pem()?;
+        Ok((pem, warning))
+    }
+
     // -----------------------------------------------------------------------
     // Revocation + CRL
     // -----------------------------------------------------------------------

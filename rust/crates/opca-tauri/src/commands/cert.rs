@@ -307,6 +307,28 @@ pub async fn renew_cert(
 }
 
 #[tauri::command]
+pub async fn rekey_cert(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<String, String> {
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    let (new_pem, issuance_warning) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()))
+        .map_err(|e| {
+            state.log_err("rekey_cert", Some(e.to_string()));
+            e.to_string()
+        })?;
+
+    if let Some(ref w) = issuance_warning {
+        state.log_ok("rekey_cert", Some(w.message.clone()));
+    }
+
+    state.log_ok("rekey_cert", Some(format!("Rekeyed certificate {} → {}", serial, new_pem)));
+    Ok(new_pem)
+}
+
+#[tauri::command]
 pub async fn import_cert(
     state: State<'_, AppState>,
     request: ImportCertRequest,

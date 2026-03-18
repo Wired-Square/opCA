@@ -18,6 +18,7 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
             cn,
             external: _,
         } => handle_import(app, cert_file, key_file, cn),
+        CertAction::Rekey(id) => handle_rekey(app, id),
         CertAction::Renew(id) => handle_renew(app, id),
         CertAction::Revoke(revoke_args) => handle_revoke(app, revoke_args),
     }
@@ -224,6 +225,26 @@ fn handle_import<R: CommandRunner>(
             .flatten()
             .unwrap_or_else(|| "Unknown".to_string());
         output::print_result(&format!("Import certificate '{imported_cn}'"), true);
+        Ok(())
+    })
+}
+
+fn handle_rekey<R: CommandRunner>(
+    app: &mut AppContext<R>,
+    id: CertIdentifier,
+) -> Result<(), OpcaError> {
+    output::title("Rekeying Certificate");
+
+    let lookup = make_lookup(id.cn.as_deref(), id.serial.as_deref())?;
+
+    with_lock(app, "cert_rekey", |app| {
+        let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+        let (new_pem, issuance_warning) = ca.rekey_certificate_bundle(&lookup)?;
+        output::print_result("Certificate rekeyed", true);
+        if let Some(ref w) = issuance_warning {
+            output::warning(&w.message);
+        }
+        print!("{new_pem}");
         Ok(())
     })
 }

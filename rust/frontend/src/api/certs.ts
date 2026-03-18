@@ -35,6 +35,12 @@ export async function renewCert(serial: string): Promise<string> {
   );
 }
 
+export async function rekeyCert(serial: string): Promise<string> {
+  return withLock("rekey_cert", () =>
+    tauriInvoke<string>("rekey_cert", { serial }),
+  );
+}
+
 export async function importCert(request: ImportCertRequest): Promise<ImportCertResult> {
   return withLock("import_cert", () =>
     tauriInvoke<ImportCertResult>("import_cert", { request }),
