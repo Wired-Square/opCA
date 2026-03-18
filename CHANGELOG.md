@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Relative time display mode: the UTC/Local timezone toggle now cycles through a third "Relative" mode that shows expiry dates as live countdowns (e.g. "2y 3mo", "4h 12m 30s") and past dates as time ago (e.g. "3 months ago")
 - Search input on list views: Certificates, CSR, DKIM, OpenVPN profiles, and Database activity log now support client-side text search across all visible columns
 - Vault backup: optional "Generate" button creates a strong random password (URL-safe base64, 32 bytes)
 - Vault backup: optional "Store password in 1Password" saves the encryption password as a Password item in the current vault

@@ -1,18 +1,22 @@
 import { tzMode, toggleTzMode } from "../utils/dates";
 
+const modeLabel = { utc: "UTC", local: "Local", relative: "Relative" } as const;
+
 /**
- * Small inline button to toggle between UTC and local time display.
+ * Small inline button to toggle between UTC, local, and relative time display.
  */
 export default function TzToggle() {
   return (
     <>
       <button class="tz-toggle" onClick={toggleTzMode} title="Toggle timezone">
-        {tzMode() === "utc" ? "UTC" : "Local"}
+        {modeLabel[tzMode()]}
       </button>
       <style>{`
         .tz-toggle {
           display: inline-flex;
           align-items: center;
+          min-width: 52px;
+          justify-content: center;
           padding: 2px 8px;
           font-size: 0.6875rem;
           font-weight: 600;
