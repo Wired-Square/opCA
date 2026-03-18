@@ -113,6 +113,7 @@ fn handle_create<R: CommandRunner>(
         StoreAction::Create,
         DEFAULT_OP_CONF.category,
         None,
+        None,
     )?;
 
     output::print_result(&format!("DKIM key '{item_title}' created"), true);

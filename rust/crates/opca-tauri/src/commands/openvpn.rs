@@ -207,6 +207,7 @@ pub async fn generate_openvpn_dh(
             action,
             DEFAULT_OP_CONF.category,
             None,
+            None,
         )
         .map_err(|e| format!("Failed to store DH parameters: {e}"))?;
 
@@ -257,6 +258,7 @@ pub async fn generate_openvpn_ta(
             Some(&attr_refs),
             action,
             DEFAULT_OP_CONF.category,
+            None,
             None,
         )
         .map_err(|e| format!("Failed to store TA key: {e}"))?;
@@ -338,6 +340,7 @@ pub async fn setup_openvpn_server(
             action,
             DEFAULT_OP_CONF.category,
             None,
+            None,
         )
         .map_err(|e| format!("Failed to store OpenVPN configuration: {e}"))?;
 
@@ -414,6 +417,7 @@ pub async fn save_openvpn_template(
             Some(&attr_refs),
             StoreAction::Edit,
             DEFAULT_OP_CONF.category,
+            None,
             None,
         )
         .map_err(|e| format!("Failed to save template: {e}"))?;

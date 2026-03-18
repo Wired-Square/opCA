@@ -152,6 +152,7 @@ fn handle_generate_dh<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), O
         action,
         DEFAULT_OP_CONF.category,
         None,
+        None,
     )?;
 
     output::print_result("Stored in 1Password", true);
@@ -188,6 +189,7 @@ fn handle_generate_ta<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), O
         Some(&attr_refs),
         action,
         DEFAULT_OP_CONF.category,
+        None,
         None,
     )?;
 
@@ -275,6 +277,7 @@ fn handle_generate_server<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(
         action,
         DEFAULT_OP_CONF.category,
         None,
+        None,
     )?;
 
     output::print_result("Server configuration stored", true);
@@ -328,6 +331,7 @@ fn handle_setup<R: CommandRunner>(
         Some(&attr_refs),
         action,
         DEFAULT_OP_CONF.category,
+        None,
         None,
     )?;
 
@@ -433,6 +437,7 @@ fn handle_import<R: CommandRunner>(
             action,
             DEFAULT_OP_CONF.category,
             None,
+            None,
         )?;
 
         output::print_result("Stored in 1Password", true);
@@ -469,6 +474,7 @@ fn handle_import<R: CommandRunner>(
             Some(&attr_refs),
             action,
             DEFAULT_OP_CONF.category,
+            None,
             None,
         )?;
 

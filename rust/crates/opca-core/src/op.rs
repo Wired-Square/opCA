@@ -473,10 +473,12 @@ impl<R: CommandRunner> Op<R> {
         action: StoreAction,
         category: &str,
         input: Option<&str>,
+        vault: Option<&str>,
     ) -> Result<String, OpcaError> {
         let (op_action, title_arg) = self.resolve_store_action(item_title, action)?;
 
-        let vault_flag = format!("--vault={}", self.vault);
+        let op_vault = vault.unwrap_or(&self.vault);
+        let vault_flag = format!("--vault={}", op_vault);
         let mut args = vec!["item", op_action, &title_arg, &vault_flag];
 
         let cat_flag;
@@ -767,7 +769,7 @@ mod tests {
     #[test]
     fn store_item_create_uses_title_flag() {
         let op = mock_op(vec![ok_output("")]);
-        op.store_item("NewCert", None, StoreAction::Create, "Secure Note", None)
+        op.store_item("NewCert", None, StoreAction::Create, "Secure Note", None, None)
             .unwrap();
         let calls = op.runner().calls();
         assert!(calls[0].contains(&"--title=NewCert".to_string()));
@@ -777,7 +779,7 @@ mod tests {
     #[test]
     fn store_item_edit_uses_bare_title() {
         let op = mock_op(vec![ok_output("")]);
-        op.store_item("ExistingCert", None, StoreAction::Edit, "Secure Note", None)
+        op.store_item("ExistingCert", None, StoreAction::Edit, "Secure Note", None, None)
             .unwrap();
         let calls = op.runner().calls();
         assert!(calls[0].contains(&"ExistingCert".to_string()));
@@ -788,7 +790,7 @@ mod tests {
     fn store_item_auto_creates_when_not_exists() {
         // First call: item_exists (fails), second: the create.
         let op = mock_op(vec![err_output("not found"), ok_output("")]);
-        op.store_item("NewCert", None, StoreAction::Auto, "Secure Note", None)
+        op.store_item("NewCert", None, StoreAction::Auto, "Secure Note", None, None)
             .unwrap();
         let calls = op.runner().calls();
         assert!(calls[1].contains(&"create".to_string()));
@@ -799,7 +801,7 @@ mod tests {
     fn store_item_auto_edits_when_exists() {
         // First call: item_exists (succeeds), second: the edit.
         let op = mock_op(vec![ok_output("{}"), ok_output("")]);
-        op.store_item("ExistingCert", None, StoreAction::Auto, "Secure Note", None)
+        op.store_item("ExistingCert", None, StoreAction::Auto, "Secure Note", None, None)
             .unwrap();
         let calls = op.runner().calls();
         assert!(calls[1].contains(&"edit".to_string()));
@@ -816,6 +818,7 @@ mod tests {
                 StoreAction::Create,
                 "Secure Note",
                 None,
+                None,
             )
             .unwrap_err();
         assert!(matches!(err, OpcaError::CliError(_)));
@@ -830,6 +833,7 @@ mod tests {
                 Some(&["no_equals_sign"]),
                 StoreAction::Create,
                 "Secure Note",
+                None,
                 None,
             )
             .unwrap_err();

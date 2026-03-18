@@ -92,6 +92,7 @@ fn handle_create<R: CommandRunner>(
         StoreAction::Create,
         DEFAULT_OP_CONF.category,
         None,
+        None,
     )?;
 
     output::print_result(&format!("CSR '{op_title}' stored"), true);

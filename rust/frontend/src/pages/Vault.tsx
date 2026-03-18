@@ -6,9 +6,11 @@ import {
   vaultDefaultFilename,
   generatePassword,
   storePasswordInOp,
+  fileMd5,
 } from "../api/vault-backup";
 import { getCaConfig } from "../api/ca";
 import Spinner from "../components/Spinner";
+import VaultPicker from "../components/VaultPicker";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
@@ -43,10 +45,13 @@ export default function Vault() {
   // Password generation / 1Password storage state
   const [storeInOp, setStoreInOp] = createSignal(false);
   const [storeTitle, setStoreTitle] = createSignal("");
+  const [storeVault, setStoreVault] = createSignal("");
   const [storeWarning, setStoreWarning] = createSignal<string | null>(null);
+  const [backupMd5, setBackupMd5] = createSignal<string | null>(null);
 
   // Restore state
   const [restorePath, setRestorePath] = createSignal("");
+  const [restoreMd5, setRestoreMd5] = createSignal<string | null>(null);
   const [restorePassword, setRestorePassword] = createSignal("");
   const [restoring, setRestoring] = createSignal(false);
   const [restoreResult, setRestoreResult] = createSignal<RestoreResult | null>(null);
@@ -106,6 +111,21 @@ export default function Vault() {
     if (path) setter(path as string);
   }
 
+  // --- File MD5 ---
+
+  async function computeRestoreMd5(path: string) {
+    if (!path.trim()) {
+      setRestoreMd5(null);
+      return;
+    }
+    try {
+      const hash = await fileMd5(path.trim());
+      setRestoreMd5(hash);
+    } catch {
+      setRestoreMd5(null);
+    }
+  }
+
   // --- Password generation ---
 
   async function handleGenerate() {
@@ -152,14 +172,17 @@ export default function Vault() {
 
     setBackingUp(true);
     setProgressMsg(null);
+    setBackupMd5(null);
     try {
-      await vaultBackup(path, pw, transferToStore());
+      const md5Hash = await vaultBackup(path, pw, transferToStore());
+      setBackupMd5(md5Hash);
 
       // Store password in 1Password as a separate step — backup already succeeded
       if (storeInOp()) {
         setProgressMsg("Storing password in 1Password\u2026");
         try {
-          await storePasswordInOp(pw, storeTitle().trim());
+          const vault = storeVault().trim() || undefined;
+          await storePasswordInOp(pw, storeTitle().trim(), vault, md5Hash);
         } catch (e) {
           setStoreWarning(`Backup saved but failed to store password: ${e}`);
         }
@@ -342,6 +365,13 @@ export default function Vault() {
                 autocapitalize="off"
                 spellcheck={false}
               />
+
+              <label class="form-label">Destination vault (optional)</label>
+              <VaultPicker
+                value={storeVault()}
+                onChange={setStoreVault}
+                placeholder="Leave blank for current vault"
+              />
             </Show>
 
             <Show when={hasBackupStore()}>
@@ -372,6 +402,11 @@ export default function Vault() {
             </Show>
             <Show when={backupSuccess()}>
               <p class="page-success">{backupSuccess()}</p>
+              <Show when={backupMd5()}>
+                <div class="md5-hash">
+                  <span class="md5-label">MD5:</span> <code>{backupMd5()}</code>
+                </div>
+              </Show>
             </Show>
           </div>
         </Show>
@@ -386,16 +421,26 @@ export default function Vault() {
                 class="form-input"
                 placeholder="e.g. /tmp/my-vault.opca"
                 value={restorePath()}
-                onInput={(e) => setRestorePath(e.currentTarget.value)}
+                onInput={(e) => { setRestorePath(e.currentTarget.value); setRestoreMd5(null); }}
+                onBlur={(e) => computeRestoreMd5(e.currentTarget.value)}
                 autocomplete="off"
                 autocorrect="off"
                 autocapitalize="off"
                 spellcheck={false}
               />
-              <button class="btn-ghost" onClick={() => browseOpen(setRestorePath, restorePath())}>
+              <button class="btn-ghost" onClick={async () => {
+                const prev = restorePath();
+                await browseOpen((v) => { setRestorePath(v); computeRestoreMd5(v); }, prev);
+              }}>
                 Browse
               </button>
             </div>
+
+            <Show when={restoreMd5()}>
+              <div class="md5-hash">
+                <span class="md5-label">MD5:</span> <code>{restoreMd5()}</code>
+              </div>
+            </Show>
 
             <label class="form-label">Password</label>
             <input
@@ -678,5 +723,19 @@ const vaultStyles = `
   .btn-warning:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .md5-hash {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    background: var(--bg-elevated);
+    border-radius: 6px;
+    font-family: monospace;
+  }
+
+  .md5-label {
+    font-weight: 600;
+    color: var(--text-primary);
   }
 `;

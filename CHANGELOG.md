@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Vault backup: optional "Generate" button creates a strong random password (URL-safe base64, 32 bytes)
 - Vault backup: optional "Store password in 1Password" saves the encryption password as a Password item in the current vault
 - Vault backup: optional "Transfer backup to store" uploads the encrypted backup to the configured backup store (rsync/S3)
+- Vault backup: display MD5 hash of the backup file on success
+- Vault backup: include MD5 hash in the 1Password password item when storing the encryption password
+- Vault backup: vault picker to choose an alternate vault for 1Password password storage
+- Vault restore: display MD5 hash of the selected backup file before restoring
 - macOS: `NSLocalNetworkUsageDescription` in Info.plist for local network permission prompt on first launch
 
 ### Changed

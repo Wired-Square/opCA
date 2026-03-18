@@ -965,6 +965,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             StoreAction::Edit,
             self.op_config.category,
             None,
+            None,
         )?;
 
         self.store_ca_database()?;
@@ -1032,6 +1033,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             Some(&attr_refs),
             StoreAction::Create,
             self.op_config.category,
+            None,
             None,
         )?;
 
@@ -1116,6 +1118,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             Some(&attr_refs),
             StoreAction::Create,
             self.op_config.category,
+            None,
             None,
         )?;
 

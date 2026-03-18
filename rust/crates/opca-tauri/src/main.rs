@@ -139,6 +139,7 @@ fn main() {
             commands::vault::vault_default_filename,
             commands::vault::generate_password,
             commands::vault::store_password_in_op,
+            commands::vault::file_md5,
             commands::update::check_for_updates,
         ])
         .setup(|_app| {

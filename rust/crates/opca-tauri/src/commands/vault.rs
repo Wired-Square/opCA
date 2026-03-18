@@ -3,6 +3,7 @@ use std::path::Path;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use md5;
 use rand::RngCore;
 use tauri::{Emitter, State, Window};
 
@@ -30,7 +31,7 @@ pub async fn vault_backup(
     password: String,
     transfer_to_store: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
@@ -58,6 +59,8 @@ pub async fn vault_backup(
         state.log_err("vault_backup", Some(e.to_string()));
         e.to_string()
     })?;
+
+    let md5_hash = format!("{:x}", md5::compute(&encrypted));
 
     if transfer_to_store {
         emit_progress(&window, "Transferring backup to store\u{2026}");
@@ -103,7 +106,7 @@ pub async fn vault_backup(
         );
     }
 
-    Ok(())
+    Ok(md5_hash)
 }
 
 /// Restore a vault from an encrypted backup file.
@@ -247,21 +250,32 @@ pub async fn generate_password() -> Result<String, String> {
 
 /// Store a backup password in 1Password as a Password category item.
 ///
-/// The item is created in the currently connected vault.
+/// When `vault` is provided, the item is created in that vault instead of the
+/// currently connected vault.  When `md5_hash` is provided it is stored as an
+/// additional field on the item.
 #[tauri::command]
 pub async fn store_password_in_op(
     state: State<'_, AppState>,
     password: String,
     item_title: String,
+    vault: Option<String>,
+    md5_hash: Option<String>,
 ) -> Result<(), String> {
     state.with_op(|op| {
-        let attr = format!("password={}", password);
+        let pw_attr = format!("password={}", password);
+        let md5_attr;
+        let mut attrs = vec![pw_attr.as_str()];
+        if let Some(ref hash) = md5_hash {
+            md5_attr = format!("md5 hash={}", hash);
+            attrs.push(md5_attr.as_str());
+        }
         op.store_item(
             &item_title,
-            Some(&[attr.as_str()]),
+            Some(&attrs),
             StoreAction::Create,
             "Password",
             None,
+            vault.as_deref(),
         )
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -272,6 +286,17 @@ pub async fn store_password_in_op(
         Some(format!("Password stored as '{}'", item_title)),
     );
     Ok(())
+}
+
+/// Compute the MD5 hash of a file on disk.
+///
+/// Returns the hex-encoded digest string.
+#[tauri::command]
+pub async fn file_md5(path: String) -> Result<String, String> {
+    let data = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("Failed to read '{}': {}", path, e))?;
+    Ok(format!("{:x}", md5::compute(&data)))
 }
 
 // ---------------------------------------------------------------------------

@@ -166,6 +166,7 @@ pub async fn create_dkim_key(
             StoreAction::Create,
             DEFAULT_OP_CONF.category,
             None,
+            None,
         )
         .map_err(|e| format!("Failed to store DKIM key in 1Password: {e}"))?;
 

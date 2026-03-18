@@ -103,6 +103,7 @@ impl VaultLock {
             StoreAction::Create,
             DEFAULT_OP_CONF.category,
             None,
+            None,
         ) {
             Ok(_) => {
                 self.held = true;
@@ -126,6 +127,7 @@ impl VaultLock {
                 Some(&attrs),
                 StoreAction::Create,
                 DEFAULT_OP_CONF.category,
+                None,
                 None,
             ) {
                 Ok(_) => {

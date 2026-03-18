@@ -265,6 +265,7 @@ impl<'a, R: CommandRunner> VaultBackup<'a, R> {
             StoreAction::Create,
             self.op_config.category,
             None,
+            None,
         )?;
         Ok(())
     }

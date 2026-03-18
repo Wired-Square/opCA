@@ -5,9 +5,9 @@ export async function vaultBackup(
   path: string,
   password: string,
   transferToStore: boolean,
-): Promise<void> {
+): Promise<string> {
   return withLock("vault_backup", () =>
-    tauriInvoke<void>("vault_backup", { path, password, transferToStore }),
+    tauriInvoke<string>("vault_backup", { path, password, transferToStore }),
   );
 }
 
@@ -46,6 +46,17 @@ export async function generatePassword(): Promise<string> {
 export async function storePasswordInOp(
   password: string,
   itemTitle: string,
+  vault?: string,
+  md5Hash?: string,
 ): Promise<void> {
-  return tauriInvoke<void>("store_password_in_op", { password, itemTitle });
+  return tauriInvoke<void>("store_password_in_op", {
+    password,
+    itemTitle,
+    vault: vault || null,
+    md5Hash: md5Hash || null,
+  });
+}
+
+export async function fileMd5(path: string): Promise<string> {
+  return tauriInvoke<string>("file_md5", { path });
 }

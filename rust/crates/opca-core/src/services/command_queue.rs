@@ -239,6 +239,7 @@ impl CommandQueue {
                         action,
                         &cmd.payload.category,
                         None,
+                        None,
                     )
                     .map(|_| ())
                 }
