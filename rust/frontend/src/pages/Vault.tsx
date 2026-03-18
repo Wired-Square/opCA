@@ -4,7 +4,10 @@ import {
   vaultRestore,
   vaultInfo,
   vaultDefaultFilename,
+  generatePassword,
+  storePasswordInOp,
 } from "../api/vault-backup";
+import { getCaConfig } from "../api/ca";
 import Spinner from "../components/Spinner";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate, useSearchParams } from "@solidjs/router";
@@ -32,6 +35,15 @@ export default function Vault() {
   const [backingUp, setBackingUp] = createSignal(false);
   const [backupSuccess, setBackupSuccess] = createSignal<string | null>(null);
   const [backupError, setBackupError] = createSignal<string | null>(null);
+
+  // Store transfer state
+  const [hasBackupStore, setHasBackupStore] = createSignal(false);
+  const [transferToStore, setTransferToStore] = createSignal(false);
+
+  // Password generation / 1Password storage state
+  const [storeInOp, setStoreInOp] = createSignal(false);
+  const [storeTitle, setStoreTitle] = createSignal("");
+  const [storeWarning, setStoreWarning] = createSignal<string | null>(null);
 
   // Restore state
   const [restorePath, setRestorePath] = createSignal("");
@@ -61,6 +73,12 @@ export default function Vault() {
     } catch {
       // Ignore — user can type path manually
     }
+    try {
+      const config = await getCaConfig();
+      setHasBackupStore(!!config.ca_backup_store);
+    } catch {
+      // Ignore — backup store checkbox simply stays hidden
+    }
   });
 
   onCleanup(() => {
@@ -88,11 +106,30 @@ export default function Vault() {
     if (path) setter(path as string);
   }
 
+  // --- Password generation ---
+
+  async function handleGenerate() {
+    try {
+      const pw = await generatePassword();
+      setBackupPassword(pw);
+      setBackupConfirm(pw);
+      // Auto-enable 1Password storage — a generated password is unrecoverable otherwise
+      setStoreInOp(true);
+      if (!storeTitle()) {
+        const date = new Date().toISOString().slice(0, 10);
+        setStoreTitle(`Vault Backup: ${appState.vault} ${date}`);
+      }
+    } catch (e) {
+      setBackupError(String(e));
+    }
+  }
+
   // --- Backup ---
 
   async function handleBackup() {
     setBackupError(null);
     setBackupSuccess(null);
+    setStoreWarning(null);
 
     const path = backupPath().trim();
     if (!path) {
@@ -108,12 +145,31 @@ export default function Vault() {
       setBackupError("Passwords do not match.");
       return;
     }
+    if (storeInOp() && !storeTitle().trim()) {
+      setBackupError("Please enter a title for the password item.");
+      return;
+    }
 
     setBackingUp(true);
     setProgressMsg(null);
     try {
-      await vaultBackup(path, pw);
-      setBackupSuccess(`Backup saved to ${path}`);
+      await vaultBackup(path, pw, transferToStore());
+
+      // Store password in 1Password as a separate step — backup already succeeded
+      if (storeInOp()) {
+        setProgressMsg("Storing password in 1Password\u2026");
+        try {
+          await storePasswordInOp(pw, storeTitle().trim());
+        } catch (e) {
+          setStoreWarning(`Backup saved but failed to store password: ${e}`);
+        }
+      }
+
+      const parts = [`Backup saved to ${path}`];
+      if (transferToStore()) parts.push("transferred to store");
+      if (storeInOp() && !storeWarning()) parts.push("password stored in 1Password");
+      setBackupSuccess(parts.join(", "));
+
       setBackupPassword("");
       setBackupConfirm("");
     } catch (e) {
@@ -234,17 +290,22 @@ export default function Vault() {
             </div>
 
             <label class="form-label">Password</label>
-            <input
-              type="password"
-              class="form-input"
-              placeholder="Encryption password"
-              value={backupPassword()}
-              onInput={(e) => setBackupPassword(e.currentTarget.value)}
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              spellcheck={false}
-            />
+            <div class="file-row">
+              <input
+                type="password"
+                class="form-input"
+                placeholder="Encryption password"
+                value={backupPassword()}
+                onInput={(e) => setBackupPassword(e.currentTarget.value)}
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck={false}
+              />
+              <button class="btn-ghost" onClick={handleGenerate} disabled={backingUp()}>
+                Generate
+              </button>
+            </div>
 
             <label class="form-label">Confirm password</label>
             <input
@@ -259,6 +320,41 @@ export default function Vault() {
               spellcheck={false}
             />
 
+            <label class="checkbox-row">
+              <input
+                type="checkbox"
+                checked={storeInOp()}
+                onChange={(e) => setStoreInOp(e.currentTarget.checked)}
+              />
+              Store password in 1Password
+            </label>
+
+            <Show when={storeInOp()}>
+              <label class="form-label">Item title</label>
+              <input
+                type="text"
+                class="form-input"
+                placeholder="e.g. Vault Backup Password"
+                value={storeTitle()}
+                onInput={(e) => setStoreTitle(e.currentTarget.value)}
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck={false}
+              />
+            </Show>
+
+            <Show when={hasBackupStore()}>
+              <label class="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={transferToStore()}
+                  onChange={(e) => setTransferToStore(e.currentTarget.checked)}
+                />
+                Transfer backup to store
+              </label>
+            </Show>
+
             <div class="action-row">
               <button class="btn-primary" onClick={handleBackup} disabled={backingUp()}>
                 {backingUp() ? "Backing up\u2026" : "Backup"}
@@ -270,6 +366,9 @@ export default function Vault() {
             </Show>
             <Show when={backupError()}>
               <p class="page-error">{backupError()}</p>
+            </Show>
+            <Show when={storeWarning()}>
+              <p class="page-warning">{storeWarning()}</p>
             </Show>
             <Show when={backupSuccess()}>
               <p class="page-success">{backupSuccess()}</p>
@@ -480,11 +579,34 @@ const vaultStyles = `
     margin-top: 4px;
   }
 
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .checkbox-row input[type="checkbox"] {
+    accent-color: var(--accent, #e97319);
+    width: 16px;
+    height: 16px;
+  }
+
   .page-error {
     color: var(--error);
     font-size: 0.875rem;
     padding: 8px 12px;
     background: rgba(255, 69, 58, 0.1);
+    border-radius: 6px;
+  }
+
+  .page-warning {
+    color: #f59e0b;
+    font-size: 0.875rem;
+    padding: 8px 12px;
+    background: rgba(245, 158, 11, 0.1);
     border-radius: 6px;
   }
 

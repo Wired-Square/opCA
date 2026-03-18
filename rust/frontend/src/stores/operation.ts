@@ -75,6 +75,8 @@ const operationLabels: Record<string, string> = {
   vault_restore: "Restoring from backup\u2026",
   vault_info: "Reading backup info\u2026",
   vault_default_filename: "Preparing backup\u2026",
+  generate_password: "Generating password\u2026",
+  store_password_in_op: "Storing password in 1Password\u2026",
 
   // Background (emitted via Tauri event)
   store_database: "Saving database\u2026",

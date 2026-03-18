@@ -1,9 +1,13 @@
 use std::collections::HashMap;
+use std::path::Path;
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use rand::RngCore;
 use tauri::{Emitter, State, Window};
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::Op;
+use opca_core::op::{Op, StoreAction};
 use opca_core::services::backup::{decrypt_payload, encrypt_payload};
 use opca_core::services::vault::{BackupPayload, VaultBackup};
 
@@ -16,11 +20,15 @@ fn emit_progress(window: &Window, message: &str) {
 }
 
 /// Create an encrypted vault backup and write it to `path`.
+///
+/// When `transfer_to_store` is `true`, the encrypted backup is also uploaded
+/// to the configured `ca_backup_store` after writing the local file.
 #[tauri::command]
 pub async fn vault_backup(
     window: Window,
     path: String,
     password: String,
+    transfer_to_store: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let conn = state.ensure_ca()?;
@@ -51,13 +59,50 @@ pub async fn vault_backup(
         e.to_string()
     })?;
 
-    state.log_ok(
-        "vault_backup",
-        Some(format!(
-            "Backup saved to {} ({} items)",
-            path, payload.metadata.item_count
-        )),
-    );
+    if transfer_to_store {
+        emit_progress(&window, "Transferring backup to store\u{2026}");
+
+        let db = ca.ca_database.as_ref()
+            .ok_or_else(|| "CA database not available".to_string())?;
+        let config = db.get_config().map_err(|e| {
+            state.log_err("vault_backup", Some(e.to_string()));
+            e.to_string()
+        })?;
+        let store_uri = config.ca_backup_store
+            .ok_or_else(|| {
+                let msg = "No backup store configured".to_string();
+                state.log_err("vault_backup", Some(msg.clone()));
+                msg
+            })?;
+
+        let filename = Path::new(&path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "backup.opca".to_string());
+        let upload_uri = format!("{}/{}", store_uri.trim_end_matches('/'), filename);
+
+        ca.upload_content(&encrypted, &upload_uri).map_err(|e| {
+            state.log_err("vault_backup", Some(e.to_string()));
+            e.to_string()
+        })?;
+
+        state.log_ok(
+            "vault_backup",
+            Some(format!(
+                "Backup saved to {} and transferred to store ({} items)",
+                path, payload.metadata.item_count
+            )),
+        );
+    } else {
+        state.log_ok(
+            "vault_backup",
+            Some(format!(
+                "Backup saved to {} ({} items)",
+                path, payload.metadata.item_count
+            )),
+        );
+    }
+
     Ok(())
 }
 
@@ -187,6 +232,46 @@ pub async fn vault_default_filename(state: State<'_, AppState>) -> Result<String
     let filename = format!("{}-{}.opca", vault_name, timestamp);
     let path = std::path::PathBuf::from(home).join(filename);
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Generate a cryptographically secure random password.
+///
+/// Returns a 43-character URL-safe base64 string (32 random bytes),
+/// matching the Python implementation's `secrets.token_urlsafe(32)`.
+#[tauri::command]
+pub async fn generate_password() -> Result<String, String> {
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+/// Store a backup password in 1Password as a Password category item.
+///
+/// The item is created in the currently connected vault.
+#[tauri::command]
+pub async fn store_password_in_op(
+    state: State<'_, AppState>,
+    password: String,
+    item_title: String,
+) -> Result<(), String> {
+    state.with_op(|op| {
+        let attr = format!("password={}", password);
+        op.store_item(
+            &item_title,
+            Some(&[attr.as_str()]),
+            StoreAction::Create,
+            "Password",
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })?;
+
+    state.log_ok(
+        "store_password",
+        Some(format!("Password stored as '{}'", item_title)),
+    );
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

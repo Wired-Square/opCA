@@ -18,6 +18,8 @@ chrono = "0.4"
 openssl = "0.10"
 dirs = "6"
 reqwest = { version = "0.12", features = ["json"] }
+rand = "0.9"
+base64 = "0.22"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

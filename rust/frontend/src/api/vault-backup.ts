@@ -4,9 +4,10 @@ import type { BackupInfoResult, RestoreResult } from "./types";
 export async function vaultBackup(
   path: string,
   password: string,
+  transferToStore: boolean,
 ): Promise<void> {
   return withLock("vault_backup", () =>
-    tauriInvoke<void>("vault_backup", { path, password }),
+    tauriInvoke<void>("vault_backup", { path, password, transferToStore }),
   );
 }
 
@@ -36,4 +37,15 @@ export async function vaultInfo(
 
 export async function vaultDefaultFilename(): Promise<string> {
   return tauriInvoke<string>("vault_default_filename");
+}
+
+export async function generatePassword(): Promise<string> {
+  return tauriInvoke<string>("generate_password");
+}
+
+export async function storePasswordInOp(
+  password: string,
+  itemTitle: string,
+): Promise<void> {
+  return tauriInvoke<void>("store_password_in_op", { password, itemTitle });
 }
