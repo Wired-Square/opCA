@@ -207,12 +207,12 @@ export default function CertInfo() {
               </Show>
 
               <div class="cert-actions">
+                <Show when={!acting() || acting() === "rekey"}>
+                  <button class="btn-primary" onClick={handleRekey} disabled={!!acting()}>
+                    {acting() === "rekey" ? "Rekeying…" : "Rekey"}
+                  </button>
+                </Show>
                 <Show when={d().status === "Valid"}>
-                  <Show when={!acting() || acting() === "rekey"}>
-                    <button class="btn-primary" onClick={handleRekey} disabled={!!acting()}>
-                      {acting() === "rekey" ? "Rekeying…" : "Rekey"}
-                    </button>
-                  </Show>
                   <Show when={!acting() || acting() === "renew"}>
                     <button class="btn-primary" onClick={handleRenew} disabled={!!acting()}>
                       {acting() === "renew" ? "Renewing…" : "Renew"}

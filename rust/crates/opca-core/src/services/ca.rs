@@ -764,18 +764,11 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let db = self.ca_database.as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
-        let cert_record = db.query_cert(lookup, true)?
+        let cert_record = db.query_cert(lookup, false)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
         let item_title = cert_record.title.clone()
             .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
-
-        let status = cert_record.status.as_deref().unwrap_or("");
-        if status == "Revoked" {
-            return Err(OpcaError::Other(
-                "Cannot rekey a revoked certificate".into(),
-            ));
-        }
 
         let mut cert_bundle = self.retrieve_certbundle(&item_title)?
             .ok_or_else(|| OpcaError::CertificateNotFound(item_title.clone()))?;
