@@ -1,0 +1,78 @@
+.page-ca {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.page-ca h2 {
+  margin: 0 0 20px;
+  flex-shrink: 0;
+}
+
+.resign-section {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.resign-section .text-muted {
+  margin: 0 0 12px;
+}
+
+.resign-form {
+  max-width: 300px;
+}
+
+.resign-form .form-actions {
+  margin-top: 12px;
+}
+
+.store-test-results {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.store-test-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.store-test-name {
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.test-pass {
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.test-pass .store-test-status {
+  color: #22c55e;
+}
+
+.test-fail {
+  background: rgba(255, 69, 58, 0.1);
+}
+
+.test-fail .store-test-status {
+  color: var(--error);
+}
+
+.page-ca .section-heading {
+  margin-top: 20px;
+  margin-bottom: 12px;
+  font-size: 0.9375rem;
+}
+
+.restore-result {
+  margin-top: 16px;
+}

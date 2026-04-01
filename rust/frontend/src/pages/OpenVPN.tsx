@@ -21,6 +21,7 @@ import type {
   OpenVpnTemplateItem,
   OpenVpnProfileItem,
 } from "../api/types";
+import "../styles/pages/openvpn.css";
 
 type Tab = "client" | "server" | "profiles";
 
@@ -463,8 +464,8 @@ export default function OpenVPN() {
           </Show>
 
           <Show when={filteredProfiles().length > 0}>
-            <div class="profile-table-wrap">
-              <table class="profile-table">
+            <div class="data-table-wrap">
+              <table class="data-table">
                 <thead>
                   <tr>
                     <th>CN</th>
@@ -475,7 +476,7 @@ export default function OpenVPN() {
                   <For each={filteredProfiles()}>
                     {(profile) => (
                       <tr
-                        class={`profile-row ${selectedProfile()?.cn === profile.cn ? "profile-row-selected" : ""}`}
+                        class={`data-table-row ${selectedProfile()?.cn === profile.cn ? "data-table-row-selected" : ""}`}
                         onClick={() => setSelectedProfile(profile)}
                       >
                         <td>{profile.cn}</td>
@@ -516,241 +517,6 @@ export default function OpenVPN() {
         <p class="page-success">{success()}</p>
       </Show>
 
-      <style>{`
-        .page-openvpn {
-          padding: 32px;
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          box-sizing: border-box;
-        }
-
-        .page-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 16px;
-          flex-shrink: 0;
-        }
-
-        .page-header h2 {
-          margin: 0;
-        }
-
-        .page-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-          margin-top: 12px;
-        }
-
-        .page-success {
-          color: var(--success);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(34, 197, 94, 0.1);
-          border-radius: 6px;
-          margin-top: 12px;
-        }
-
-        .tab-content {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          flex: 1;
-          min-height: 0;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .form-label {
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-        }
-
-        .form-select {
-          padding: 8px 12px;
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          color: var(--text-primary);
-          font-size: 0.875rem;
-          max-width: 400px;
-        }
-
-        .form-actions {
-          display: flex;
-          gap: 12px;
-          margin-top: 4px;
-        }
-
-        .generated-profile-section {
-          border-top: 1px solid var(--border);
-          padding-top: 16px;
-          max-width: 480px;
-        }
-
-        /* ── Server tab ─────────────────────────── */
-        .server-params {
-          margin-bottom: 16px;
-        }
-
-        .params-grid {
-          display: grid;
-          gap: 6px;
-        }
-
-        .server-actions {
-          display: flex;
-          gap: 8px;
-          margin-top: 12px;
-        }
-
-        .template-section {
-          border-top: 1px solid var(--border);
-          padding-top: 16px;
-        }
-
-        .template-section h3 {
-          margin: 0 0 12px 0;
-          font-size: 1rem;
-        }
-
-        .template-header {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-
-        .template-header .form-select {
-          flex: 1;
-        }
-
-        .new-template-row {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-
-        .new-template-row input {
-          flex: 1;
-          max-width: 300px;
-        }
-
-        .template-editor {
-          width: 100%;
-          min-height: 250px;
-          padding: 12px;
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          color: var(--text-primary);
-          font-family: "JetBrains Mono", monospace;
-          font-size: 0.8125rem;
-          line-height: 1.5;
-          resize: vertical;
-          box-sizing: border-box;
-        }
-
-        /* ── Profiles tab ───────────────────────── */
-        .profiles-header {
-          display: flex;
-          justify-content: flex-end;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .profile-table-wrap {
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          overflow: auto;
-          max-height: 280px;
-        }
-
-        .profile-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.875rem;
-        }
-
-        .profile-table th {
-          text-align: left;
-          padding: 10px 14px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: var(--text-secondary);
-          background: var(--bg-elevated);
-          border-bottom: 1px solid var(--border);
-          position: sticky;
-          top: 0;
-          z-index: 1;
-        }
-
-        .profile-table td {
-          padding: 10px 14px;
-          border-bottom: 1px solid var(--border);
-          color: var(--text-primary);
-        }
-
-        .profile-row {
-          cursor: pointer;
-          transition: background 0.1s;
-        }
-
-        .profile-row:hover {
-          background: var(--bg-elevated);
-        }
-
-        .profile-row-selected {
-          background: var(--accent-glow) !important;
-        }
-
-        .profile-row:last-child td {
-          border-bottom: none;
-        }
-
-        .send-section {
-          margin-top: 16px;
-          max-width: 400px;
-        }
-
-        /* ── Shared ─────────────────────────────── */
-        .detail-row {
-          display: flex;
-          gap: 16px;
-          padding: 6px 12px;
-          border-radius: 6px;
-        }
-
-        .detail-row:nth-child(odd) {
-          background: var(--bg-elevated);
-        }
-
-        .detail-label {
-          min-width: 120px;
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-          flex-shrink: 0;
-        }
-
-        .detail-value {
-          font-size: 0.875rem;
-          color: var(--text-primary);
-          word-break: break-all;
-        }
-      `}</style>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Show } from "solid-js";
+import "../styles/components/search-input.css";
 
 interface SearchInputProps {
   value: string;
@@ -30,44 +31,6 @@ export default function SearchInput(props: SearchInputProps) {
           &times;
         </button>
       </Show>
-
-      <style>{`
-        .search-input-wrap {
-          position: relative;
-          display: flex;
-          align-items: center;
-        }
-
-        .search-input {
-          padding: 6px 28px 6px 10px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          color: var(--text-primary);
-          font-size: 0.8125rem;
-          min-width: 160px;
-        }
-
-        .search-input::placeholder {
-          color: var(--text-tertiary);
-        }
-
-        .search-clear {
-          position: absolute;
-          right: 4px;
-          background: none;
-          border: none;
-          color: var(--text-tertiary);
-          cursor: pointer;
-          font-size: 1rem;
-          padding: 2px 6px;
-          line-height: 1;
-        }
-
-        .search-clear:hover {
-          color: var(--text-primary);
-        }
-      `}</style>
     </div>
   );
 }

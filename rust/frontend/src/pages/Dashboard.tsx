@@ -5,6 +5,7 @@ import { getDashboard } from "../api/dashboard";
 import { formatDate } from "../utils/dates";
 import TzToggle from "../components/TzToggle";
 import type { DashboardData } from "../api/types";
+import "../styles/pages/dashboard.css";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -98,98 +99,6 @@ export default function Dashboard() {
         )}
       </Show>
 
-      <style>{`
-        .dashboard {
-          padding: 32px;
-        }
-
-        .dashboard-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 24px;
-        }
-
-        .dashboard-header h2 {
-          margin: 0;
-        }
-
-        .dashboard-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-          margin-bottom: 16px;
-        }
-
-        .dashboard-notice {
-          padding: 16px 20px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          margin-bottom: 24px;
-        }
-
-        .dashboard-notice p {
-          margin: 0;
-        }
-
-        .dashboard-notice p + p {
-          margin-top: 4px;
-        }
-
-        .dashboard-notice-error {
-          border-color: var(--error);
-        }
-
-        .notice-actions {
-          display: flex;
-          gap: 10px;
-          margin-top: 14px;
-        }
-
-        .section-heading {
-          margin-top: 32px;
-          margin-bottom: 16px;
-          font-size: 1rem;
-          color: var(--text-secondary);
-          font-weight: 600;
-        }
-
-        .dashboard-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-          gap: 16px;
-        }
-
-        .stat-card {
-          padding: 20px;
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          transition: border-color 0.15s ease;
-        }
-
-        .stat-card:hover {
-          border-color: var(--accent);
-        }
-
-        .stat-label {
-          font-size: 0.8125rem;
-          color: var(--text-secondary);
-          font-weight: 500;
-        }
-
-        .stat-value {
-          font-size: 1.125rem;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-      `}</style>
     </div>
   );
 }

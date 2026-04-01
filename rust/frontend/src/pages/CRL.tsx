@@ -4,6 +4,7 @@ import { formatDate } from "../utils/dates";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import type { CrlInfo } from "../api/types";
+import "../styles/pages/crl.css";
 
 export default function CRL() {
   const [info, { refetch, mutate }] = createResource<CrlInfo>(getCrlInfo);
@@ -140,130 +141,6 @@ export default function CRL() {
         </Show>
       </div>
 
-      <style>{`
-        .page-crl {
-          padding: 32px;
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          box-sizing: border-box;
-        }
-
-        .page-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 24px;
-          flex-shrink: 0;
-        }
-
-        .page-header h2 {
-          margin: 0;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .crl-scroll {
-          flex: 1;
-          min-height: 0;
-          overflow-y: auto;
-        }
-
-        .upload-prompt {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px 14px;
-          background: rgba(255, 149, 0, 0.1);
-          border: 1px solid rgba(255, 149, 0, 0.3);
-          border-radius: 8px;
-          margin-bottom: 16px;
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--text-primary);
-        }
-
-        .upload-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .page-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-          margin-bottom: 16px;
-        }
-
-        .detail-grid {
-          display: grid;
-          gap: 12px;
-        }
-
-        .detail-row {
-          display: flex;
-          gap: 16px;
-          padding: 8px 12px;
-          border-radius: 6px;
-        }
-
-        .detail-row:nth-child(odd) {
-          background: var(--bg-elevated);
-        }
-
-        .detail-label {
-          min-width: 180px;
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-        }
-
-        .detail-value {
-          font-size: 0.875rem;
-          color: var(--text-primary);
-          word-break: break-all;
-        }
-
-        .pem-section {
-          margin-top: 24px;
-        }
-
-        .pem-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 8px;
-        }
-
-        .pem-label {
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-        }
-
-        .pem-block {
-          padding: 16px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
-          font-size: 0.75rem;
-          line-height: 1.5;
-          overflow-x: auto;
-          white-space: pre-wrap;
-          word-break: break-all;
-        }
-
-        .btn-sm {
-          padding: 4px 10px;
-          font-size: 0.75rem;
-        }
-      `}</style>
     </div>
   );
 }

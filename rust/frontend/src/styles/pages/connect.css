@@ -1,0 +1,282 @@
+.connect-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-primary);
+}
+
+.connect-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 48px 40px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.connect-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.connect-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.connect-logo {
+  width: 44px;
+  height: 44px;
+}
+
+.connect-title {
+  font-family: "Ubuntu", sans-serif;
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.brand-op {
+  color: var(--text-primary);
+}
+
+.brand-ca {
+  color: var(--accent);
+}
+
+.connect-subtitle {
+  font-family: "Ubuntu", sans-serif;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  margin-bottom: 4px;
+}
+
+.connect-byline {
+  font-family: "Ubuntu", sans-serif;
+  color: var(--text-tertiary);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.input-with-dropdown {
+  position: relative;
+}
+
+.input-with-dropdown input {
+  width: 100%;
+  padding-right: 36px;
+  box-sizing: border-box;
+}
+
+.dropdown-toggle {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  bottom: 1px;
+  width: 34px;
+  background: var(--accent);
+  border: none;
+  border-left: 1px solid var(--border);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 7px 7px 0;
+  transition: opacity 0.15s;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.dropdown-toggle:hover {
+  opacity: 0.85;
+}
+
+.saved-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  overflow: hidden;
+}
+
+.saved-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.saved-item:hover {
+  background: var(--bg-elevated);
+}
+
+.saved-item + .saved-item {
+  border-top: 1px solid var(--border);
+}
+
+.saved-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.saved-vault {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-account {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-forget {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  font-size: 1.125rem;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.saved-forget:hover {
+  color: var(--error);
+  background: rgba(255, 69, 58, 0.1);
+}
+
+.connect-error {
+  color: var(--error);
+  font-size: 0.875rem;
+  padding: 8px 12px;
+  background: rgba(255, 69, 58, 0.1);
+  border-radius: 6px;
+}
+
+.connect-btn {
+  margin-top: 8px;
+  padding: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 10px;
+}
+
+.connect-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.theme-toggle-connect {
+  display: block;
+  margin: 24px auto 0;
+  font-size: 0.8125rem;
+}
+
+.op-cli-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 0.75rem;
+}
+
+.op-cli-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.op-cli-found .op-cli-dot {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+
+.op-cli-missing .op-cli-dot {
+  background: var(--error);
+  box-shadow: 0 0 6px var(--error);
+}
+
+.op-cli-text {
+  color: var(--text-tertiary);
+}
+
+.connect-update-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px 14px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 8px;
+  font-family: "DM Sans", sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.connect-update-badge:hover {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(37, 99, 235, 0.4);
+}
+
+.connect-update-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.connect-update-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

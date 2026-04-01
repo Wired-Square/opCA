@@ -3,6 +3,7 @@ import { useNavigate } from "@solidjs/router";
 import { importCert } from "../api/certs";
 import { getCaConfig, uploadCaDatabase } from "../api/ca";
 import PemInput from "../components/PemInput";
+import "../styles/pages/cert-import.css";
 
 export default function CertImport() {
   const navigate = useNavigate();
@@ -154,73 +155,6 @@ export default function CertImport() {
         </Show>
       </form>
 
-      <style>{`
-        .page-cert-import {
-          padding: 32px;
-          overflow-y: auto;
-          height: 100%;
-        }
-
-        .page-cert-import h2 {
-          margin: 0 0 24px;
-        }
-
-        .import-form {
-          max-width: 640px;
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .hint-encrypted {
-          font-size: 0.8125rem;
-          color: var(--warning);
-          margin-top: -12px;
-        }
-
-        .upload-prompt {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px 14px;
-          background: rgba(255, 149, 0, 0.1);
-          border: 1px solid rgba(255, 149, 0, 0.3);
-          border-radius: 8px;
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--text-primary);
-        }
-
-        .upload-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .btn-sm {
-          padding: 4px 10px;
-          font-size: 0.75rem;
-        }
-
-        .form-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-        }
-
-        .form-actions {
-          display: flex;
-          gap: 12px;
-          margin-top: 8px;
-        }
-      `}</style>
     </div>
   );
 }

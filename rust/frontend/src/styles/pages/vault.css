@@ -1,0 +1,84 @@
+.page-vault {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.page-vault h2 {
+  margin: 0;
+}
+
+.vault-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.vault-form .file-row .form-input {
+  flex: 1;
+}
+
+.action-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent, #e97319);
+  width: 16px;
+  height: 16px;
+}
+
+.result-section {
+  margin-top: 8px;
+}
+
+.page-vault .section-heading {
+  margin-top: 20px;
+  margin-bottom: 12px;
+  font-size: 0.9375rem;
+}
+
+.page-vault .detail-label {
+  min-width: 160px;
+}
+
+.page-vault .detail-grid {
+  gap: 8px;
+}
+
+.page-vault .btn-warning:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.page-vault .btn-warning:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.md5-hash {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  background: var(--bg-elevated);
+  border-radius: 6px;
+  font-family: monospace;
+}
+
+.md5-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}

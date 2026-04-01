@@ -4,6 +4,7 @@ import { appState } from "./stores/app";
 import { initOperationListener } from "./stores/operation";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
+import "./styles/pages/app.css";
 
 /** Routes accessible when the vault is empty (no CA). */
 const EMPTY_VAULT_ROUTES = ["/", "/ca", "/vault"];
@@ -58,21 +59,6 @@ export default function App(props: ParentProps) {
         <main class="content">{props.children}</main>
       </div>
 
-      <style>{`
-        .main-area {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .content {
-          flex: 1;
-          overflow-y: auto;
-          background: var(--bg-primary);
-        }
-      `}</style>
     </Show>
   );
 }

@@ -1,0 +1,74 @@
+.page-database {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.page-database h2 {
+  margin: 0;
+}
+
+.page-database .detail-label {
+  min-width: 180px;
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.log-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+
+.log-entry:nth-child(odd) {
+  background: var(--bg-elevated);
+}
+
+.log-entry.log-error {
+  background: rgba(255, 69, 58, 0.06);
+}
+
+.log-time {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.log-status {
+  flex-shrink: 0;
+  font-weight: 700;
+  width: 16px;
+  text-align: center;
+}
+
+.log-ok {
+  color: #22c55e;
+}
+
+.log-fail {
+  color: #ef4444;
+}
+
+.log-action {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.log-detail {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}

@@ -1,0 +1,21 @@
+.page-crl {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.crl-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.page-crl .upload-prompt {
+  margin-bottom: 16px;
+}
+
+.page-crl .detail-label {
+  min-width: 180px;
+}

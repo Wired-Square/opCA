@@ -1,4 +1,5 @@
 import { tauriInvoke } from "../api/tauri";
+import "../styles/components/pem-input.css";
 
 interface PemInputProps {
   label: string;
@@ -60,35 +61,6 @@ export default function PemInput(props: PemInputProps) {
           </button>
         </div>
       </div>
-
-      <style>{`
-        .pem-input-row {
-          display: flex;
-          gap: 8px;
-          align-items: flex-start;
-        }
-
-        .pem-textarea {
-          flex: 1;
-          font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
-          font-size: 0.75rem;
-          line-height: 1.5;
-          resize: vertical;
-          min-height: 80px;
-        }
-
-        .pem-btn-col {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          flex-shrink: 0;
-        }
-
-        .pem-action-btn {
-          font-size: 0.8125rem;
-          padding: 4px 10px;
-        }
-      `}</style>
     </div>
   );
 }

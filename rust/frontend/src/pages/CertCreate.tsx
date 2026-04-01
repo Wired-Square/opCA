@@ -3,6 +3,7 @@ import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
 import { getCaConfig, uploadCaDatabase } from "../api/ca";
 import { CERT_TYPES } from "../api/types";
+import "../styles/pages/cert-create.css";
 
 export default function CertCreate() {
   const navigate = useNavigate();
@@ -178,107 +179,6 @@ export default function CertCreate() {
         </Show>
       </form>
 
-      <style>{`
-        .page-cert-create {
-          padding: 32px;
-        }
-
-        .page-cert-create h2 {
-          margin: 0 0 24px;
-        }
-
-        .create-form {
-          max-width: 520px;
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .san-input-row {
-          display: flex;
-          gap: 8px;
-        }
-
-        .san-input-row input {
-          flex: 1;
-        }
-
-        .san-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-          margin-top: 8px;
-        }
-
-        .san-tag {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 10px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          font-size: 0.8125rem;
-          color: var(--text-primary);
-        }
-
-        .san-remove {
-          background: none;
-          border: none;
-          color: var(--text-secondary);
-          cursor: pointer;
-          font-size: 1rem;
-          padding: 0 2px;
-          line-height: 1;
-        }
-
-        .san-remove:hover {
-          color: var(--error);
-        }
-
-        .upload-prompt {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px 14px;
-          background: rgba(255, 149, 0, 0.1);
-          border: 1px solid rgba(255, 149, 0, 0.3);
-          border-radius: 8px;
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--text-primary);
-        }
-
-        .upload-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .btn-sm {
-          padding: 4px 10px;
-          font-size: 0.75rem;
-        }
-
-        .form-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-        }
-
-        .form-actions {
-          display: flex;
-          gap: 12px;
-          margin-top: 8px;
-        }
-      `}</style>
     </div>
   );
 }

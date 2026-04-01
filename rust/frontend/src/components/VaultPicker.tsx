@@ -2,6 +2,7 @@ import { Show, For, createSignal } from "solid-js";
 import { listVaults, createVault } from "../api/vaults";
 import Spinner from "./Spinner";
 import type { VaultInfo } from "../api/types";
+import "../styles/components/vault-picker.css";
 
 interface VaultPickerProps {
   /** Current vault name value. */
@@ -174,96 +175,6 @@ export default function VaultPicker(props: VaultPickerProps) {
           </Show>
         </div>
       </Show>
-
-      <style>{`
-        .vault-picker {
-          position: relative;
-        }
-
-        .vault-picker-row {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .vault-picker-row input {
-          flex: 1;
-        }
-
-        .vault-picker-dropdown {
-          position: absolute;
-          top: calc(100% + 4px);
-          left: 0;
-          right: 0;
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-          z-index: 10;
-          overflow: hidden;
-          max-height: 300px;
-          overflow-y: auto;
-        }
-
-        .vault-picker-item {
-          padding: 8px 12px;
-          cursor: pointer;
-          font-size: 0.875rem;
-          color: var(--text-primary);
-          transition: background 0.1s;
-        }
-
-        .vault-picker-item:hover {
-          background: var(--bg-elevated);
-        }
-
-        .vault-picker-item-selected {
-          background: var(--accent-glow);
-        }
-
-        .vault-picker-item + .vault-picker-item {
-          border-top: 1px solid var(--border);
-        }
-
-        .vault-picker-new {
-          color: var(--accent);
-          font-weight: 500;
-        }
-
-        .vault-picker-create-section {
-          border-top: 1px solid var(--border);
-        }
-
-        .vault-picker-create-form {
-          display: flex;
-          gap: 6px;
-          align-items: center;
-          padding: 8px 10px;
-        }
-
-        .vault-picker-create-form input {
-          flex: 1;
-          font-size: 0.8125rem;
-          padding: 5px 8px;
-        }
-
-        .vault-picker-loading,
-        .vault-picker-error,
-        .vault-picker-empty {
-          padding: 12px;
-          font-size: 0.8125rem;
-          color: var(--text-secondary);
-        }
-
-        .vault-picker-error {
-          color: var(--error);
-        }
-
-        .btn-sm {
-          padding: 4px 10px;
-          font-size: 0.75rem;
-        }
-      `}</style>
     </div>
   );
 }

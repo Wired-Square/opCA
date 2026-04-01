@@ -1,0 +1,11 @@
+.page-cert-create {
+  padding: 32px;
+}
+
+.page-cert-create h2 {
+  margin: 0 0 24px;
+}
+
+.page-cert-create .create-form {
+  gap: 20px;
+}

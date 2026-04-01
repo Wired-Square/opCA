@@ -1,0 +1,31 @@
+.page-cert-info {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.cert-info-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.san-entry {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.cert-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.confirm-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

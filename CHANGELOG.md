@@ -14,7 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Enable Content Security Policy for the Tauri webview, restricting resource loading to self-origin and Google Fonts
-- Replace all inline styles with CSS utility classes in global.css
+- Extract all runtime `<style>` blocks from 20 components into dedicated CSS files, removing `unsafe-inline` from CSP
+- Consolidate shared CSS patterns (detail grids, forms, status badges, data tables) into global.css
+- Deduplicate per-page table classes into shared `data-table` classes
+- Replace inline style attributes with CSS utility classes
 - Replace `any` types with `Resource<DatabaseInfo>` in Database page components
 
 ## [0.99.12] - 2026-04-01

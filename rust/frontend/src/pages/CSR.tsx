@@ -4,6 +4,7 @@ import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import { CERT_TYPES } from "../api/types";
 import type { CsrListItem, CreateCsrResult, DecodeCsrResult, SignCsrResult } from "../api/types";
+import "../styles/pages/csr.css";
 
 type Tab = "list" | "create" | "sign";
 
@@ -251,8 +252,8 @@ export default function CSR() {
           </Show>
 
           <Show when={filteredCsrs().length > 0}>
-            <div class="csr-table-wrap">
-              <table class="csr-table">
+            <div class="data-table-wrap">
+              <table class="data-table">
                 <thead>
                   <tr>
                     <th>Common Name</th>
@@ -266,7 +267,7 @@ export default function CSR() {
                   <For each={filteredCsrs()}>
                     {(csr) => (
                       <tr
-                        class={`csr-row ${selected()?.cn === csr.cn ? "csr-row-selected" : ""}`}
+                        class={`data-table-row ${selected()?.cn === csr.cn ? "data-table-row-selected" : ""}`}
                         onClick={() => selectRow(csr)}
                       >
                         <td>{csr.cn ?? "\u2014"}</td>
@@ -586,257 +587,6 @@ export default function CSR() {
         </div>
       </Show>
 
-      <style>{`
-        .page-csr {
-          padding: 32px;
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          box-sizing: border-box;
-        }
-
-        .page-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 16px;
-          flex-shrink: 0;
-        }
-
-        .page-header h2 {
-          margin: 0;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .page-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-          margin-top: 12px;
-        }
-
-        .page-success {
-          color: var(--success);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(34, 197, 94, 0.1);
-          border-radius: 6px;
-          margin-top: 12px;
-        }
-
-        .csr-table-wrap {
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          overflow: auto;
-          max-height: 300px;
-        }
-
-        .csr-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.875rem;
-        }
-
-        .csr-table th {
-          text-align: left;
-          padding: 10px 14px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: var(--text-secondary);
-          background: var(--bg-elevated);
-          border-bottom: 1px solid var(--border);
-          position: sticky;
-          top: 0;
-          z-index: 1;
-        }
-
-        .csr-table td {
-          padding: 10px 14px;
-          border-bottom: 1px solid var(--border);
-          color: var(--text-primary);
-        }
-
-        .csr-row {
-          cursor: pointer;
-          transition: background 0.1s;
-        }
-
-        .csr-row:hover {
-          background: var(--bg-elevated);
-        }
-
-        .csr-row-selected {
-          background: var(--accent-glow) !important;
-        }
-
-        .csr-row:last-child td {
-          border-bottom: none;
-        }
-
-        .csr-actions {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 16px;
-        }
-
-        .status-pending {
-          color: var(--warning, #f5a623);
-        }
-
-        .status-complete {
-          color: var(--success);
-        }
-
-        .detail-section {
-          margin-top: 16px;
-        }
-
-        .detail-grid {
-          display: grid;
-          gap: 8px;
-        }
-
-        .detail-row {
-          display: flex;
-          gap: 16px;
-          padding: 6px 12px;
-          border-radius: 6px;
-        }
-
-        .detail-row:nth-child(odd) {
-          background: var(--bg-elevated);
-        }
-
-        .detail-label {
-          min-width: 120px;
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-          flex-shrink: 0;
-        }
-
-        .detail-value {
-          font-size: 0.875rem;
-          color: var(--text-primary);
-          word-break: break-all;
-        }
-
-        .pem-section {
-          margin-top: 16px;
-        }
-
-        .pem-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 4px;
-        }
-
-        .pem-block {
-          padding: 12px;
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          font-size: 0.6875rem;
-          line-height: 1.5;
-          white-space: pre-wrap;
-          word-break: break-all;
-          max-height: 200px;
-          overflow: auto;
-        }
-
-        .create-form {
-          max-width: 520px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .create-form textarea {
-          font-family: var(--font-mono, monospace);
-          font-size: 0.75rem;
-          resize: vertical;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .san-input-row {
-          display: flex;
-          gap: 8px;
-        }
-
-        .san-input-row input {
-          flex: 1;
-        }
-
-        .san-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-          margin-top: 8px;
-        }
-
-        .san-tag {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 10px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          font-size: 0.8125rem;
-          color: var(--text-primary);
-        }
-
-        .san-remove {
-          background: none;
-          border: none;
-          color: var(--text-secondary);
-          cursor: pointer;
-          font-size: 1rem;
-          padding: 0 2px;
-          line-height: 1;
-        }
-
-        .san-remove:hover {
-          color: var(--error);
-        }
-
-        .form-label {
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-        }
-
-        .form-actions {
-          display: flex;
-          gap: 12px;
-          margin-top: 4px;
-        }
-
-        .create-success {
-          margin-top: 8px;
-        }
-
-        .btn-sm {
-          padding: 4px 10px;
-          font-size: 0.75rem;
-        }
-      `}</style>
     </div>
   );
 }

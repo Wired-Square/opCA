@@ -5,6 +5,7 @@ import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import Modal from "../components/Modal";
 import type { DkimKeyItem, DkimKeyDetail, DkimVerifyResult } from "../api/types";
+import "../styles/pages/dkim.css";
 
 type Tab = "keys" | "create";
 
@@ -225,8 +226,8 @@ export default function DKIM() {
           </Show>
 
           <Show when={filteredKeys().length > 0}>
-            <div class="dkim-table-wrap">
-              <table class="dkim-table">
+            <div class="data-table-wrap">
+              <table class="data-table">
                 <thead>
                   <tr>
                     <th>Domain</th>
@@ -238,7 +239,7 @@ export default function DKIM() {
                   <For each={filteredKeys()}>
                     {(key) => (
                       <tr
-                        class={`dkim-row ${selected()?.domain === key.domain && selected()?.selector === key.selector ? "dkim-row-selected" : ""}`}
+                        class={`data-table-row ${selected()?.domain === key.domain && selected()?.selector === key.selector ? "data-table-row-selected" : ""}`}
                         onClick={() => selectRow(key)}
                       >
                         <td>{key.domain}</td>
@@ -407,234 +408,6 @@ export default function DKIM() {
         </div>
       </Show>
 
-      <style>{`
-        .page-dkim {
-          padding: 32px;
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          box-sizing: border-box;
-        }
-
-        .page-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 16px;
-          flex-shrink: 0;
-        }
-
-        .page-header h2 {
-          margin: 0;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .page-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-          margin-top: 12px;
-          flex-shrink: 0;
-        }
-
-        .page-success {
-          color: var(--success);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(34, 197, 94, 0.1);
-          border-radius: 6px;
-          margin-top: 12px;
-          flex-shrink: 0;
-        }
-
-        .page-dkim .tab-content {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .dkim-table-wrap {
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          overflow: auto;
-          flex: 1;
-          min-height: 120px;
-        }
-
-        .dkim-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.875rem;
-        }
-
-        .dkim-table th {
-          text-align: left;
-          padding: 10px 14px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: var(--text-secondary);
-          background: var(--bg-elevated);
-          border-bottom: 1px solid var(--border);
-          position: sticky;
-          top: 0;
-          z-index: 1;
-        }
-
-        .dkim-table td {
-          padding: 10px 14px;
-          border-bottom: 1px solid var(--border);
-          color: var(--text-primary);
-        }
-
-        .dkim-row {
-          cursor: pointer;
-          transition: background 0.1s;
-        }
-
-        .dkim-row:hover {
-          background: var(--bg-elevated);
-        }
-
-        .dkim-row-selected {
-          background: var(--accent-glow) !important;
-        }
-
-        .dkim-row:last-child td {
-          border-bottom: none;
-        }
-
-        .key-actions {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 16px;
-          flex-shrink: 0;
-        }
-
-        .detail-grid {
-          display: grid;
-          gap: 8px;
-          margin-top: 16px;
-        }
-
-        .detail-row {
-          display: flex;
-          gap: 16px;
-          padding: 6px 12px;
-          border-radius: 6px;
-        }
-
-        .detail-row:nth-child(odd) {
-          background: var(--bg-elevated);
-        }
-
-        .detail-label {
-          min-width: 120px;
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-          flex-shrink: 0;
-        }
-
-        .detail-value {
-          font-size: 0.875rem;
-          color: var(--text-primary);
-          word-break: break-all;
-        }
-
-        .dns-record-wrap {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .dns-record {
-          padding: 10px 12px;
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          font-size: 0.6875rem;
-          line-height: 1.5;
-          white-space: pre-wrap;
-          word-break: break-all;
-          margin-bottom: 4px;
-        }
-
-        .verify-mismatch {
-          margin-top: 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          flex-shrink: 0;
-        }
-
-        .mismatch-row {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .create-form {
-          max-width: 480px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .form-label {
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: var(--text-secondary);
-        }
-
-        .form-actions {
-          display: flex;
-          gap: 12px;
-          margin-top: 4px;
-        }
-
-        .create-success {
-          margin-top: 8px;
-        }
-
-        .btn-danger {
-          padding: 8px 16px;
-          background: var(--error);
-          color: white;
-          border: none;
-          border-radius: 8px;
-          font-weight: 600;
-          cursor: pointer;
-          font-size: 0.875rem;
-        }
-
-        .btn-danger:hover {
-          opacity: 0.9;
-        }
-
-        .btn-danger:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .btn-sm {
-          padding: 4px 10px;
-          font-size: 0.75rem;
-        }
-      `}</style>
     </div>
   );
 }

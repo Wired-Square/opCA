@@ -1,0 +1,22 @@
+.page-cert-import {
+  padding: 32px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.page-cert-import h2 {
+  margin: 0 0 24px;
+}
+
+.import-form {
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.hint-encrypted {
+  font-size: 0.8125rem;
+  color: var(--warning);
+  margin-top: -12px;
+}

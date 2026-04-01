@@ -16,6 +16,7 @@ import { useNavigate, useSearchParams } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { BackupInfoResult, RestoreResult } from "../api/types";
+import "../styles/pages/vault.css";
 
 type Tab = "backup" | "restore" | "info";
 
@@ -566,7 +567,6 @@ export default function Vault() {
         </Show>
       </div>
 
-      <style>{vaultStyles}</style>
     </div>
   );
 }
@@ -580,162 +580,3 @@ function Row(props: { label: string; value: string | null | undefined }) {
   );
 }
 
-const vaultStyles = `
-  .page-vault {
-    padding: 32px;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    box-sizing: border-box;
-  }
-
-  .page-vault h2 {
-    margin: 0;
-  }
-
-  .page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    flex-shrink: 0;
-  }
-
-  .vault-form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-width: 640px;
-  }
-
-  .file-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .file-row .form-input {
-    flex: 1;
-  }
-
-  .action-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 4px;
-  }
-
-  .checkbox-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    cursor: pointer;
-  }
-
-  .checkbox-row input[type="checkbox"] {
-    accent-color: var(--accent, #e97319);
-    width: 16px;
-    height: 16px;
-  }
-
-  .page-error {
-    color: var(--error);
-    font-size: 0.875rem;
-    padding: 8px 12px;
-    background: rgba(255, 69, 58, 0.1);
-    border-radius: 6px;
-  }
-
-  .page-warning {
-    color: #f59e0b;
-    font-size: 0.875rem;
-    padding: 8px 12px;
-    background: rgba(245, 158, 11, 0.1);
-    border-radius: 6px;
-  }
-
-  .page-success {
-    color: #22c55e;
-    font-size: 0.875rem;
-    padding: 8px 12px;
-    background: rgba(34, 197, 94, 0.1);
-    border-radius: 6px;
-  }
-
-  .result-section {
-    margin-top: 8px;
-  }
-
-  .section-heading {
-    margin-top: 20px;
-    margin-bottom: 12px;
-    font-size: 0.9375rem;
-    color: var(--text-secondary);
-    font-weight: 600;
-  }
-
-  .detail-grid {
-    display: grid;
-    gap: 8px;
-  }
-
-  .detail-row {
-    display: flex;
-    gap: 16px;
-    padding: 6px 12px;
-    border-radius: 6px;
-  }
-
-  .detail-row:nth-child(odd) {
-    background: var(--bg-elevated);
-  }
-
-  .detail-label {
-    min-width: 160px;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-  }
-
-  .detail-value {
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    word-break: break-all;
-  }
-
-  .btn-warning {
-    padding: 8px 18px;
-    border-radius: 8px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-    background: #f59e0b;
-    color: #fff;
-    transition: background 0.15s ease;
-  }
-
-  .btn-warning:hover:not(:disabled) {
-    background: #d97706;
-  }
-
-  .btn-warning:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .md5-hash {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
-    padding: 6px 12px;
-    background: var(--bg-elevated);
-    border-radius: 6px;
-    font-family: monospace;
-  }
-
-  .md5-label {
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-`;

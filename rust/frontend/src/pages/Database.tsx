@@ -4,6 +4,7 @@ import { uploadCaDatabase } from "../api/ca";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import type { DatabaseInfo, LogEntry } from "../api/types";
+import "../styles/pages/database.css";
 
 type Tab = "log" | "statistics" | "config";
 
@@ -100,7 +101,6 @@ export default function Database() {
         </Show>
       </div>
 
-      <style>{dbStyles}</style>
     </div>
   );
 }
@@ -207,147 +207,3 @@ function Row(props: {
   );
 }
 
-const dbStyles = `
-  .page-database {
-    padding: 32px;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    box-sizing: border-box;
-  }
-
-  .page-database h2 {
-    margin: 0;
-  }
-
-  .page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    flex-shrink: 0;
-  }
-
-  .header-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .upload-success {
-    color: #22c55e;
-    font-size: 0.875rem;
-    padding: 8px 12px;
-    background: rgba(34, 197, 94, 0.1);
-    border-radius: 6px;
-    margin-bottom: 16px;
-  }
-
-  .page-error {
-    color: var(--error);
-    font-size: 0.875rem;
-    padding: 8px 12px;
-    background: rgba(255, 69, 58, 0.1);
-    border-radius: 6px;
-    margin-bottom: 16px;
-  }
-
-  .section-heading {
-    margin-top: 32px;
-    margin-bottom: 16px;
-    font-size: 1rem;
-    color: var(--text-secondary);
-    font-weight: 600;
-  }
-
-  .section-heading:first-child {
-    margin-top: 0;
-  }
-
-  .detail-grid {
-    display: grid;
-    gap: 12px;
-  }
-
-  .detail-row {
-    display: flex;
-    gap: 16px;
-    padding: 8px 12px;
-    border-radius: 6px;
-  }
-
-  .detail-row:nth-child(odd) {
-    background: var(--bg-elevated);
-  }
-
-  .detail-label {
-    min-width: 180px;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-  }
-
-  .detail-value {
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    word-break: break-all;
-  }
-
-  .log-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .log-entry {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 0.8125rem;
-  }
-
-  .log-entry:nth-child(odd) {
-    background: var(--bg-elevated);
-  }
-
-  .log-entry.log-error {
-    background: rgba(255, 69, 58, 0.06);
-  }
-
-  .log-time {
-    font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
-    font-size: 0.75rem;
-    color: var(--text-tertiary);
-    flex-shrink: 0;
-  }
-
-  .log-status {
-    flex-shrink: 0;
-    font-weight: 700;
-    width: 16px;
-    text-align: center;
-  }
-
-  .log-ok {
-    color: #22c55e;
-  }
-
-  .log-fail {
-    color: #ef4444;
-  }
-
-  .log-action {
-    font-weight: 600;
-    color: var(--text-primary);
-    flex-shrink: 0;
-  }
-
-  .log-detail {
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-  }
-`;

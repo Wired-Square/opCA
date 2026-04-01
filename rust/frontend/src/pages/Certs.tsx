@@ -6,6 +6,7 @@ import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import type { CertListItem, ExternalCertListItem } from "../api/types";
+import "../styles/pages/certs.css";
 
 type Tab = "local" | "external";
 
@@ -115,8 +116,8 @@ export default function Certs() {
         </Show>
 
         <Show when={filteredLocal().length > 0}>
-          <div class="cert-table-wrap">
-            <table class="cert-table">
+          <div class="data-table-wrap">
+            <table class="data-table">
               <thead>
                 <tr>
                   <th>Serial</th>
@@ -130,7 +131,7 @@ export default function Certs() {
                 <For each={filteredLocal()}>
                   {(cert) => (
                     <tr
-                      class="cert-row"
+                      class="data-table-row"
                       onClick={() => cert.serial && navigate(`/certs/${cert.serial}`)}
                     >
                       <td class="mono">{cert.serial ?? "\u2014"}</td>
@@ -156,8 +157,8 @@ export default function Certs() {
         </Show>
 
         <Show when={filteredExternal().length > 0}>
-          <div class="cert-table-wrap">
-            <table class="cert-table">
+          <div class="data-table-wrap">
+            <table class="data-table">
               <thead>
                 <tr>
                   <th>Serial</th>
@@ -171,7 +172,7 @@ export default function Certs() {
               <tbody>
                 <For each={filteredExternal()}>
                   {(cert) => (
-                    <tr class="cert-row">
+                    <tr class="data-table-row">
                       <td class="mono">{cert.serial ?? "\u2014"}</td>
                       <td>{cert.cn ?? "\u2014"}</td>
                       <td>{cert.issuer ?? "\u2014"}</td>
@@ -187,132 +188,6 @@ export default function Certs() {
         </Show>
       </Show>
 
-      <style>{`
-        .page-certs {
-          padding: 32px;
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          box-sizing: border-box;
-        }
-
-        .page-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 16px;
-          flex-shrink: 0;
-        }
-
-        .page-header h2 {
-          margin: 0;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .status-filter {
-          padding: 6px 10px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          color: var(--text-primary);
-          font-size: 0.8125rem;
-        }
-
-        .tab-bar {
-          margin-bottom: 16px;
-        }
-
-        .page-error {
-          color: var(--error);
-          font-size: 0.875rem;
-          padding: 8px 12px;
-          background: rgba(255, 69, 58, 0.1);
-          border-radius: 6px;
-          margin-bottom: 16px;
-          flex-shrink: 0;
-        }
-
-        .cert-table-wrap {
-          flex: 1;
-          min-height: 0;
-          overflow: auto;
-          border: 1px solid var(--border);
-          border-radius: 10px;
-        }
-
-        .cert-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.875rem;
-        }
-
-        .cert-table th {
-          text-align: left;
-          padding: 10px 14px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: var(--text-secondary);
-          background: var(--bg-elevated);
-          border-bottom: 1px solid var(--border);
-          position: sticky;
-          top: 0;
-          z-index: 1;
-        }
-
-        .cert-table td {
-          padding: 10px 14px;
-          border-bottom: 1px solid var(--border);
-          color: var(--text-primary);
-        }
-
-        .cert-row {
-          cursor: pointer;
-          transition: background 0.1s;
-        }
-
-        .cert-row:hover {
-          background: var(--bg-elevated);
-        }
-
-        .cert-row:last-child td {
-          border-bottom: none;
-        }
-
-        .status-badge {
-          display: inline-block;
-          padding: 2px 10px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          border-radius: 20px;
-          letter-spacing: 0.02em;
-        }
-
-        .status-valid {
-          color: #22c55e;
-          background: rgba(34, 197, 94, 0.12);
-          border: 1px solid rgba(34, 197, 94, 0.3);
-        }
-
-        .status-expired,
-        .status-revoked {
-          color: #ef4444;
-          background: rgba(239, 68, 68, 0.12);
-          border: 1px solid rgba(239, 68, 68, 0.3);
-        }
-
-        .status-expiring {
-          color: #eab308;
-          background: rgba(234, 179, 8, 0.12);
-          border: 1px solid rgba(234, 179, 8, 0.3);
-        }
-      `}</style>
     </div>
   );
 }

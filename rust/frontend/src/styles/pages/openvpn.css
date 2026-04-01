@@ -1,0 +1,118 @@
+.page-openvpn {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.page-openvpn .page-header {
+  margin-bottom: 16px;
+}
+
+.page-openvpn .page-error,
+.page-openvpn .page-success {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.page-openvpn .tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+.page-openvpn .form-actions {
+  margin-top: 4px;
+}
+
+.generated-profile-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  max-width: 480px;
+}
+
+.server-params {
+  margin-bottom: 16px;
+}
+
+.params-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.server-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.template-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.template-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 1rem;
+}
+
+.template-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.template-header .form-select {
+  flex: 1;
+}
+
+.new-template-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.new-template-row input {
+  flex: 1;
+  max-width: 300px;
+}
+
+.template-editor {
+  width: 100%;
+  min-height: 250px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.profiles-header {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
+.page-openvpn .data-table-wrap {
+  max-height: 280px;
+}
+
+.page-openvpn .detail-label {
+  min-width: 120px;
+}
+
+.send-section {
+  margin-top: 16px;
+  max-width: 400px;
+}
