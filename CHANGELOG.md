@@ -11,8 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Frontend test infrastructure with Vitest, SolidJS testing library, and Tauri API mocks
 
+### Fixed
+
+- `vault_item_count` now propagates JSON parse errors instead of silently returning zero
+- `read_lock` in vault lock now propagates real errors (auth, network) instead of swallowing them
+- Fix timer leaks in frontend components: clipboard "Copied" feedback and navigation timeouts now clean up on unmount
+- Replace `setTimeout(0)` focus hack in VaultPicker with `autofocus` attribute
+
 ### Changed
 
+- Replace `innerHTML` SVG icon strings with a JSX `Icon` component, eliminating XSS-prone pattern
+- Replace bare mutex `.unwrap()` with `.expect()` diagnostic messages across all Tauri command handlers
+- Remove unused `CONFIG_ATTRS` constant from database module
 - Enable Content Security Policy for the Tauri webview, restricting resource loading to self-origin and Google Fonts
 - Extract all runtime `<style>` blocks from 20 components into dedicated CSS files, removing `unsafe-inline` from CSP
 - Consolidate shared CSS patterns (detail grids, forms, status badges, data tables) into global.css
