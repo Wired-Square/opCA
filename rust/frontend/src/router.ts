@@ -27,4 +27,5 @@ export const routes: RouteDefinition[] = [
   { path: "/openvpn", component: OpenVPN },
   { path: "/database", component: Database },
   { path: "/vault", component: lazy(() => import("./pages/Vault")) },
+  { path: "/log", component: lazy(() => import("./pages/Log")) },
 ];

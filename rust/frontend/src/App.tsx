@@ -7,7 +7,7 @@ import Header from "./components/layout/Header";
 import "./styles/pages/app.css";
 
 /** Routes accessible when the vault is empty (no CA). */
-const EMPTY_VAULT_ROUTES = ["/", "/ca", "/vault"];
+const EMPTY_VAULT_ROUTES = ["/", "/ca", "/vault", "/log"];
 
 export default function App(props: ParentProps) {
   const location = useLocation();
@@ -31,8 +31,8 @@ export default function App(props: ParentProps) {
     }
 
     if (state === "invalid_ca") {
-      // Only dashboard (shows error message) and connect page allowed
-      if (path !== "/" && path !== "/dashboard") {
+      // Only dashboard (shows error message), connect, and log pages allowed
+      if (path !== "/" && path !== "/dashboard" && path !== "/log") {
         navigate("/dashboard", { replace: true });
       }
       return;

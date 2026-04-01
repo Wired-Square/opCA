@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
   { label: "OpenVPN", path: "/openvpn", icon: "vpn", gated: true },
   { label: "Database", path: "/database", icon: "database", gated: true },
   { label: "Vault", path: "/vault", icon: "vault" },
+  { label: "Log", path: "/log", icon: "log" },
 ];
 
 export default function Sidebar() {

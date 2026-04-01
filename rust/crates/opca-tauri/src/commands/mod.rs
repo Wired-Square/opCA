@@ -9,6 +9,7 @@ pub mod dkim;
 pub mod dto;
 pub mod files;
 pub mod lock;
+pub mod logs;
 pub mod openvpn;
 pub mod update;
 pub mod vault;

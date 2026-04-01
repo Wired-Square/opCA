@@ -142,6 +142,8 @@ fn main() {
             commands::vault::store_password_in_op,
             commands::vault::file_md5,
             commands::update::check_for_updates,
+            commands::logs::get_log_contents,
+            commands::logs::get_log_path,
         ])
         .setup(|_app| {
             info!("opCA v{} starting", env!("CARGO_PKG_VERSION"));

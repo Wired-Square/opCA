@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Log viewer page: view, scroll, and copy application log contents directly from the UI
+
 ### Changed
 
 - DKIM Route53 deployment now uses the native AWS SDK instead of shelling out to `aws` CLI via `op plugin run`

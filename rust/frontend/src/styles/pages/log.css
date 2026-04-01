@@ -1,0 +1,79 @@
+.page-log {
+  display: flex;
+  flex-direction: column;
+  padding: 32px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.page-log .page-header {
+  flex-shrink: 0;
+}
+
+.log-path {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.log-viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+
+.log-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  white-space: pre;
+  color: var(--text-secondary);
+  user-select: text;
+  cursor: text;
+  tab-size: 4;
+}
+
+.log-content::selection,
+.log-content *::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.log-line {
+  display: block;
+}
+
+.log-line:hover {
+  background: rgba(128, 128, 128, 0.06);
+}
+
+.log-level-debug { color: var(--text-tertiary); }
+.log-level-info  { color: var(--text-secondary); }
+.log-level-warn  { color: var(--warning); }
+.log-level-error { color: var(--error); }
+
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.log-toolbar .line-count {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-right: auto;
+}
