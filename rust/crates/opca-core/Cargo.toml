@@ -22,7 +22,7 @@ rand = "0.9"
 openssl = { version = "0.10", features = ["vendored"] }
 openssl-sys = "0.9"
 foreign-types = "0.3"
-rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"] }
+aws-sdk-s3 = "1"
 aws-sdk-route53 = "1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-credential-types = "1"

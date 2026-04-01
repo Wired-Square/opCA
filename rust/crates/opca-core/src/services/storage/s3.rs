@@ -1,15 +1,12 @@
 //! Amazon S3 storage backend.
 //!
-//! Uploads content to AWS S3 buckets using the `rust-s3` crate.  Credentials
+//! Uploads content to AWS S3 buckets using the native AWS SDK.  Credentials
 //! are obtained from 1Password via the `op` CLI plugin (see
 //! [`super::get_aws_credentials`]).
 //!
 //! URI format: `s3://bucket/key/prefix`
 
 use log::{debug, error, info};
-use s3::bucket::Bucket;
-use s3::creds::Credentials;
-use s3::Region;
 
 use crate::error::OpcaError;
 
@@ -26,28 +23,26 @@ impl StorageS3 {
         Self { credentials }
     }
 
-    /// Build a `Bucket` handle from the URI and stored credentials.
-    fn bucket_from_uri(&self, uri: &str) -> Result<(Box<Bucket>, String), OpcaError> {
-        let (bucket_name, key) = parse_s3_uri(uri)?;
+    /// Build an AWS SDK S3 client from the stored credentials.
+    fn sdk_client(&self) -> aws_sdk_s3::Client {
+        use aws_credential_types::Credentials;
 
-        let region = match &self.credentials.region {
-            Some(r) => r.parse::<Region>().unwrap_or(Region::ApSoutheast2),
-            None => Region::ApSoutheast2,
-        };
+        let region = self.credentials.region.as_deref().unwrap_or("ap-southeast-2");
 
         let creds = Credentials::new(
-            Some(&self.credentials.access_key_id),
-            Some(&self.credentials.secret_access_key),
-            self.credentials.session_token.as_deref(),
-            None, // token expiry
-            None, // profile
-        )
-        .map_err(|e| OpcaError::Storage(format!("Failed to create S3 credentials: {e}")))?;
+            &self.credentials.access_key_id,
+            &self.credentials.secret_access_key,
+            self.credentials.session_token.clone(),
+            None, // expiry
+            "opca-1password",
+        );
 
-        let bucket = Bucket::new(&bucket_name, region, creds)
-            .map_err(|e| OpcaError::Storage(format!("Failed to create S3 bucket handle: {e}")))?;
+        let config = aws_sdk_s3::config::Builder::new()
+            .region(aws_sdk_s3::config::Region::new(region.to_string()))
+            .credentials_provider(creds)
+            .build();
 
-        Ok((bucket, key))
+        aws_sdk_s3::Client::from_conf(config)
     }
 }
 
@@ -70,24 +65,21 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 impl StorageBackend for StorageS3 {
     fn upload(&self, content: &[u8], uri: &str) -> Result<(), OpcaError> {
         info!("[s3] uploading {} bytes to {}", content.len(), uri);
-        let (bucket, key) = self.bucket_from_uri(uri)?;
+        let (bucket_name, key) = parse_s3_uri(uri)?;
+        let client = self.sdk_client();
 
         block_on(async {
-            let response = bucket
-                .put_object(&key, content)
+            client
+                .put_object()
+                .bucket(&bucket_name)
+                .key(&key)
+                .body(content.to_vec().into())
+                .send()
                 .await
                 .map_err(|e| {
                     error!("[s3] put_object failed for {uri}: {e}");
                     OpcaError::Storage(format!("S3 put_object failed: {e}"))
                 })?;
-
-            if response.status_code() >= 300 {
-                error!("[s3] put_object returned status {} for {uri}", response.status_code());
-                return Err(OpcaError::Storage(format!(
-                    "S3 put_object returned status {}",
-                    response.status_code()
-                )));
-            }
 
             debug!("[s3] upload succeeded for {uri}");
             Ok(())
@@ -96,18 +88,22 @@ impl StorageBackend for StorageS3 {
 
     fn test_connection(&self, uri: &str) -> Result<(), OpcaError> {
         info!("[s3] testing connection to {}", uri);
-        let (bucket, _key) = self.bucket_from_uri(uri)?;
+        let (bucket_name, _key) = parse_s3_uri(uri)?;
+        let client = self.sdk_client();
 
         block_on(async {
-            let results = bucket
-                .list("".to_string(), Some("/".to_string()))
+            client
+                .list_objects_v2()
+                .bucket(&bucket_name)
+                .delimiter("/")
+                .max_keys(1)
+                .send()
                 .await
                 .map_err(|e| {
                     error!("[s3] connection test failed for {uri}: {e}");
                     OpcaError::Storage(format!("S3 connection test failed: {e}"))
                 })?;
 
-            let _ = results;
             debug!("[s3] connection test passed for {uri}");
             Ok(())
         })

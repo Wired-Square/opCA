@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - DKIM Route53 deployment now uses the native AWS SDK instead of shelling out to `aws` CLI via `op plugin run`
+- S3 storage backend now uses `aws-sdk-s3` instead of `rust-s3`, unifying all AWS access on a single SDK
 
 ## [0.99.13] - 2026-04-01
 
