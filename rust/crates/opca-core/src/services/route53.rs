@@ -74,6 +74,8 @@ pub async fn lookup_txt(dns_name: &str) -> Result<Vec<String>, crate::error::Opc
 // Native Route53 client (AWS SDK)
 // ---------------------------------------------------------------------------
 
+use log::{debug, error, info};
+
 use crate::error::OpcaError;
 use crate::services::storage::AwsCredentials;
 
@@ -126,6 +128,7 @@ impl Route53Client {
     /// given `mail._domainkey.example.com`, it will try `mail._domainkey.example.com.`,
     /// then `_domainkey.example.com.`, then `example.com.`.
     pub async fn find_hosted_zone(&self, domain: &str) -> Result<HostedZone, OpcaError> {
+        info!("[route53] searching for hosted zone matching '{domain}'");
         let client = self.sdk_client();
 
         // Collect all hosted zones (paginated).
@@ -137,7 +140,9 @@ impl Route53Client {
             if let Some(ref m) = marker {
                 req = req.marker(m);
             }
+            debug!("[route53] listing hosted zones (marker: {marker:?})");
             let resp = req.send().await.map_err(|e| {
+                error!("[route53] list_hosted_zones failed: {e}");
                 OpcaError::Route53(format!("Failed to list hosted zones: {e}"))
             })?;
 
@@ -158,6 +163,8 @@ impl Route53Client {
             }
         }
 
+        debug!("[route53] found {} hosted zones", zones.len());
+
         // Normalise the domain to trailing-dot form for matching.
         let normalised = if domain.ends_with('.') {
             domain.to_string()
@@ -170,6 +177,7 @@ impl Route53Client {
         loop {
             for (id, name) in &zones {
                 if name.eq_ignore_ascii_case(search) {
+                    info!("[route53] matched zone '{name}' (id: {id}) for '{domain}'");
                     return Ok(HostedZone {
                         id: id.clone(),
                         name: name.clone(),
@@ -209,10 +217,12 @@ impl Route53Client {
             Change, ChangeAction, ChangeBatch, ResourceRecord, ResourceRecordSet, RrType,
         };
 
+        info!("[route53] upserting TXT record for '{name}' in zone {zone_id} (TTL={ttl})");
         let client = self.sdk_client();
 
         let chunks = split_txt_value(value, 255);
         let formatted = format_txt_value(&chunks);
+        debug!("[route53] TXT value ({} chunks): {}", chunks.len(), &formatted[..formatted.len().min(120)]);
 
         let record = ResourceRecord::builder()
             .value(formatted)
@@ -244,13 +254,17 @@ impl Route53Client {
             .change_batch(batch)
             .send()
             .await
-            .map_err(|e| OpcaError::Route53(format!("Route53 upsert failed: {e}")))?;
+            .map_err(|e| {
+                error!("[route53] upsert failed for '{name}': {e}");
+                OpcaError::Route53(format!("Route53 upsert failed: {e}"))
+            })?;
 
         let change_id = resp
             .change_info()
             .map(|info| info.id().to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
+        info!("[route53] upsert succeeded for '{name}' (change: {change_id})");
         Ok(change_id)
     }
 
