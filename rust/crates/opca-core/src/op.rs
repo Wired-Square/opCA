@@ -401,8 +401,8 @@ impl<R: CommandRunner> Op<R> {
     /// Return the number of items in the vault (all categories).
     pub fn vault_item_count(&self) -> Result<usize, OpcaError> {
         let json = self.item_list("", "json")?;
-        let items: Vec<serde_json::Value> =
-            serde_json::from_str(&json).unwrap_or_default();
+        let items: Vec<serde_json::Value> = serde_json::from_str(&json)
+            .map_err(|e| OpcaError::CliError(format!("failed to parse vault item list: {e}")))?;
         Ok(items.len())
     }
 
@@ -911,5 +911,26 @@ mod tests {
             success: false,
         };
         assert!(matches!(map_cli_error(&out), OpcaError::VaultNotFound(_)));
+    }
+
+    // -- vault_item_count ------------------------------------------------
+
+    #[test]
+    fn vault_item_count_parses_valid_json() {
+        let op = mock_op(vec![ok_output(r#"[{"id":"a"},{"id":"b"}]"#)]);
+        assert_eq!(op.vault_item_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn vault_item_count_errors_on_malformed_json() {
+        let op = mock_op(vec![ok_output("not valid json")]);
+        let err = op.vault_item_count().unwrap_err();
+        assert!(matches!(err, OpcaError::CliError(_)));
+    }
+
+    #[test]
+    fn vault_item_count_handles_empty_array() {
+        let op = mock_op(vec![ok_output("[]")]);
+        assert_eq!(op.vault_item_count().unwrap(), 0);
     }
 }

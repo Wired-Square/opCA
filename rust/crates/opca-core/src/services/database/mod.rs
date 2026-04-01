@@ -20,27 +20,6 @@ const EXPIRY_WARNING_DAYS: i64 = 30;
 /// Caution expiry warning window in days (6 months).
 const EXPIRY_CAUTION_DAYS: i64 = 183;
 
-/// Valid config attribute names (matching the Python `config_attrs` tuple).
-#[allow(dead_code)]
-const CONFIG_ATTRS: &[&str] = &[
-    "next_serial",
-    "next_crl_serial",
-    "org",
-    "ou",
-    "email",
-    "city",
-    "state",
-    "country",
-    "ca_url",
-    "crl_url",
-    "days",
-    "crl_days",
-    "schema_version",
-    "ca_public_store",
-    "ca_private_store",
-    "ca_backup_store",
-];
-
 // ---------------------------------------------------------------------------
 // Main struct
 // ---------------------------------------------------------------------------

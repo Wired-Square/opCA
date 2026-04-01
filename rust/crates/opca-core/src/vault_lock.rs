@@ -116,7 +116,7 @@ impl VaultLock {
         }
 
         // Lock exists. Read it to decide whether it is stale.
-        let mut lock_info = read_lock(op, &self.lock_title);
+        let mut lock_info = read_lock(op, &self.lock_title)?;
 
         if is_stale(&lock_info) {
             break_stale(op, &self.lock_title)?;
@@ -136,7 +136,7 @@ impl VaultLock {
                 }
                 Err(OpcaError::ItemConflict(_)) => {
                     // Another user beat us to re-acquire after the stale break.
-                    lock_info = read_lock(op, &self.lock_title);
+                    lock_info = read_lock(op, &self.lock_title)?;
                 }
                 Err(e) => return Err(e),
             }
@@ -224,10 +224,17 @@ fn current_user<R: CommandRunner>(op: &Op<R>) -> (String, String) {
 }
 
 /// Read the existing lock item and return its fields as label→value pairs.
-fn read_lock<R: CommandRunner>(op: &Op<R>, lock_title: &str) -> HashMap<String, String> {
+///
+/// Returns an empty map if the lock item no longer exists (race with
+/// another user deleting it).  Propagates all other errors.
+fn read_lock<R: CommandRunner>(
+    op: &Op<R>,
+    lock_title: &str,
+) -> Result<HashMap<String, String>, OpcaError> {
     match op.get_item(lock_title, "json") {
-        Ok(stdout) => extract_fields(&stdout),
-        Err(_) => HashMap::new(),
+        Ok(stdout) => Ok(extract_fields(&stdout)),
+        Err(OpcaError::ItemNotFound(_)) => Ok(HashMap::new()),
+        Err(e) => Err(e),
     }
 }
 
@@ -612,6 +619,49 @@ mod tests {
     #[test]
     fn parse_iso_invalid() {
         assert!(parse_iso("not-a-date").is_none());
+    }
+
+    // -- read_lock error propagation --------------------------------------
+
+    #[test]
+    fn acquire_propagates_read_lock_error() {
+        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
+
+        let op = mock_op(vec![
+            ok_output(user_json),                                // get_current_user_details
+            err_output("already exists"),                        // store_item conflict
+            err_output("You are not currently sign in"),         // get_item → auth error
+        ]);
+
+        let mut lock = VaultLock::new(None);
+        let err = lock.acquire(&op, "cert_create", 300).unwrap_err();
+
+        assert!(!lock.held());
+        assert!(
+            matches!(err, OpcaError::AuthenticationFailed),
+            "Expected AuthenticationFailed, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn acquire_treats_disappeared_lock_as_stale() {
+        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
+
+        let op = mock_op(vec![
+            ok_output(user_json),                                // get_current_user_details
+            err_output("already exists"),                        // store_item conflict
+            err_output("[ERROR] item \"CA_Lock\" not found"),    // get_item → lock gone
+            ok_output(""),                                       // store_item retry (success)
+        ]);
+
+        let mut lock = VaultLock::new(None);
+        // Lock disappeared between conflict and read — treated as stale
+        // (empty map → missing acquired_at → is_stale → break + retry).
+        // break_stale will call delete_item, but the mock sequence
+        // already consumed the "not found" response.  Since MockRunner
+        // returns a default ok when responses are exhausted, this works.
+        lock.acquire(&op, "cert_create", 300).unwrap();
+        assert!(lock.held());
     }
 
     // -- custom lock title ------------------------------------------------
