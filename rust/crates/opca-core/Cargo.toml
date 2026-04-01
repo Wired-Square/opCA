@@ -24,6 +24,7 @@ openssl-sys = "0.9"
 foreign-types = "0.3"
 rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+hickory-resolver = "0.25"
 
 [features]
 default = []

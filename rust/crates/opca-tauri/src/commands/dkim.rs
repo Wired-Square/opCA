@@ -238,27 +238,26 @@ pub async fn verify_dkim_dns(
         Ok(record.trim().to_string())
     })?;
 
-    // DNS lookup using the `dig` command (available on macOS/Linux)
-    let output = tokio::process::Command::new("dig")
-        .args(["+short", "TXT", &dns_name])
-        .output()
+    // Native DNS TXT lookup
+    let found_records = opca_core::services::route53::lookup_txt(&dns_name)
         .await
-        .map_err(|e| format!("Failed to run dig: {e}"))?;
+        .map_err(|e| e.to_string())?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Extract the p= key from expected and actual for comparison
     let expected_key = opca_core::services::route53::extract_dkim_key(&expected_record);
 
-    let verified = if let Some(ref ek) = expected_key {
-        stdout.contains(ek)
-    } else {
-        stdout.contains(&expected_record)
-    };
+    let verified = found_records.iter().any(|rec| {
+        match (&expected_key, opca_core::services::route53::extract_dkim_key(rec)) {
+            (Some(ek), Some(fk)) => ek == &fk,
+            _ => rec.contains(&expected_record),
+        }
+    });
+
+    let found_txt = found_records.join("\n");
+    let mismatch = !verified && !found_txt.is_empty();
 
     let message = if verified {
         "DNS record verified — published and matching.".to_string()
-    } else if stdout.trim().is_empty() {
+    } else if found_txt.is_empty() {
         "No TXT record found. DNS may not have propagated yet.".to_string()
     } else {
         "TXT record found but does not match the expected value.".to_string()
@@ -268,6 +267,8 @@ pub async fn verify_dkim_dns(
         verified,
         dns_name,
         message,
+        expected: if mismatch { Some(expected_record) } else { None },
+        found: if mismatch { Some(found_txt) } else { None },
     })
 }
 

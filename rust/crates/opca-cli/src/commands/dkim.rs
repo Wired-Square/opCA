@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use chrono::Utc;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
@@ -265,24 +263,25 @@ fn handle_verify<R: CommandRunner>(
     let url = op.mk_url(&item_title, Some("dns_record"));
     let expected_record = op.read_item(&url)?.trim().to_string();
 
-    // DNS lookup using dig
-    let dig_output = Command::new("dig")
-        .args(["+short", "TXT", &dns_name])
-        .output()
-        .map_err(|e| OpcaError::Other(format!("Failed to run dig: {e}")))?;
-
-    let stdout = String::from_utf8_lossy(&dig_output.stdout);
+    // Native DNS TXT lookup
+    let found_records = tokio::runtime::Runtime::new()
+        .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?
+        .block_on(opca_core::services::route53::lookup_txt(&dns_name))?;
 
     let expected_key = extract_dkim_key(&expected_record);
-    let verified = if let Some(ref ek) = expected_key {
-        stdout.contains(ek)
-    } else {
-        stdout.contains(&expected_record)
-    };
+
+    let verified = found_records.iter().any(|rec| {
+        match (&expected_key, extract_dkim_key(rec)) {
+            (Some(ek), Some(fk)) => ek == &fk,
+            _ => rec.contains(&expected_record),
+        }
+    });
+
+    let found_txt = found_records.join("\n");
 
     if verified {
         output::print_result("DNS record verified — published and matching", true);
-    } else if stdout.trim().is_empty() {
+    } else if found_txt.is_empty() {
         output::print_result("No TXT record found. DNS may not have propagated yet", false);
     } else {
         output::print_result("TXT record found but does not match expected value", false);

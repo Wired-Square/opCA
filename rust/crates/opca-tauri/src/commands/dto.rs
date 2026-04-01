@@ -251,6 +251,8 @@ pub struct DkimVerifyResult {
     pub verified: bool,
     pub dns_name: String,
     pub message: String,
+    pub expected: Option<String>,
+    pub found: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

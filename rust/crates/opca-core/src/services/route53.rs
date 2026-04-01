@@ -45,6 +45,30 @@ pub fn extract_dkim_key(value: &str) -> Option<String> {
     None
 }
 
+/// Look up TXT records for a DNS name using the system resolver.
+///
+/// Returns the concatenated TXT record data for each record found.
+/// Multi-part TXT records are reassembled into a single string.
+pub async fn lookup_txt(dns_name: &str) -> Result<Vec<String>, crate::error::OpcaError> {
+    use hickory_resolver::TokioResolver;
+
+    let resolver = TokioResolver::builder_tokio()
+        .map_err(|e| crate::error::OpcaError::Other(format!("DNS resolver init failed: {e}")))?
+        .build();
+
+    let response = resolver
+        .txt_lookup(dns_name)
+        .await
+        .map_err(|e| crate::error::OpcaError::Other(format!("DNS lookup failed: {e}")))?;
+
+    let records: Vec<String> = response
+        .iter()
+        .map(|txt| txt.to_string())
+        .collect();
+
+    Ok(records)
+}
+
 // ---------------------------------------------------------------------------
 // Route53 client (shells out to `aws` via `op plugin run`)
 // ---------------------------------------------------------------------------

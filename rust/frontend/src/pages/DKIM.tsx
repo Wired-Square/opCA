@@ -3,6 +3,7 @@ import { listDkimKeys, getDkimInfo, createDkimKey, deleteDkimKey, verifyDkimDns,
 import { formatDate } from "../utils/dates";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
+import Modal from "../components/Modal";
 import type { DkimKeyItem, DkimKeyDetail, DkimVerifyResult } from "../api/types";
 
 type Tab = "keys" | "create";
@@ -17,6 +18,7 @@ export default function DKIM() {
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
   const [copied, setCopied] = createSignal(false);
+  const [verifyMismatch, setVerifyMismatch] = createSignal<{ expected: string; found: string } | null>(null);
 
   const [search, setSearch] = createSignal("");
 
@@ -47,6 +49,7 @@ export default function DKIM() {
     setDetail(null);
     setError(null);
     setSuccess(null);
+    setVerifyMismatch(null);
     setConfirmDelete(false);
   }
 
@@ -72,12 +75,16 @@ export default function DKIM() {
     setActing(true);
     setError(null);
     setSuccess(null);
+    setVerifyMismatch(null);
     try {
       const result: DkimVerifyResult = await verifyDkimDns(sel.domain, sel.selector);
       if (result.verified) {
         setSuccess(result.message);
       } else {
         setError(result.message);
+        if (result.expected && result.found) {
+          setVerifyMismatch({ expected: result.expected, found: result.found });
+        }
       }
     } catch (e) {
       setError(String(e));
@@ -275,6 +282,21 @@ export default function DKIM() {
             <p class="page-error">{error()}</p>
           </Show>
 
+          <Show when={verifyMismatch()}>
+            {(m) => (
+              <div class="verify-mismatch">
+                <div class="mismatch-row">
+                  <span class="detail-label">Expected</span>
+                  <pre class="dns-record mono">{m().expected}</pre>
+                </div>
+                <div class="mismatch-row">
+                  <span class="detail-label">Found</span>
+                  <pre class="dns-record mono">{m().found}</pre>
+                </div>
+              </div>
+            )}
+          </Show>
+
           <Show when={success()}>
             <p class="page-success">{success()}</p>
           </Show>
@@ -283,28 +305,34 @@ export default function DKIM() {
             <Spinner message="Fetching key details from vault..." />
           </Show>
 
-          <Show when={detail()}>
-            {(d) => (
-              <div class="detail-grid">
-                <Row label="Domain" value={d().domain} />
-                <Row label="Selector" value={d().selector} mono />
-                <Row label="Key Size" value={d().key_size ? `${d().key_size} bits` : null} />
-                <Row label="DNS Name" value={d().dns_name} mono />
-                <Row label="Created" value={d().created_at} />
-                <Show when={d().dns_record}>
-                  <div class="detail-row">
-                    <span class="detail-label">DNS Record</span>
-                    <div class="dns-record-wrap">
-                      <pre class="dns-record mono">{d().dns_record}</pre>
-                      <button class="btn-ghost btn-sm" onClick={copyDnsRecord}>
-                        {copied() ? "Copied" : "Copy"}
-                      </button>
+          <Modal
+            open={detail() !== null}
+            onClose={() => setDetail(null)}
+            title={detail() ? `${detail()!.selector}._domainkey.${detail()!.domain}` : ""}
+          >
+            <Show when={detail()}>
+              {(d) => (
+                <div class="detail-grid">
+                  <Row label="Domain" value={d().domain} />
+                  <Row label="Selector" value={d().selector} mono />
+                  <Row label="Key Size" value={d().key_size ? `${d().key_size} bits` : null} />
+                  <Row label="DNS Name" value={d().dns_name} mono />
+                  <Row label="Created" value={formatDate(d().created_at)} />
+                  <Show when={d().dns_record}>
+                    <div class="detail-row">
+                      <span class="detail-label">DNS Record</span>
+                      <div class="dns-record-wrap">
+                        <pre class="dns-record mono">{d().dns_record}</pre>
+                        <button class="btn-ghost btn-sm" onClick={copyDnsRecord}>
+                          {copied() ? "Copied" : "Copy"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </Show>
-              </div>
-            )}
-          </Show>
+                  </Show>
+                </div>
+              )}
+            </Show>
+          </Modal>
         </div>
       </Show>
 
@@ -413,6 +441,7 @@ export default function DKIM() {
           background: rgba(255, 69, 58, 0.1);
           border-radius: 6px;
           margin-top: 12px;
+          flex-shrink: 0;
         }
 
         .page-success {
@@ -422,13 +451,20 @@ export default function DKIM() {
           background: rgba(34, 197, 94, 0.1);
           border-radius: 6px;
           margin-top: 12px;
+          flex-shrink: 0;
+        }
+
+        .page-dkim .tab-content {
+          display: flex;
+          flex-direction: column;
         }
 
         .dkim-table-wrap {
           border: 1px solid var(--border);
           border-radius: 10px;
           overflow: auto;
-          max-height: 240px;
+          flex: 1;
+          min-height: 120px;
         }
 
         .dkim-table {
@@ -480,6 +516,7 @@ export default function DKIM() {
           align-items: center;
           gap: 8px;
           margin-top: 16px;
+          flex-shrink: 0;
         }
 
         .detail-grid {
@@ -528,6 +565,20 @@ export default function DKIM() {
           white-space: pre-wrap;
           word-break: break-all;
           margin-bottom: 4px;
+        }
+
+        .verify-mismatch {
+          margin-top: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+
+        .mismatch-row {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
         }
 
         .create-form {

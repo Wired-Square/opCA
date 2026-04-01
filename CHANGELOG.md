@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- DKIM: show expected and found DNS records when verification detects a mismatch
+- DKIM: native DNS TXT lookups via hickory-resolver, replacing `dig` shell-out
+- DKIM: key info now opens in a modal dialog instead of rendering inline
+- DKIM: key table grows to fill available vertical space instead of fixed 240px height
 - Certificate rekey operation: renew a certificate with a newly generated private key, preserving subject attributes and SANs
 - Allow rekeying revoked and expired certificates to issue a new key and certificate with the same subject details
 - Relative time display mode: the UTC/Local timezone toggle now cycles through a third "Relative" mode that shows expiry dates as live countdowns (e.g. "2y 3mo", "4h 12m 30s") and past dates as time ago (e.g. "3 months ago")

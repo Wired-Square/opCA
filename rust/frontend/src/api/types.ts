@@ -197,6 +197,8 @@ export interface DkimVerifyResult {
   verified: boolean;
   dns_name: string;
   message: string;
+  expected?: string;
+  found?: string;
 }
 
 export interface DkimRoute53Result {
