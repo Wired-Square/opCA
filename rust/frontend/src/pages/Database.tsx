@@ -1,4 +1,4 @@
-import { Show, For, createSignal, createResource } from "solid-js";
+import { Show, For, createSignal, createResource, type Resource } from "solid-js";
 import { getDatabaseInfo, getActionLog } from "../api/database";
 import { uploadCaDatabase } from "../api/ca";
 import Spinner from "../components/Spinner";
@@ -130,7 +130,7 @@ function LogTab(props: { entries: () => LogEntry[]; loading: boolean }) {
   );
 }
 
-function StatisticsTab(props: { info: any }) {
+function StatisticsTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
       <Show when={props.info.error}>
@@ -150,7 +150,7 @@ function StatisticsTab(props: { info: any }) {
   );
 }
 
-function ConfigTab(props: { info: any }) {
+function ConfigTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
       <Show when={props.info.error}>
