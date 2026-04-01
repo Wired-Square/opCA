@@ -136,7 +136,7 @@ pub async fn backfill_cert(
         tauri::async_runtime::spawn_blocking(move || {
             let state: State<'_, AppState> = app.state();
             let _ = app.emit("op-status", Some("store_database"));
-            let mut conn = state.conn.lock().unwrap();
+            let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
             if let Some(ca) = conn.ca.as_mut() {
                 if let Err(e) = ca.store_ca_database() {
                     state.log_err("store_database", Some(e.to_string()));

@@ -34,7 +34,7 @@ impl AppState {
     /// duration of the operation.  If `ca` is already populated the guard is
     /// returned immediately; otherwise `Op` is consumed to retrieve the CA.
     pub fn ensure_ca(&self) -> Result<MutexGuard<'_, Connection>, String> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
 
         if conn.ca.is_none() {
             let op = conn.op.take()
@@ -59,7 +59,7 @@ impl AppState {
     where
         F: FnOnce(&Op) -> Result<T, String>,
     {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
         if let Some(ref ca) = conn.ca {
             return f(&ca.op);
         }
@@ -81,7 +81,7 @@ impl AppState {
             detail,
             success,
         };
-        self.action_log.lock().unwrap().push(entry);
+        self.action_log.lock().expect("mutex poisoned — a prior operation panicked").push(entry);
     }
 
     /// Convenience: log a successful action.

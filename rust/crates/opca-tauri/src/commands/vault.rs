@@ -150,7 +150,7 @@ pub async fn vault_restore(
 
     // Acquire vault lock using the fresh Op
     {
-        let mut lock_guard = state.vault_lock.lock().unwrap();
+        let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
         lock_guard.acquire(&op, "vault_restore", opca_core::vault_lock::VaultLock::default_ttl())
             .map_err(|e| e.to_string())?;
     }
@@ -162,12 +162,12 @@ pub async fn vault_restore(
     };
     let counts = match vb.restore_backup(&payload, Some(&on_progress)) {
         Ok(c) => {
-            let mut lock_guard = state.vault_lock.lock().unwrap();
+            let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
             let _ = lock_guard.release(&op);
             c
         }
         Err(e) => {
-            let mut lock_guard = state.vault_lock.lock().unwrap();
+            let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
             let _ = lock_guard.release(&op);
             state.log_err("vault_restore", Some(e.to_string()));
             return Err(e.to_string());
@@ -178,7 +178,7 @@ pub async fn vault_restore(
     let item_breakdown = counts_to_breakdown(&counts);
 
     // Re-install the fresh Op into state so ensure_ca() works without reconnecting.
-    let mut conn = state.conn.lock().unwrap();
+    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
     conn.ca = None;
     conn.op = Some(op);
 

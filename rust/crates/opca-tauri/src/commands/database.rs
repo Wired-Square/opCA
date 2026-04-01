@@ -27,6 +27,6 @@ pub async fn get_database_info(state: State<'_, AppState>) -> Result<DatabaseInf
 
 #[tauri::command]
 pub async fn get_action_log(state: State<'_, AppState>) -> Result<Vec<LogEntry>, String> {
-    let log = state.action_log.lock().unwrap();
+    let log = state.action_log.lock().expect("mutex poisoned — a prior operation panicked");
     Ok(log.clone())
 }

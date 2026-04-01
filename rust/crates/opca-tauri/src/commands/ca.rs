@@ -80,7 +80,7 @@ pub async fn init_ca(
     config: CaConfigDto,
 ) -> Result<(), String> {
     // Take Op — it must be in `op` (CA shouldn't exist yet)
-    let mut conn = state.conn.lock().unwrap();
+    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
     let op = conn.op.take()
         .ok_or("Not connected")?;
 

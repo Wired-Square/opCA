@@ -59,7 +59,7 @@ pub async fn connect(
     // Clear any stale CA and Op before installing the new connection.
     // This single lock acquisition prevents the race where a stale CA
     // from a previous vault survives into the new session.
-    let mut conn = state.conn.lock().unwrap();
+    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
     conn.ca = None;
     conn.op = Some(op);
 
@@ -70,12 +70,12 @@ pub async fn connect(
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     // Acquire the single connection lock — no other command can race us.
-    let mut conn = state.conn.lock().unwrap();
+    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
 
     // Release the vault lock (best-effort) using whichever Op is available.
     let op_ref = conn.ca.as_ref().map(|ca| &ca.op).or(conn.op.as_ref());
     if let Some(op) = op_ref {
-        let mut lock = state.vault_lock.lock().unwrap();
+        let mut lock = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
         let _ = lock.release(op);
     }
 
