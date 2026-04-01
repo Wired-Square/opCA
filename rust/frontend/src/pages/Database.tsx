@@ -71,7 +71,7 @@ export default function Database() {
         <p class="upload-success">Database uploaded to private store.</p>
       </Show>
       <Show when={uploadResult() && uploadResult() !== "ok"}>
-        <p class="page-error">{uploadResult()}</p>
+        <p class="page-error" role="alert">{uploadResult()}</p>
       </Show>
 
       <div class="tab-bar">
@@ -134,7 +134,7 @@ function StatisticsTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
       <Show when={props.info.error}>
-        <p class="page-error">{String(props.info.error)}</p>
+        <p class="page-error" role="alert">{String(props.info.error)}</p>
       </Show>
 
       <Show when={props.info()} fallback={<Spinner message="Loading…" />}>
@@ -154,7 +154,7 @@ function ConfigTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
       <Show when={props.info.error}>
-        <p class="page-error">{String(props.info.error)}</p>
+        <p class="page-error" role="alert">{String(props.info.error)}</p>
       </Show>
 
       <Show when={props.info()} fallback={<Spinner message="Loading…" />}>

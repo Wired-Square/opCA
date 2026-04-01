@@ -94,7 +94,7 @@ export default function Sidebar() {
                   if (disabled()) e.preventDefault();
                 }}
               >
-                <span class="sidebar-icon" innerHTML={navIcons[item.icon]} />
+                <span class="sidebar-icon" innerHTML={navIcons[item.icon]} aria-hidden="true" />
                 <span class="sidebar-label">{item.label}</span>
               </A>
             );
@@ -104,8 +104,8 @@ export default function Sidebar() {
       <div class="sidebar-footer">
         <Show when={operationLabel()}>
           {(label) => (
-            <div class="sidebar-status">
-              <span class="sidebar-status-spinner" />
+            <div class="sidebar-status" aria-live="polite" aria-atomic="true">
+              <span class="sidebar-status-spinner" aria-hidden="true" />
               <span class="sidebar-status-label">{label()}</span>
             </div>
           )}

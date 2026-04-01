@@ -164,7 +164,7 @@ export default function CertCreate() {
         </Show>
 
         <Show when={error()}>
-          <p class="form-error">{error()}</p>
+          <p class="form-error" role="alert">{error()}</p>
         </Show>
 
         <Show when={!showUploadPrompt()}>

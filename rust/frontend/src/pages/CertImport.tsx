@@ -140,7 +140,7 @@ export default function CertImport() {
         </Show>
 
         <Show when={error()}>
-          <p class="form-error">{error()}</p>
+          <p class="form-error" role="alert">{error()}</p>
         </Show>
 
         <Show when={!showUploadPrompt()}>

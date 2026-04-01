@@ -100,7 +100,7 @@ export default function Certs() {
       </div>
 
       <Show when={certs().error}>
-        <p class="page-error">{String(certs().error)}</p>
+        <p class="page-error" role="alert">{String(certs().error)}</p>
       </Show>
 
       <Show when={loading()}>

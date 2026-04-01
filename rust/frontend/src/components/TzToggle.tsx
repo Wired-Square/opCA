@@ -9,7 +9,7 @@ const modeLabel = { utc: "UTC", local: "Local", relative: "Relative" } as const;
 export default function TzToggle() {
   return (
     <>
-      <button class="tz-toggle" onClick={toggleTzMode} title="Toggle timezone">
+      <button class="tz-toggle" onClick={toggleTzMode} aria-label="Toggle timezone display" title="Toggle timezone">
         {modeLabel[tzMode()]}
       </button>
     </>

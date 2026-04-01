@@ -47,10 +47,10 @@ export default function Header() {
         </Show>
       </div>
       <div class="header-actions">
-        <button class="btn-ghost theme-toggle" onClick={toggleTheme} title="Toggle theme">
+        <button class="btn-ghost theme-toggle" onClick={toggleTheme} aria-label="Toggle theme" title="Toggle theme">
           {themeMode() === "dark" ? "\u2600" : "\u263E"}
         </button>
-        <button class="btn-ghost disconnect-btn" onClick={handleLogout} title="Disconnect">
+        <button class="btn-ghost disconnect-btn" onClick={handleLogout} aria-label="Disconnect" title="Disconnect">
           <span innerHTML={logoutIcon} />
         </button>
       </div>

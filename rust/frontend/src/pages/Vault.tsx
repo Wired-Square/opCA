@@ -396,7 +396,7 @@ export default function Vault() {
               <Spinner message={progressMsg()!} />
             </Show>
             <Show when={backupError()}>
-              <p class="page-error">{backupError()}</p>
+              <p class="page-error" role="alert">{backupError()}</p>
             </Show>
             <Show when={storeWarning()}>
               <p class="page-warning">{storeWarning()}</p>
@@ -466,7 +466,7 @@ export default function Vault() {
               <Spinner message={progressMsg()!} />
             </Show>
             <Show when={restoreError()}>
-              <p class="page-error">{restoreError()}</p>
+              <p class="page-error" role="alert">{restoreError()}</p>
             </Show>
             <Show when={restoreResult()}>
               {(r) => (
@@ -533,7 +533,7 @@ export default function Vault() {
             </div>
 
             <Show when={infoError()}>
-              <p class="page-error">{infoError()}</p>
+              <p class="page-error" role="alert">{infoError()}</p>
             </Show>
 
             <Show when={loadingInfo()}>

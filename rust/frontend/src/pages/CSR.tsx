@@ -244,7 +244,7 @@ export default function CSR() {
           </Show>
 
           <Show when={csrs.error}>
-            <p class="page-error">{String(csrs.error)}</p>
+            <p class="page-error" role="alert">{String(csrs.error)}</p>
           </Show>
 
           <Show when={!csrs.loading && filteredCsrs().length === 0}>
@@ -296,7 +296,7 @@ export default function CSR() {
           </Show>
 
           <Show when={error()}>
-            <p class="page-error">{error()}</p>
+            <p class="page-error" role="alert">{error()}</p>
           </Show>
 
           <Show when={success()}>
@@ -411,7 +411,7 @@ export default function CSR() {
             </div>
 
             <Show when={createError()}>
-              <p class="page-error">{createError()}</p>
+              <p class="page-error" role="alert">{createError()}</p>
             </Show>
 
             <Show when={createResult()}>
@@ -479,7 +479,7 @@ export default function CSR() {
             </Show>
 
             <Show when={signError()}>
-              <p class="page-error">{signError()}</p>
+              <p class="page-error" role="alert">{signError()}</p>
             </Show>
 
             <Show when={!signResult() ? decoded() : null}>

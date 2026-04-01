@@ -218,7 +218,7 @@ export default function DKIM() {
           </Show>
 
           <Show when={keys.error}>
-            <p class="page-error">{String(keys.error)}</p>
+            <p class="page-error" role="alert">{String(keys.error)}</p>
           </Show>
 
           <Show when={!keys.loading && filteredKeys().length === 0}>
@@ -280,7 +280,7 @@ export default function DKIM() {
           </Show>
 
           <Show when={error()}>
-            <p class="page-error">{error()}</p>
+            <p class="page-error" role="alert">{error()}</p>
           </Show>
 
           <Show when={verifyMismatch()}>
@@ -370,7 +370,7 @@ export default function DKIM() {
             </div>
 
             <Show when={createError()}>
-              <p class="page-error">{createError()}</p>
+              <p class="page-error" role="alert">{createError()}</p>
             </Show>
 
             <Show when={createResult()}>

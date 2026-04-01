@@ -196,7 +196,7 @@ function CertificateTab(props: {
                   </div>
                 </div>
                 <Show when={resignResult() && resignResult() !== "ok"}>
-                  <p class="form-error">{resignResult()}</p>
+                  <p class="form-error" role="alert">{resignResult()}</p>
                 </Show>
               </div>
             </Show>
@@ -206,7 +206,7 @@ function CertificateTab(props: {
                 <p class="form-success">Certificate uploaded to public store.</p>
               </Show>
               <Show when={uploadResult() && uploadResult() !== "ok"}>
-                <p class="form-error">{uploadResult()}</p>
+                <p class="form-error" role="alert">{uploadResult()}</p>
               </Show>
             </Show>
 
@@ -272,7 +272,7 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
             </div>
 
             <Show when={error()}>
-              <p class="form-error">{error()}</p>
+              <p class="form-error" role="alert">{error()}</p>
             </Show>
 
             <div class="form-actions">
@@ -342,7 +342,7 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
             </div>
 
             <Show when={error()}>
-              <p class="form-error">{error()}</p>
+              <p class="form-error" role="alert">{error()}</p>
             </Show>
 
             <div class="form-actions">
@@ -359,7 +359,7 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
             </Show>
 
             <Show when={testError()}>
-              <p class="form-error">{testError()}</p>
+              <p class="form-error" role="alert">{testError()}</p>
             </Show>
 
             <Show when={testResults()}>
@@ -431,7 +431,7 @@ function InitTab() {
         </div>
 
         <Show when={error()}>
-          <p class="form-error">{error()}</p>
+          <p class="form-error" role="alert">{error()}</p>
         </Show>
 
         <div class="form-actions">
@@ -547,7 +547,7 @@ function RestoreTab() {
         </div>
 
         <Show when={restoreError()}>
-          <p class="form-error">{restoreError()}</p>
+          <p class="form-error" role="alert">{restoreError()}</p>
         </Show>
 
         <div class="form-actions">
@@ -664,7 +664,7 @@ function InfoTab() {
         </div>
 
         <Show when={infoError()}>
-          <p class="form-error">{infoError()}</p>
+          <p class="form-error" role="alert">{infoError()}</p>
         </Show>
 
         <div class="form-actions">

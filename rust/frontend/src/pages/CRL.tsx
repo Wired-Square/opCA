@@ -88,11 +88,11 @@ export default function CRL() {
         </Show>
 
         <Show when={info.error}>
-          <p class="page-error">{String(info.error)}</p>
+          <p class="page-error" role="alert">{String(info.error)}</p>
         </Show>
 
         <Show when={error()}>
-          <p class="page-error">{error()}</p>
+          <p class="page-error" role="alert">{error()}</p>
         </Show>
 
         <Show when={info.loading}>

@@ -19,12 +19,12 @@ export default function Modal(props: ModalProps): JSX.Element {
   return (
     <Show when={props.open}>
       <div class="modal-overlay" onClick={props.onClose}>
-        <div class="modal-dialog" onClick={(e) => e.stopPropagation()}>
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={(e) => e.stopPropagation()}>
           <div class="modal-header">
             <Show when={props.title}>
-              <h3 class="modal-title">{props.title}</h3>
+              <h3 class="modal-title" id="modal-title">{props.title}</h3>
             </Show>
-            <button class="modal-close btn-ghost" onClick={props.onClose}>
+            <button class="modal-close btn-ghost" onClick={props.onClose} aria-label="Close">
               &times;
             </button>
           </div>

@@ -511,7 +511,7 @@ export default function OpenVPN() {
 
       {/* ── Feedback ───────────────────────────────────────────── */}
       <Show when={error()}>
-        <p class="page-error">{error()}</p>
+        <p class="page-error" role="alert">{error()}</p>
       </Show>
       <Show when={success()}>
         <p class="page-success">{success()}</p>

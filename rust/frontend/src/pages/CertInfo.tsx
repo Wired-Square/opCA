@@ -133,7 +133,7 @@ export default function CertInfo() {
 
       <div class="cert-info-scroll">
         <Show when={detail.error}>
-          <p class="page-error">{String(detail.error)}</p>
+          <p class="page-error" role="alert">{String(detail.error)}</p>
         </Show>
 
         <Show when={detail.loading}>
@@ -204,7 +204,7 @@ export default function CertInfo() {
               </Show>
 
               <Show when={error()}>
-                <p class="page-error mt-3">{error()}</p>
+                <p class="page-error mt-3" role="alert">{error()}</p>
               </Show>
 
               <div class="cert-actions">

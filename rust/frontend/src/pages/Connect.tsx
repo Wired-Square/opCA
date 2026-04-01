@@ -156,6 +156,7 @@ export default function Connect() {
                 <button
                   type="button"
                   class="dropdown-toggle"
+                  aria-label="Show saved vaults"
                   onClick={() => setDropdownOpen(!dropdownOpen())}
                   tabIndex={-1}
                 >
@@ -176,6 +177,7 @@ export default function Connect() {
                         <button
                           type="button"
                           class="saved-forget"
+                          aria-label="Forget this login"
                           onClick={(e) => forgetLogin(e, login)}
                           title="Forget this login"
                         >
@@ -207,7 +209,7 @@ export default function Connect() {
             />
           </div>
 
-          {error() && <p class="connect-error">{error()}</p>}
+          {error() && <p class="connect-error" role="alert">{error()}</p>}
 
           <button class="btn-primary connect-btn" type="submit" disabled={loading() || !vault().trim()}>
             {loading() ? "Connecting\u2026" : "Connect"}

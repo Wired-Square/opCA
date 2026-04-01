@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Deduplicate per-page table classes into shared `data-table` classes
 - Replace inline style attributes with CSS utility classes
 - Replace `any` types with `Resource<DatabaseInfo>` in Database page components
+- Improve accessibility: focus indicators on all interactive elements, aria-labels on icon-only buttons, `role="alert"` on error messages, modal dialog semantics, and operation status live region
 
 ## [0.99.12] - 2026-04-01
 
