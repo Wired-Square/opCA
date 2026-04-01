@@ -6,6 +6,7 @@ use tauri::State;
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::op::StoreAction;
 use opca_core::services::route53::Route53Client;
+use opca_core::services::storage::get_aws_credentials;
 
 use crate::commands::dto::{
     CreateDkimRequest, CreateDkimResult, DkimKeyDetail, DkimKeyItem, DkimRoute53Result,
@@ -295,13 +296,17 @@ pub async fn deploy_dkim_route53(
         Ok(record.trim().to_string())
     })?;
 
-    // Deploy to Route53 using the runner from Op.
-    let result = state.with_op(|op| {
-        let client = Route53Client::new(op.runner());
-        client
-            .deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL)
+    // Fetch AWS credentials from 1Password and deploy via native SDK.
+    let creds = state.with_op(|op| {
+        get_aws_credentials(op.runner(), op.account())
             .map_err(|e| e.to_string())
     })?;
+
+    let client = Route53Client::new(creds);
+    let result = client
+        .deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let message = format!(
         "Deployed TXT record to zone {} (change: {})",

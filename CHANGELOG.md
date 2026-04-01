@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- DKIM Route53 deployment now uses the native AWS SDK instead of shelling out to `aws` CLI via `op plugin run`
+
 ## [0.99.13] - 2026-04-01
 
 ### Added
