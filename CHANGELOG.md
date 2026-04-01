@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Log directory is now platform-appropriate (was hardcoded to macOS `~/Library/Logs/opCA`)
+- Log directory now uses Tauri's platform-appropriate `LogDir` target instead of a hardcoded macOS path
 
 ### Changed
 

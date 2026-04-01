@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
-mod paths;
 mod state;
 
 use log::info;
@@ -53,9 +52,6 @@ fn main() {
     #[cfg(target_os = "macos")]
     warmup_op_cli();
 
-    let log_dir = paths::app_log_dir();
-    std::fs::create_dir_all(&log_dir).ok();
-
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -64,8 +60,7 @@ fn main() {
                 .max_file_size(5_000_000) // 5 MB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Folder {
-                        path: log_dir,
+                    tauri_plugin_log::TargetKind::LogDir {
                         file_name: Some("opca".to_string()),
                     },
                 ))
