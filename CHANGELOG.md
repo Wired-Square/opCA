@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Frontend test infrastructure with Vitest, SolidJS testing library, and Tauri API mocks
+
+### Changed
+
+- Enable Content Security Policy for the Tauri webview, restricting resource loading to self-origin and Google Fonts
+- Replace all inline styles with CSS utility classes in global.css
+- Replace `any` types with `Resource<DatabaseInfo>` in Database page components
+
 ## [0.99.12] - 2026-04-01
 
 ### Changed
