@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { setAppState, type VaultState } from "../stores/app";
 import { themeMode, toggleTheme } from "../stores/theme";
 import { availableUpdate, fetchUpdate } from "../stores/update";
+import Icon from "../components/Icon";
 import "../styles/pages/connect.css";
 
 interface ConnectionInfo {
@@ -55,8 +56,6 @@ function removeLogin(vault: string, account: string | null): SavedLogin[] {
   persistLogins(logins);
   return logins;
 }
-
-const updateIcon = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="8"/><polyline points="8 12 12 8 16 12"/></svg>`;
 
 export default function Connect() {
   const navigate = useNavigate();
@@ -238,7 +237,7 @@ export default function Connect() {
               onClick={() => open(update().url)}
               title={`Update available: ${update().version}`}
             >
-              <span class="connect-update-icon" innerHTML={updateIcon} />
+              <span class="connect-update-icon"><Icon name="update" /></span>
               Update available: {update().version}
             </button>
           )}

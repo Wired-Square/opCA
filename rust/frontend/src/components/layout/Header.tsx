@@ -3,6 +3,7 @@ import { useNavigate } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
 import { appState, setAppState } from "../../stores/app";
 import { themeMode, toggleTheme } from "../../stores/theme";
+import Icon from "../Icon";
 import "../../styles/components/header.css";
 
 export default function Header() {
@@ -51,11 +52,9 @@ export default function Header() {
           {themeMode() === "dark" ? "\u2600" : "\u263E"}
         </button>
         <button class="btn-ghost disconnect-btn" onClick={handleLogout} aria-label="Disconnect" title="Disconnect">
-          <span innerHTML={logoutIcon} />
+          <Icon name="logout" />
         </button>
       </div>
     </header>
   );
 }
-
-const logoutIcon = `<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`;
