@@ -484,7 +484,7 @@ export default function CSR() {
             <Show when={!signResult() ? decoded() : null}>
               {(d) => (
                 <>
-                  <div class="detail-grid" style="margin-bottom: 16px">
+                  <div class="detail-grid mb-3">
                     <Row label="Subject" value={d().subject} mono />
                   </div>
 
@@ -543,7 +543,7 @@ export default function CSR() {
                       </div>
                     </Show>
                     <Show when={signSans().length === 0}>
-                      <p class="text-muted" style="font-size: 0.8125rem; margin-top: 4px">No alternative names.</p>
+                      <p class="text-muted text-sm mt-1">No alternative names.</p>
                     </Show>
                   </div>
 

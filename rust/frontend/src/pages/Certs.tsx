@@ -109,7 +109,7 @@ export default function Certs() {
       {/* Local certificates tab */}
       <Show when={tab() === "local"}>
         <Show when={!localCerts.loading && filteredLocal().length === 0}>
-          <p class="text-muted" style={{ "margin-top": "16px" }}>
+          <p class="text-muted mt-3">
             No local certificates found.
           </p>
         </Show>
@@ -150,7 +150,7 @@ export default function Certs() {
       {/* External certificates tab */}
       <Show when={tab() === "external"}>
         <Show when={!externalCerts.loading && filteredExternal().length === 0}>
-          <p class="text-muted" style={{ "margin-top": "16px" }}>
+          <p class="text-muted mt-3">
             No external certificates found.
           </p>
         </Show>

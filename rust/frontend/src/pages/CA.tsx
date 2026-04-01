@@ -186,7 +186,7 @@ function CertificateTab(props: {
                       value={resignDays()}
                       onInput={(e) => setResignDays(e.currentTarget.value)}
                       min="1"
-                      style={{ "max-width": "200px" }}
+                      class="max-w-input"
                     />
                   </div>
                   <div class="form-actions">
@@ -411,7 +411,7 @@ function InitTab() {
 
   return (
     <div class="tab-content">
-      <p class="text-muted" style={{ "margin-bottom": "16px" }}>
+      <p class="text-muted mb-3">
         No Certificate Authority found. Fill in the details below to initialise one.
       </p>
       <div class="config-form">
@@ -511,7 +511,7 @@ function RestoreTab() {
 
   return (
     <div class="tab-content">
-      <p class="text-muted" style={{ "margin-bottom": "16px" }}>
+      <p class="text-muted mb-3">
         Restore a vault from an encrypted backup file.
       </p>
       <div class="config-form">
@@ -628,7 +628,7 @@ function InfoTab() {
 
   return (
     <div class="tab-content">
-      <p class="text-muted" style={{ "margin-bottom": "16px" }}>
+      <p class="text-muted mb-3">
         View the contents of an encrypted backup file without restoring it.
       </p>
       <div class="config-form">

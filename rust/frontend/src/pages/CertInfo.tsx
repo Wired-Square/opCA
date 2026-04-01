@@ -203,7 +203,7 @@ export default function CertInfo() {
               </Show>
 
               <Show when={error()}>
-                <p class="page-error" style={{ "margin-top": "16px" }}>{error()}</p>
+                <p class="page-error mt-3">{error()}</p>
               </Show>
 
               <div class="cert-actions">

@@ -8,9 +8,9 @@ export default function Placeholder() {
   };
 
   return (
-    <div style={{ padding: "32px" }}>
+    <div class="p-4">
       <h2>{title()}</h2>
-      <p class="text-muted" style={{ "margin-top": "8px" }}>
+      <p class="text-muted mt-2">
         Coming soon
       </p>
     </div>
