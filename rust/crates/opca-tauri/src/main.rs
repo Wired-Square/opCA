@@ -63,7 +63,7 @@ fn main() {
                 .level(log::LevelFilter::Debug)
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .max_file_size(5_000_000) // 5 MB
-                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Folder {
                         path: log_dir,
