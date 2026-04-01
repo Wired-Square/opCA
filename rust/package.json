@@ -16,7 +16,10 @@
     "release:major": "node scripts/release.js major",
     "release:rebuild": "node scripts/release.js rebuild",
     "test": "cargo test -p opca-core",
-    "test:e2e": "cargo test -p opca-core --test e2e"
+    "test:e2e": "cargo test -p opca-core --test e2e",
+    "notary:history": "scripts/notary.sh history",
+    "notary:log": "scripts/notary.sh log",
+    "notary:validate": "xcrun stapler validate"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"

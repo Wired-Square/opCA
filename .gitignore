@@ -29,3 +29,4 @@ rust/frontend/dist/
 *.pem
 *.key
 environment.sh
+.env.local
