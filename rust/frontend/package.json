@@ -12,6 +12,9 @@
     "test:e2e": "OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test e2e -- --test-threads=1"
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/ubuntu": "^5.2.8",
     "@solidjs/router": "^0.15.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",

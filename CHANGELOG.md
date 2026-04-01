@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Replace inline style attributes with CSS utility classes
 - Replace `any` types with `Resource<DatabaseInfo>` in Database page components
 - Improve accessibility: focus indicators on all interactive elements, aria-labels on icon-only buttons, `role="alert"` on error messages, modal dialog semantics, and operation status live region
+- Self-host all fonts (DM Sans, JetBrains Mono, Ubuntu) via @fontsource, removing Google Fonts CDN dependency
+- Tighten CSP to `'self'` only with no external domain allowances
 
 ## [0.99.12] - 2026-04-01
 
