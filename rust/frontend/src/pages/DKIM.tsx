@@ -1,6 +1,7 @@
 import { Show, For, createSignal, createResource } from "solid-js";
 import { listDkimKeys, getDkimInfo, createDkimKey, deleteDkimKey, verifyDkimDns, deployDkimRoute53 } from "../api/dkim";
 import { formatDate } from "../utils/dates";
+import { createCopiedSignal } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import Modal from "../components/Modal";
@@ -18,7 +19,7 @@ export default function DKIM() {
   const [acting, setActing] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
-  const [copied, setCopied] = createSignal(false);
+  const [copied, markCopied] = createCopiedSignal();
   const [verifyMismatch, setVerifyMismatch] = createSignal<{ expected: string; found: string } | null>(null);
 
   const [search, setSearch] = createSignal("");
@@ -176,8 +177,7 @@ export default function DKIM() {
     const rec = detail()?.dns_record ?? createResult()?.dns_record;
     if (rec) {
       navigator.clipboard.writeText(rec);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      markCopied();
     }
   }
 

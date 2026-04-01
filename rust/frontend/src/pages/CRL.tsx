@@ -1,6 +1,7 @@
 import { Show, createSignal, createResource } from "solid-js";
 import { getCrlInfo, generateCrl, uploadCrl } from "../api/crl";
 import { formatDate } from "../utils/dates";
+import { createCopiedSignal } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import type { CrlInfo } from "../api/types";
@@ -11,7 +12,7 @@ export default function CRL() {
   const [generating, setGenerating] = createSignal(false);
   const [uploading, setUploading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [copied, setCopied] = createSignal(false);
+  const [copied, markCopied] = createCopiedSignal();
   const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
 
   async function handleGenerate() {
@@ -48,8 +49,7 @@ export default function CRL() {
     const pem = info()?.crl_pem;
     if (pem) {
       navigator.clipboard.writeText(pem);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      markCopied();
     }
   }
 

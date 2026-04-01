@@ -4,6 +4,7 @@ import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
 import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, resignCa } from "../api/ca";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
 import { formatDate } from "../utils/dates";
+import { createCopiedSignal } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -81,7 +82,7 @@ function CertificateTab(props: {
   config: () => CaConfig | undefined;
   onResign: () => void;
 }) {
-  const [copied, setCopied] = createSignal(false);
+  const [copied, markCopied] = createCopiedSignal();
   const [uploading, setUploading] = createSignal(false);
   const [uploadResult, setUploadResult] = createSignal<string | null>(null);
   const [showResign, setShowResign] = createSignal(false);
@@ -89,14 +90,17 @@ function CertificateTab(props: {
   const [resigning, setResigning] = createSignal(false);
   const [resignResult, setResignResult] = createSignal<string | null>(null);
 
+  let uploadTimer: number | undefined;
+  let resignTimer: number | undefined;
+  onCleanup(() => { clearTimeout(uploadTimer); clearTimeout(resignTimer); });
+
   const hasPublicStore = () => !!props.config()?.ca_public_store;
 
   function copyPem() {
     const pem = props.info()?.cert_pem;
     if (pem) {
       navigator.clipboard.writeText(pem);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      markCopied();
     }
   }
 
@@ -106,7 +110,8 @@ function CertificateTab(props: {
     try {
       await uploadCaCert();
       setUploadResult("ok");
-      setTimeout(() => setUploadResult(null), 3000);
+      clearTimeout(uploadTimer);
+      uploadTimer = window.setTimeout(() => setUploadResult(null), 3000);
     } catch (e) {
       setUploadResult(String(e));
     } finally {
@@ -127,7 +132,8 @@ function CertificateTab(props: {
       setResignResult("ok");
       setShowResign(false);
       props.onResign();
-      setTimeout(() => setResignResult(null), 5000);
+      clearTimeout(resignTimer);
+      resignTimer = window.setTimeout(() => setResignResult(null), 5000);
     } catch (e) {
       setResignResult(String(e));
     } finally {
@@ -453,6 +459,7 @@ function RestoreTab() {
   const [restoreError, setRestoreError] = createSignal<string | null>(null);
   const [progressMsg, setProgressMsg] = createSignal<string | null>(null);
   let unlistenProgress: UnlistenFn | undefined;
+  let navTimer: number | undefined;
 
   onMount(async () => {
     unlistenProgress = await listen<string>("vault-progress", (event) => {
@@ -462,6 +469,7 @@ function RestoreTab() {
 
   onCleanup(() => {
     unlistenProgress?.();
+    clearTimeout(navTimer);
   });
 
   async function browseOpen() {
@@ -500,7 +508,7 @@ function RestoreTab() {
       const newState = await invoke<string>("check_vault_state");
       setAppState("vaultState", newState as VaultState);
 
-      setTimeout(() => navigate("/dashboard"), 1500);
+      navTimer = window.setTimeout(() => navigate("/dashboard"), 1500);
     } catch (e) {
       setRestoreError(String(e));
     } finally {

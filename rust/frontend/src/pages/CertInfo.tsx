@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "@solidjs/router";
 import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert } from "../api/certs";
 import { getCaConfig, uploadCaDatabase } from "../api/ca";
 import { formatDate } from "../utils/dates";
+import { createCopiedSignal } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import "../styles/pages/cert-info.css";
@@ -18,7 +19,7 @@ export default function CertInfo() {
   const [confirming, setConfirming] = createSignal(false);
   const [acting, setActing] = createSignal<string | false>(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [copied, setCopied] = createSignal(false);
+  const [copied, markCopied] = createCopiedSignal();
   const [backfilling, setBackfilling] = createSignal(false);
   const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
   const [uploadingDb, setUploadingDb] = createSignal(false);
@@ -117,8 +118,7 @@ export default function CertInfo() {
     const pem = detail()?.cert_pem;
     if (pem) {
       navigator.clipboard.writeText(pem);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      markCopied();
     }
   }
 

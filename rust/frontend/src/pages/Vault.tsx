@@ -68,6 +68,7 @@ export default function Vault() {
   // Progress events from backend
   const [progressMsg, setProgressMsg] = createSignal<string | null>(null);
   let unlistenProgress: UnlistenFn | undefined;
+  let navTimer: number | undefined;
 
   onMount(async () => {
     unlistenProgress = await listen<string>("vault-progress", (event) => {
@@ -89,6 +90,7 @@ export default function Vault() {
 
   onCleanup(() => {
     unlistenProgress?.();
+    clearTimeout(navTimer);
   });
 
   // --- File dialogs ---
@@ -231,7 +233,7 @@ export default function Vault() {
       const newState = await invoke<string>("check_vault_state");
       setAppState("vaultState", newState as VaultState);
       // Navigate to dashboard after a short delay so the user sees the success message
-      setTimeout(() => navigate("/dashboard"), 1500);
+      navTimer = window.setTimeout(() => navigate("/dashboard"), 1500);
     } catch (e) {
       setRestoreError(String(e));
     } finally {

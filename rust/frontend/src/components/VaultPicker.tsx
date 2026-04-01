@@ -116,7 +116,7 @@ export default function VaultPicker(props: VaultPickerProps) {
             <Show when={showCreate()}>
               <div class="vault-picker-create-form">
                 <input
-                  ref={(el) => setTimeout(() => el.focus(), 0)}
+                  autofocus
                   type="text"
                   placeholder="Vault name"
                   value={newVaultName()}

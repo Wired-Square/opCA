@@ -1,5 +1,6 @@
 import { Show, For, createSignal, createResource } from "solid-js";
 import { listCsrs, getCsrInfo, createCsr, decodeCsr, signCsr } from "../api/csr";
+import { createCopiedSignal } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import { CERT_TYPES } from "../api/types";
@@ -22,7 +23,7 @@ export default function CSR() {
   const [loadingDetail, setLoadingDetail] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
-  const [copied, setCopied] = createSignal(false);
+  const [copied, markCopied] = createCopiedSignal();
 
   // Create form
   const [cn, setCn] = createSignal("");
@@ -73,8 +74,7 @@ export default function CSR() {
     const pem = detail()?.csr_pem ?? createResult()?.csr_pem;
     if (pem) {
       navigator.clipboard.writeText(pem);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      markCopied();
     }
   }
 
@@ -571,8 +571,7 @@ export default function CSR() {
                         class="btn-ghost btn-sm"
                         onClick={() => {
                           navigator.clipboard.writeText(r().cert_pem);
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 2000);
+                          markCopied();
                         }}
                       >
                         {copied() ? "Copied" : "Copy"}
