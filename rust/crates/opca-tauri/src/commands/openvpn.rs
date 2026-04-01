@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use log::info;
 use tauri::State;
 
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
@@ -183,6 +184,7 @@ pub async fn get_openvpn_params(
 pub async fn generate_openvpn_dh(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
+    info!("[tauri] generate_openvpn_dh");
     state.with_op(|op| {
         let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)
             .map_err(|e| format!("Failed to generate DH parameters: {e}"))?;
@@ -235,6 +237,7 @@ pub async fn generate_openvpn_dh(
 pub async fn generate_openvpn_ta(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
+    info!("[tauri] generate_openvpn_ta");
     state.with_op(|op| {
         let ta_pem = generate_ta_key(DEFAULT_KEY_SIZE.ta)
             .map_err(|e| format!("Failed to generate TA key: {e}"))?;
@@ -279,6 +282,7 @@ pub async fn setup_openvpn_server(
 ) -> Result<OpenVpnServerParams, String> {
     let template_name = request.template_name;
 
+    info!("[tauri] setup_openvpn_server: template='{template_name}'");
     state.with_op(|op| {
         let (item_exists, fields) = read_openvpn_fields(op)?;
         let mut attrs: Vec<String> = Vec::new();
@@ -408,6 +412,7 @@ pub async fn save_openvpn_template(
         return Err("Template content is required".to_string());
     }
 
+    info!("[tauri] save_openvpn_template: name='{name}'");
     state.with_op(|op| {
         let attrs = vec![format!("template.{name}[text]={content}")];
         let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
@@ -475,6 +480,8 @@ pub async fn generate_openvpn_profile(
     let cn = request.cn;
     let template_name = request.template_name;
     let dest_vault = request.dest_vault;
+
+    info!("[tauri] generate_openvpn_profile: cn='{}' template='{}'", cn, template_name);
     let created_date = Utc::now().format("%Y-%m-%d").to_string();
 
     state.with_op(|op| {
@@ -592,6 +599,7 @@ pub async fn send_profile_to_vault(
         return Err("Destination vault is required".to_string());
     }
 
+    info!("[tauri] send_profile_to_vault: cn='{cn}' dest='{dest_vault}'");
     state.with_op(|op| {
         let item_title = format!("VPN_{cn}");
         let content = op

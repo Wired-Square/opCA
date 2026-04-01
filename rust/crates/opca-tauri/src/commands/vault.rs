@@ -3,6 +3,7 @@ use std::path::Path;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use log::{info, error};
 use md5;
 use rand::RngCore;
 use tauri::{Emitter, State, Window};
@@ -32,6 +33,7 @@ pub async fn vault_backup(
     transfer_to_store: bool,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    info!("[tauri] vault_backup: path='{}' transfer_to_store={}", path, transfer_to_store);
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
@@ -123,6 +125,7 @@ pub async fn vault_restore(
     account: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<RestoreResult, String> {
+    info!("[tauri] vault_restore: path='{}' vault='{vault}'", path);
     emit_progress(&window, "Reading backup file\u{2026}");
     let data = tokio::fs::read(&path).await.map_err(|e| {
         let msg = format!("Failed to read '{}': {}", path, e);
@@ -169,6 +172,7 @@ pub async fn vault_restore(
         Err(e) => {
             let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
             let _ = lock_guard.release(&op);
+            error!("[tauri] vault_restore failed: {e}");
             state.log_err("vault_restore", Some(e.to_string()));
             return Err(e.to_string());
         }
@@ -261,6 +265,7 @@ pub async fn store_password_in_op(
     vault: Option<String>,
     md5_hash: Option<String>,
 ) -> Result<(), String> {
+    info!("[tauri] store_password_in_op: item='{item_title}'");
     state.with_op(|op| {
         let pw_attr = format!("password={}", password);
         let md5_attr;

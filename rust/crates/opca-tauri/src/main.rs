@@ -59,14 +59,16 @@ fn main() {
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .max_file_size(5_000_000) // 5 MB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("opca".to_string()),
-                    },
-                ))
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                ))
+                .targets([
+                    tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::LogDir {
+                            file_name: Some("opca".to_string()),
+                        },
+                    ),
+                    tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::Stdout,
+                    ),
+                ])
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())

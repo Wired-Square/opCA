@@ -1,3 +1,4 @@
+use log::{info, warn, debug};
 use serde::Serialize;
 use tauri::State;
 
@@ -45,7 +46,11 @@ pub async fn connect(
     vault: String,
     account: Option<String>,
 ) -> Result<ConnectionInfo, String> {
-    let op = Op::new(&vault, account.clone(), None).map_err(|e| e.to_string())?;
+    info!("[tauri] connect: vault='{}' account={:?}", vault, account);
+    let op = Op::new(&vault, account.clone(), None).map_err(|e| {
+        warn!("[tauri] connect failed: {e}");
+        e.to_string()
+    })?;
 
     let vault_state = detect_vault_state(&op);
 
@@ -69,6 +74,7 @@ pub async fn connect(
 
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
+    info!("[tauri] disconnect");
     // Acquire the single connection lock — no other command can race us.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
 
@@ -95,6 +101,7 @@ pub async fn create_vault(
     state: State<'_, AppState>,
     name: String,
 ) -> Result<VaultInfo, String> {
+    info!("[tauri] create_vault: name='{name}'");
     let result = state.with_op(|op| {
         op.vault_create(&name).map_err(|e| e.to_string())
     })?;
@@ -118,6 +125,7 @@ pub struct OpCliStatus {
 
 #[tauri::command]
 pub async fn check_op_cli() -> OpCliStatus {
+    debug!("[tauri] check_op_cli");
     match op::check_cli_available() {
         Some(path) => OpCliStatus {
             found: true,

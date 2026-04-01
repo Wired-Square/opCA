@@ -1,6 +1,7 @@
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use log::{info, warn};
 use opca_core::op::{Op, ShellRunner};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::vault_lock::VaultLock;
@@ -40,8 +41,10 @@ impl AppState {
             let op = conn.op.take()
                 .ok_or("Not connected")?;
 
+            info!("[tauri] loading CA from 1Password");
             let ca = CertificateAuthority::retrieve(op)
                 .map_err(|e| {
+                    warn!("[tauri] failed to load CA: {e}");
                     self.log_err("retrieve_ca", Some(e.to_string()));
                     e.to_string()
                 })?;

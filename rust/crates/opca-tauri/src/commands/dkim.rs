@@ -1,4 +1,5 @@
 use chrono::Utc;
+use log::{info, debug};
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
 use tauri::State;
@@ -112,6 +113,7 @@ pub async fn create_dkim_key(
     state: State<'_, AppState>,
     request: CreateDkimRequest,
 ) -> Result<CreateDkimResult, String> {
+    info!("[tauri] create_dkim_key: domain='{}' selector='{}'", request.domain, request.selector);
     let key_size = request.key_size.unwrap_or(DEFAULT_KEY_SIZE.dkim);
     let domain = request.domain;
     let selector = request.selector;
@@ -198,6 +200,7 @@ pub async fn delete_dkim_key(
     domain: String,
     selector: String,
 ) -> Result<bool, String> {
+    info!("[tauri] delete_dkim_key: domain='{domain}' selector='{selector}'");
     let item_title = make_dkim_title(&domain, &selector);
 
     state.with_op(|op| {
@@ -225,6 +228,7 @@ pub async fn verify_dkim_dns(
     domain: String,
     selector: String,
 ) -> Result<DkimVerifyResult, String> {
+    debug!("[tauri] verify_dkim_dns: domain='{domain}' selector='{selector}'");
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
@@ -282,6 +286,7 @@ pub async fn deploy_dkim_route53(
     domain: String,
     selector: String,
 ) -> Result<DkimRoute53Result, String> {
+    info!("[tauri] deploy_dkim_route53: domain='{domain}' selector='{selector}'");
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 

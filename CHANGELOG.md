@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Log viewer page: view, scroll, and copy application log contents directly from the UI
 - SFTP storage backend (`sftp://[user@]host[:port]/path`) as a cross-platform alternative to rsync; `scp://` is accepted as an alias
 - Consistent logging across all storage backends (rsync, S3, SFTP)
+- System-level logging for all Tauri command entry points (mutating operations at info, locks at info, external calls at debug) with `[tauri]` prefix
 
 ### Fixed
 
+- Fixed duplicate log output caused by appending to default log targets instead of replacing them
 - Log directory now uses Tauri's platform-appropriate `LogDir` target instead of a hardcoded macOS path
 
 ### Changed

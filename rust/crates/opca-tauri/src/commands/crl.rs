@@ -1,3 +1,4 @@
+use log::{info, warn};
 use tauri::State;
 
 use opca_core::services::ca::parse_crl_metadata;
@@ -67,7 +68,9 @@ pub async fn generate_crl(state: State<'_, AppState>) -> Result<CrlInfo, String>
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
+    info!("[tauri] generate_crl");
     let crl_pem = ca.generate_crl().map_err(|e| {
+        warn!("[tauri] generate_crl failed: {e}");
         state.log_err("generate_crl", Some(e.to_string()));
         e.to_string()
     })?;
@@ -110,7 +113,9 @@ pub async fn upload_crl(state: State<'_, AppState>) -> Result<(), String> {
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
+    info!("[tauri] upload_crl");
     ca.upload_crl("").map_err(|e| {
+        warn!("[tauri] upload_crl failed: {e}");
         state.log_err("upload_crl", Some(e.to_string()));
         e.to_string()
     })?;

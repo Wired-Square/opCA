@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use log::{info, warn, error, debug};
 use tauri::State;
 
 use opca_core::services::ca::CertificateAuthority;
@@ -57,6 +58,7 @@ pub async fn update_ca_config(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
+    info!("[tauri] update_ca_config");
     let updates = dto_to_ca_config(&config);
 
     {
@@ -66,6 +68,7 @@ pub async fn update_ca_config(
     }
 
     ca.store_ca_database().map_err(|e| {
+        warn!("[tauri] update_ca_config: store failed: {e}");
         state.log_err("update_config", Some(e.to_string()));
         e.to_string()
     })?;
@@ -84,6 +87,7 @@ pub async fn init_ca(
     let op = conn.op.take()
         .ok_or("Not connected")?;
 
+    info!("[tauri] init_ca");
     let ca_config = dto_to_ca_config(&config);
 
     match CertificateAuthority::init(op, &ca_config) {
@@ -93,6 +97,7 @@ pub async fn init_ca(
             Ok(())
         }
         Err(e) => {
+            error!("[tauri] init_ca failed: {e}");
             state.log_err("init_ca", Some(e.to_string()));
             // On failure, we've lost the Op — caller must reconnect
             Err(e.to_string())
@@ -107,6 +112,7 @@ pub async fn test_stores(
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
+    debug!("[tauri] test_stores");
     ca.test_stores().map_err(|e| e.to_string())
 }
 
@@ -115,7 +121,9 @@ pub async fn upload_ca_cert(state: State<'_, AppState>) -> Result<(), String> {
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
+    info!("[tauri] upload_ca_cert");
     ca.upload_ca_cert("").map_err(|e| {
+        warn!("[tauri] upload_ca_cert failed: {e}");
         state.log_err("upload_ca_cert", Some(e.to_string()));
         e.to_string()
     })?;
@@ -129,7 +137,9 @@ pub async fn upload_ca_database(state: State<'_, AppState>) -> Result<(), String
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
+    info!("[tauri] upload_ca_database");
     ca.upload_ca_database("").map_err(|e| {
+        warn!("[tauri] upload_ca_database failed: {e}");
         state.log_err("upload_ca_database", Some(e.to_string()));
         e.to_string()
     })?;
@@ -146,7 +156,9 @@ pub async fn resign_ca(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
+    info!("[tauri] resign_ca: days={ca_days}");
     ca.re_sign_ca(ca_days).map_err(|e| {
+        warn!("[tauri] resign_ca failed: {e}");
         state.log_err("resign_ca", Some(e.to_string()));
         e.to_string()
     })?;

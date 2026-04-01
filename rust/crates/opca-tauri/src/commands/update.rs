@@ -3,6 +3,7 @@
 //! Queries the GitHub releases API for the latest published release and
 //! compares it against the running application version.
 
+use log::{info, warn, debug};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -40,6 +41,7 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
 #[tauri::command]
 pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     let current_version = env!("CARGO_PKG_VERSION");
+    debug!("[tauri] check_for_updates: current={current_version}");
 
     let client = reqwest::Client::builder()
         .user_agent("opCA-App")
@@ -50,9 +52,13 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         .get("https://api.github.com/repos/Wired-Square/opca/releases/latest")
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch release info: {}", e))?;
+        .map_err(|e| {
+            warn!("[tauri] update check failed: {e}");
+            format!("Failed to fetch release info: {}", e)
+        })?;
 
     if !response.status().is_success() {
+        warn!("[tauri] update check failed: HTTP {}", response.status());
         return Err(format!("GitHub API returned status: {}", response.status()));
     }
 
@@ -62,11 +68,13 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         .map_err(|e| format!("Failed to parse release info: {}", e))?;
 
     if is_newer_version(current_version, &release.tag_name) {
+        info!("[tauri] update available: {} -> {}", current_version, release.tag_name);
         Ok(Some(UpdateInfo {
             version: release.tag_name,
             url: release.html_url,
         }))
     } else {
+        debug!("[tauri] no update available (latest: {})", release.tag_name);
         Ok(None)
     }
 }

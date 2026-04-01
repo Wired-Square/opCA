@@ -1,3 +1,4 @@
+use log::{info, warn, debug};
 use tauri::{Emitter, Manager, State};
 
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
@@ -86,6 +87,7 @@ pub async fn backfill_cert(
     state: State<'_, AppState>,
     serial: String,
 ) -> Result<CertDetail, String> {
+    debug!("[tauri] backfill_cert: serial={serial}");
     let (result, needs_persist) = {
         let mut conn = state.ensure_ca()?;
         let ca = conn.ca.as_mut().ok_or("CA not available")?;
@@ -209,6 +211,7 @@ pub async fn create_cert(
     state: State<'_, AppState>,
     request: CreateCertRequest,
 ) -> Result<CertListItem, String> {
+    info!("[tauri] create_cert: cn='{}' type='{}'", request.cn, request.cert_type);
     let cert_type: CertType = request.cert_type.parse()
         .map_err(|e: opca_core::error::OpcaError| e.to_string())?;
 
@@ -236,6 +239,7 @@ pub async fn create_cert(
 
     let (bundle, issuance_warning) = ca.generate_certificate_bundle(cert_type.clone(), &request.cn, bundle_config)
         .map_err(|e| {
+            warn!("[tauri] create_cert failed: {e}");
             state.log_err("create_cert", Some(e.to_string()));
             e.to_string()
         })?;
@@ -274,8 +278,10 @@ pub async fn revoke_cert(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
+    info!("[tauri] revoke_cert: serial={serial}");
     ca.revoke_certificate(&CertLookup::Serial(serial.clone()))
         .map_err(|e| {
+            warn!("[tauri] revoke_cert failed: {e}");
             state.log_err("revoke_cert", Some(e.to_string()));
             e.to_string()
         })?;
@@ -292,8 +298,10 @@ pub async fn renew_cert(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
+    info!("[tauri] renew_cert: serial={serial}");
     let (new_pem, issuance_warning) = ca.renew_certificate_bundle(&CertLookup::Serial(serial.clone()))
         .map_err(|e| {
+            warn!("[tauri] renew_cert failed: {e}");
             state.log_err("renew_cert", Some(e.to_string()));
             e.to_string()
         })?;
@@ -314,8 +322,10 @@ pub async fn rekey_cert(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
+    info!("[tauri] rekey_cert: serial={serial}");
     let (new_pem, issuance_warning) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()))
         .map_err(|e| {
+            warn!("[tauri] rekey_cert failed: {e}");
             state.log_err("rekey_cert", Some(e.to_string()));
             e.to_string()
         })?;
@@ -336,6 +346,7 @@ pub async fn import_cert(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
+    info!("[tauri] import_cert");
     let cert_pem = request.cert_pem.as_bytes();
     let key_pem = request.key_pem.as_deref().map(|s| s.as_bytes());
     let chain_pem = request.chain_pem.as_deref().map(|s| s.as_bytes());

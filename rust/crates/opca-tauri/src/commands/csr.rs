@@ -1,3 +1,4 @@
+use log::info;
 use tauri::State;
 
 use openssl::nid::Nid;
@@ -173,6 +174,7 @@ pub async fn create_csr(
     state: State<'_, AppState>,
     request: CreateCsrRequest,
 ) -> Result<CreateCsrResult, String> {
+    info!("[tauri] create_csr: cn='{}' type='{}'", request.cn, request.csr_type);
     let cert_type: CertType = request
         .csr_type
         .parse()
@@ -290,6 +292,7 @@ pub async fn sign_csr(
     state: State<'_, AppState>,
     request: SignCsrRequest,
 ) -> Result<SignCsrResult, String> {
+    info!("[tauri] sign_csr: type='{}' cn={:?}", request.csr_type, request.cn);
     let cert_type: CertType = request
         .csr_type
         .parse()
@@ -376,6 +379,7 @@ pub async fn import_csr_cert(
     state: State<'_, AppState>,
     request: ImportCsrCertRequest,
 ) -> Result<CertListItem, String> {
+    info!("[tauri] import_csr_cert: cn={:?}", request.cn);
     // Parse the imported certificate
     let cert = X509::from_pem(request.cert_pem.as_bytes())
         .map_err(|e| format!("Failed to parse certificate PEM: {e}"))?;
