@@ -6,6 +6,8 @@
 use std::io::Write;
 use std::process::Command;
 
+use log::{debug, info};
+
 use crate::error::OpcaError;
 
 use super::StorageBackend;
@@ -62,6 +64,7 @@ impl StorageRsync {
 
 impl StorageBackend for StorageRsync {
     fn upload(&self, content: &[u8], uri: &str) -> Result<(), OpcaError> {
+        info!("[rsync] uploading {} bytes to {}", content.len(), uri);
         let destination = Self::parse_destination(uri)?;
 
         // Write content to a temp file
@@ -84,10 +87,12 @@ impl StorageBackend for StorageRsync {
             return Err(OpcaError::Storage(format!("rsync failed: {stderr}")));
         }
 
+        debug!("[rsync] upload succeeded for {uri}");
         Ok(())
     }
 
     fn test_connection(&self, uri: &str) -> Result<(), OpcaError> {
+        info!("[rsync] testing connection to {}", uri);
         let host = Self::parse_host(uri)?;
 
         if Self::is_daemon_uri(uri) {
@@ -124,6 +129,7 @@ impl StorageBackend for StorageRsync {
             }
         }
 
+        debug!("[rsync] connection test passed for {uri}");
         Ok(())
     }
 }

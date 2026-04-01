@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Log viewer page: view, scroll, and copy application log contents directly from the UI
+- SFTP storage backend (`sftp://[user@]host[:port]/path`) as a cross-platform alternative to rsync
+
+### Fixed
+
+- Log directory is now platform-appropriate (was hardcoded to macOS `~/Library/Logs/opCA`)
 
 ### Changed
 

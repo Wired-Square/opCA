@@ -3,9 +3,11 @@
 //! Each backend lives in its own sub-module:
 //! - [`rsync`] — uploads via `rsync -avz` over SSH
 //! - [`s3`]    — uploads to AWS S3 using credentials from the `op` CLI plugin
+//! - [`sftp`]  — uploads via SFTP using SSH agent or key-file authentication
 
 pub mod rsync;
 pub mod s3;
+pub mod sftp;
 
 use log::{debug, info};
 
@@ -47,6 +49,7 @@ pub fn storage_from_uri<R: CommandRunner>(
 
     match scheme.as_str() {
         "rsync" => Ok(Box::new(rsync::StorageRsync)),
+        "sftp" | "scp" => Ok(Box::new(sftp::StorageSftp)),
         "s3" => {
             let creds = get_aws_credentials(runner, account)?;
             Ok(Box::new(s3::StorageS3::new(creds)))
@@ -71,6 +74,7 @@ pub fn storage_from_uri_with_creds(
 
     match scheme.as_str() {
         "rsync" => Ok(Box::new(rsync::StorageRsync)),
+        "sftp" | "scp" => Ok(Box::new(sftp::StorageSftp)),
         "s3" => {
             let creds = aws_creds
                 .ok_or_else(|| OpcaError::Storage("AWS credentials required for S3 stores".into()))?;
@@ -257,6 +261,20 @@ mod tests {
     fn test_storage_from_uri_rsync() {
         let runner = mock_runner();
         let backend = storage_from_uri("rsync://host/path", &runner, None);
+        assert!(backend.is_ok());
+    }
+
+    #[test]
+    fn test_storage_from_uri_sftp() {
+        let runner = mock_runner();
+        let backend = storage_from_uri("sftp://user@host/path", &runner, None);
+        assert!(backend.is_ok());
+    }
+
+    #[test]
+    fn test_storage_from_uri_scp() {
+        let runner = mock_runner();
+        let backend = storage_from_uri("scp://user@host/path", &runner, None);
         assert!(backend.is_ok());
     }
 
