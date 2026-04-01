@@ -16,7 +16,5 @@ pub async fn get_log_path() -> Result<String, String> {
 }
 
 fn log_file_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Library/Logs/opCA/opca.log")
+    crate::paths::app_log_dir().join("opca.log")
 }

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod paths;
 mod state;
 
 use log::info;
@@ -52,9 +53,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     warmup_op_cli();
 
-    let log_dir = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("Library/Logs/opCA");
+    let log_dir = paths::app_log_dir();
     std::fs::create_dir_all(&log_dir).ok();
 
     tauri::Builder::default()
