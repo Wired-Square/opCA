@@ -3,4 +3,4 @@ members = ["crates/opca-core", "crates/opca-cli", "crates/opca-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "0.99.11"
+version = "0.99.12"

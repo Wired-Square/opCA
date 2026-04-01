@@ -1,7 +1,7 @@
 {
   "name": "opca",
   "private": true,
-  "version": "0.99.11",
+  "version": "0.99.12",
   "type": "module",
   "scripts": {
     "dev": "npm run dev --prefix frontend",
