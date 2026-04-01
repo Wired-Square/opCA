@@ -112,6 +112,7 @@ impl Route53Client {
         );
 
         let config = aws_sdk_route53::config::Builder::new()
+            .behavior_version(aws_sdk_route53::config::BehaviorVersion::latest())
             .region(aws_sdk_route53::config::Region::new(region.to_string()))
             .credentials_provider(creds)
             .build();
