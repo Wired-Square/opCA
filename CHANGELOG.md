@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Log viewer page: view, scroll, and copy application log contents directly from the UI
-- SFTP storage backend (`sftp://[user@]host[:port]/path`) as a cross-platform alternative to rsync
+- SFTP storage backend (`sftp://[user@]host[:port]/path`) as a cross-platform alternative to rsync; `scp://` is accepted as an alias
+- Consistent logging across all storage backends (rsync, S3, SFTP)
 
 ### Fixed
 
