@@ -6,6 +6,7 @@ use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
 use opca_core::services::route53::{extract_dkim_key, Route53Client};
+use opca_core::services::storage::get_aws_credentials;
 
 use crate::app::AppContext;
 use crate::output;
@@ -119,8 +120,11 @@ fn handle_create<R: CommandRunner>(
     // Deploy to Route53 if requested
     if deploy_route53 {
         let op = app.op()?;
-        let client = Route53Client::new(op.runner());
-        let result = client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL)?;
+        let creds = get_aws_credentials(op.runner(), op.account())?;
+        let client = Route53Client::new(creds);
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?;
+        let result = rt.block_on(client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL))?;
         output::print_result(
             &format!("Deployed to Route53 zone {} (change: {})", result.zone_name, result.change_id),
             true,
@@ -186,8 +190,11 @@ fn handle_deploy<R: CommandRunner>(
     let url = op.mk_url(&item_title, Some("dns_record"));
     let dns_record = op.read_item(&url)?.trim().to_string();
 
-    let client = Route53Client::new(op.runner());
-    let result = client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL)?;
+    let creds = get_aws_credentials(op.runner(), op.account())?;
+    let client = Route53Client::new(creds);
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?;
+    let result = rt.block_on(client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL))?;
 
     output::print_result(
         &format!("Deployed to zone {} (change: {})", result.zone_name, result.change_id),
