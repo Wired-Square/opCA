@@ -38,7 +38,8 @@ export default function DKIM() {
   const [selector, setSelector] = createSignal("");
   const [creating, setCreating] = createSignal(false);
   const [createError, setCreateError] = createSignal<string | null>(null);
-  const [createResult, setCreateResult] = createSignal<{ domain: string; selector: string; dns_name: string; dns_record: string } | null>(null);
+  const [createResult, setCreateResult] = createSignal<{ domain: string; selector: string; dns_name: string; dns_record: string; dns_record_chunked: string } | null>(null);
+  const [chunked, setChunked] = createSignal(false);
 
   // Route53 deploy
   const [deploying, setDeploying] = createSignal(false);
@@ -162,7 +163,13 @@ export default function DKIM() {
     setCreating(true);
     try {
       const result = await createDkimKey({ domain: d, selector: s });
-      setCreateResult({ domain: d, selector: s, dns_name: result.dns_name, dns_record: result.dns_record });
+      setCreateResult({
+        domain: d,
+        selector: s,
+        dns_name: result.dns_name,
+        dns_record: result.dns_record,
+        dns_record_chunked: result.dns_record_chunked,
+      });
       setDomain("");
       setSelector("");
       refetch();
@@ -173,8 +180,16 @@ export default function DKIM() {
     }
   }
 
+  function visibleDnsRecord(): string | null {
+    const d = detail();
+    if (d) return chunked() ? d.dns_record_chunked ?? d.dns_record : d.dns_record;
+    const r = createResult();
+    if (r) return chunked() ? r.dns_record_chunked : r.dns_record;
+    return null;
+  }
+
   function copyDnsRecord() {
-    const rec = detail()?.dns_record ?? createResult()?.dns_record;
+    const rec = visibleDnsRecord();
     if (rec) {
       navigator.clipboard.writeText(rec);
       markCopied();
@@ -323,10 +338,22 @@ export default function DKIM() {
                     <div class="detail-row">
                       <span class="detail-label">DNS Record</span>
                       <div class="dns-record-wrap">
-                        <pre class="dns-record mono">{d().dns_record}</pre>
-                        <button class="btn-ghost btn-sm" onClick={copyDnsRecord}>
-                          {copied() ? "Copied" : "Copy"}
-                        </button>
+                        <pre class="dns-record mono">
+                          {chunked() ? d().dns_record_chunked ?? d().dns_record : d().dns_record}
+                        </pre>
+                        <div class="dns-record-actions">
+                          <button
+                            class="btn-ghost btn-sm"
+                            onClick={() => setChunked((v) => !v)}
+                            title="Format as 255-byte chunks for AWS Route53"
+                            aria-pressed={chunked()}
+                          >
+                            {chunked() ? "Single" : "AWS chunks"}
+                          </button>
+                          <button class="btn-ghost btn-sm" onClick={copyDnsRecord}>
+                            {copied() ? "Copied" : "Copy"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </Show>
@@ -382,10 +409,23 @@ export default function DKIM() {
                     <div class="detail-row">
                       <span class="detail-label">DNS Record</span>
                       <div class="dns-record-wrap">
-                        <pre class="dns-record mono">{r().dns_record}</pre>
-                        <button type="button" class="btn-ghost btn-sm" onClick={copyDnsRecord}>
-                          {copied() ? "Copied" : "Copy"}
-                        </button>
+                        <pre class="dns-record mono">
+                          {chunked() ? r().dns_record_chunked : r().dns_record}
+                        </pre>
+                        <div class="dns-record-actions">
+                          <button
+                            type="button"
+                            class="btn-ghost btn-sm"
+                            onClick={() => setChunked((v) => !v)}
+                            title="Format as 255-byte chunks for AWS Route53"
+                            aria-pressed={chunked()}
+                          >
+                            {chunked() ? "Single" : "AWS chunks"}
+                          </button>
+                          <button type="button" class="btn-ghost btn-sm" onClick={copyDnsRecord}>
+                            {copied() ? "Copied" : "Copy"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

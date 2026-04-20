@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dashboard CA and CRL status bubbles now show expiry and graduated warnings (critical / prominent / expired), with a timezone toggle anchored in the top-right of each bubble
 - Dashboard action-items panel surfaces one-click fixes: regenerate (and optionally upload) the CRL when it nears expiry, jump to expired certificates, and review pending CSRs
 - Pending CSRs bubble replaces the Vault bubble on the dashboard
+- DKIM info and create views can toggle the DNS record between single-string and Route53-style 255-byte quoted chunks; Copy copies the visible form
 
 ### Fixed
 

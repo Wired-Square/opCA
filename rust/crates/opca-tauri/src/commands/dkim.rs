@@ -6,7 +6,7 @@ use tauri::State;
 
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::op::StoreAction;
-use opca_core::services::route53::Route53Client;
+use opca_core::services::route53::{format_txt_value, split_txt_value, Route53Client};
 use opca_core::services::storage::get_aws_credentials;
 
 use crate::commands::dto::{
@@ -34,6 +34,12 @@ fn format_dkim_dns_record(public_key_pem: &str) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!("v=DKIM1; k=rsa; p={base64}")
+}
+
+/// Re-format a TXT value as Route53 expects long records: 255-byte chunks,
+/// each wrapped in double quotes and space-separated.
+fn chunk_for_route53(record: &str) -> String {
+    format_txt_value(&split_txt_value(record, 255))
 }
 
 // ---------------------------------------------------------------------------
@@ -96,12 +102,16 @@ pub async fn get_dkim_info(
             op.read_item(&url).ok().map(|s| s.trim().to_string())
         };
 
+        let dns_record = read_field("dns_record");
+        let dns_record_chunked = dns_record.as_deref().map(chunk_for_route53);
+
         Ok(DkimKeyDetail {
             domain,
             selector,
             key_size: read_field("key_size"),
             dns_name,
-            dns_record: read_field("dns_record"),
+            dns_record,
+            dns_record_chunked,
             created_at: read_field("created_at"),
             public_key: read_field("public_key"),
         })
@@ -183,6 +193,8 @@ pub async fn create_dkim_key(
         Some(format!("Created DKIM key for {selector}._domainkey.{domain}")),
     );
 
+    let dns_record_chunked = chunk_for_route53(&dns_record);
+
     Ok(CreateDkimResult {
         item: DkimKeyItem {
             domain,
@@ -191,6 +203,7 @@ pub async fn create_dkim_key(
         },
         dns_name: dns_name_out,
         dns_record,
+        dns_record_chunked,
     })
 }
 

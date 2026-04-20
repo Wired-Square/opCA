@@ -215,6 +215,8 @@ export interface DkimKeyDetail {
   key_size: string | null;
   dns_name: string;
   dns_record: string | null;
+  /** `dns_record` reformatted as 255-byte quoted chunks for AWS Route53. */
+  dns_record_chunked: string | null;
   created_at: string | null;
   public_key: string | null;
 }
@@ -229,6 +231,8 @@ export interface CreateDkimResult {
   item: DkimKeyItem;
   dns_name: string;
   dns_record: string;
+  /** `dns_record` reformatted as 255-byte quoted chunks for AWS Route53. */
+  dns_record_chunked: string;
 }
 
 export interface DkimVerifyResult {

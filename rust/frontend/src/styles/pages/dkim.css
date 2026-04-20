@@ -60,6 +60,12 @@
   margin-bottom: 4px;
 }
 
+.dns-record-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .verify-mismatch {
   margin-top: 12px;
   display: flex;

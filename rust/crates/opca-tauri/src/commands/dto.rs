@@ -260,6 +260,8 @@ pub struct DkimKeyDetail {
     pub key_size: Option<String>,
     pub dns_name: String,
     pub dns_record: Option<String>,
+    /// `dns_record` reformatted as 255-byte quoted chunks for AWS Route53.
+    pub dns_record_chunked: Option<String>,
     pub created_at: Option<String>,
     pub public_key: Option<String>,
 }
@@ -276,6 +278,8 @@ pub struct CreateDkimResult {
     pub item: DkimKeyItem,
     pub dns_name: String,
     pub dns_record: String,
+    /// `dns_record` reformatted as 255-byte quoted chunks for AWS Route53.
+    pub dns_record_chunked: String,
 }
 
 #[derive(Debug, Serialize)]
