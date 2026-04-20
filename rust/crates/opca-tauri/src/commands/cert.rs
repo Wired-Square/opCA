@@ -15,7 +15,7 @@ pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>,
     let db = ca.ca_database.as_mut()
         .ok_or("Database not loaded")?;
 
-    db.process_ca_database(None).map_err(|e| e.to_string())?;
+    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
 
     let certs = db.query_all_certs().map_err(|e| e.to_string())?;
 
@@ -39,7 +39,7 @@ pub async fn list_external_certs(state: State<'_, AppState>) -> Result<Vec<Exter
     let db = ca.ca_database.as_mut()
         .ok_or("Database not loaded")?;
 
-    db.process_ca_database(None).map_err(|e| e.to_string())?;
+    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
 
     let certs = db.query_all_external_certs(None).map_err(|e| e.to_string())?;
 

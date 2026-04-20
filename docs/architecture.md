@@ -162,6 +162,26 @@ matches a single logical operation.
 The shell is intentionally thin: no PKI logic lives here, only glue between
 the webview and `opca-core`.
 
+### Dashboard as a persisting command
+
+`get_dashboard` is the one read-shaped command that can also write. It forces
+a fresh rescan of the certificate database (passing `force=true` to
+`process_ca_database`) so that passage-of-time state transitions —
+specifically, a certificate crossing its `not_after` and flipping to
+`Expired` — are detected on every refresh. When the rescan mutates any rows,
+the command calls `store_ca_database()` so the transition lands in 1Password
+immediately, without waiting for an unrelated write op (revoke, sign, CRL
+generate) to flush the change.
+
+The DTO surfaces both a reshaped CA status (value + expiry + graduated
+warning) and a mirrored CRL status (next_update + graduated warning from
+`assess_crl_expiry`), along with a `pending_csrs` count and an
+`action_items: Vec<ActionItemDto>` list. Action items carry a stable `id`,
+severity, human-readable message, button label, and an `action` token that
+the frontend dispatches on (`regenerate_and_upload_crl`, `regenerate_crl`,
+`view_expired_certs`, `view_pending_csrs`, `view_ca`). Threshold logic lives
+entirely in the Rust layer to avoid duplication in TypeScript.
+
 ---
 
 ## Frontend (`rust/frontend`)

@@ -15,12 +15,18 @@ pub struct DashboardData {
     pub ca_cn: Option<String>,
     pub ca_expiry: Option<String>,
     pub ca_expiry_warning: Option<CaExpiryWarningDto>,
+    pub crl_present: bool,
+    pub crl_next_update: Option<String>,
+    pub crl_expiry_warning: Option<CrlExpiryWarningDto>,
     pub total_certs: i64,
     pub valid_certs: usize,
     pub expired_certs: usize,
     pub expiring_certs: usize,
     pub warning_certs: usize,
     pub revoked_certs: usize,
+    pub pending_csrs: usize,
+    pub has_public_store: bool,
+    pub action_items: Vec<ActionItemDto>,
 }
 
 /// Graduated CA certificate expiry warning for the frontend.
@@ -32,6 +38,32 @@ pub struct CaExpiryWarningDto {
     pub days_remaining: Option<i64>,
     /// Human-readable warning message.
     pub message: String,
+}
+
+/// Graduated CRL expiry warning for the frontend.
+#[derive(Debug, Serialize)]
+pub struct CrlExpiryWarningDto {
+    /// Warning level: "critical", "prominent", "expired", or "none".
+    pub level: String,
+    /// Days remaining until the CRL's next_update. Negative when expired.
+    pub days_remaining: Option<i64>,
+    /// Human-readable warning message.
+    pub message: String,
+}
+
+/// Actionable item surfaced on the dashboard.
+#[derive(Debug, Serialize)]
+pub struct ActionItemDto {
+    /// Stable identifier, e.g. "crl_regenerate".
+    pub id: String,
+    /// Severity: "critical", "warning", or "info".
+    pub severity: String,
+    /// Human-readable description of the issue.
+    pub message: String,
+    /// Label for the action button.
+    pub button_label: String,
+    /// Action token the frontend dispatches on, e.g. "regenerate_and_upload_crl".
+    pub action: String,
 }
 
 // ---------------------------------------------------------------------------

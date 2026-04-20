@@ -219,7 +219,7 @@ fn handle_list<R: CommandRunner>(
     let db = ca.ca_database.as_mut()
         .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
 
-    db.process_ca_database(None)?;
+    db.process_ca_database(None, false)?;
 
     // Determine mode
     let mode = if expired {

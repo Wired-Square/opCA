@@ -570,7 +570,7 @@ fn test_process_categorises_valid_certs() {
     db.add_cert(&make_cert("100", "server.example.com", "20501231235959Z"))
         .unwrap();
 
-    let changed = db.process_ca_database(None).unwrap();
+    let changed = db.process_ca_database(None, false).unwrap();
     assert!(!changed);
     assert_eq!(db.certs_valid.len(), 1);
     assert!(db.certs_valid.contains("100"));
@@ -583,7 +583,7 @@ fn test_process_categorises_expired_certs() {
     db.add_cert(&make_cert("100", "expired.example.com", "20200101000000Z"))
         .unwrap();
 
-    let changed = db.process_ca_database(None).unwrap();
+    let changed = db.process_ca_database(None, false).unwrap();
     assert!(changed);
     assert_eq!(db.certs_expired.len(), 1);
     assert!(db.certs_expired.contains("100"));
@@ -602,7 +602,7 @@ fn test_process_revokes_certificate() {
     db.add_cert(&make_cert("100", "server.example.com", "20501231235959Z"))
         .unwrap();
 
-    let changed = db.process_ca_database(Some("100")).unwrap();
+    let changed = db.process_ca_database(Some("100"), false).unwrap();
     assert!(changed);
     assert_eq!(db.certs_revoked.len(), 1);
     assert!(db.certs_revoked.contains("100"));
@@ -620,10 +620,10 @@ fn test_process_not_dirty_no_revoke_returns_false() {
     let mut db = test_db();
     db.add_cert(&make_cert("100", "server.example.com", "20501231235959Z"))
         .unwrap();
-    db.process_ca_database(None).unwrap();
+    db.process_ca_database(None, false).unwrap();
 
     // Second call with no changes → false
-    let changed = db.process_ca_database(None).unwrap();
+    let changed = db.process_ca_database(None, false).unwrap();
     assert!(!changed);
 }
 
@@ -635,7 +635,7 @@ fn test_process_external_certs() {
     db.add_external_cert(&make_ext_cert("201", "ext.expired.com", "20200101000000Z"))
         .unwrap();
 
-    db.process_ca_database(None).unwrap();
+    db.process_ca_database(None, false).unwrap();
 
     assert_eq!(db.ext_certs_valid.len(), 1);
     assert!(db.ext_certs_valid.contains("200"));
@@ -786,7 +786,7 @@ fn test_dirty_tracking() {
     let mut db = test_db();
     assert!(db.is_dirty());
 
-    db.process_ca_database(None).unwrap();
+    db.process_ca_database(None, false).unwrap();
     assert!(!db.is_dirty());
 
     db.add_cert(&make_cert("100", "server.example.com", "20501231235959Z"))

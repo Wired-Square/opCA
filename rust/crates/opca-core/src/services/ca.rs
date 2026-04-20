@@ -69,6 +69,40 @@ pub enum CaExpiryWarning {
     Critical { days_remaining: i64 },
 }
 
+/// Graduated warning level for CRL expiry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "level", rename_all = "snake_case")]
+pub enum CrlExpiryWarning {
+    /// CRL has plenty of remaining validity.
+    None,
+    /// CRL expires within 14 days.
+    Prominent { days_remaining: i64 },
+    /// CRL expires within 7 days.
+    Critical { days_remaining: i64 },
+    /// CRL's next_update is already in the past.
+    Expired { days_overdue: i64 },
+}
+
+/// Assess the CRL's expiry relative to now.
+///
+/// Tiers are checked most-urgent first: Expired (past next_update), Critical
+/// (<7d), Prominent (<14d), then None.
+pub fn assess_crl_expiry(next_update: DateTime<Utc>, now: DateTime<Utc>) -> CrlExpiryWarning {
+    let days_remaining = (next_update - now).num_days();
+
+    if next_update <= now {
+        CrlExpiryWarning::Expired {
+            days_overdue: (now - next_update).num_days(),
+        }
+    } else if days_remaining < 7 {
+        CrlExpiryWarning::Critical { days_remaining }
+    } else if days_remaining < 14 {
+        CrlExpiryWarning::Prominent { days_remaining }
+    } else {
+        CrlExpiryWarning::None
+    }
+}
+
 /// Warning returned when a certificate would outlive the CA.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CertIssuanceWarning {
@@ -820,7 +854,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let item_serial = cert.serial.clone();
 
         let db = self.ca_database.as_mut().unwrap();
-        db.process_ca_database(Some(&item_serial))?;
+        db.process_ca_database(Some(&item_serial), false)?;
 
         self.store_ca_database()?;
 
@@ -832,7 +866,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         info!("[ca] generating CRL");
         let db = self.ca_database.as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
-        db.process_ca_database(None)?;
+        db.process_ca_database(None, false)?;
 
         let ca_config = db.get_config()?;
         let crl_days = ca_config.crl_days.unwrap_or(30) as u32;
@@ -2205,6 +2239,74 @@ mod tests {
         assert!(result.is_some());
         let w = result.unwrap();
         assert!(w.message.contains("will expire on"));
+    }
+
+    // -----------------------------------------------------------------------
+    // CRL expiry warning tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_assess_crl_expiry_none() {
+        let now = chrono::Utc::now();
+        let next_update = now + chrono::Duration::days(20);
+        let result = assess_crl_expiry(next_update, now);
+        assert!(matches!(result, CrlExpiryWarning::None));
+    }
+
+    #[test]
+    fn test_assess_crl_expiry_prominent() {
+        let now = chrono::Utc::now();
+        let next_update = now + chrono::Duration::days(8);
+        let result = assess_crl_expiry(next_update, now);
+        assert!(matches!(
+            result,
+            CrlExpiryWarning::Prominent { days_remaining: 8 }
+        ));
+    }
+
+    #[test]
+    fn test_assess_crl_expiry_critical() {
+        let now = chrono::Utc::now();
+        let next_update = now + chrono::Duration::days(3);
+        let result = assess_crl_expiry(next_update, now);
+        assert!(matches!(
+            result,
+            CrlExpiryWarning::Critical { days_remaining: 3 }
+        ));
+    }
+
+    #[test]
+    fn test_assess_crl_expiry_critical_boundary() {
+        // Exactly 7 days remaining is NOT critical (< 7) — it is prominent.
+        let now = chrono::Utc::now();
+        let next_update = now + chrono::Duration::days(7);
+        let result = assess_crl_expiry(next_update, now);
+        assert!(matches!(
+            result,
+            CrlExpiryWarning::Prominent { days_remaining: 7 }
+        ));
+    }
+
+    #[test]
+    fn test_assess_crl_expiry_expired() {
+        let now = chrono::Utc::now();
+        let next_update = now - chrono::Duration::days(1);
+        let result = assess_crl_expiry(next_update, now);
+        assert!(matches!(
+            result,
+            CrlExpiryWarning::Expired { days_overdue: 1 }
+        ));
+    }
+
+    #[test]
+    fn test_assess_crl_expiry_expired_far_past() {
+        let now = chrono::Utc::now();
+        let next_update = now - chrono::Duration::days(60);
+        let result = assess_crl_expiry(next_update, now);
+        assert!(matches!(
+            result,
+            CrlExpiryWarning::Expired { days_overdue: 60 }
+        ));
     }
 
     #[test]

@@ -13,11 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SFTP storage backend (`sftp://[user@]host[:port]/path`) as a cross-platform alternative to rsync; `scp://` is accepted as an alias
 - Consistent logging across all storage backends (rsync, S3, SFTP)
 - System-level logging for all Tauri command entry points (mutating operations at info, locks at info, external calls at debug) with `[tauri]` prefix
+- Dashboard CA and CRL status bubbles now show expiry and graduated warnings (critical / prominent / expired), with a timezone toggle anchored in the top-right of each bubble
+- Dashboard action-items panel surfaces one-click fixes: regenerate (and optionally upload) the CRL when it nears expiry, jump to expired certificates, and review pending CSRs
+- Pending CSRs bubble replaces the Vault bubble on the dashboard
 
 ### Fixed
 
 - Fixed duplicate log output caused by appending to default log targets instead of replacing them
 - Log directory now uses Tauri's platform-appropriate `LogDir` target instead of a hardcoded macOS path
+- Dashboard refresh now rescans for passage-of-time certificate expirations and persists the updated statuses to 1Password immediately, instead of waiting for an unrelated write operation
 
 ### Changed
 

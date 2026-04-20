@@ -450,7 +450,7 @@ pub async fn list_vpn_clients(
         .as_mut()
         .ok_or("Database not loaded")?;
 
-    db.process_ca_database(None).map_err(|e| e.to_string())?;
+    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
 
     let certs = db.query_all_certs().map_err(|e| e.to_string())?;
 

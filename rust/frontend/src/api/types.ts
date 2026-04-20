@@ -2,15 +2,53 @@
 // Dashboard
 // ---------------------------------------------------------------------------
 
+export type CaExpiryLevel = "critical" | "prominent" | "cert_lifetime" | "none";
+export type CrlExpiryLevel = "critical" | "prominent" | "expired" | "none";
+export type ActionSeverity = "critical" | "warning" | "info";
+export type ActionKind =
+  | "regenerate_and_upload_crl"
+  | "regenerate_crl"
+  | "view_expired_certs"
+  | "view_pending_csrs"
+  | "view_ca";
+
+export interface CaExpiryWarning {
+  level: CaExpiryLevel;
+  days_remaining: number | null;
+  message: string;
+}
+
+export interface CrlExpiryWarning {
+  level: CrlExpiryLevel;
+  days_remaining: number | null;
+  message: string;
+}
+
+export interface ActionItem {
+  id: string;
+  severity: ActionSeverity;
+  message: string;
+  button_label: string;
+  action: ActionKind;
+}
+
 export interface DashboardData {
   ca_valid: boolean;
   ca_cn: string | null;
   ca_expiry: string | null;
+  ca_expiry_warning: CaExpiryWarning | null;
+  crl_present: boolean;
+  crl_next_update: string | null;
+  crl_expiry_warning: CrlExpiryWarning | null;
   total_certs: number;
   valid_certs: number;
   expired_certs: number;
   expiring_certs: number;
+  warning_certs: number;
   revoked_certs: number;
+  pending_csrs: number;
+  has_public_store: boolean;
+  action_items: ActionItem[];
 }
 
 // ---------------------------------------------------------------------------

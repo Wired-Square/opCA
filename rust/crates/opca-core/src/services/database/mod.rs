@@ -1004,8 +1004,9 @@ impl CertificateAuthorityDB {
     pub fn process_ca_database(
         &mut self,
         revoke_serial: Option<&str>,
+        force: bool,
     ) -> Result<bool, OpcaError> {
-        if !self.dirty && revoke_serial.is_none() {
+        if !self.dirty && revoke_serial.is_none() && !force {
             return Ok(false);
         }
 

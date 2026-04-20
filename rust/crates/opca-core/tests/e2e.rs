@@ -321,7 +321,7 @@ fn t40_database_counts() {
 
     let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
     let db = ca.ca_database.as_mut().expect("database missing");
-    db.process_ca_database(None).expect("process_ca_database failed");
+    db.process_ca_database(None, false).expect("process_ca_database failed");
 
     let total = db.count_certs().expect("count_certs failed");
     assert!(total >= 2, "Expected at least 2 certs, got {total}");
