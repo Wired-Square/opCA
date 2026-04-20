@@ -51,14 +51,21 @@ pub fn extract_dkim_key(value: &str) -> Option<String> {
 /// Returns the concatenated TXT record data for each record found.
 /// Multi-part TXT records are reassembled into a single string.
 pub async fn lookup_txt(dns_name: &str) -> Result<Vec<String>, crate::error::OpcaError> {
+    use hickory_resolver::proto::rr::Name;
     use hickory_resolver::TokioResolver;
+
+    // Parse as an absolute (FQDN) name so the system resolver does not append
+    // search-domain suffixes. DKIM names are always fully qualified.
+    let mut name = Name::from_ascii(dns_name)
+        .map_err(|e| crate::error::OpcaError::Other(format!("invalid DNS name '{dns_name}': {e}")))?;
+    name.set_fqdn(true);
 
     let resolver = TokioResolver::builder_tokio()
         .map_err(|e| crate::error::OpcaError::Other(format!("DNS resolver init failed: {e}")))?
         .build();
 
     let response = resolver
-        .txt_lookup(dns_name)
+        .txt_lookup(name)
         .await
         .map_err(|e| crate::error::OpcaError::Other(format!("DNS lookup failed: {e}")))?;
 

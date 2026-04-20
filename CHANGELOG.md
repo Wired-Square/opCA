@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed duplicate log output caused by appending to default log targets instead of replacing them
 - Log directory now uses Tauri's platform-appropriate `LogDir` target instead of a hardcoded macOS path
 - Dashboard refresh now rescans for passage-of-time certificate expirations and persists the updated statuses to 1Password immediately, instead of waiting for an unrelated write operation
+- DKIM DNS verification no longer appends the system resolver's search domain to the query name; DKIM names are now looked up as absolute FQDNs
 
 ### Changed
 
