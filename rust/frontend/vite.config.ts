@@ -42,5 +42,11 @@ export default defineConfig({
   build: {
     target: "esnext",
     outDir: "dist",
+    // Never inline font files. Fontsource ships real woff2 files; inlining
+    // them as data: URIs breaks the font-src 'self' Content Security Policy.
+    assetsInlineLimit: (filePath: string) => {
+      if (/\.(woff2?|ttf|otf|eot)$/i.test(filePath)) return false;
+      return undefined;
+    },
   },
 });
