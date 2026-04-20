@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { useNavigate } from "@solidjs/router";
+import { useNavigate, useSearchParams } from "@solidjs/router";
 import { listCerts, listExternalCerts } from "../api/certs";
 import { formatDate } from "../utils/dates";
 import TzToggle from "../components/TzToggle";
@@ -10,10 +10,23 @@ import "../styles/pages/certs.css";
 
 type Tab = "local" | "external";
 
+const VALID_FILTERS = new Set([
+  "all",
+  "valid",
+  "expired",
+  "revoked",
+  "ignored",
+  "superseded",
+]);
+
 export default function Certs() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialFilter = typeof searchParams.filter === "string" && VALID_FILTERS.has(searchParams.filter)
+    ? searchParams.filter
+    : "all";
   const [tab, setTab] = createSignal<Tab>("local");
-  const [filter, setFilter] = createSignal("all");
+  const [filter, setFilter] = createSignal(initialFilter);
   const [search, setSearch] = createSignal("");
 
   const [localCerts, { refetch: refetchLocal }] = createResource<CertListItem[]>(listCerts);
@@ -25,7 +38,18 @@ export default function Certs() {
   const filteredLocal = () => {
     let items = localCerts() ?? [];
     const f = filter();
-    if (f !== "all") items = items.filter((c) => c.status?.toLowerCase() === f);
+    if (f === "ignored") {
+      items = items.filter((c) => !!c.ignored_at);
+    } else if (f === "superseded") {
+      items = items.filter((c) => !!c.superseded_by);
+    } else if (f === "expired" || f === "valid" || f === "revoked") {
+      // Status filters hide ignored and superseded rows — they're audit-only
+      // and would otherwise inflate the "Expired" view the dashboard mirrors.
+      items = items.filter(
+        (c) =>
+          c.status?.toLowerCase() === f && !c.ignored_at && !c.superseded_by,
+      );
+    }
     const q = search().toLowerCase();
     if (q) items = items.filter((c) =>
       [c.serial, c.cn, c.cert_type, c.status, c.expiry_date ? formatDate(c.expiry_date) : null]
@@ -69,6 +93,8 @@ export default function Certs() {
             <option value="valid">Valid</option>
             <option value="expired">Expired</option>
             <option value="revoked">Revoked</option>
+            <option value="superseded">Superseded</option>
+            <option value="ignored">Ignored</option>
           </select>
           <button class="btn-ghost" onClick={handleRefresh} disabled={loading()}>
             {loading() ? "Loading\u2026" : "Refresh"}
@@ -132,12 +158,24 @@ export default function Certs() {
                   {(cert) => (
                     <tr
                       class="data-table-row"
+                      classList={{
+                        "data-table-row-ignored":
+                          !!cert.ignored_at || !!cert.superseded_by,
+                      }}
                       onClick={() => cert.serial && navigate(`/certs/${cert.serial}`)}
                     >
                       <td class="mono">{cert.serial ?? "\u2014"}</td>
                       <td>{cert.cn ?? "\u2014"}</td>
                       <td>{cert.cert_type ?? "\u2014"}</td>
-                      <td><span class={statusBadgeClass(cert.status)}>{cert.status ?? "\u2014"}</span></td>
+                      <td>
+                        <span class={statusBadgeClass(cert.status)}>{cert.status ?? "\u2014"}</span>
+                        <Show when={cert.ignored_at}>
+                          <span class="status-badge status-ignored">ignored</span>
+                        </Show>
+                        <Show when={cert.superseded_by && !cert.ignored_at}>
+                          <span class="status-badge status-superseded">superseded</span>
+                        </Show>
+                      </td>
                       <td class="mono">{formatDate(cert.expiry_date)}</td>
                     </tr>
                   )}

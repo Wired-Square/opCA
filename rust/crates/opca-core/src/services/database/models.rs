@@ -50,6 +50,30 @@ pub struct CertRecord {
     pub key_size: Option<i64>,
     pub issuer: Option<String>,
     pub san: Option<String>,
+    /// ISO 8601 timestamp the cert was marked as ignored; `None` means active.
+    pub ignored_at: Option<String>,
+    /// `email (name)` of the 1Password user who set the ignore.
+    pub ignored_by: Option<String>,
+    /// One of: `renewed`, `rekeyed`, `manual`.
+    pub ignored_reason: Option<String>,
+    /// Optional free-text note; for auto-ignores, carries `"replaced by <new_serial>"`.
+    pub ignored_note: Option<String>,
+}
+
+/// Reason a certificate was ignored. Today only manual ignores are written;
+/// the enum is retained for future reasons (e.g. auto-ignore triggered by
+/// some future automated workflow).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IgnoreReason {
+    Manual,
+}
+
+impl IgnoreReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IgnoreReason::Manual => "manual",
+        }
+    }
 }
 
 /// An external (third-party signed) certificate record.

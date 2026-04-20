@@ -117,6 +117,11 @@ pub struct CertListItem {
     pub expiry_date: Option<String>,
     pub key_type: Option<String>,
     pub key_size: Option<i64>,
+    /// Presence indicates the cert is ignored; value is the timestamp.
+    pub ignored_at: Option<String>,
+    /// If this cert is expired but another same-CN cert is Valid, this is
+    /// the replacement's serial. Set only for superseded rows.
+    pub superseded_by: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -135,6 +140,13 @@ pub struct CertDetail {
     pub revocation_date: Option<String>,
     pub san: Option<String>,
     pub cert_pem: Option<String>,
+    pub ignored_at: Option<String>,
+    pub ignored_by: Option<String>,
+    pub ignored_reason: Option<String>,
+    pub ignored_note: Option<String>,
+    /// If this cert is expired but another same-CN cert is Valid, this is
+    /// the replacement's serial.
+    pub superseded_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

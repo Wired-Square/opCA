@@ -106,6 +106,10 @@ export interface CertListItem {
   expiry_date: string | null;
   key_type: string | null;
   key_size: number | null;
+  /** Presence indicates the cert is ignored; value is the timestamp. */
+  ignored_at: string | null;
+  /** If expired and a same-CN Valid replacement exists, its serial. */
+  superseded_by: string | null;
 }
 
 export interface ExternalCertListItem {
@@ -127,6 +131,12 @@ export interface CertDetail extends CertListItem {
   revocation_date: string | null;
   san: string | null;
   cert_pem: string | null;
+  /** `username@hostname` of the user who set the ignore. */
+  ignored_by: string | null;
+  /** Typically `manual` for new ignores; legacy rows may carry other strings. */
+  ignored_reason: string | null;
+  /** Optional free-text note. */
+  ignored_note: string | null;
 }
 
 export interface CreateCertRequest {

@@ -5,7 +5,7 @@ mod schema;
 pub use models::*;
 pub use schema::DEFAULT_SCHEMA_VERSION;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -40,6 +40,14 @@ pub struct CertificateAuthorityDB {
     pub certs_expires_warning: HashSet<String>,
     pub certs_revoked: HashSet<String>,
     pub certs_valid: HashSet<String>,
+    /// Certs whose `ignored_at` is set — excluded from `certs_expired`.
+    pub certs_ignored: HashSet<String>,
+    /// Expired certs whose CN matches a currently-valid cert — excluded from
+    /// `certs_expired` because the replacement covers them.
+    pub certs_superseded: HashSet<String>,
+    /// Map from a superseded expired serial to the serial of the valid
+    /// replacement (same CN, highest serial).
+    pub replacements: HashMap<String, String>,
     pub ext_certs_expired: HashSet<String>,
     pub ext_certs_expires_soon: HashSet<String>,
     pub ext_certs_expires_warning: HashSet<String>,
@@ -74,6 +82,9 @@ impl CertificateAuthorityDB {
             certs_expires_warning: HashSet::new(),
             certs_revoked: HashSet::new(),
             certs_valid: HashSet::new(),
+            certs_ignored: HashSet::new(),
+            certs_superseded: HashSet::new(),
+            replacements: HashMap::new(),
             ext_certs_expired: HashSet::new(),
             ext_certs_expires_soon: HashSet::new(),
             ext_certs_expires_warning: HashSet::new(),
@@ -107,6 +118,9 @@ impl CertificateAuthorityDB {
             certs_expires_warning: HashSet::new(),
             certs_revoked: HashSet::new(),
             certs_valid: HashSet::new(),
+            certs_ignored: HashSet::new(),
+            certs_superseded: HashSet::new(),
+            replacements: HashMap::new(),
             ext_certs_expired: HashSet::new(),
             ext_certs_expires_soon: HashSet::new(),
             ext_certs_expires_warning: HashSet::new(),
@@ -346,8 +360,10 @@ impl CertificateAuthorityDB {
         self.conn.execute(
             "INSERT INTO certificate_authority
                 (serial, cn, title, status, expiry_date, revocation_date, subject,
-                 cert_type, not_before, key_type, key_size, issuer, san)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 cert_type, not_before, key_type, key_size, issuer, san,
+                 ignored_at, ignored_by, ignored_reason, ignored_note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17)",
             rusqlite::params![
                 record.serial,
                 record.cn,
@@ -362,6 +378,10 @@ impl CertificateAuthorityDB {
                 record.key_size,
                 record.issuer,
                 record.san,
+                record.ignored_at,
+                record.ignored_by,
+                record.ignored_reason,
+                record.ignored_note,
             ],
         )?;
         self.dirty = true;
@@ -375,8 +395,9 @@ impl CertificateAuthorityDB {
                 cn = ?1, title = ?2, status = ?3, expiry_date = ?4,
                 revocation_date = ?5, subject = ?6, cert_type = ?7,
                 not_before = ?8, key_type = ?9, key_size = ?10,
-                issuer = ?11, san = ?12
-             WHERE serial = ?13",
+                issuer = ?11, san = ?12,
+                ignored_at = ?13, ignored_by = ?14, ignored_reason = ?15, ignored_note = ?16
+             WHERE serial = ?17",
             rusqlite::params![
                 record.cn,
                 record.title,
@@ -390,6 +411,10 @@ impl CertificateAuthorityDB {
                 record.key_size,
                 record.issuer,
                 record.san,
+                record.ignored_at,
+                record.ignored_by,
+                record.ignored_reason,
+                record.ignored_note,
                 record.serial,
             ],
         )?;
@@ -398,6 +423,60 @@ impl CertificateAuthorityDB {
             return Err(OpcaError::Database(format!(
                 "No certificate found with serial number {}.",
                 record.serial
+            )));
+        }
+
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Mark a certificate as ignored — it will no longer inflate the
+    /// dashboard's expired-cert count. Records who did it, when, why, and
+    /// an optional note.
+    ///
+    /// Used automatically from the renew/rekey flows and manually from the
+    /// UI's "Ignore" action. Safe to call on any status; the ignore is
+    /// orthogonal to Valid/Expired/Revoked.
+    pub fn ignore_cert(
+        &mut self,
+        serial: &str,
+        reason: crate::services::database::models::IgnoreReason,
+        by: &str,
+        note: Option<&str>,
+    ) -> Result<(), OpcaError> {
+        let now = crate::utils::datetime::now_utc_str(
+            crate::utils::datetime::DateTimeFormat::Openssl,
+        );
+        let rows = self.conn.execute(
+            "UPDATE certificate_authority SET
+                ignored_at = ?1, ignored_by = ?2, ignored_reason = ?3, ignored_note = ?4
+             WHERE serial = ?5",
+            rusqlite::params![now, by, reason.as_str(), note, serial],
+        )?;
+
+        if rows == 0 {
+            return Err(OpcaError::Database(format!(
+                "No certificate found with serial number {serial}."
+            )));
+        }
+
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Clear the ignore state on a certificate (undo path).
+    pub fn unignore_cert(&mut self, serial: &str) -> Result<(), OpcaError> {
+        let rows = self.conn.execute(
+            "UPDATE certificate_authority SET
+                ignored_at = NULL, ignored_by = NULL,
+                ignored_reason = NULL, ignored_note = NULL
+             WHERE serial = ?1",
+            rusqlite::params![serial],
+        )?;
+
+        if rows == 0 {
+            return Err(OpcaError::Database(format!(
+                "No certificate found with serial number {serial}."
             )));
         }
 
@@ -425,7 +504,8 @@ impl CertificateAuthorityDB {
 
         let sql = format!(
             "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
-                    cert_type, not_before, key_type, key_size, issuer, san
+                    cert_type, not_before, key_type, key_size, issuer, san,
+                    ignored_at, ignored_by, ignored_reason, ignored_note
              FROM certificate_authority WHERE {where_col} = ?1{valid_clause}"
         );
 
@@ -445,6 +525,10 @@ impl CertificateAuthorityDB {
                 key_size: row.get(10)?,
                 issuer: row.get(11)?,
                 san: row.get(12)?,
+                ignored_at: row.get(13)?,
+                ignored_by: row.get(14)?,
+                ignored_reason: row.get(15)?,
+                ignored_note: row.get(16)?,
             })
         });
 
@@ -469,7 +553,8 @@ impl CertificateAuthorityDB {
     pub fn query_all_certs(&self) -> Result<Vec<CertRecord>, OpcaError> {
         let mut stmt = self.conn.prepare(
             "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
-                    cert_type, not_before, key_type, key_size, issuer, san
+                    cert_type, not_before, key_type, key_size, issuer, san,
+                    ignored_at, ignored_by, ignored_reason, ignored_note
              FROM certificate_authority ORDER BY CAST(serial AS INTEGER)"
         )?;
 
@@ -488,6 +573,10 @@ impl CertificateAuthorityDB {
                 key_size: row.get(10)?,
                 issuer: row.get(11)?,
                 san: row.get(12)?,
+                ignored_at: row.get(13)?,
+                ignored_by: row.get(14)?,
+                ignored_reason: row.get(15)?,
+                ignored_note: row.get(16)?,
             })
         })?;
 
@@ -1016,6 +1105,9 @@ impl CertificateAuthorityDB {
         self.certs_expires_warning.clear();
         self.certs_revoked.clear();
         self.certs_valid.clear();
+        self.certs_ignored.clear();
+        self.certs_superseded.clear();
+        self.replacements.clear();
         self.ext_certs_expired.clear();
         self.ext_certs_expires_soon.clear();
         self.ext_certs_expires_warning.clear();
@@ -1029,6 +1121,58 @@ impl CertificateAuthorityDB {
 
         // Process CA-issued certificates
         let certs = self.fetch_all_ca_certs()?;
+
+        // First pass: for each CN, find the serial of the current valid replacement
+        // (not expired, not revoked, not ignored, not about to be revoked in this
+        // call). If multiple valid certs share a CN, prefer the highest serial.
+        let mut valid_cn_to_serial: HashMap<String, String> = HashMap::new();
+        for cert in &certs {
+            if cert.ignored_at.is_some() {
+                continue;
+            }
+            if let Some(rev_serial) = revoke_serial {
+                if rev_serial == cert.serial {
+                    continue; // about to be revoked — not a replacement
+                }
+            }
+            let Some(expiry_str) = cert.expiry_date.as_deref() else {
+                continue;
+            };
+            if expiry_str.is_empty() {
+                continue;
+            }
+            let Ok(expiry_date) = datetime::parse_datetime(expiry_str, DateTimeFormat::Openssl)
+            else {
+                continue;
+            };
+            if now > expiry_date.naive_utc() {
+                continue; // expired
+            }
+            let revoked = cert
+                .revocation_date
+                .as_ref()
+                .is_some_and(|rd| !rd.is_empty())
+                || cert.status.as_deref() == Some("Revoked");
+            if revoked {
+                continue;
+            }
+            let Some(cn) = cert.cn.as_deref() else {
+                continue;
+            };
+            if cn.is_empty() {
+                continue;
+            }
+            // Prefer higher serial as the canonical replacement for display.
+            let this_serial_num = cert.serial.parse::<i64>().unwrap_or(0);
+            let existing_num = valid_cn_to_serial
+                .get(cn)
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(i64::MIN);
+            if this_serial_num > existing_num {
+                valid_cn_to_serial.insert(cn.to_string(), cert.serial.clone());
+            }
+        }
+
         for mut cert in certs {
             let mut cert_changed = false;
 
@@ -1065,7 +1209,19 @@ impl CertificateAuthorityDB {
                     db_changed = true;
                     cert.status = Some("Expired".to_string());
                 }
-                self.certs_expired.insert(cert.serial.clone());
+                if cert.ignored_at.is_some() {
+                    self.certs_ignored.insert(cert.serial.clone());
+                } else if let Some(replacement) = cert
+                    .cn
+                    .as_deref()
+                    .and_then(|cn| valid_cn_to_serial.get(cn))
+                {
+                    self.certs_superseded.insert(cert.serial.clone());
+                    self.replacements
+                        .insert(cert.serial.clone(), replacement.clone());
+                } else {
+                    self.certs_expired.insert(cert.serial.clone());
+                }
             } else if revoked {
                 if cert.status.as_deref() != Some("Revoked") {
                     cert_changed = true;
@@ -1135,7 +1291,8 @@ impl CertificateAuthorityDB {
     fn fetch_all_ca_certs(&self) -> Result<Vec<CertRecord>, OpcaError> {
         let mut stmt = self.conn.prepare(
             "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
-                    cert_type, not_before, key_type, key_size, issuer, san
+                    cert_type, not_before, key_type, key_size, issuer, san,
+                    ignored_at, ignored_by, ignored_reason, ignored_note
              FROM certificate_authority",
         )?;
 
@@ -1154,6 +1311,10 @@ impl CertificateAuthorityDB {
                 key_size: row.get(10)?,
                 issuer: row.get(11)?,
                 san: row.get(12)?,
+                ignored_at: row.get(13)?,
+                ignored_by: row.get(14)?,
+                ignored_reason: row.get(15)?,
+                ignored_note: row.get(16)?,
             })
         })?;
 

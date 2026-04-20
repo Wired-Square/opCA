@@ -43,8 +43,8 @@ export default function Dashboard() {
     setActionError(null);
 
     const routeMap: Partial<Record<ActionKind, string>> = {
-      view_expired_certs: "/certificates?status=expired",
-      view_pending_csrs: "/csrs?status=pending",
+      view_expired_certs: "/certs?filter=expired",
+      view_pending_csrs: "/csr",
       view_ca: "/ca",
     };
 
@@ -157,13 +157,13 @@ export default function Dashboard() {
 
               <div
                 class="stat-card stat-card-clickable"
-                onClick={() => navigate("/csrs?status=pending")}
+                onClick={() => navigate("/csr")}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    navigate("/csrs?status=pending");
+                    navigate("/csr");
                   }
                 }}
               >

@@ -120,6 +120,37 @@ every query, and re-serialises it to the `CA_Database` document whenever the
 catalogue changes. The dump is keyed by a `download_fingerprint` so stale
 local state is detected on reconnect.
 
+### Suppressing expired-cert noise
+
+An expired cert in the database only counts toward the dashboard's
+expired-cert alert if it's still actionable. Two mechanisms pull it out of
+that set:
+
+**Supersession (automatic)** — `process_ca_database` does a two-pass scan. The
+first pass collects, for each CN, the highest-serial currently-valid cert
+(not expired, not revoked, not ignored, not about to be revoked). The second
+pass classifies expired rows; if an expired cert's CN matches a valid-cert
+serial from the first pass, it lands in `certs_superseded` with an entry in
+the `replacements: HashMap<String, String>` mapping `old_serial → new_serial`.
+This naturally quiets old rows after renew, rekey, or any same-CN re-issuance.
+The DB rows stay untouched; supersession is a runtime classification only.
+
+**Manual ignore** — for CNs with no replacement (retired services,
+decommissioned hardware), the cert detail page exposes an `Ignore` action. It
+writes four audit-trail columns to the row — `ignored_at`, `ignored_by`
+(`username@hostname` from the `whoami` crate), `ignored_reason` (`manual`),
+and `ignored_note` (optional free-text). Ignored rows land in `certs_ignored`.
+An `Un-ignore` action clears all four columns.
+
+Precedence: if a row is both ignored AND superseded, ignored wins — it's the
+explicit user action with an audit trail.
+
+Ignore is **orthogonal** to the Valid/Expired/Revoked status; the record
+keeps its real status and just drops out of the actionable set. The cert list
+gains filters for both `Ignored` and `Superseded`, and status-axis filters
+(`Expired`/`Valid`/`Revoked`) hide rows from both audit-only sets so the list
+mirrors what the dashboard counts.
+
 ### Concurrent-writer safety
 
 Any mutating operation goes through `VaultLock`:

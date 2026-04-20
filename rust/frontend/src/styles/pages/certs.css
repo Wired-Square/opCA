@@ -27,3 +27,11 @@
   padding: 2px 10px;
   font-size: 0.75rem;
 }
+
+.data-table-row-ignored {
+  opacity: 0.6;
+}
+
+.data-table-row-ignored:hover {
+  opacity: 0.85;
+}

@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 7;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 8;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v7 — current)
+// Table DDL (v8 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -47,7 +47,11 @@ pub const CREATE_CA_TABLE: &str = "
         key_type TEXT,
         key_size INTEGER,
         issuer TEXT,
-        san TEXT
+        san TEXT,
+        ignored_at TEXT,
+        ignored_by TEXT,
+        ignored_reason TEXT,
+        ignored_note TEXT
     )
 ";
 
@@ -281,8 +285,23 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
             .map_err(|e| OpcaError::SchemaMigration(format!("v6→v7 openvpn_profile: {e}")))?;
 
         version = 7;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 7, ok: true });
+    }
+
+    // v7 → v8: add audit trail for ignored certificates
+    if version == 7 {
+        conn.execute_batch(
+            "ALTER TABLE certificate_authority ADD COLUMN ignored_at TEXT;
+             ALTER TABLE certificate_authority ADD COLUMN ignored_by TEXT;
+             ALTER TABLE certificate_authority ADD COLUMN ignored_reason TEXT;
+             ALTER TABLE certificate_authority ADD COLUMN ignored_note TEXT;
+             UPDATE config SET schema_version = 8 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v7→v8: {e}")))?;
+
+        version = 8;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 8, ok: true });
     }
 
     info.migrated = true;

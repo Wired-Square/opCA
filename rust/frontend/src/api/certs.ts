@@ -41,6 +41,18 @@ export async function rekeyCert(serial: string): Promise<string> {
   );
 }
 
+export async function ignoreCert(serial: string, note?: string): Promise<void> {
+  return withLock("ignore_cert", () =>
+    tauriInvoke<void>("ignore_cert", { serial, note: note ?? null }),
+  );
+}
+
+export async function unignoreCert(serial: string): Promise<void> {
+  return withLock("unignore_cert", () =>
+    tauriInvoke<void>("unignore_cert", { serial }),
+  );
+}
+
 export async function importCert(request: ImportCertRequest): Promise<ImportCertResult> {
   return withLock("import_cert", () =>
     tauriInvoke<ImportCertResult>("import_cert", { request }),

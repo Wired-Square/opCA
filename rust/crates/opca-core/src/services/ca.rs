@@ -25,11 +25,20 @@ use crate::error::OpcaError;
 use crate::op::{CommandRunner, Op, StoreAction};
 use crate::services::cert::{asn1_time_to_openssl_str, CertBundleConfig, CertType, CertificateBundle};
 use crate::services::database::models::{
-    CaConfig, CertLookup, CertRecord, CrlMetadata, ExternalCertRecord, SerialType,
+    CaConfig, CertLookup, CertRecord, CrlMetadata, ExternalCertRecord, IgnoreReason, SerialType,
 };
 use crate::services::database::CertificateAuthorityDB;
 use crate::services::storage;
 use crate::utils::datetime::{self, DateTimeFormat};
+
+/// Identifier for the local user, used as the actor on audit-trail fields
+/// like `ignored_by`. Formatted as `username@hostname` — readable and doesn't
+/// require a 1Password CLI round-trip.
+fn local_user() -> String {
+    let user = whoami::username();
+    let host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown-host".into());
+    format!("{user}@{host}")
+}
 
 // ---------------------------------------------------------------------------
 // CA init command
@@ -777,7 +786,9 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         // Check if the renewed cert will outlive the CA
         let warning = self.check_cert_issuance_warning();
 
-        // Store updated bundle
+        // The old serial row stays in the database untouched; once its
+        // not_after passes, classification recognises the new Valid cert as
+        // a same-CN replacement and marks the old row as superseded.
         self.store_certbundle_for(&cert_bundle, None, None, false)?;
         self.store_ca_database()?;
 
@@ -830,7 +841,9 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         // Check if the rekeyed cert will outlive the CA
         let warning = self.check_cert_issuance_warning();
 
-        // Store updated bundle (new key, CSR, and cert)
+        // Store updated bundle (new key, CSR, and cert). The old serial row
+        // stays untouched; once its not_after passes, classification will mark
+        // it as superseded because this rekeyed cert shares the CN and is Valid.
         self.store_certbundle_for(&cert_bundle, None, None, false)?;
         self.store_ca_database()?;
 
@@ -859,6 +872,36 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         self.store_ca_database()?;
 
         Ok(true)
+    }
+
+    /// Manually mark a certificate as ignored — it drops out of the expired
+    /// count on the dashboard. Reason is recorded as `manual`; the caller is
+    /// identified from the 1Password session. Persists to 1Password.
+    pub fn ignore_certificate(
+        &mut self,
+        serial: &str,
+        note: Option<&str>,
+    ) -> Result<(), OpcaError> {
+        info!("[ca] ignoring certificate {serial}");
+        let by = local_user();
+
+        let db = self.ca_database.as_mut()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
+        db.ignore_cert(serial, IgnoreReason::Manual, &by, note)?;
+
+        self.store_ca_database()?;
+        Ok(())
+    }
+
+    /// Clear the ignored state on a certificate (undo). Persists to 1Password.
+    pub fn unignore_certificate(&mut self, serial: &str) -> Result<(), OpcaError> {
+        info!("[ca] un-ignoring certificate {serial}");
+        let db = self.ca_database.as_mut()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
+        db.unignore_cert(serial)?;
+
+        self.store_ca_database()?;
+        Ok(())
     }
 
     /// Generate a CRL, store it in 1Password, and optionally upload.
@@ -1685,6 +1728,10 @@ fn format_db_item(
         key_size,
         issuer: issuer_str,
         san,
+        ignored_at: None,
+        ignored_by: None,
+        ignored_reason: None,
+        ignored_note: None,
     })
 }
 

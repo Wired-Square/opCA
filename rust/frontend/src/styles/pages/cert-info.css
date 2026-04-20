@@ -29,3 +29,50 @@
   align-items: center;
   gap: 8px;
 }
+
+.ignored-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(138, 138, 145, 0.08);
+  border: 1px solid rgba(138, 138, 145, 0.3);
+  border-left-width: 4px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.ignored-banner-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+
+.ignore-inline {
+  flex-wrap: wrap;
+}
+
+.superseded-banner {
+  border-left-color: var(--accent);
+}
+
+.superseded-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.ignore-note-input {
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 6px 10px;
+  min-width: 240px;
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+}

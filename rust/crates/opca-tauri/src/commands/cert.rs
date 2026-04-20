@@ -18,16 +18,22 @@ pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>,
     db.process_ca_database(None, false).map_err(|e| e.to_string())?;
 
     let certs = db.query_all_certs().map_err(|e| e.to_string())?;
+    let replacements = db.replacements.clone();
 
-    Ok(certs.into_iter().map(|r| CertListItem {
-        serial: r.serial.into(),
-        cn: r.cn,
-        title: r.title,
-        status: r.status,
-        cert_type: r.cert_type,
-        expiry_date: r.expiry_date,
-        key_type: r.key_type,
-        key_size: r.key_size,
+    Ok(certs.into_iter().map(|r| {
+        let superseded_by = replacements.get(&r.serial).cloned();
+        CertListItem {
+            serial: r.serial.into(),
+            cn: r.cn,
+            title: r.title,
+            status: r.status,
+            cert_type: r.cert_type,
+            expiry_date: r.expiry_date,
+            key_type: r.key_type,
+            key_size: r.key_size,
+            ignored_at: r.ignored_at,
+            superseded_by,
+        }
     }).collect())
 }
 
@@ -72,7 +78,8 @@ pub async fn get_cert_info(
         .map_err(|e| e.to_string())?
         .ok_or("Certificate not found")?;
 
-    Ok(record_to_detail(&record, None))
+    let superseded_by = db.replacements.get(&record.serial).cloned();
+    Ok(record_to_detail(&record, None, superseded_by))
 }
 
 /// Slow path: fetch the certificate bundle from 1Password, backfill any
@@ -129,7 +136,11 @@ pub async fn backfill_cert(
             }
         }
 
-        (record_to_detail(&record, cert_pem), did_backfill)
+        let superseded_by = ca
+            .ca_database
+            .as_ref()
+            .and_then(|db| db.replacements.get(&record.serial).cloned());
+        (record_to_detail(&record, cert_pem, superseded_by), did_backfill)
     }; // conn lock dropped — user gets result immediately
 
     // Persist updated database to 1Password in the background so the UI
@@ -152,7 +163,11 @@ pub async fn backfill_cert(
     Ok(result)
 }
 
-fn record_to_detail(record: &CertRecord, cert_pem: Option<String>) -> CertDetail {
+fn record_to_detail(
+    record: &CertRecord,
+    cert_pem: Option<String>,
+    superseded_by: Option<String>,
+) -> CertDetail {
     CertDetail {
         serial: Some(record.serial.clone()),
         cn: record.cn.clone(),
@@ -168,6 +183,11 @@ fn record_to_detail(record: &CertRecord, cert_pem: Option<String>) -> CertDetail
         revocation_date: record.revocation_date.clone(),
         san: record.san.clone(),
         cert_pem,
+        ignored_at: record.ignored_at.clone(),
+        ignored_by: record.ignored_by.clone(),
+        ignored_reason: record.ignored_reason.clone(),
+        ignored_note: record.ignored_note.clone(),
+        superseded_by,
     }
 }
 
@@ -267,6 +287,8 @@ pub async fn create_cert(
             .ok()
             .flatten()
             .and_then(|s| s.parse().ok()),
+        ignored_at: None,
+        superseded_by: None,
     })
 }
 
@@ -339,6 +361,47 @@ pub async fn rekey_cert(
 }
 
 #[tauri::command]
+pub async fn ignore_cert(
+    state: State<'_, AppState>,
+    serial: String,
+    note: Option<String>,
+) -> Result<(), String> {
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    info!("[tauri] ignore_cert: serial={serial}");
+    ca.ignore_certificate(&serial, note.as_deref())
+        .map_err(|e| {
+            warn!("[tauri] ignore_cert failed: {e}");
+            state.log_err("ignore_cert", Some(e.to_string()));
+            e.to_string()
+        })?;
+
+    state.log_ok("ignore_cert", Some(format!("Ignored certificate {serial}")));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unignore_cert(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<(), String> {
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    info!("[tauri] unignore_cert: serial={serial}");
+    ca.unignore_certificate(&serial)
+        .map_err(|e| {
+            warn!("[tauri] unignore_cert failed: {e}");
+            state.log_err("unignore_cert", Some(e.to_string()));
+            e.to_string()
+        })?;
+
+    state.log_ok("unignore_cert", Some(format!("Cleared ignore on certificate {serial}")));
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn import_cert(
     state: State<'_, AppState>,
     request: ImportCertRequest,
@@ -386,6 +449,8 @@ pub async fn import_cert(
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse().ok()),
+            ignored_at: None,
+            superseded_by: None,
         },
         is_external,
     })

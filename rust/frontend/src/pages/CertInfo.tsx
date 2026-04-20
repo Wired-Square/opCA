@@ -1,6 +1,6 @@
 import { Show, For, createSignal, createResource, createEffect } from "solid-js";
 import { useParams, useNavigate } from "@solidjs/router";
-import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert } from "../api/certs";
+import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert, ignoreCert, unignoreCert } from "../api/certs";
 import { getCaConfig, uploadCaDatabase } from "../api/ca";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal } from "../utils/clipboard";
@@ -23,6 +23,8 @@ export default function CertInfo() {
   const [backfilling, setBackfilling] = createSignal(false);
   const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
   const [uploadingDb, setUploadingDb] = createSignal(false);
+  const [showIgnoreForm, setShowIgnoreForm] = createSignal(false);
+  const [ignoreNote, setIgnoreNote] = createSignal("");
 
   // Slow: once the fast detail renders, fetch from 1Password in the background.
   // Use a plain boolean to avoid re-triggering the effect on mutate.
@@ -114,6 +116,39 @@ export default function CertInfo() {
     }
   }
 
+  async function handleIgnore() {
+    const serial = params.serial as string;
+    if (!serial) return;
+    setActing("ignore");
+    setError(null);
+    try {
+      const note = ignoreNote().trim() || undefined;
+      await ignoreCert(serial, note);
+      setShowIgnoreForm(false);
+      setIgnoreNote("");
+      refetch();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setActing(false);
+    }
+  }
+
+  async function handleUnignore() {
+    const serial = params.serial as string;
+    if (!serial) return;
+    setActing("unignore");
+    setError(null);
+    try {
+      await unignoreCert(serial);
+      refetch();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setActing(false);
+    }
+  }
+
   function copyPem() {
     const pem = detail()?.cert_pem;
     if (pem) {
@@ -147,6 +182,46 @@ export default function CertInfo() {
         <Show when={detail()}>
           {(d) => (
             <>
+              <Show when={d().ignored_at}>
+                <div class="ignored-banner">
+                  <span class="ignored-banner-label">Ignored</span>
+                  <span class="ignored-banner-body">
+                    {d().ignored_reason ?? "manual"}
+                    <Show when={d().ignored_by}>
+                      {" "}by <span class="mono">{d().ignored_by}</span>
+                    </Show>
+                    <Show when={d().ignored_at}>
+                      {" "}on <span class="mono">{formatDate(d().ignored_at)}</span> <TzToggle />
+                    </Show>
+                    <Show when={d().ignored_note}>
+                      {" "}&mdash; <span>{d().ignored_note}</span>
+                    </Show>
+                  </span>
+                </div>
+              </Show>
+
+              <Show when={d().superseded_by && !d().ignored_at}>
+                <div class="ignored-banner superseded-banner">
+                  <span class="ignored-banner-label">Superseded</span>
+                  <span class="ignored-banner-body">
+                    Replaced by{" "}
+                    <a
+                      class="mono superseded-link"
+                      href={`/certs/${d().superseded_by}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        navigate(`/certs/${d().superseded_by}`);
+                      }}
+                    >
+                      serial {d().superseded_by}
+                    </a>
+                    {" "}&mdash; the newer cert with the same Common Name is
+                    Valid, so this one no longer counts toward the expired-cert
+                    alert.
+                  </span>
+                </div>
+              </Show>
+
               <div class="detail-grid">
                 <Row label="Serial" value={d().serial} mono />
                 <Row label="Common Name" value={d().cn} />
@@ -157,6 +232,9 @@ export default function CertInfo() {
                   <span class={`status-badge status-${(d().status ?? "").toLowerCase()}`}>
                     {d().status ?? "\u2014"}
                   </span>
+                  <Show when={d().ignored_at}>
+                    <span class="status-badge status-ignored">ignored</span>
+                  </Show>
                 </div>
                 <Row label="Subject" value={d().subject} mono />
                 <Row label="Issuer" value={d().issuer} mono />
@@ -241,6 +319,43 @@ export default function CertInfo() {
                       </div>
                     </Show>
                   </Show>
+                </Show>
+
+                <Show when={d().status === "Expired" && !d().ignored_at && !d().superseded_by && !showIgnoreForm()}>
+                  <button class="btn-ghost" onClick={() => setShowIgnoreForm(true)} disabled={!!acting()}>
+                    Ignore
+                  </button>
+                </Show>
+
+                <Show when={showIgnoreForm() && !d().ignored_at}>
+                  <div class="confirm-inline ignore-inline">
+                    <input
+                      type="text"
+                      class="ignore-note-input"
+                      value={ignoreNote()}
+                      onInput={(e) => setIgnoreNote(e.currentTarget.value)}
+                      placeholder={"Optional note \u2014 why?"}
+                      disabled={!!acting()}
+                      autofocus
+                    />
+                    <button class="btn-primary" onClick={handleIgnore} disabled={!!acting()}>
+                      {acting() === "ignore" ? "Ignoring\u2026" : "Confirm Ignore"}
+                    </button>
+                    <Show when={!acting()}>
+                      <button
+                        class="btn-ghost"
+                        onClick={() => { setShowIgnoreForm(false); setIgnoreNote(""); }}
+                      >
+                        Cancel
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
+
+                <Show when={d().ignored_at}>
+                  <button class="btn-ghost" onClick={handleUnignore} disabled={!!acting()}>
+                    {acting() === "unignore" ? "Un-ignoring\u2026" : "Un-ignore"}
+                  </button>
                 </Show>
               </div>
             </>

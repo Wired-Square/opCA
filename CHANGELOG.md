@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dashboard action-items panel surfaces one-click fixes: regenerate (and optionally upload) the CRL when it nears expiry, jump to expired certificates, and review pending CSRs
 - Pending CSRs bubble replaces the Vault bubble on the dashboard
 - DKIM info and create views can toggle the DNS record between single-string and Route53-style 255-byte quoted chunks; Copy copies the visible form
+- Expired certificates with a same-CN replacement (newer Valid cert, e.g. after renew or rekey) are now automatically marked as Superseded and drop out of the dashboard's expired-cert count. The cert detail page links to the replacement
+- Certificates can also be manually ignored from the cert detail page for cases where there's no replacement (retired services etc.); each ignore records who set it, when, and an optional note
+- Cert list filter gains "Superseded" and "Ignored" options; the Expired/Valid/Revoked filters now hide both ignored and superseded rows
 
 ### Fixed
 

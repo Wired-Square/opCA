@@ -31,6 +31,8 @@ const operationLabels: Record<string, string> = {
   revoke_cert: "Revoking certificate\u2026",
   renew_cert: "Renewing certificate\u2026",
   rekey_cert: "Rekeying certificate\u2026",
+  ignore_cert: "Marking certificate ignored\u2026",
+  unignore_cert: "Clearing certificate ignore\u2026",
   import_cert: "Importing certificate\u2026",
 
   // CRL

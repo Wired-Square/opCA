@@ -36,6 +36,10 @@ fn make_cert(serial: &str, cn: &str, expiry: &str) -> CertRecord {
         key_size: Some(2048),
         issuer: Some("Test CA".to_string()),
         san: None,
+        ignored_at: None,
+        ignored_by: None,
+        ignored_reason: None,
+        ignored_note: None,
     }
 }
 
@@ -56,10 +60,10 @@ fn test_new_creates_all_tables() {
 }
 
 #[test]
-fn test_new_sets_schema_version_7() {
+fn test_new_sets_schema_version() {
     let db = test_db();
     let config = db.get_config().unwrap();
-    assert_eq!(config.schema_version, Some(7));
+    assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
 }
 
 #[test]
@@ -628,6 +632,187 @@ fn test_process_not_dirty_no_revoke_returns_false() {
 }
 
 #[test]
+fn test_ignore_cert_sets_all_fields() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    db.add_cert(&make_cert("100", "retired.example.com", "20200101000000Z"))
+        .unwrap();
+
+    db.ignore_cert(
+        "100",
+        IgnoreReason::Manual,
+        "alex@example.com (Alex)",
+        Some("decommissioned"),
+    )
+    .unwrap();
+
+    let cert = db
+        .query_cert(&CertLookup::Serial("100".to_string()), false)
+        .unwrap()
+        .unwrap();
+    assert!(cert.ignored_at.is_some());
+    assert_eq!(cert.ignored_by.as_deref(), Some("alex@example.com (Alex)"));
+    assert_eq!(cert.ignored_reason.as_deref(), Some("manual"));
+    assert_eq!(cert.ignored_note.as_deref(), Some("decommissioned"));
+}
+
+#[test]
+fn test_ignore_cert_unknown_serial_errors() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    let err = db
+        .ignore_cert("999", IgnoreReason::Manual, "alex@example.com", None)
+        .unwrap_err();
+    assert!(matches!(err, OpcaError::Database(_)));
+}
+
+#[test]
+fn test_process_excludes_ignored_from_certs_expired() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    db.add_cert(&make_cert("100", "active-expired.example.com", "20200101000000Z"))
+        .unwrap();
+    db.add_cert(&make_cert("200", "ignored-expired.example.com", "20200101000000Z"))
+        .unwrap();
+
+    // Ignore one of the two expired certs.
+    db.ignore_cert("200", IgnoreReason::Manual, "alex@example.com", None)
+        .unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    // Only the non-ignored expired cert is in certs_expired.
+    assert_eq!(db.certs_expired.len(), 1);
+    assert!(db.certs_expired.contains("100"));
+
+    // The ignored one lands in certs_ignored instead.
+    assert_eq!(db.certs_ignored.len(), 1);
+    assert!(db.certs_ignored.contains("200"));
+}
+
+#[test]
+fn test_unignore_restores_cert_to_expired() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    db.add_cert(&make_cert("100", "expired.example.com", "20200101000000Z"))
+        .unwrap();
+
+    db.ignore_cert("100", IgnoreReason::Manual, "alex@example.com", None)
+        .unwrap();
+    db.process_ca_database(None, true).unwrap();
+    assert!(db.certs_ignored.contains("100"));
+    assert!(!db.certs_expired.contains("100"));
+
+    db.unignore_cert("100").unwrap();
+    db.process_ca_database(None, true).unwrap();
+    assert!(db.certs_expired.contains("100"));
+    assert!(!db.certs_ignored.contains("100"));
+
+    let cert = db
+        .query_cert(&CertLookup::Serial("100".to_string()), false)
+        .unwrap()
+        .unwrap();
+    assert!(cert.ignored_at.is_none());
+    assert!(cert.ignored_by.is_none());
+    assert!(cert.ignored_reason.is_none());
+    assert!(cert.ignored_note.is_none());
+}
+
+#[test]
+fn test_process_supersedes_expired_by_cn() {
+    let mut db = test_db();
+    // Two certs with the same CN: one expired, one currently valid.
+    db.add_cert(&make_cert("100", "api.example.com", "20200101000000Z"))
+        .unwrap();
+    db.add_cert(&make_cert("200", "api.example.com", "20501231235959Z"))
+        .unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    // Expired cert with a same-CN valid replacement drops out of certs_expired.
+    assert!(!db.certs_expired.contains("100"));
+    assert!(db.certs_superseded.contains("100"));
+    assert_eq!(db.replacements.get("100").map(String::as_str), Some("200"));
+
+    // The valid cert is in certs_valid.
+    assert!(db.certs_valid.contains("200"));
+}
+
+#[test]
+fn test_process_expired_cert_without_replacement_stays_expired() {
+    let mut db = test_db();
+    // One expired cert, no other cert sharing its CN.
+    db.add_cert(&make_cert("100", "orphan.example.com", "20200101000000Z"))
+        .unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    assert!(db.certs_expired.contains("100"));
+    assert!(!db.certs_superseded.contains("100"));
+    assert!(db.replacements.is_empty());
+}
+
+#[test]
+fn test_process_revoked_cert_does_not_count_as_replacement() {
+    let mut db = test_db();
+    // Expired cert plus a would-be replacement that is Revoked.
+    db.add_cert(&make_cert("100", "api.example.com", "20200101000000Z"))
+        .unwrap();
+    let mut replacement = make_cert("200", "api.example.com", "20501231235959Z");
+    replacement.status = Some("Revoked".to_string());
+    replacement.revocation_date = Some("20250101000000Z".to_string());
+    db.add_cert(&replacement).unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    // Revoked cert is not a valid replacement; expired cert stays expired.
+    assert!(db.certs_expired.contains("100"));
+    assert!(!db.certs_superseded.contains("100"));
+}
+
+#[test]
+fn test_process_ignored_wins_over_supersession() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    db.add_cert(&make_cert("100", "api.example.com", "20200101000000Z"))
+        .unwrap();
+    db.add_cert(&make_cert("200", "api.example.com", "20501231235959Z"))
+        .unwrap();
+
+    // Manually ignore the expired one even though it would be superseded.
+    db.ignore_cert("100", IgnoreReason::Manual, "alex@MacBook", None)
+        .unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    // Ignored takes priority — cert lands in certs_ignored, not certs_superseded.
+    assert!(db.certs_ignored.contains("100"));
+    assert!(!db.certs_superseded.contains("100"));
+    assert!(!db.certs_expired.contains("100"));
+}
+
+#[test]
+fn test_process_picks_highest_serial_as_replacement() {
+    let mut db = test_db();
+    db.add_cert(&make_cert("100", "api.example.com", "20200101000000Z"))
+        .unwrap();
+    db.add_cert(&make_cert("200", "api.example.com", "20501231235959Z"))
+        .unwrap();
+    db.add_cert(&make_cert("300", "api.example.com", "20501231235959Z"))
+        .unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    // Highest-serial valid cert is the referenced replacement.
+    assert_eq!(db.replacements.get("100").map(String::as_str), Some("300"));
+}
+
+#[test]
 fn test_process_external_certs() {
     let mut db = test_db();
     db.add_external_cert(&make_ext_cert("200", "ext.valid.com", "20501231235959Z"))
@@ -670,7 +855,7 @@ fn test_export_import_roundtrip() {
     let config = db2.get_config().unwrap();
     assert_eq!(config.next_serial, Some(100));
     assert_eq!(config.org.as_deref(), Some("Test Org"));
-    assert_eq!(config.schema_version, Some(7));
+    assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
 }
 
 #[test]
@@ -738,11 +923,11 @@ COMMIT;
     let (db, info) = CertificateAuthorityDB::from_sql_dump(v5_sql).unwrap();
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
-    assert_eq!(info.to_version, 7);
-    assert_eq!(info.steps.len(), 2); // v5→v6, v6→v7
+    assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
+    assert_eq!(info.steps.len(), 3); // v5→v6, v6→v7, v7→v8
 
     let config = db.get_config().unwrap();
-    assert_eq!(config.schema_version, Some(7));
+    assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
 
     // Local cert should remain in certificate_authority
     assert_eq!(db.count_certs().unwrap(), 1);
@@ -831,6 +1016,10 @@ fn test_iterdump_null_handling() {
         key_size: None,
         issuer: None,
         san: None,
+        ignored_at: None,
+        ignored_by: None,
+        ignored_reason: None,
+        ignored_note: None,
     };
     db.add_cert(&cert).unwrap();
 
@@ -855,6 +1044,10 @@ fn test_iterdump_single_quote_escaping() {
         key_size: None,
         issuer: None,
         san: None,
+        ignored_at: None,
+        ignored_by: None,
+        ignored_reason: None,
+        ignored_note: None,
     };
     db.add_cert(&cert).unwrap();
 

@@ -393,6 +393,14 @@ input::placeholder {
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.status-ignored,
+.status-superseded {
+  color: var(--text-secondary);
+  background: rgba(138, 138, 145, 0.12);
+  border: 1px solid rgba(138, 138, 145, 0.3);
+  margin-left: 6px;
+}
+
 .status-expiring {
   color: #eab308;
   background: rgba(234, 179, 8, 0.12);
