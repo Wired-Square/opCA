@@ -116,31 +116,15 @@ Launch OPCA, connect to your 1Password account, select the vault, and use the GU
 
 ---
 
-## Project Layout
+## Architecture
 
-```
-rust/
-  Cargo.toml                        # Workspace root
-  crates/
-    opca-core/                      # Pure Rust library (no framework deps)
-      src/
-        op.rs                       # 1Password CLI wrapper (CommandRunner trait)
-        crypto/                     # Key generation, signing, CRL, DKIM, OpenVPN, PKCS#12
-        services/                   # CA, database, storage, backup, Route53
-    opca-tauri/                     # Tauri 2 desktop shell
-      src/
-        main.rs                     # App builder with IPC command handlers
-        state.rs                    # Shared app state
-        commands/                   # IPC command modules
-  frontend/                         # SolidJS + Vite
-    src/
-      App.tsx                       # Root layout
-      router.ts                     # Client-side routes
-      api/                          # Typed Tauri invoke() wrappers
-      pages/                        # Screen components
-      components/                   # Shared UI (DataTable, Modal, NavBar, etc.)
-      stores/                       # SolidJS reactive state
-```
+OPCA is an `opca-core` Rust library wrapped by a Tauri 2 shell and a SolidJS
+frontend. A standalone AWS Lambda
+([notification/](notification/)) handles scheduled expiry monitoring.
+
+See [docs/architecture.md](docs/architecture.md) for the full walkthrough of
+crates, vault layout, locking model, and the lifecycle of a typical
+operation.
 
 ---
 
