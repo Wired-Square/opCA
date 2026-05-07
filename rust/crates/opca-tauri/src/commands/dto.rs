@@ -433,6 +433,21 @@ pub struct CrlInfo {
     pub revoked_count: usize,
     pub crl_pem: Option<String>,
     pub has_public_store: bool,
+    /// CRL document presence, as observed by the most recent vault probe.
+    /// `None` = fast path hasn't been confirmed against 1Password yet;
+    /// `Some(true)` = the document was found; `Some(false)` = it was not.
+    pub has_crl: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InspectCrlResult {
+    pub issuer: String,
+    pub last_update: Option<String>,
+    pub next_update: Option<String>,
+    pub crl_number: Option<i64>,
+    pub revoked_count: i64,
+    pub signature_algorithm: String,
+    pub text_dump: String,
 }
 
 // ---------------------------------------------------------------------------

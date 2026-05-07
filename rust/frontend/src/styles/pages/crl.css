@@ -19,3 +19,20 @@
 .page-crl .detail-label {
   min-width: 180px;
 }
+
+.page-crl .form-actions {
+  margin-top: 12px;
+}
+
+.page-crl textarea {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  resize: vertical;
+  box-sizing: border-box;
+}

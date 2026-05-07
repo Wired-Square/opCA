@@ -1,4 +1,5 @@
 import { Match, Show, Switch } from "solid-js";
+import "../styles/components/availability.css";
 
 interface AvailabilityProps {
   label: string;

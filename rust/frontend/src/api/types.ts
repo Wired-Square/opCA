@@ -367,6 +367,19 @@ export interface CrlInfo {
   revoked_count: number;
   crl_pem: string | null;
   has_public_store: boolean;
+  /** `true` once the slow backfill has confirmed the CRL exists in
+   * 1Password. `null` on the fast path. */
+  has_crl: boolean | null;
+}
+
+export interface InspectCrlResult {
+  issuer: string;
+  last_update: string | null;
+  next_update: string | null;
+  crl_number: number | null;
+  revoked_count: number;
+  signature_algorithm: string;
+  text_dump: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -1879,11 +1879,18 @@ pub fn prepare_cert_authority<R: CommandRunner>(op: Op<R>) -> Result<Certificate
 /// Parse CRL metadata from a PEM string without needing a full CA instance.
 pub fn parse_crl_metadata(pem: &str) -> Result<CrlMetadata, OpcaError> {
     use openssl::x509::X509Crl;
-
     let crl = X509Crl::from_pem(pem.as_bytes())
         .map_err(|e| OpcaError::Crypto(format!("Failed to parse CRL PEM: {e}")))?;
+    Ok(crl_metadata_from(&crl))
+}
 
-    let issuer = crl.issuer_name().entries()
+/// Pull metadata out of an already-parsed CRL — saves a redundant
+/// `X509Crl::from_pem` call when the caller (e.g. `inspect_crl`) also needs
+/// the parsed handle for other work.
+pub fn crl_metadata_from(crl: &openssl::x509::X509Crl) -> CrlMetadata {
+    let issuer = crl
+        .issuer_name()
+        .entries()
         .filter_map(|e| {
             let sn = e.object().nid().short_name().ok()?;
             let val = e.data().as_utf8().ok()?;
@@ -1894,21 +1901,50 @@ pub fn parse_crl_metadata(pem: &str) -> Result<CrlMetadata, OpcaError> {
 
     let last_update = asn1_time_to_openssl_str(crl.last_update());
     let next_update = crl.next_update().and_then(asn1_time_to_openssl_str);
-    let revoked_count = crl.get_revoked()
-        .map(|stack| stack.len() as i64)
-        .unwrap_or(0);
+    let revoked_count = crl.get_revoked().map(|stack| stack.len() as i64).unwrap_or(0);
+    let crl_number = extract_crl_number(crl);
 
-    // Extract CRL Number extension (OID 2.5.29.20 / NID_crl_number)
-    let crl_number = extract_crl_number(&crl);
-
-    Ok(CrlMetadata {
+    CrlMetadata {
         issuer: Some(issuer),
         last_update,
         next_update,
         crl_number,
         revoked_count: Some(revoked_count),
         revoked_json: None,
-    })
+    }
+}
+
+/// Render a CRL as `openssl crl -text -noout` style output. The openssl-rs
+/// crate doesn't expose `X509_CRL_print`, and openssl-sys' handwritten
+/// bindings stop short of CRL-printing helpers, so we declare the symbol
+/// locally and call libcrypto directly.
+pub fn crl_to_text(crl: &openssl::x509::X509Crl) -> Result<String, OpcaError> {
+    use std::os::raw::{c_char, c_int};
+
+    extern "C" {
+        fn X509_CRL_print(bp: *mut openssl_sys::BIO, x: *mut openssl_sys::X509_CRL) -> c_int;
+    }
+
+    unsafe {
+        let bio = openssl_sys::BIO_new(openssl_sys::BIO_s_mem());
+        if bio.is_null() {
+            return Err(OpcaError::Crypto("BIO_new failed".into()));
+        }
+        let rc = X509_CRL_print(bio, crl.as_ptr());
+        if rc != 1 {
+            openssl_sys::BIO_free_all(bio);
+            return Err(OpcaError::Crypto("X509_CRL_print failed".into()));
+        }
+        let mut data: *mut c_char = std::ptr::null_mut();
+        let len = openssl_sys::BIO_get_mem_data(bio, &mut data);
+        let text = if len > 0 && !data.is_null() {
+            std::slice::from_raw_parts(data as *const u8, len as usize).to_vec()
+        } else {
+            Vec::new()
+        };
+        openssl_sys::BIO_free_all(bio);
+        Ok(String::from_utf8_lossy(&text).to_string())
+    }
 }
 
 /// Extract the CRL Number extension value from a parsed CRL.

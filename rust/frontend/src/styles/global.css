@@ -710,3 +710,13 @@ input::placeholder {
 .modal-body {
   padding: 16px 20px 20px;
 }
+
+/* ── Inspect-tab text dump (used by CSR and CRL inspect panes) ─────── */
+.text-dump {
+  padding: 12px;
+  background: var(--bg-surface);
+  font-size: 0.6875rem;
+  max-height: 480px;
+  overflow: auto;
+  white-space: pre;
+}

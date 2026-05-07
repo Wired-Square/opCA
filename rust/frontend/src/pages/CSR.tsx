@@ -822,7 +822,7 @@ export default function CSR() {
                       {inspectCopied() ? "Copied" : "Copy"}
                     </button>
                   </div>
-                  <pre class="csr-text-dump mono">{r().text_dump}</pre>
+                  <pre class="text-dump mono">{r().text_dump}</pre>
                 </div>
               </div>
             )}

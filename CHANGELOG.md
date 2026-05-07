@@ -13,9 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - External certificates tab: per-row **Generate CSR** action produces a fresh CSR (new key, same subject and SANs) from an existing external certificate, ready to send to an external CA for re-signing.
 - New **Inspect** tab on the CSR page: paste any CSR PEM to see structured fields (subject, key type/size, SANs, signature algorithm, public-key SHA-256 fingerprint) plus the full `openssl req -text -noout` style dump.
 - External certificates now have a detail view (mirrors the local cert detail page): subject, issuer, validity, key info, SANs, certificate PEM with copy. Click any row in the External tab.
-- **Copy Private Key** action on the local and external certificate detail pages: writes the key to the clipboard without ever displaying it on screen. The button only appears when a private key is stored alongside the certificate.
-- Certificate detail pages now show a **Stored Items** row indicating whether the Certificate, Private Key, and Chain are stored alongside the cert. Database-backed (schema v9) so availability is shown immediately without waiting for a vault roundtrip.
-- **Copy Chain** action on certificate detail pages — copies the issuer chain PEM. Greyed when no chain is stored. Existing **Copy** button on the certificate PEM section is now greyed during the brief load period instead of the section being hidden.
+- **Stored Items** row on certificate detail pages indicates whether the Certificate, Private Key, and Chain are stored alongside the cert. The indicators double as copy buttons — green with a copy icon when present, struck-through grey when absent, italic grey while the bundle is loading. Database-backed (schema v9 migration adds `has_private_key` and `has_chain` to the certificate tables) so availability is shown immediately on subsequent loads; legacy rows backfill lazily on first detail-page open.
+- **Copy Private Key** lands on the clipboard without ever rendering on screen. A native Tauri confirmation dialog (with a heavy security warning) gates every copy. The backend refuses to export keys belonging to CA certificates outright — both via the `cert_type` column and by checking the X.509 BasicConstraints of the retrieved bundle. The corresponding indicator on a CA cert renders with a padlock and is non-interactive while keeping the green "stored" colour.
+- **Copy Chain** action on certificate detail pages — copies the issuer chain PEM via the same indicator pattern.
+- CRL page now has **Detail** and **Inspect** tabs. Detail loads the local SQLite metadata immediately and lazily fetches the CRL document from 1Password to populate the Stored Items indicator. Inspect prefills the live CRL PEM but accepts any pasted CRL — decodes into structured fields (issuer, last/next update, CRL number, signature algorithm, revoked count) plus the full `openssl crl -text -noout` style dump.
+- Server-side audit logging for every clipboard copy of a certificate, private key, chain, or CRL document — entries appear in the Log page alongside the existing CA operations.
+
+### Changed
+
+- `CRL` detail now uses a fast/slow split: the local SQLite metadata renders immediately, and the actual CRL document loads from 1Password in the background. The previous combined fetch held the page hostage to the vault round-trip.
 
 ## [0.99.14] - 2026-04-20
 
