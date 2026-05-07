@@ -82,6 +82,11 @@ pub struct CaInfo {
     pub key_size: Option<String>,
     pub is_valid: bool,
     pub cert_pem: Option<String>,
+    /// `true` if the CA private key was loaded into the in-memory bundle —
+    /// surfaced so the UI can render a "stored" indicator. Should always be
+    /// true for an initialised CA (no key = no signing), but we read it off
+    /// the bundle rather than assuming.
+    pub has_private_key: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -154,6 +159,23 @@ pub struct CertDetail {
     pub has_chain: Option<bool>,
     /// PEM-encoded issuer chain (only populated by the slow backfill path).
     pub chain_pem: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InspectCertificateResult {
+    pub cn: Option<String>,
+    pub subject: String,
+    pub issuer: String,
+    pub serial: Option<String>,
+    pub not_before: Option<String>,
+    pub not_after: Option<String>,
+    pub alt_dns_names: Vec<String>,
+    pub key_type: String,
+    pub key_size: u32,
+    pub signature_algorithm: String,
+    pub public_key_fingerprint_sha256: String,
+    pub is_ca: bool,
+    pub text_dump: String,
 }
 
 #[derive(Debug, Serialize)]

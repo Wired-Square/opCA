@@ -9,6 +9,15 @@ use opca_core::services::database::CaConfig;
 use crate::commands::dto::{CaConfigDto, CaInfo};
 use crate::state::AppState;
 
+/// Audit-log a clipboard copy of the CA certificate. Mirrors the cert/CRL
+/// copy logging — the PEM doesn't cross this call, the frontend already
+/// has it from `get_ca_info`.
+#[tauri::command]
+pub async fn record_ca_cert_copy(state: State<'_, AppState>) -> Result<(), String> {
+    state.log_ok("copy_ca_cert", Some("Copied CA certificate".to_string()));
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_ca_info(state: State<'_, AppState>) -> Result<CaInfo, String> {
     let conn = state.ensure_ca()?;
@@ -23,6 +32,7 @@ pub async fn get_ca_info(state: State<'_, AppState>) -> Result<CaInfo, String> {
 
     let is_valid = ca.is_valid().unwrap_or(false);
     let cert_pem = bundle.certificate_pem().ok();
+    let has_private_key = bundle.private_key.is_some();
 
     Ok(CaInfo {
         cn: attr("cn"),
@@ -35,6 +45,7 @@ pub async fn get_ca_info(state: State<'_, AppState>) -> Result<CaInfo, String> {
         key_size: attr("key_size"),
         is_valid,
         cert_pem,
+        has_private_key,
     })
 }
 
@@ -174,6 +185,7 @@ pub async fn resign_ca(
 
     let is_valid = ca.is_valid().unwrap_or(false);
     let cert_pem = bundle.certificate_pem().ok();
+    let has_private_key = bundle.private_key.is_some();
 
     Ok(CaInfo {
         cn: attr("cn"),
@@ -186,6 +198,7 @@ pub async fn resign_ca(
         key_size: attr("key_size"),
         is_valid,
         cert_pem,
+        has_private_key,
     })
 }
 

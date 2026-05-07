@@ -38,3 +38,9 @@ export async function resignCa(caDays: number): Promise<CaInfo> {
     tauriInvoke<CaInfo>("resign_ca", { caDays }),
   );
 }
+
+/** Audit-log a clipboard copy of the CA certificate. Mirrors `recordCertCopy`
+ * — the PEM doesn't travel through this call, the frontend already has it. */
+export async function recordCaCertCopy(): Promise<void> {
+  return tauriInvoke<void>("record_ca_cert_copy");
+}

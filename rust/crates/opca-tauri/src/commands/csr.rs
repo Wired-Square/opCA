@@ -1,7 +1,6 @@
 use log::info;
 use tauri::State;
 
-use openssl::hash::{Hasher, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
 use openssl::x509::{X509Req, X509};
@@ -16,6 +15,9 @@ use crate::commands::dto::{
     CertListItem, CreateCsrRequest, CreateCsrResult, CsrListItem, DecodeCsrResult,
     GenerateCsrFromCertRequest, ImportCsrCertRequest, InspectCsrResult, SignCsrRequest,
     SignCsrResult,
+};
+use crate::commands::inspect_helpers::{
+    public_key_summary, signature_algorithm_from_text, x509_name_to_rdn_string,
 };
 use crate::state::AppState;
 
@@ -556,49 +558,16 @@ pub async fn inspect_csr(csr_pem: String) -> Result<InspectCsrResult, String> {
     let public_key = csr
         .public_key()
         .map_err(|e| format!("Failed to read public key: {e}"))?;
+    let (key_type, key_size, public_key_fingerprint_sha256) = public_key_summary(&public_key)?;
 
-    let key_type = if public_key.rsa().is_ok() {
-        "RSA"
-    } else if public_key.ec_key().is_ok() {
-        "EC"
-    } else if public_key.dsa().is_ok() {
-        "DSA"
-    } else {
-        "Unknown"
-    }
-    .to_string();
-    let key_size = public_key.bits();
-
-    let pub_der = public_key
-        .public_key_to_der()
-        .map_err(|e| format!("Failed to encode public key: {e}"))?;
-    let mut hasher = Hasher::new(MessageDigest::sha256())
-        .map_err(|e| format!("Hasher init: {e}"))?;
-    hasher
-        .update(&pub_der)
-        .map_err(|e| format!("Hash update: {e}"))?;
-    let hash = hasher
-        .finish()
-        .map_err(|e| format!("Hash finish: {e}"))?;
-    let public_key_fingerprint_sha256 = hash
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<_>>()
-        .join(":");
-
-    // openssl-rs doesn't surface signature_algorithm() on X509Req, so parse it
-    // out of the text dump (every dump has a "Signature Algorithm:" line).
-    let signature_algorithm = text_dump
-        .lines()
-        .find_map(|l| l.trim().strip_prefix("Signature Algorithm:").map(|s| s.trim().to_string()))
-        .unwrap_or_else(|| "Unknown".to_string());
+    let signature_algorithm = signature_algorithm_from_text(&text_dump);
 
     let cn = csr_cn(&csr);
     let alt_dns_names = extract_dns_sans_from_text(&text_dump, cn.as_deref());
 
     Ok(InspectCsrResult {
         cn,
-        subject: csr_subject_string(&csr),
+        subject: x509_name_to_rdn_string(csr.subject_name()),
         alt_dns_names,
         key_type,
         key_size,

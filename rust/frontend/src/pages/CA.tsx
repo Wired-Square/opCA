@@ -1,12 +1,13 @@
 import { Show, For, createSignal, createResource, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
-import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, resignCa } from "../api/ca";
+import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, resignCa, recordCaCertCopy } from "../api/ca";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
+import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { CaInfo, CaConfig, RestoreResult, BackupInfoResult, StoreTestResults } from "../api/types";
@@ -101,6 +102,7 @@ function CertificateTab(props: {
     if (pem) {
       navigator.clipboard.writeText(pem);
       markCopied();
+      void recordCaCertCopy();
     }
   }
 
@@ -161,6 +163,22 @@ function CertificateTab(props: {
                   {info().is_valid ? "Valid" : "Invalid"}
                 </span>
               </div>
+              <div class="detail-row">
+                <span class="detail-label">Stored Items</span>
+                <div class="stored-items">
+                  <Availability
+                    label="Certificate"
+                    available={info().cert_pem ? true : null}
+                    onCopy={copyPem}
+                    copied={copied()}
+                  />
+                  <Availability
+                    label="Private Key"
+                    available={info().has_private_key}
+                    blocked="CA private keys cannot be copied from opCA. Retrieve from 1Password directly if absolutely necessary."
+                  />
+                </div>
+              </div>
             </div>
 
             <div class="form-actions">
@@ -220,9 +238,6 @@ function CertificateTab(props: {
               <div class="pem-section">
                 <div class="pem-header">
                   <span class="pem-label">Certificate PEM</span>
-                  <button class="btn-ghost btn-sm" onClick={copyPem}>
-                    {copied() ? "Copied" : "Copy"}
-                  </button>
                 </div>
                 <pre class="pem-block">{info().cert_pem}</pre>
               </div>

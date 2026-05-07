@@ -8,6 +8,7 @@ pub mod database;
 pub mod dkim;
 pub mod dto;
 pub mod files;
+pub mod inspect_helpers;
 pub mod lock;
 pub mod logs;
 pub mod openvpn;

@@ -1,9 +1,15 @@
 use log::{info, warn, debug};
+use openssl::nid::Nid;
+use openssl::x509::X509;
 use serde::Deserialize;
 use tauri::{Emitter, Manager, State};
 
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{CertLookup, CertRecord, ExternalCertRecord};
+
+use crate::commands::inspect_helpers::{
+    public_key_summary, signature_algorithm_from_text, x509_name_to_rdn_string,
+};
 
 /// 1Password title for an external cert is always `EXT_<cn>` ([ca.rs] convention),
 /// even though the DB row stores the un-prefixed CN in `title`. Compute the
@@ -18,7 +24,7 @@ fn external_item_title(record: &ExternalCertRecord) -> Result<String, String> {
 
 use crate::commands::dto::{
     CertDetail, CertListItem, CreateCertRequest, ExternalCertDetail, ExternalCertListItem,
-    ImportCertRequest, ImportCertResult,
+    ImportCertRequest, ImportCertResult, InspectCertificateResult,
 };
 use crate::state::AppState;
 
@@ -747,4 +753,75 @@ pub async fn get_external_cert_private_key(
         Some(format!("Exported private key for external cert {serial}")),
     );
     Ok(key_pem)
+}
+
+#[tauri::command]
+pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateResult, String> {
+    let cert = X509::from_pem(cert_pem.as_bytes())
+        .map_err(|e| format!("Failed to parse certificate PEM: {e}"))?;
+
+    let text_bytes = cert
+        .to_text()
+        .map_err(|e| format!("Failed to render certificate text: {e}"))?;
+    let text_dump = String::from_utf8_lossy(&text_bytes).to_string();
+
+    let public_key = cert
+        .public_key()
+        .map_err(|e| format!("Failed to read public key: {e}"))?;
+    let (key_type, key_size, public_key_fingerprint_sha256) = public_key_summary(&public_key)?;
+
+    let signature_algorithm = signature_algorithm_from_text(&text_dump);
+
+    let cn = cert
+        .subject_name()
+        .entries_by_nid(Nid::COMMONNAME)
+        .next()
+        .and_then(|e| e.data().as_utf8().ok())
+        .map(|s| s.to_string());
+
+    let subject = x509_name_to_rdn_string(cert.subject_name());
+    let issuer = x509_name_to_rdn_string(cert.issuer_name());
+
+    let serial = cert
+        .serial_number()
+        .to_bn()
+        .ok()
+        .and_then(|bn| bn.to_dec_str().ok())
+        .map(|s| s.to_string());
+
+    let not_before = asn1_time_to_string(cert.not_before());
+    let not_after = asn1_time_to_string(cert.not_after());
+
+    let alt_dns_names = cert
+        .subject_alt_names()
+        .map(|stack| {
+            stack
+                .iter()
+                .filter_map(|name| name.dnsname().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let is_ca = text_dump.contains("CA:TRUE");
+
+    Ok(InspectCertificateResult {
+        cn,
+        subject,
+        issuer,
+        serial,
+        not_before,
+        not_after,
+        alt_dns_names,
+        key_type,
+        key_size,
+        signature_algorithm,
+        public_key_fingerprint_sha256,
+        is_ca,
+        text_dump,
+    })
+}
+
+fn asn1_time_to_string(time: &openssl::asn1::Asn1TimeRef) -> Option<String> {
+    let s = time.to_string();
+    if s.is_empty() { None } else { Some(s) }
 }

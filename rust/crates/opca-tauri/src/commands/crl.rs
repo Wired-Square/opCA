@@ -6,6 +6,7 @@ use opca_core::services::ca::{crl_metadata_from, crl_to_text, parse_crl_metadata
 use opca_core::services::database::CrlMetadata;
 
 use crate::commands::dto::{CrlInfo, InspectCrlResult};
+use crate::commands::inspect_helpers::signature_algorithm_from_text;
 use crate::state::AppState;
 
 /// Project the database CRL metadata (and optionally the just-fetched PEM)
@@ -93,17 +94,7 @@ pub async fn inspect_crl(crl_pem: String) -> Result<InspectCrlResult, String> {
 
     let text_dump = crl_to_text(&crl).map_err(|e| format!("Failed to render CRL text: {e}"))?;
     let metadata = crl_metadata_from(&crl);
-
-    // openssl-rs doesn't surface signature_algorithm() on X509Crl, so recover
-    // it from the text dump (every dump has a "Signature Algorithm:" line).
-    let signature_algorithm = text_dump
-        .lines()
-        .find_map(|l| {
-            l.trim()
-                .strip_prefix("Signature Algorithm:")
-                .map(|s| s.trim().to_string())
-        })
-        .unwrap_or_else(|| "Unknown".to_string());
+    let signature_algorithm = signature_algorithm_from_text(&text_dump);
 
     Ok(InspectCrlResult {
         issuer: metadata.issuer.unwrap_or_default(),

@@ -66,6 +66,10 @@ export interface CaInfo {
   key_size: string | null;
   is_valid: boolean;
   cert_pem: string | null;
+  /** `true` if the CA private key is loaded into the in-memory bundle.
+   * Always true for an initialised CA, but the UI reads it explicitly
+   * for the Stored Items indicator. */
+  has_private_key: boolean;
 }
 
 export interface CaConfig {
@@ -185,6 +189,22 @@ export interface ImportCertRequest {
 export interface ImportCertResult {
   cert: CertListItem;
   is_external: boolean;
+}
+
+export interface InspectCertificateResult {
+  cn: string | null;
+  subject: string;
+  issuer: string;
+  serial: string | null;
+  not_before: string | null;
+  not_after: string | null;
+  alt_dns_names: string[];
+  key_type: string;
+  key_size: number;
+  signature_algorithm: string;
+  public_key_fingerprint_sha256: string;
+  is_ca: boolean;
+  text_dump: string;
 }
 
 // ---------------------------------------------------------------------------

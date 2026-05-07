@@ -1,15 +1,16 @@
 import { Show, For, createSignal, createResource } from "solid-js";
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { listCerts, listExternalCerts } from "../api/certs";
+import { listCerts, listExternalCerts, inspectCertificate } from "../api/certs";
 import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
+import { createCopiedSignal } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
-import type { CertListItem, ExternalCertListItem } from "../api/types";
+import type { CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
 import "../styles/pages/certs.css";
 
-type Tab = "local" | "external";
+type Tab = "local" | "external" | "inspect";
 
 const VALID_FILTERS = new Set([
   "all",
@@ -26,7 +27,10 @@ export default function Certs() {
   const initialFilter = typeof searchParams.filter === "string" && VALID_FILTERS.has(searchParams.filter)
     ? searchParams.filter
     : "all";
-  const initialTab: Tab = searchParams.tab === "external" ? "external" : "local";
+  const initialTab: Tab =
+    searchParams.tab === "external" ? "external"
+    : searchParams.tab === "inspect" ? "inspect"
+    : "local";
   const [tab, setTab] = createSignal<Tab>(initialTab);
   const [filter, setFilter] = createSignal(initialFilter);
   const [search, setSearch] = createSignal("");
@@ -83,6 +87,39 @@ export default function Certs() {
   const [generatingSerial, setGeneratingSerial] = createSignal<string | null>(null);
   const [generateError, setGenerateError] = createSignal<string | null>(null);
 
+  const [inspectPem, setInspectPem] = createSignal("");
+  const [inspecting, setInspecting] = createSignal(false);
+  const [inspectError, setInspectError] = createSignal<string | null>(null);
+  const [inspectResult, setInspectResult] = createSignal<InspectCertificateResult | null>(null);
+  const [inspectCopied, markInspectCopied] = createCopiedSignal();
+
+  async function handleInspect() {
+    const pem = inspectPem().trim();
+    setInspectError(null);
+    setInspectResult(null);
+    if (!pem) {
+      setInspectError("Certificate PEM is required.");
+      return;
+    }
+    setInspecting(true);
+    try {
+      const result = await inspectCertificate(pem);
+      setInspectResult(result);
+    } catch (e) {
+      setInspectError(String(e));
+    } finally {
+      setInspecting(false);
+    }
+  }
+
+  function copyInspectDump() {
+    const dump = inspectResult()?.text_dump;
+    if (dump) {
+      navigator.clipboard.writeText(dump);
+      markInspectCopied();
+    }
+  }
+
   async function handleGenerateCsr(cert: ExternalCertListItem, e: MouseEvent) {
     e.stopPropagation();
     if (!cert.serial) return;
@@ -108,30 +145,32 @@ export default function Certs() {
       <div class="page-header">
         <h2>Certificates</h2>
         <div class="header-actions">
-          <SearchInput value={search()} onInput={setSearch} />
-          <select
-            class="status-filter"
-            value={filter()}
-            onChange={(e) => setFilter(e.currentTarget.value)}
-          >
-            <option value="all">All</option>
-            <option value="valid">Valid</option>
-            <option value="expired">Expired</option>
-            <option value="revoked">Revoked</option>
-            <option value="superseded">Superseded</option>
-            <option value="ignored">Ignored</option>
-          </select>
-          <button class="btn-ghost" onClick={handleRefresh} disabled={loading()}>
-            {loading() ? "Loading\u2026" : "Refresh"}
-          </button>
-          <Show when={tab() === "local"}>
-            <button class="btn-primary" onClick={() => navigate("/certs/create")}>
-              Create
+          <Show when={tab() !== "inspect"}>
+            <SearchInput value={search()} onInput={setSearch} />
+            <select
+              class="status-filter"
+              value={filter()}
+              onChange={(e) => setFilter(e.currentTarget.value)}
+            >
+              <option value="all">All</option>
+              <option value="valid">Valid</option>
+              <option value="expired">Expired</option>
+              <option value="revoked">Revoked</option>
+              <option value="superseded">Superseded</option>
+              <option value="ignored">Ignored</option>
+            </select>
+            <button class="btn-ghost" onClick={handleRefresh} disabled={loading()}>
+              {loading() ? "Loading\u2026" : "Refresh"}
+            </button>
+            <Show when={tab() === "local"}>
+              <button class="btn-primary" onClick={() => navigate("/certs/create")}>
+                Create
+              </button>
+            </Show>
+            <button class="btn-secondary" onClick={() => navigate("/certs/import")}>
+              Import
             </button>
           </Show>
-          <button class="btn-secondary" onClick={() => navigate("/certs/import")}>
-            Import
-          </button>
         </div>
       </div>
 
@@ -147,6 +186,12 @@ export default function Certs() {
           onClick={() => setTab("external")}
         >
           External
+        </button>
+        <button
+          class={`tab-btn ${tab() === "inspect" ? "tab-active" : ""}`}
+          onClick={() => { setTab("inspect"); setInspectError(null); }}
+        >
+          Inspect
         </button>
       </div>
 
@@ -265,6 +310,118 @@ export default function Certs() {
               </tbody>
             </table>
           </div>
+        </Show>
+      </Show>
+
+      {/* \u2500\u2500 Inspect tab \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+      <Show when={tab() === "inspect"}>
+        <div class="form-group">
+          <label class="form-label">Certificate PEM</label>
+          <textarea
+            rows={10}
+            placeholder="Paste a certificate PEM here…"
+            value={inspectPem()}
+            onInput={(e) => {
+              setInspectPem(e.currentTarget.value);
+              setInspectResult(null);
+              setInspectError(null);
+            }}
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck={false}
+          />
+        </div>
+
+        <div class="form-actions">
+          <button
+            class="btn-primary"
+            type="button"
+            disabled={inspecting() || !inspectPem().trim()}
+            onClick={handleInspect}
+          >
+            {inspecting() ? "Inspecting\u2026" : "Inspect Certificate"}
+          </button>
+        </div>
+
+        <Show when={inspectError()}>
+          <p class="page-error" role="alert">{inspectError()}</p>
+        </Show>
+
+        <Show when={inspectResult()}>
+          {(r) => (
+            <div class="detail-section">
+              <div class="detail-grid">
+                <div class="detail-row">
+                  <span class="detail-label">Common Name</span>
+                  <span class="detail-value">{r().cn ?? "\u2014"}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Subject</span>
+                  <span class="detail-value mono">{r().subject || "\u2014"}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Issuer</span>
+                  <span class="detail-value mono">{r().issuer || "\u2014"}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Serial</span>
+                  <span class="detail-value mono">{r().serial ?? "\u2014"}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Valid From <TzToggle /></span>
+                  <span class="detail-value mono">{formatDate(r().not_before)}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Valid Until</span>
+                  <span class="detail-value mono">{formatDate(r().not_after)}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Key</span>
+                  <span class="detail-value">{r().key_type} {r().key_size} bits</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Signature Algorithm</span>
+                  <span class="detail-value mono">{r().signature_algorithm}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Public Key SHA-256</span>
+                  <span class="detail-value mono">{r().public_key_fingerprint_sha256}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">CA Certificate</span>
+                  <span class="detail-value">{r().is_ca ? "Yes" : "No"}</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Subject Alternative Names</label>
+                <Show when={r().alt_dns_names.length > 0} fallback={
+                  <p class="text-muted text-sm">No alternative names.</p>
+                }>
+                  <div class="san-list">
+                    <For each={r().alt_dns_names}>
+                      {(san) => <span class="san-tag">{san}</span>}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="pem-section">
+                <div class="pem-header">
+                  <span class="detail-label">Text Dump</span>
+                  <button
+                    type="button"
+                    class="btn-ghost btn-sm"
+                    onClick={copyInspectDump}
+                  >
+                    {inspectCopied() ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <pre class="text-dump mono">{r().text_dump}</pre>
+              </div>
+            </div>
+          )}
         </Show>
       </Show>
 

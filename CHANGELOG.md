@@ -17,11 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Copy Private Key** lands on the clipboard without ever rendering on screen. A native Tauri confirmation dialog (with a heavy security warning) gates every copy. The backend refuses to export keys belonging to CA certificates outright — both via the `cert_type` column and by checking the X.509 BasicConstraints of the retrieved bundle. The corresponding indicator on a CA cert renders with a padlock and is non-interactive while keeping the green "stored" colour.
 - **Copy Chain** action on certificate detail pages — copies the issuer chain PEM via the same indicator pattern.
 - CRL page now has **Detail** and **Inspect** tabs. Detail loads the local SQLite metadata immediately and lazily fetches the CRL document from 1Password to populate the Stored Items indicator. Inspect prefills the live CRL PEM but accepts any pasted CRL — decodes into structured fields (issuer, last/next update, CRL number, signature algorithm, revoked count) plus the full `openssl crl -text -noout` style dump.
-- Server-side audit logging for every clipboard copy of a certificate, private key, chain, or CRL document — entries appear in the Log page alongside the existing CA operations.
+- Server-side audit logging for every clipboard copy of a certificate, private key, chain, CRL document, or CA certificate — entries appear in the Log page alongside the existing CA operations.
+- CA Certificate tab now has the same **Stored Items** row as the cert detail pages: Certificate (green, copyable via the indicator) and Private Key (green, padlock — never copyable).
+- New **Inspect** tab on the Certificates page: paste any certificate PEM to see structured fields (subject, issuer, serial, validity, key info, signature algorithm, SANs, public-key SHA-256 fingerprint, CA flag) plus the full `openssl x509 -text -noout` style dump.
 
 ### Changed
 
 - `CRL` detail now uses a fast/slow split: the local SQLite metadata renders immediately, and the actual CRL document loads from 1Password in the background. The previous combined fetch held the page hostage to the vault round-trip.
+- The CSR / CRL / Certificate Inspect commands share a single `inspect_helpers` module — RDN-string formatting, public-key summaries, and signature-algorithm extraction are no longer duplicated across the three handlers.
+
+### Fixed
+
+- Inspect-tab placeholder on the Certificates page rendered the literal text `…` instead of an ellipsis character — JSX bare-string attributes don't process JS escapes.
 
 ## [0.99.14] - 2026-04-20
 

@@ -7,6 +7,7 @@ import type {
   CreateCertRequest,
   ImportCertRequest,
   ImportCertResult,
+  InspectCertificateResult,
 } from "./types";
 
 export async function listCerts(): Promise<CertListItem[]> {
@@ -39,6 +40,10 @@ export async function getCertPrivateKey(serial: string): Promise<string> {
 
 export async function getExternalCertPrivateKey(serial: string): Promise<string> {
   return tauriInvoke<string>("get_external_cert_private_key", { serial });
+}
+
+export async function inspectCertificate(certPem: string): Promise<InspectCertificateResult> {
+  return tauriInvoke<InspectCertificateResult>("inspect_certificate", { certPem });
 }
 
 /** Audit-log a clipboard copy of a non-secret cert artefact. The PEM bytes
