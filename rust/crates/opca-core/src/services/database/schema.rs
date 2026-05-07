@@ -5,7 +5,7 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 8;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 9;
 
 // ---------------------------------------------------------------------------
 // Table DDL (v8 — current)
@@ -51,7 +51,9 @@ pub const CREATE_CA_TABLE: &str = "
         ignored_at TEXT,
         ignored_by TEXT,
         ignored_reason TEXT,
-        ignored_note TEXT
+        ignored_note TEXT,
+        has_private_key INTEGER,
+        has_chain INTEGER
     )
 ";
 
@@ -84,7 +86,9 @@ pub const CREATE_EXTERNAL_CERT_TABLE: &str = "
         not_before TEXT,
         key_type TEXT,
         key_size INTEGER,
-        san TEXT
+        san TEXT,
+        has_private_key INTEGER,
+        has_chain INTEGER
     )
 ";
 
@@ -300,8 +304,24 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v7→v8: {e}")))?;
 
         version = 8;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 8, ok: true });
+    }
+
+    // v8 → v9: track presence of private key and chain alongside each cert.
+    // Existing rows get NULL (unknown); detail-page backfill populates them.
+    if version == 8 {
+        conn.execute_batch(
+            "ALTER TABLE certificate_authority ADD COLUMN has_private_key INTEGER;
+             ALTER TABLE certificate_authority ADD COLUMN has_chain INTEGER;
+             ALTER TABLE external_certificate ADD COLUMN has_private_key INTEGER;
+             ALTER TABLE external_certificate ADD COLUMN has_chain INTEGER;
+             UPDATE config SET schema_version = 9 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v8→v9: {e}")))?;
+
+        version = 9;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 9, ok: true });
     }
 
     info.migrated = true;

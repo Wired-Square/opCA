@@ -1732,6 +1732,8 @@ fn format_db_item(
         ignored_by: None,
         ignored_reason: None,
         ignored_note: None,
+        has_private_key: Some(bundle.private_key.is_some()),
+        has_chain: Some(bundle.chain.as_ref().is_some_and(|c| !c.is_empty())),
     })
 }
 
@@ -1757,6 +1759,8 @@ impl IntoExternal for CertRecord {
             key_type: self.key_type,
             key_size: self.key_size,
             san: self.san,
+            has_private_key: self.has_private_key,
+            has_chain: self.has_chain,
         }
     }
 }

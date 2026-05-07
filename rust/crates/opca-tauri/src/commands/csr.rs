@@ -1,6 +1,7 @@
 use log::info;
 use tauri::State;
 
+use openssl::hash::{Hasher, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
 use openssl::x509::{X509Req, X509};
@@ -8,12 +9,13 @@ use openssl::x509::{X509Req, X509};
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::StoreAction;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
-use opca_core::services::database::{CsrLookup, CsrRecord};
+use opca_core::services::database::{CertLookup, CsrLookup, CsrRecord};
 use opca_core::utils::datetime::{now_utc_str, DateTimeFormat};
 
 use crate::commands::dto::{
     CertListItem, CreateCsrRequest, CreateCsrResult, CsrListItem, DecodeCsrResult,
-    ImportCsrCertRequest, SignCsrRequest, SignCsrResult,
+    GenerateCsrFromCertRequest, ImportCsrCertRequest, InspectCsrResult, SignCsrRequest,
+    SignCsrResult,
 };
 use crate::state::AppState;
 
@@ -85,20 +87,24 @@ fn cert_issuer_subject(cert: &X509) -> String {
 
 /// Extract Subject Alternative Names (DNS entries) from a CSR.
 fn csr_sans(csr: &X509Req) -> Vec<String> {
-    let cn = csr_cn(csr);
     let csr_text = csr
         .to_text()
         .map(|v| String::from_utf8_lossy(&v).to_string())
         .unwrap_or_default();
+    extract_dns_sans_from_text(&csr_text, csr_cn(csr).as_deref())
+}
 
+/// Pull DNS SAN entries out of an OpenSSL `-text` style dump. The dump format
+/// is shared between certificates and CSRs, so this helper serves both.
+fn extract_dns_sans_from_text(text: &str, cn: Option<&str>) -> Vec<String> {
     let mut sans = Vec::new();
-    for line in csr_text.lines() {
+    for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.contains("DNS:") && !trimmed.starts_with("X509v3") {
             for part in trimmed.split(',') {
                 let part = part.trim();
                 if let Some(dns) = part.strip_prefix("DNS:") {
-                    if cn.as_deref() != Some(dns) && !sans.contains(&dns.to_string()) {
+                    if cn != Some(dns) && !sans.contains(&dns.to_string()) {
                         sans.push(dns.to_string());
                     }
                 }
@@ -455,7 +461,7 @@ pub async fn import_csr_cert(
     })?;
 
     // Build certificate bundle with cert + key + CSR
-    let bundle = CertificateBundle::import(
+    let mut bundle = CertificateBundle::import(
         CertType::External,
         &cn,
         request.cert_pem.as_bytes(),
@@ -468,6 +474,17 @@ pub async fn import_csr_cert(
         state.log_err("import_csr_cert", Some(e.to_string()));
         e.to_string()
     })?;
+
+    // Attach upstream chain if provided
+    if let Some(ref chain) = request.chain_pem {
+        let trimmed = chain.trim();
+        if !trimmed.is_empty() {
+            bundle.set_chain_from_pem(trimmed.as_bytes()).map_err(|e| {
+                state.log_err("import_csr_cert", Some(e.to_string()));
+                e.to_string()
+            })?;
+        }
+    }
 
     // Extract issuer info
     let issuer = cert_issuer_cn(&cert).unwrap_or_else(|| "Unknown".to_string());
@@ -523,5 +540,173 @@ pub async fn import_csr_cert(
             .and_then(|s| s.parse().ok()),
         ignored_at: None,
         superseded_by: None,
+    })
+}
+
+#[tauri::command]
+pub async fn inspect_csr(csr_pem: String) -> Result<InspectCsrResult, String> {
+    let csr = X509Req::from_pem(csr_pem.as_bytes())
+        .map_err(|e| format!("Failed to parse CSR PEM: {e}"))?;
+
+    let text_bytes = csr
+        .to_text()
+        .map_err(|e| format!("Failed to render CSR text: {e}"))?;
+    let text_dump = String::from_utf8_lossy(&text_bytes).to_string();
+
+    let public_key = csr
+        .public_key()
+        .map_err(|e| format!("Failed to read public key: {e}"))?;
+
+    let key_type = if public_key.rsa().is_ok() {
+        "RSA"
+    } else if public_key.ec_key().is_ok() {
+        "EC"
+    } else if public_key.dsa().is_ok() {
+        "DSA"
+    } else {
+        "Unknown"
+    }
+    .to_string();
+    let key_size = public_key.bits();
+
+    let pub_der = public_key
+        .public_key_to_der()
+        .map_err(|e| format!("Failed to encode public key: {e}"))?;
+    let mut hasher = Hasher::new(MessageDigest::sha256())
+        .map_err(|e| format!("Hasher init: {e}"))?;
+    hasher
+        .update(&pub_der)
+        .map_err(|e| format!("Hash update: {e}"))?;
+    let hash = hasher
+        .finish()
+        .map_err(|e| format!("Hash finish: {e}"))?;
+    let public_key_fingerprint_sha256 = hash
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<Vec<_>>()
+        .join(":");
+
+    // openssl-rs doesn't surface signature_algorithm() on X509Req, so parse it
+    // out of the text dump (every dump has a "Signature Algorithm:" line).
+    let signature_algorithm = text_dump
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("Signature Algorithm:").map(|s| s.trim().to_string()))
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let cn = csr_cn(&csr);
+    let alt_dns_names = extract_dns_sans_from_text(&text_dump, cn.as_deref());
+
+    Ok(InspectCsrResult {
+        cn,
+        subject: csr_subject_string(&csr),
+        alt_dns_names,
+        key_type,
+        key_size,
+        signature_algorithm,
+        public_key_fingerprint_sha256,
+        text_dump,
+    })
+}
+
+#[tauri::command]
+pub async fn generate_csr_from_cert(
+    state: State<'_, AppState>,
+    request: GenerateCsrFromCertRequest,
+) -> Result<CreateCsrResult, String> {
+    info!("[tauri] generate_csr_from_cert: serial='{}'", request.serial);
+
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
+    let record = db
+        .query_external_cert(&CertLookup::Serial(request.serial.clone()), false)
+        .map_err(|e| e.to_string())?
+        .ok_or("External certificate not found")?;
+
+    let cn = record.cn.clone().ok_or("External certificate has no CN")?;
+    // 1Password title is always EXT_<cn>; the DB `title` may legacy-store the
+    // un-prefixed CN.
+    let title = format!("EXT_{cn}");
+
+    let csr_title = format!("CSR_{}", cn);
+    if ca.op.item_exists(&csr_title) {
+        return Err(format!(
+            "Item '{}' already exists in 1Password — delete or rename the existing CSR first",
+            csr_title
+        ));
+    }
+
+    let mut bundle = ca
+        .retrieve_certbundle(&title)
+        .map_err(|e| e.to_string())?
+        .ok_or("External certificate item not found in 1Password")?;
+
+    bundle.regenerate_key_and_csr().map_err(|e| {
+        state.log_err("generate_csr_from_cert", Some(e.to_string()));
+        e.to_string()
+    })?;
+
+    let key_pem = bundle.private_key_pem().map_err(|e| e.to_string())?;
+    let csr_pem = bundle.csr_pem().ok_or("CSR not generated")?;
+
+    let cert_type = bundle.cert_type.clone();
+    let attributes = [
+        format!("{}={}", DEFAULT_OP_CONF.cert_type_item, cert_type),
+        format!("{}={}", DEFAULT_OP_CONF.cn_item, cn),
+        format!("{}={}", DEFAULT_OP_CONF.key_item, key_pem),
+        format!("{}={}", DEFAULT_OP_CONF.csr_item, csr_pem),
+    ];
+    let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
+
+    ca.op
+        .store_item(
+            &csr_title,
+            Some(&attr_refs),
+            StoreAction::Create,
+            DEFAULT_OP_CONF.category,
+            None,
+            None,
+        )
+        .map_err(|e| {
+            state.log_err("generate_csr_from_cert", Some(e.to_string()));
+            e.to_string()
+        })?;
+
+    let subject = bundle
+        .csr
+        .as_ref()
+        .map(csr_subject_string)
+        .unwrap_or_default();
+    let email = bundle.config.email.clone();
+
+    let csr_record = CsrRecord {
+        id: None,
+        cn: Some(cn.clone()),
+        title: Some(csr_title),
+        csr_type: Some(cert_type.to_string()),
+        email,
+        subject: Some(subject),
+        status: Some("Pending".to_string()),
+        created_date: Some(now_utc_str(DateTimeFormat::Compact)),
+        csr_pem: Some(csr_pem.clone()),
+    };
+
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
+    db.add_csr(&csr_record).map_err(|e| e.to_string())?;
+
+    ca.store_ca_database().map_err(|e| {
+        state.log_err("generate_csr_from_cert", Some(e.to_string()));
+        e.to_string()
+    })?;
+
+    state.log_ok(
+        "generate_csr_from_cert",
+        Some(format!("Generated CSR from external cert '{}'", cn)),
+    );
+
+    Ok(CreateCsrResult {
+        item: record_to_list_item(&csr_record),
+        csr_pem,
     })
 }

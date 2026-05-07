@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- CSR list detail view: when viewing a Pending CSR, an **Import Signed Cert** action accepts the externally-signed certificate plus an optional upstream CA chain. The CSR's stored private key is paired with the new certificate and the result becomes an external certificate.
+- External certificates tab: per-row **Generate CSR** action produces a fresh CSR (new key, same subject and SANs) from an existing external certificate, ready to send to an external CA for re-signing.
+- New **Inspect** tab on the CSR page: paste any CSR PEM to see structured fields (subject, key type/size, SANs, signature algorithm, public-key SHA-256 fingerprint) plus the full `openssl req -text -noout` style dump.
+- External certificates now have a detail view (mirrors the local cert detail page): subject, issuer, validity, key info, SANs, certificate PEM with copy. Click any row in the External tab.
+- **Copy Private Key** action on the local and external certificate detail pages: writes the key to the clipboard without ever displaying it on screen. The button only appears when a private key is stored alongside the certificate.
+- Certificate detail pages now show a **Stored Items** row indicating whether the Certificate, Private Key, and Chain are stored alongside the cert. Database-backed (schema v9) so availability is shown immediately without waiting for a vault roundtrip.
+- **Copy Chain** action on certificate detail pages — copies the issuer chain PEM. Greyed when no chain is stored. Existing **Copy** button on the certificate PEM section is now greyed during the brief load period instead of the section being hidden.
+
 ## [0.99.14] - 2026-04-20
 
 ### Added

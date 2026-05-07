@@ -1,6 +1,7 @@
 import { Show, For, createSignal, createResource } from "solid-js";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { listCerts, listExternalCerts } from "../api/certs";
+import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
@@ -25,7 +26,8 @@ export default function Certs() {
   const initialFilter = typeof searchParams.filter === "string" && VALID_FILTERS.has(searchParams.filter)
     ? searchParams.filter
     : "all";
-  const [tab, setTab] = createSignal<Tab>("local");
+  const initialTab: Tab = searchParams.tab === "external" ? "external" : "local";
+  const [tab, setTab] = createSignal<Tab>(initialTab);
   const [filter, setFilter] = createSignal(initialFilter);
   const [search, setSearch] = createSignal("");
 
@@ -76,6 +78,29 @@ export default function Certs() {
   function handleRefresh() {
     if (tab() === "local") refetchLocal();
     else refetchExternal();
+  }
+
+  const [generatingSerial, setGeneratingSerial] = createSignal<string | null>(null);
+  const [generateError, setGenerateError] = createSignal<string | null>(null);
+
+  async function handleGenerateCsr(cert: ExternalCertListItem, e: MouseEvent) {
+    e.stopPropagation();
+    if (!cert.serial) return;
+    const ok = window.confirm(
+      `Generate a fresh CSR (new key, same subject and SANs) from ${cert.cn ?? cert.serial}?\n\nThe new CSR will appear as a Pending CSR you can send to your external CA.`,
+    );
+    if (!ok) return;
+
+    setGenerateError(null);
+    setGeneratingSerial(cert.serial);
+    try {
+      await generateCsrFromCert({ serial: cert.serial });
+      navigate("/csrs");
+    } catch (err) {
+      setGenerateError(String(err));
+    } finally {
+      setGeneratingSerial(null);
+    }
   }
 
   return (
@@ -194,6 +219,10 @@ export default function Certs() {
           </p>
         </Show>
 
+        <Show when={generateError()}>
+          <p class="page-error" role="alert">{generateError()}</p>
+        </Show>
+
         <Show when={filteredExternal().length > 0}>
           <div class="data-table-wrap">
             <table class="data-table">
@@ -205,18 +234,31 @@ export default function Certs() {
                   <th>Status</th>
                   <th>Expiry <TzToggle /></th>
                   <th>Imported</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 <For each={filteredExternal()}>
                   {(cert) => (
-                    <tr class="data-table-row">
+                    <tr
+                      class="data-table-row"
+                      onClick={() => cert.serial && navigate(`/external-certs/${cert.serial}`)}
+                    >
                       <td class="mono">{cert.serial ?? "\u2014"}</td>
                       <td>{cert.cn ?? "\u2014"}</td>
                       <td>{cert.issuer ?? "\u2014"}</td>
                       <td><span class={statusBadgeClass(cert.status)}>{cert.status ?? "\u2014"}</span></td>
                       <td class="mono">{formatDate(cert.expiry_date)}</td>
                       <td class="mono">{formatDate(cert.import_date)}</td>
+                      <td>
+                        <button
+                          class="btn-ghost btn-sm"
+                          disabled={generatingSerial() !== null}
+                          onClick={(e) => handleGenerateCsr(cert, e)}
+                        >
+                          {generatingSerial() === cert.serial ? "Generating\u2026" : "Generate CSR"}
+                        </button>
+                      </td>
                     </tr>
                   )}
                 </For>

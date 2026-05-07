@@ -1,10 +1,25 @@
 use log::{info, warn, debug};
+use serde::Deserialize;
 use tauri::{Emitter, Manager, State};
 
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
-use opca_core::services::database::{CertLookup, CertRecord};
+use opca_core::services::database::{CertLookup, CertRecord, ExternalCertRecord};
 
-use crate::commands::dto::{CertDetail, CertListItem, ExternalCertListItem, CreateCertRequest, ImportCertRequest, ImportCertResult};
+/// 1Password title for an external cert is always `EXT_<cn>` ([ca.rs] convention),
+/// even though the DB row stores the un-prefixed CN in `title`. Compute the
+/// real vault title from the CN so legacy DB rows still resolve correctly.
+fn external_item_title(record: &ExternalCertRecord) -> Result<String, String> {
+    let cn = record
+        .cn
+        .as_deref()
+        .ok_or("External certificate has no CN")?;
+    Ok(format!("EXT_{cn}"))
+}
+
+use crate::commands::dto::{
+    CertDetail, CertListItem, CreateCertRequest, ExternalCertDetail, ExternalCertListItem,
+    ImportCertRequest, ImportCertResult,
+};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -79,7 +94,7 @@ pub async fn get_cert_info(
         .ok_or("Certificate not found")?;
 
     let superseded_by = db.replacements.get(&record.serial).cloned();
-    Ok(record_to_detail(&record, None, superseded_by))
+    Ok(record_to_detail(&record, None, None, superseded_by))
 }
 
 /// Slow path: fetch the certificate bundle from 1Password, backfill any
@@ -114,14 +129,19 @@ pub async fn backfill_cert(
 
         let cert_pem = bundle.as_ref()
             .and_then(|b| b.certificate_pem().ok());
+        let chain_pem = bundle.as_ref().and_then(|b| b.chain_pem());
 
-        // Determine if metadata is missing — if so backfill from the bundle
+        // Determine if metadata is missing — if so backfill from the bundle.
+        // The has_*_key/has_chain flags also need backfilling for legacy
+        // rows that pre-date the v9 schema.
         let needs_backfill = record.cert_type.is_none()
             || record.key_type.is_none()
             || record.subject.is_none()
             || record.not_before.is_none()
             || record.san.is_none()
-            || record.issuer.is_none();
+            || record.issuer.is_none()
+            || record.has_private_key.is_none()
+            || record.has_chain.is_none();
 
         let mut did_backfill = false;
         if needs_backfill {
@@ -140,7 +160,10 @@ pub async fn backfill_cert(
             .ca_database
             .as_ref()
             .and_then(|db| db.replacements.get(&record.serial).cloned());
-        (record_to_detail(&record, cert_pem, superseded_by), did_backfill)
+        (
+            record_to_detail(&record, cert_pem, chain_pem, superseded_by),
+            did_backfill,
+        )
     }; // conn lock dropped — user gets result immediately
 
     // Persist updated database to 1Password in the background so the UI
@@ -166,6 +189,7 @@ pub async fn backfill_cert(
 fn record_to_detail(
     record: &CertRecord,
     cert_pem: Option<String>,
+    chain_pem: Option<String>,
     superseded_by: Option<String>,
 ) -> CertDetail {
     CertDetail {
@@ -188,6 +212,36 @@ fn record_to_detail(
         ignored_reason: record.ignored_reason.clone(),
         ignored_note: record.ignored_note.clone(),
         superseded_by,
+        has_private_key: record.has_private_key,
+        has_chain: record.has_chain,
+        chain_pem,
+    }
+}
+
+fn external_record_to_detail(
+    record: &ExternalCertRecord,
+    cert_pem: Option<String>,
+    chain_pem: Option<String>,
+) -> ExternalCertDetail {
+    ExternalCertDetail {
+        serial: Some(record.serial.clone()),
+        cn: record.cn.clone(),
+        title: record.title.clone(),
+        status: record.status.clone(),
+        cert_type: record.cert_type.clone(),
+        expiry_date: record.expiry_date.clone(),
+        key_type: record.key_type.clone(),
+        key_size: record.key_size,
+        subject: record.subject.clone(),
+        issuer: record.issuer.clone(),
+        issuer_subject: record.issuer_subject.clone(),
+        not_before: record.not_before.clone(),
+        import_date: record.import_date.clone(),
+        san: record.san.clone(),
+        cert_pem,
+        has_private_key: record.has_private_key,
+        has_chain: record.has_chain,
+        chain_pem,
     }
 }
 
@@ -223,6 +277,12 @@ fn backfill_record(record: &mut CertRecord, bundle: &CertificateBundle) {
     }
     if record.cn.as_ref().is_none_or(|s| s.is_empty()) {
         record.cn = attr("cn");
+    }
+    if record.has_private_key.is_none() {
+        record.has_private_key = Some(bundle.private_key.is_some());
+    }
+    if record.has_chain.is_none() {
+        record.has_chain = Some(bundle.chain.as_ref().is_some_and(|c| !c.is_empty()));
     }
 }
 
@@ -454,4 +514,237 @@ pub async fn import_cert(
         },
         is_external,
     })
+}
+
+/// Fast path: external cert detail from the local database only.
+#[tauri::command]
+pub async fn get_external_cert_info(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<ExternalCertDetail, String> {
+    let conn = state.ensure_ca()?;
+    let ca = conn.ca.as_ref().ok_or("CA not available")?;
+
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
+
+    let record = db
+        .query_external_cert(&CertLookup::Serial(serial), false)
+        .map_err(|e| e.to_string())?
+        .ok_or("External certificate not found")?;
+
+    Ok(external_record_to_detail(&record, None, None))
+}
+
+/// Slow path: fetch the external cert bundle from 1Password, return cert
+/// and chain PEM, and persist any missing has_private_key / has_chain flags
+/// so subsequent fast-path reads can show availability without a roundtrip.
+#[tauri::command]
+pub async fn backfill_external_cert(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<ExternalCertDetail, String> {
+    debug!("[tauri] backfill_external_cert: serial={serial}");
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
+    let mut record = db
+        .query_external_cert(&CertLookup::Serial(serial), false)
+        .map_err(|e| e.to_string())?
+        .ok_or("External certificate not found")?;
+
+    let title = external_item_title(&record)?;
+    let bundle = ca.retrieve_certbundle(&title).ok().flatten();
+
+    let cert_pem = bundle.as_ref().and_then(|b| b.certificate_pem().ok());
+    let chain_pem = bundle.as_ref().and_then(|b| b.chain_pem());
+
+    if let Some(ref b) = bundle {
+        let new_pk = Some(b.private_key.is_some());
+        let new_chain = Some(b.chain.as_ref().is_some_and(|c| !c.is_empty()));
+        if record.has_private_key != new_pk || record.has_chain != new_chain {
+            record.has_private_key = new_pk;
+            record.has_chain = new_chain;
+            if let Some(db) = ca.ca_database.as_mut() {
+                let _ = db.update_external_cert(&record);
+            }
+        }
+    }
+
+    Ok(external_record_to_detail(&record, cert_pem, chain_pem))
+}
+
+/// Return the PEM-encoded private key for a CA-issued certificate. The key is
+/// fetched from 1Password and returned to the frontend so the user can copy it
+/// to the clipboard. Never log or persist the key value.
+///
+/// Refuses to export CA private keys: the CA key is the root of trust for
+/// every cert OPCA has issued, and we don't want a stray clipboard write to be
+/// the way it leaves the vault. Anyone needing the CA key for a legitimate
+/// migration can fetch it directly via `op` against the `CA` item.
+#[tauri::command]
+pub async fn get_cert_private_key(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<String, String> {
+    info!("[tauri] get_cert_private_key: serial={serial}");
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
+    let record = db
+        .query_cert(&CertLookup::Serial(serial.clone()), false)
+        .map_err(|e| e.to_string())?
+        .ok_or("Certificate not found")?;
+
+    let title = record.title.as_deref().unwrap_or(&record.serial);
+    let bundle = ca
+        .retrieve_certbundle(title)
+        .map_err(|e| e.to_string())?
+        .ok_or("Certificate item not found in 1Password")?;
+
+    bail_if_ca_certificate(record.cert_type.as_deref(), &bundle)?;
+
+    let key_pem = bundle
+        .private_key_pem()
+        .map_err(|_| "No private key stored for this certificate".to_string())?;
+
+    state.log_ok(
+        "get_cert_private_key",
+        Some(format!("Exported private key for cert {serial}")),
+    );
+    Ok(key_pem)
+}
+
+fn is_ca_cert_type(cert_type: Option<&str>) -> bool {
+    cert_type.is_some_and(|t| t.eq_ignore_ascii_case("ca"))
+}
+
+/// Refuse to surface the private key when the cert is — or appears to be —
+/// a CA. Two checks deliberately:
+///
+/// - `cert_type` from the local DB row is fast but can be stale or wrong if
+///   an import mislabelled the type.
+/// - The X.509 BasicConstraints flag on the actual bundle is authoritative,
+///   but only available after a vault round-trip.
+///
+/// Both layers must say "not CA" before we expose the key.
+fn bail_if_ca_certificate(
+    cert_type: Option<&str>,
+    bundle: &CertificateBundle,
+) -> Result<(), String> {
+    let by_type = is_ca_cert_type(cert_type);
+    let by_constraints = bundle.is_ca_certificate().unwrap_or(false);
+    if by_type || by_constraints {
+        return Err(
+            "Refusing to export a CA private key. If you genuinely need it, retrieve it from 1Password directly."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CertScope {
+    Local,
+    External,
+}
+
+impl CertScope {
+    fn label(&self) -> &'static str {
+        match self {
+            CertScope::Local => "cert",
+            CertScope::External => "external cert",
+        }
+    }
+    fn token(&self) -> &'static str {
+        match self {
+            CertScope::Local => "local",
+            CertScope::External => "external",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CertCopyKind {
+    Certificate,
+    Chain,
+}
+
+impl CertCopyKind {
+    fn label(&self) -> &'static str {
+        match self {
+            CertCopyKind::Certificate => "certificate PEM",
+            CertCopyKind::Chain => "issuer chain",
+        }
+    }
+    fn token(&self) -> &'static str {
+        match self {
+            CertCopyKind::Certificate => "certificate",
+            CertCopyKind::Chain => "chain",
+        }
+    }
+}
+
+/// Frontend tells us when the user copied a non-secret cert artefact (the
+/// cert PEM or chain PEM) so it lands in the audit log alongside the
+/// private-key exports. The artefact bytes don't cross this boundary — the
+/// frontend already has them from `backfill_cert` / `backfill_external_cert`
+/// and writes directly to the clipboard. We're only recording the action.
+#[tauri::command]
+pub async fn record_cert_copy(
+    state: State<'_, AppState>,
+    scope: CertScope,
+    serial: String,
+    kind: CertCopyKind,
+) -> Result<(), String> {
+    let action = format!("copy_{}_{}", scope.token(), kind.token());
+    state.log_ok(
+        &action,
+        Some(format!(
+            "Copied {} for {} {serial}",
+            kind.label(),
+            scope.label()
+        )),
+    );
+    Ok(())
+}
+
+/// External-cert counterpart of `get_cert_private_key`. Refuses to export
+/// keys belonging to imported CA certificates for the same reason as the
+/// local-cert version.
+#[tauri::command]
+pub async fn get_external_cert_private_key(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<String, String> {
+    info!("[tauri] get_external_cert_private_key: serial={serial}");
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
+    let record = db
+        .query_external_cert(&CertLookup::Serial(serial.clone()), false)
+        .map_err(|e| e.to_string())?
+        .ok_or("External certificate not found")?;
+
+    let title = external_item_title(&record)?;
+    let bundle = ca
+        .retrieve_certbundle(&title)
+        .map_err(|e| e.to_string())?
+        .ok_or("External certificate item not found in 1Password")?;
+
+    bail_if_ca_certificate(record.cert_type.as_deref(), &bundle)?;
+
+    let key_pem = bundle
+        .private_key_pem()
+        .map_err(|_| "No private key stored for this certificate".to_string())?;
+
+    state.log_ok(
+        "get_external_cert_private_key",
+        Some(format!("Exported private key for external cert {serial}")),
+    );
+    Ok(key_pem)
 }

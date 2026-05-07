@@ -58,6 +58,12 @@ pub struct CertRecord {
     pub ignored_reason: Option<String>,
     /// Optional free-text note; for auto-ignores, carries `"replaced by <new_serial>"`.
     pub ignored_note: Option<String>,
+    /// Whether a private key is stored alongside this cert in 1Password.
+    /// `None` for legacy rows that pre-date the v9 schema; populated by the
+    /// detail-page backfill the first time the bundle is fetched.
+    pub has_private_key: Option<bool>,
+    /// Whether an issuer chain is stored alongside this cert in 1Password.
+    pub has_chain: Option<bool>,
 }
 
 /// Reason a certificate was ignored. Today only manual ignores are written;
@@ -93,6 +99,12 @@ pub struct ExternalCertRecord {
     pub key_type: Option<String>,
     pub key_size: Option<i64>,
     pub san: Option<String>,
+    /// Whether a private key is stored alongside this cert in 1Password.
+    /// `None` for legacy rows that pre-date the v9 schema; populated by the
+    /// detail-page backfill the first time the bundle is fetched.
+    pub has_private_key: Option<bool>,
+    /// Whether an issuer chain is stored alongside this cert in 1Password.
+    pub has_chain: Option<bool>,
 }
 
 /// A certificate signing request record.

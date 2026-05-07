@@ -147,6 +147,39 @@ pub struct CertDetail {
     /// If this cert is expired but another same-CN cert is Valid, this is
     /// the replacement's serial.
     pub superseded_by: Option<String>,
+    /// `Some(true)` if a private key is stored alongside the certificate in
+    /// 1Password. Mirrors the DB-backed `has_private_key` column.
+    pub has_private_key: Option<bool>,
+    /// `Some(true)` if an issuer chain is stored alongside the certificate.
+    pub has_chain: Option<bool>,
+    /// PEM-encoded issuer chain (only populated by the slow backfill path).
+    pub chain_pem: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExternalCertDetail {
+    pub serial: Option<String>,
+    pub cn: Option<String>,
+    pub title: Option<String>,
+    pub status: Option<String>,
+    pub cert_type: Option<String>,
+    pub expiry_date: Option<String>,
+    pub key_type: Option<String>,
+    pub key_size: Option<i64>,
+    pub subject: Option<String>,
+    pub issuer: Option<String>,
+    pub issuer_subject: Option<String>,
+    pub not_before: Option<String>,
+    pub import_date: Option<String>,
+    pub san: Option<String>,
+    pub cert_pem: Option<String>,
+    /// `Some(true)` if a private key is stored alongside the certificate in
+    /// 1Password. Mirrors the DB-backed `has_private_key` column.
+    pub has_private_key: Option<bool>,
+    /// `Some(true)` if an issuer chain is stored alongside the certificate.
+    pub has_chain: Option<bool>,
+    /// PEM-encoded issuer chain (only populated by the slow backfill path).
+    pub chain_pem: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -251,7 +284,28 @@ pub struct SignCsrResult {
 #[derive(Debug, Deserialize)]
 pub struct ImportCsrCertRequest {
     pub cert_pem: String,
+    pub chain_pem: Option<String>,
     pub cn: Option<String>,
+}
+
+/// Request to generate a fresh CSR (new key, same subject/SAN) from an
+/// existing external certificate.
+#[derive(Debug, Deserialize)]
+pub struct GenerateCsrFromCertRequest {
+    pub serial: String,
+}
+
+/// Detailed CSR inspection result — structured fields plus full text dump.
+#[derive(Debug, Serialize)]
+pub struct InspectCsrResult {
+    pub cn: Option<String>,
+    pub subject: String,
+    pub alt_dns_names: Vec<String>,
+    pub key_type: String,
+    pub key_size: u32,
+    pub signature_algorithm: String,
+    pub public_key_fingerprint_sha256: String,
+    pub text_dump: String,
 }
 
 // ---------------------------------------------------------------------------

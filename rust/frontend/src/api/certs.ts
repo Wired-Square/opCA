@@ -1,5 +1,13 @@
 import { tauriInvoke, withLock } from "./tauri";
-import type { CertListItem, ExternalCertListItem, CertDetail, CreateCertRequest, ImportCertRequest, ImportCertResult } from "./types";
+import type {
+  CertListItem,
+  ExternalCertListItem,
+  CertDetail,
+  ExternalCertDetail,
+  CreateCertRequest,
+  ImportCertRequest,
+  ImportCertResult,
+} from "./types";
 
 export async function listCerts(): Promise<CertListItem[]> {
   return tauriInvoke<CertListItem[]>("list_certs");
@@ -15,6 +23,32 @@ export async function getCertInfo(serial: string): Promise<CertDetail> {
 
 export async function backfillCert(serial: string): Promise<CertDetail> {
   return tauriInvoke<CertDetail>("backfill_cert", { serial });
+}
+
+export async function getExternalCertInfo(serial: string): Promise<ExternalCertDetail> {
+  return tauriInvoke<ExternalCertDetail>("get_external_cert_info", { serial });
+}
+
+export async function backfillExternalCert(serial: string): Promise<ExternalCertDetail> {
+  return tauriInvoke<ExternalCertDetail>("backfill_external_cert", { serial });
+}
+
+export async function getCertPrivateKey(serial: string): Promise<string> {
+  return tauriInvoke<string>("get_cert_private_key", { serial });
+}
+
+export async function getExternalCertPrivateKey(serial: string): Promise<string> {
+  return tauriInvoke<string>("get_external_cert_private_key", { serial });
+}
+
+/** Audit-log a clipboard copy of a non-secret cert artefact. The PEM bytes
+ * don't travel through this call — the frontend already has them. */
+export async function recordCertCopy(
+  scope: "local" | "external",
+  serial: string,
+  kind: "certificate" | "chain",
+): Promise<void> {
+  return tauriInvoke<void>("record_cert_copy", { scope, serial, kind });
 }
 
 export async function createCert(request: CreateCertRequest): Promise<CertListItem> {

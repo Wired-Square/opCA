@@ -7,6 +7,8 @@ import type {
   SignCsrRequest,
   SignCsrResult,
   ImportCsrCertRequest,
+  GenerateCsrFromCertRequest,
+  InspectCsrResult,
   CertListItem,
 } from "./types";
 
@@ -46,4 +48,16 @@ export async function importCsrCert(
   return withLock("import_csr_cert", () =>
     tauriInvoke<CertListItem>("import_csr_cert", { request }),
   );
+}
+
+export async function generateCsrFromCert(
+  request: GenerateCsrFromCertRequest,
+): Promise<CreateCsrResult> {
+  return withLock("generate_csr_from_cert", () =>
+    tauriInvoke<CreateCsrResult>("generate_csr_from_cert", { request }),
+  );
+}
+
+export async function inspectCsr(csrPem: string): Promise<InspectCsrResult> {
+  return tauriInvoke<InspectCsrResult>("inspect_csr", { csrPem });
 }

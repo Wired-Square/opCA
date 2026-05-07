@@ -40,6 +40,8 @@ fn make_cert(serial: &str, cn: &str, expiry: &str) -> CertRecord {
         ignored_by: None,
         ignored_reason: None,
         ignored_note: None,
+        has_private_key: Some(true),
+        has_chain: Some(false),
     }
 }
 
@@ -290,6 +292,8 @@ fn make_ext_cert(serial: &str, cn: &str, expiry: &str) -> ExternalCertRecord {
         key_type: Some("RSA".to_string()),
         key_size: Some(4096),
         san: None,
+        has_private_key: Some(false),
+        has_chain: Some(false),
     }
 }
 
@@ -924,7 +928,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 3); // v5→v6, v6→v7, v7→v8
+    assert_eq!(info.steps.len(), 4); // v5→v6, v6→v7, v7→v8, v8→v9
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1020,6 +1024,8 @@ fn test_iterdump_null_handling() {
         ignored_by: None,
         ignored_reason: None,
         ignored_note: None,
+        has_private_key: None,
+        has_chain: None,
     };
     db.add_cert(&cert).unwrap();
 
@@ -1048,6 +1054,8 @@ fn test_iterdump_single_quote_escaping() {
         ignored_by: None,
         ignored_reason: None,
         ignored_note: None,
+        has_private_key: None,
+        has_chain: None,
     };
     db.add_cert(&cert).unwrap();
 

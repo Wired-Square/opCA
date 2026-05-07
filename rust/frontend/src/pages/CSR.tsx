@@ -1,13 +1,29 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { listCsrs, getCsrInfo, createCsr, decodeCsr, signCsr } from "../api/csr";
+import {
+  listCsrs,
+  getCsrInfo,
+  createCsr,
+  decodeCsr,
+  signCsr,
+  importCsrCert,
+  inspectCsr,
+} from "../api/csr";
 import { createCopiedSignal } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
+import PemInput from "../components/PemInput";
 import { CERT_TYPES } from "../api/types";
-import type { CsrListItem, CreateCsrResult, DecodeCsrResult, SignCsrResult } from "../api/types";
+import type {
+  CsrListItem,
+  CreateCsrResult,
+  DecodeCsrResult,
+  SignCsrResult,
+  CertListItem,
+  InspectCsrResult,
+} from "../api/types";
 import "../styles/pages/csr.css";
 
-type Tab = "list" | "create" | "sign";
+type Tab = "list" | "create" | "sign" | "inspect";
 
 const CSR_TYPES = [
   { value: "appledev", label: "Apple Development" },
@@ -47,11 +63,94 @@ export default function CSR() {
   const [signSanInput, setSignSanInput] = createSignal("");
   const [signSans, setSignSans] = createSignal<string[]>([]);
 
+  // Import-signed-cert form (List tab, visible only for Pending CSRs)
+  const [importOpen, setImportOpen] = createSignal(false);
+  const [importCertPem, setImportCertPem] = createSignal("");
+  const [importChainPem, setImportChainPem] = createSignal("");
+  const [importing, setImporting] = createSignal(false);
+  const [importError, setImportError] = createSignal<string | null>(null);
+  const [importResult, setImportResult] = createSignal<CertListItem | null>(null);
+
+  // Inspect tab
+  const [inspectPem, setInspectPem] = createSignal("");
+  const [inspecting, setInspecting] = createSignal(false);
+  const [inspectError, setInspectError] = createSignal<string | null>(null);
+  const [inspectResult, setInspectResult] = createSignal<InspectCsrResult | null>(null);
+  const [inspectCopied, markInspectCopied] = createCopiedSignal();
+
   function selectRow(csr: CsrListItem) {
     setSelected(csr);
     setDetail(null);
     setError(null);
     setSuccess(null);
+    setImportOpen(false);
+    setImportCertPem("");
+    setImportChainPem("");
+    setImportError(null);
+    setImportResult(null);
+  }
+
+  async function handleImportSignedCert(e: Event) {
+    e.preventDefault();
+    const sel = selected();
+    if (!sel?.cn) return;
+
+    const certPem = importCertPem().trim();
+    setImportError(null);
+    setImportResult(null);
+
+    if (!certPem) {
+      setImportError("Signed certificate PEM is required.");
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const cert = await importCsrCert({
+        cert_pem: certPem,
+        chain_pem: importChainPem().trim() || undefined,
+        cn: sel.cn,
+      });
+      setImportResult(cert);
+      setImportCertPem("");
+      setImportChainPem("");
+      setDetail(null);
+      setSelected(null);
+      refetch();
+    } catch (err) {
+      setImportError(String(err));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function handleInspect() {
+    const pem = inspectPem().trim();
+    setInspectError(null);
+    setInspectResult(null);
+
+    if (!pem) {
+      setInspectError("CSR PEM is required.");
+      return;
+    }
+
+    setInspecting(true);
+    try {
+      const result = await inspectCsr(pem);
+      setInspectResult(result);
+    } catch (err) {
+      setInspectError(String(err));
+    } finally {
+      setInspecting(false);
+    }
+  }
+
+  function copyInspectDump() {
+    const dump = inspectResult()?.text_dump;
+    if (dump) {
+      navigator.clipboard.writeText(dump);
+      markInspectCopied();
+    }
   }
 
   async function handleInfo() {
@@ -234,6 +333,12 @@ export default function CSR() {
         >
           Sign
         </button>
+        <button
+          class={`tab-btn ${tab() === "inspect" ? "tab-active" : ""}`}
+          onClick={() => { setTab("inspect"); setInspectError(null); }}
+        >
+          Inspect
+        </button>
       </div>
 
       {/* ── List Tab ──────────────────────────────────────────────── */}
@@ -288,11 +393,69 @@ export default function CSR() {
           </Show>
 
           <Show when={selected()}>
-            <div class="csr-actions">
-              <button class="btn-secondary" onClick={handleInfo} disabled={loadingDetail()}>
-                {loadingDetail() ? "Loading..." : "View CSR"}
-              </button>
-            </div>
+            {(sel) => (
+              <div class="csr-actions">
+                <button class="btn-secondary" onClick={handleInfo} disabled={loadingDetail()}>
+                  {loadingDetail() ? "Loading..." : "View CSR"}
+                </button>
+                <Show when={sel().status === "Pending"}>
+                  <button
+                    class="btn-secondary"
+                    onClick={() => setImportOpen(!importOpen())}
+                  >
+                    {importOpen() ? "Cancel Import" : "Import Signed Cert"}
+                  </button>
+                </Show>
+              </div>
+            )}
+          </Show>
+
+          <Show when={importOpen() && selected()?.status === "Pending"}>
+            <form class="create-form import-cert-form" onSubmit={handleImportSignedCert}>
+              <p class="text-muted text-sm">
+                Paste the externally-signed certificate for {selected()?.cn}. The
+                CSR's stored private key will be paired with it and the result
+                will appear as an external certificate.
+              </p>
+              <PemInput
+                label="Signed Certificate (PEM, required)"
+                placeholder="Paste PEM certificate or use Browse…"
+                value={importCertPem()}
+                onInput={setImportCertPem}
+                rows={8}
+              />
+              <PemInput
+                label="Issuer Chain (PEM, optional)"
+                placeholder="Paste PEM intermediate CA certificates or use Browse…"
+                value={importChainPem()}
+                onInput={setImportChainPem}
+                rows={6}
+              />
+
+              <Show when={importError()}>
+                <p class="page-error" role="alert">{importError()}</p>
+              </Show>
+
+              <div class="form-actions">
+                <button
+                  class="btn-primary"
+                  type="submit"
+                  disabled={importing() || !importCertPem().trim()}
+                >
+                  {importing() ? "Importing..." : "Import Signed Cert"}
+                </button>
+              </div>
+            </form>
+          </Show>
+
+          <Show when={importResult()}>
+            {(c) => (
+              <div class="create-success">
+                <p class="page-success">
+                  Imported external certificate for {c().cn} (serial {c().serial}).
+                </p>
+              </div>
+            )}
           </Show>
 
           <Show when={error()}>
@@ -583,6 +746,87 @@ export default function CSR() {
               )}
             </Show>
           </form>
+        </div>
+      </Show>
+
+      {/* ── Inspect Tab ────────────────────────────────────────────── */}
+      <Show when={tab() === "inspect"}>
+        <div class="tab-content">
+          <div class="form-group">
+            <label class="form-label">CSR PEM</label>
+            <textarea
+              rows={10}
+              placeholder="Paste CSR PEM here..."
+              value={inspectPem()}
+              onInput={(e) => {
+                setInspectPem(e.currentTarget.value);
+                setInspectResult(null);
+                setInspectError(null);
+              }}
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck={false}
+            />
+          </div>
+
+          <div class="form-actions">
+            <button
+              class="btn-primary"
+              type="button"
+              disabled={inspecting() || !inspectPem().trim()}
+              onClick={handleInspect}
+            >
+              {inspecting() ? "Inspecting..." : "Inspect CSR"}
+            </button>
+          </div>
+
+          <Show when={inspectError()}>
+            <p class="page-error" role="alert">{inspectError()}</p>
+          </Show>
+
+          <Show when={inspectResult()}>
+            {(r) => (
+              <div class="detail-section">
+                <div class="detail-grid">
+                  <Row label="Common Name" value={r().cn} />
+                  <Row label="Subject" value={r().subject} mono />
+                  <Row label="Key" value={`${r().key_type} ${r().key_size} bits`} />
+                  <Row label="Signature Algorithm" value={r().signature_algorithm} mono />
+                  <Row
+                    label="Public Key SHA-256"
+                    value={r().public_key_fingerprint_sha256}
+                    mono
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Subject Alternative Names</label>
+                  <Show when={r().alt_dns_names.length > 0} fallback={
+                    <p class="text-muted text-sm">No alternative names.</p>
+                  }>
+                    <div class="san-list">
+                      <For each={r().alt_dns_names}>
+                        {(san) => <span class="san-tag">{san}</span>}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+                <div class="pem-section">
+                  <div class="pem-header">
+                    <span class="detail-label">Text Dump</span>
+                    <button
+                      type="button"
+                      class="btn-ghost btn-sm"
+                      onClick={copyInspectDump}
+                    >
+                      {inspectCopied() ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <pre class="csr-text-dump mono">{r().text_dump}</pre>
+                </div>
+              </div>
+            )}
+          </Show>
         </div>
       </Show>
 

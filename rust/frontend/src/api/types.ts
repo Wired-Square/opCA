@@ -137,6 +137,35 @@ export interface CertDetail extends CertListItem {
   ignored_reason: string | null;
   /** Optional free-text note. */
   ignored_note: string | null;
+  /** Whether a private key is stored alongside the cert in 1Password.
+   * `null` for legacy rows that pre-date the v9 schema; populated by the
+   * detail page's backfill the first time it's opened. */
+  has_private_key: boolean | null;
+  /** Whether an issuer chain is stored alongside the cert in 1Password. */
+  has_chain: boolean | null;
+  /** PEM-encoded issuer chain — populated by the slow backfill path. */
+  chain_pem: string | null;
+}
+
+export interface ExternalCertDetail {
+  serial: string | null;
+  cn: string | null;
+  title: string | null;
+  status: string | null;
+  cert_type: string | null;
+  expiry_date: string | null;
+  key_type: string | null;
+  key_size: number | null;
+  subject: string | null;
+  issuer: string | null;
+  issuer_subject: string | null;
+  not_before: string | null;
+  import_date: string | null;
+  san: string | null;
+  cert_pem: string | null;
+  has_private_key: boolean | null;
+  has_chain: boolean | null;
+  chain_pem: string | null;
 }
 
 export interface CreateCertRequest {
@@ -206,7 +235,23 @@ export interface SignCsrResult {
 
 export interface ImportCsrCertRequest {
   cert_pem: string;
+  chain_pem?: string;
   cn?: string;
+}
+
+export interface GenerateCsrFromCertRequest {
+  serial: string;
+}
+
+export interface InspectCsrResult {
+  cn: string | null;
+  subject: string;
+  alt_dns_names: string[];
+  key_type: string;
+  key_size: number;
+  signature_algorithm: string;
+  public_key_fingerprint_sha256: string;
+  text_dump: string;
 }
 
 // ---------------------------------------------------------------------------

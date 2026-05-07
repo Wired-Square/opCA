@@ -1,11 +1,14 @@
 import { Show, For, createSignal, createResource, createEffect } from "solid-js";
 import { useParams, useNavigate } from "@solidjs/router";
-import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert, ignoreCert, unignoreCert } from "../api/certs";
+import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert, ignoreCert, unignoreCert, getCertPrivateKey, recordCertCopy } from "../api/certs";
+import type { CertDetail } from "../api/types";
 import { getCaConfig, uploadCaDatabase } from "../api/ca";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal } from "../utils/clipboard";
+import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
+import Availability from "../components/Availability";
 import "../styles/pages/cert-info.css";
 
 export default function CertInfo() {
@@ -20,6 +23,9 @@ export default function CertInfo() {
   const [acting, setActing] = createSignal<string | false>(false);
   const [error, setError] = createSignal<string | null>(null);
   const [copied, markCopied] = createCopiedSignal();
+  const [copiedKey, markKeyCopied] = createCopiedSignal();
+  const [copiedChain, markChainCopied] = createCopiedSignal();
+  const [exportingKey, setExportingKey] = createSignal(false);
   const [backfilling, setBackfilling] = createSignal(false);
   const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
   const [uploadingDb, setUploadingDb] = createSignal(false);
@@ -151,10 +157,55 @@ export default function CertInfo() {
 
   function copyPem() {
     const pem = detail()?.cert_pem;
-    if (pem) {
+    const serial = params.serial as string;
+    if (pem && serial) {
       navigator.clipboard.writeText(pem);
       markCopied();
+      void recordCertCopy("local", serial, "certificate");
     }
+  }
+
+  function copyChain() {
+    const pem = detail()?.chain_pem;
+    const serial = params.serial as string;
+    if (pem && serial) {
+      navigator.clipboard.writeText(pem);
+      markChainCopied();
+      void recordCertCopy("local", serial, "chain");
+    }
+  }
+
+  async function copyPrivateKey() {
+    const serial = params.serial as string;
+    if (!serial) return;
+    if (!(await confirmPrivateKeyCopy(detail()?.cn ?? serial))) return;
+    setError(null);
+    setExportingKey(true);
+    let key = "";
+    try {
+      key = await getCertPrivateKey(serial);
+      await navigator.clipboard.writeText(key);
+      markKeyCopied();
+      // No recordCertCopy() call here: get_cert_private_key already audits
+      // server-side via state.log_ok, and refuses CA keys outright.
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      key = "";
+      setExportingKey(false);
+    }
+  }
+
+  // Until backfill finishes, we know whether a chain exists (has_chain) but
+  // don't have the chain PEM in hand yet. Render the indicator as "unknown"
+  // (loading) rather than green-but-broken in that window.
+  function chainIndicatorState(d: CertDetail): boolean | null {
+    if (d.has_chain === true && !d.chain_pem) return null;
+    return d.has_chain;
+  }
+
+  function isCaCert(d: CertDetail): boolean {
+    return d.cert_type?.toLowerCase() === "ca";
   }
 
   return (
@@ -253,17 +304,50 @@ export default function CertInfo() {
                     </div>
                   </Show>
                 </div>
+                <div class="detail-row">
+                  <span class="detail-label">Stored Items</span>
+                  <div class="stored-items">
+                    <Availability
+                      label="Certificate"
+                      available={d().cert_pem ? true : null}
+                      onCopy={copyPem}
+                      copied={copied()}
+                    />
+                    <Availability
+                      label="Private Key"
+                      available={d().has_private_key}
+                      onCopy={isCaCert(d()) ? undefined : copyPrivateKey}
+                      busy={exportingKey()}
+                      copied={copiedKey()}
+                      blocked={isCaCert(d())
+                        ? "CA private keys cannot be copied from opCA. Retrieve from 1Password directly if absolutely necessary."
+                        : undefined}
+                    />
+                    <Availability
+                      label="Chain"
+                      available={chainIndicatorState(d())}
+                      onCopy={copyChain}
+                      copied={copiedChain()}
+                    />
+                  </div>
+                </div>
               </div>
 
               <Show when={d().cert_pem}>
                 <div class="pem-section">
                   <div class="pem-header">
                     <span class="pem-label">Certificate PEM</span>
-                    <button class="btn-ghost btn-sm" onClick={copyPem}>
-                      {copied() ? "Copied" : "Copy"}
-                    </button>
                   </div>
                   <pre class="pem-block">{d().cert_pem}</pre>
+                </div>
+              </Show>
+
+              <Show when={d().chain_pem}>
+                <div class="pem-section">
+                  <div class="pem-header">
+                    <span class="pem-label">Certificate Chain</span>
+                  </div>
+                  <pre class="pem-block">{d().chain_pem}</pre>
                 </div>
               </Show>
 
@@ -382,3 +466,4 @@ function Row(props: {
     </div>
   );
 }
+

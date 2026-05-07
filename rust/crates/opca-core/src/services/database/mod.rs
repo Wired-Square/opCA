@@ -361,9 +361,10 @@ impl CertificateAuthorityDB {
             "INSERT INTO certificate_authority
                 (serial, cn, title, status, expiry_date, revocation_date, subject,
                  cert_type, not_before, key_type, key_size, issuer, san,
-                 ignored_at, ignored_by, ignored_reason, ignored_note)
+                 ignored_at, ignored_by, ignored_reason, ignored_note,
+                 has_private_key, has_chain)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17)",
+                     ?14, ?15, ?16, ?17, ?18, ?19)",
             rusqlite::params![
                 record.serial,
                 record.cn,
@@ -382,6 +383,8 @@ impl CertificateAuthorityDB {
                 record.ignored_by,
                 record.ignored_reason,
                 record.ignored_note,
+                record.has_private_key,
+                record.has_chain,
             ],
         )?;
         self.dirty = true;
@@ -396,8 +399,9 @@ impl CertificateAuthorityDB {
                 revocation_date = ?5, subject = ?6, cert_type = ?7,
                 not_before = ?8, key_type = ?9, key_size = ?10,
                 issuer = ?11, san = ?12,
-                ignored_at = ?13, ignored_by = ?14, ignored_reason = ?15, ignored_note = ?16
-             WHERE serial = ?17",
+                ignored_at = ?13, ignored_by = ?14, ignored_reason = ?15, ignored_note = ?16,
+                has_private_key = ?17, has_chain = ?18
+             WHERE serial = ?19",
             rusqlite::params![
                 record.cn,
                 record.title,
@@ -415,6 +419,8 @@ impl CertificateAuthorityDB {
                 record.ignored_by,
                 record.ignored_reason,
                 record.ignored_note,
+                record.has_private_key,
+                record.has_chain,
                 record.serial,
             ],
         )?;
@@ -505,32 +511,13 @@ impl CertificateAuthorityDB {
         let sql = format!(
             "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
                     cert_type, not_before, key_type, key_size, issuer, san,
-                    ignored_at, ignored_by, ignored_reason, ignored_note
+                    ignored_at, ignored_by, ignored_reason, ignored_note,
+                    has_private_key, has_chain
              FROM certificate_authority WHERE {where_col} = ?1{valid_clause}"
         );
 
         let mut stmt = self.conn.prepare(&sql)?;
-        let result = stmt.query_row([&value], |row| {
-            Ok(CertRecord {
-                serial: row.get(0)?,
-                cn: row.get(1)?,
-                title: row.get(2)?,
-                status: row.get(3)?,
-                expiry_date: row.get(4)?,
-                revocation_date: row.get(5)?,
-                subject: row.get(6)?,
-                cert_type: row.get(7)?,
-                not_before: row.get(8)?,
-                key_type: row.get(9)?,
-                key_size: row.get(10)?,
-                issuer: row.get(11)?,
-                san: row.get(12)?,
-                ignored_at: row.get(13)?,
-                ignored_by: row.get(14)?,
-                ignored_reason: row.get(15)?,
-                ignored_note: row.get(16)?,
-            })
-        });
+        let result = stmt.query_row([&value], Self::row_to_cert);
 
         match result {
             Ok(record) => Ok(Some(record)),
@@ -554,37 +541,42 @@ impl CertificateAuthorityDB {
         let mut stmt = self.conn.prepare(
             "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
                     cert_type, not_before, key_type, key_size, issuer, san,
-                    ignored_at, ignored_by, ignored_reason, ignored_note
+                    ignored_at, ignored_by, ignored_reason, ignored_note,
+                    has_private_key, has_chain
              FROM certificate_authority ORDER BY CAST(serial AS INTEGER)"
         )?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok(CertRecord {
-                serial: row.get(0)?,
-                cn: row.get(1)?,
-                title: row.get(2)?,
-                status: row.get(3)?,
-                expiry_date: row.get(4)?,
-                revocation_date: row.get(5)?,
-                subject: row.get(6)?,
-                cert_type: row.get(7)?,
-                not_before: row.get(8)?,
-                key_type: row.get(9)?,
-                key_size: row.get(10)?,
-                issuer: row.get(11)?,
-                san: row.get(12)?,
-                ignored_at: row.get(13)?,
-                ignored_by: row.get(14)?,
-                ignored_reason: row.get(15)?,
-                ignored_note: row.get(16)?,
-            })
-        })?;
+        let rows = stmt.query_map([], Self::row_to_cert)?;
 
         let mut certs = Vec::new();
         for row in rows {
             certs.push(row?);
         }
         Ok(certs)
+    }
+
+    fn row_to_cert(row: &rusqlite::Row<'_>) -> rusqlite::Result<CertRecord> {
+        Ok(CertRecord {
+            serial: row.get(0)?,
+            cn: row.get(1)?,
+            title: row.get(2)?,
+            status: row.get(3)?,
+            expiry_date: row.get(4)?,
+            revocation_date: row.get(5)?,
+            subject: row.get(6)?,
+            cert_type: row.get(7)?,
+            not_before: row.get(8)?,
+            key_type: row.get(9)?,
+            key_size: row.get(10)?,
+            issuer: row.get(11)?,
+            san: row.get(12)?,
+            ignored_at: row.get(13)?,
+            ignored_by: row.get(14)?,
+            ignored_reason: row.get(15)?,
+            ignored_note: row.get(16)?,
+            has_private_key: row.get(17)?,
+            has_chain: row.get(18)?,
+        })
     }
 }
 
@@ -598,8 +590,9 @@ impl CertificateAuthorityDB {
         self.conn.execute(
             "INSERT INTO external_certificate
                 (serial, cn, title, status, expiry_date, subject, issuer, issuer_subject,
-                 import_date, cert_type, not_before, key_type, key_size, san)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 import_date, cert_type, not_before, key_type, key_size, san,
+                 has_private_key, has_chain)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             rusqlite::params![
                 record.serial,
                 record.cn,
@@ -615,6 +608,8 @@ impl CertificateAuthorityDB {
                 record.key_type,
                 record.key_size,
                 record.san,
+                record.has_private_key,
+                record.has_chain,
             ],
         )?;
         self.dirty = true;
@@ -628,8 +623,9 @@ impl CertificateAuthorityDB {
                 cn = ?1, title = ?2, status = ?3, expiry_date = ?4,
                 subject = ?5, issuer = ?6, issuer_subject = ?7,
                 import_date = ?8, cert_type = ?9, not_before = ?10,
-                key_type = ?11, key_size = ?12, san = ?13
-             WHERE serial = ?14",
+                key_type = ?11, key_size = ?12, san = ?13,
+                has_private_key = ?14, has_chain = ?15
+             WHERE serial = ?16",
             rusqlite::params![
                 record.cn,
                 record.title,
@@ -644,6 +640,8 @@ impl CertificateAuthorityDB {
                 record.key_type,
                 record.key_size,
                 record.san,
+                record.has_private_key,
+                record.has_chain,
                 record.serial,
             ],
         )?;
@@ -678,7 +676,8 @@ impl CertificateAuthorityDB {
 
         let sql = format!(
             "SELECT serial, cn, title, status, expiry_date, subject, issuer, issuer_subject,
-                    import_date, cert_type, not_before, key_type, key_size, san
+                    import_date, cert_type, not_before, key_type, key_size, san,
+                    has_private_key, has_chain
              FROM external_certificate WHERE {where_col} = ?1{valid_clause}"
         );
 
@@ -700,14 +699,16 @@ impl CertificateAuthorityDB {
         let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match status {
             Some(s) => (
                 "SELECT serial, cn, title, status, expiry_date, subject, issuer, issuer_subject,
-                        import_date, cert_type, not_before, key_type, key_size, san
+                        import_date, cert_type, not_before, key_type, key_size, san,
+                        has_private_key, has_chain
                  FROM external_certificate WHERE status = ?1 ORDER BY serial"
                     .to_string(),
                 vec![Box::new(s.to_string())],
             ),
             None => (
                 "SELECT serial, cn, title, status, expiry_date, subject, issuer, issuer_subject,
-                        import_date, cert_type, not_before, key_type, key_size, san
+                        import_date, cert_type, not_before, key_type, key_size, san,
+                        has_private_key, has_chain
                  FROM external_certificate ORDER BY serial"
                     .to_string(),
                 vec![],
@@ -752,6 +753,8 @@ impl CertificateAuthorityDB {
             key_type: row.get(11)?,
             key_size: row.get(12)?,
             san: row.get(13)?,
+            has_private_key: row.get(14)?,
+            has_chain: row.get(15)?,
         })
     }
 }
@@ -1292,31 +1295,12 @@ impl CertificateAuthorityDB {
         let mut stmt = self.conn.prepare(
             "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
                     cert_type, not_before, key_type, key_size, issuer, san,
-                    ignored_at, ignored_by, ignored_reason, ignored_note
+                    ignored_at, ignored_by, ignored_reason, ignored_note,
+                    has_private_key, has_chain
              FROM certificate_authority",
         )?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok(CertRecord {
-                serial: row.get(0)?,
-                cn: row.get(1)?,
-                title: row.get(2)?,
-                status: row.get(3)?,
-                expiry_date: row.get(4)?,
-                revocation_date: row.get(5)?,
-                subject: row.get(6)?,
-                cert_type: row.get(7)?,
-                not_before: row.get(8)?,
-                key_type: row.get(9)?,
-                key_size: row.get(10)?,
-                issuer: row.get(11)?,
-                san: row.get(12)?,
-                ignored_at: row.get(13)?,
-                ignored_by: row.get(14)?,
-                ignored_reason: row.get(15)?,
-                ignored_note: row.get(16)?,
-            })
-        })?;
+        let rows = stmt.query_map([], Self::row_to_cert)?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -1329,7 +1313,8 @@ impl CertificateAuthorityDB {
     fn fetch_all_external_certs(&self) -> Result<Vec<ExternalCertRecord>, OpcaError> {
         let mut stmt = self.conn.prepare(
             "SELECT serial, cn, title, status, expiry_date, subject, issuer, issuer_subject,
-                    import_date, cert_type, not_before, key_type, key_size, san
+                    import_date, cert_type, not_before, key_type, key_size, san,
+                    has_private_key, has_chain
              FROM external_certificate",
         )?;
 
