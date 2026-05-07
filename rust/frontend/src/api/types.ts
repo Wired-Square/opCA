@@ -281,20 +281,30 @@ export interface InspectCsrResult {
 export interface DkimKeyItem {
   domain: string;
   selector: string;
+  key_size: number | null;
   created_at: string | null;
 }
 
 export interface DkimKeyDetail {
   domain: string;
   selector: string;
-  key_size: string | null;
+  key_size: number | null;
   dns_name: string;
   dns_record: string | null;
   /** `dns_record` reformatted as 255-byte quoted chunks for AWS Route53. */
   dns_record_chunked: string | null;
   created_at: string | null;
   public_key: string | null;
+  /** Stored Items flags — `null` until the slow-path backfill confirms. */
+  has_private_key: boolean | null;
+  has_public_key: boolean | null;
+  has_dns_record: boolean | null;
+  /** `true` if the stored private key derives a public key matching the
+   * stored public key. `null` until the slow-path verification runs. */
+  key_pair_match: boolean | null;
 }
+
+export type DkimCopyKind = "selector" | "public_key" | "dns_record";
 
 export interface CreateDkimRequest {
   domain: string;

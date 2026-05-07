@@ -71,6 +71,7 @@ impl CertificateAuthorityDB {
         conn.execute_batch(schema::CREATE_CRL_METADATA_TABLE)?;
         conn.execute_batch(schema::CREATE_OPENVPN_TEMPLATE_TABLE)?;
         conn.execute_batch(schema::CREATE_OPENVPN_PROFILE_TABLE)?;
+        conn.execute_batch(schema::CREATE_DKIM_TABLE)?;
         Self::create_indexes(&conn)?;
 
         Ok(Self {
@@ -1077,6 +1078,106 @@ impl CertificateAuthorityDB {
             .conn
             .execute("DELETE FROM openvpn_profile WHERE title = ?1", [title])?;
         Ok(rows > 0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DKIM key CRUD
+// ---------------------------------------------------------------------------
+
+impl CertificateAuthorityDB {
+    /// Insert a DKIM key record. Used both at create time and when seeding
+    /// the table from existing 1Password items.
+    pub fn upsert_dkim(&mut self, record: &DkimRecord) -> Result<(), OpcaError> {
+        self.conn.execute(
+            "INSERT INTO dkim_key
+                (domain, selector, title, key_size, created_at,
+                 has_private_key, has_public_key, has_dns_record)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (domain, selector) DO UPDATE SET
+                title = excluded.title,
+                key_size = COALESCE(excluded.key_size, dkim_key.key_size),
+                created_at = COALESCE(excluded.created_at, dkim_key.created_at),
+                has_private_key = COALESCE(excluded.has_private_key, dkim_key.has_private_key),
+                has_public_key = COALESCE(excluded.has_public_key, dkim_key.has_public_key),
+                has_dns_record = COALESCE(excluded.has_dns_record, dkim_key.has_dns_record)",
+            rusqlite::params![
+                record.domain,
+                record.selector,
+                record.title,
+                record.key_size,
+                record.created_at,
+                record.has_private_key,
+                record.has_public_key,
+                record.has_dns_record,
+            ],
+        )?;
+        self.dirty = true;
+        Ok(())
+    }
+
+    pub fn delete_dkim(&mut self, domain: &str, selector: &str) -> Result<bool, OpcaError> {
+        let rows = self.conn.execute(
+            "DELETE FROM dkim_key WHERE domain = ?1 AND selector = ?2",
+            [domain, selector],
+        )?;
+        if rows > 0 {
+            self.dirty = true;
+        }
+        Ok(rows > 0)
+    }
+
+    pub fn query_dkim(
+        &self,
+        domain: &str,
+        selector: &str,
+    ) -> Result<Option<DkimRecord>, OpcaError> {
+        let result = self.conn.query_row(
+            "SELECT domain, selector, title, key_size, created_at,
+                    has_private_key, has_public_key, has_dns_record
+             FROM dkim_key WHERE domain = ?1 AND selector = ?2",
+            [domain, selector],
+            Self::row_to_dkim,
+        );
+        match result {
+            Ok(record) => Ok(Some(record)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn query_all_dkim(&self) -> Result<Vec<DkimRecord>, OpcaError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT domain, selector, title, key_size, created_at,
+                    has_private_key, has_public_key, has_dns_record
+             FROM dkim_key ORDER BY domain, selector",
+        )?;
+        let rows = stmt.query_map([], Self::row_to_dkim)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn count_dkim(&self) -> Result<i64, OpcaError> {
+        let count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM dkim_key", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    fn row_to_dkim(row: &rusqlite::Row<'_>) -> rusqlite::Result<DkimRecord> {
+        Ok(DkimRecord {
+            domain: row.get(0)?,
+            selector: row.get(1)?,
+            title: row.get(2)?,
+            key_size: row.get(3)?,
+            created_at: row.get(4)?,
+            has_private_key: row.get(5)?,
+            has_public_key: row.get(6)?,
+            has_dns_record: row.get(7)?,
+        })
     }
 }
 

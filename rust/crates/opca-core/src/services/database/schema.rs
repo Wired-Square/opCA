@@ -5,7 +5,7 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 9;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 10;
 
 // ---------------------------------------------------------------------------
 // Table DDL (v8 — current)
@@ -113,6 +113,20 @@ pub const CREATE_OPENVPN_TEMPLATE_TABLE: &str = "
     )
 ";
 
+pub const CREATE_DKIM_TABLE: &str = "
+    CREATE TABLE IF NOT EXISTS dkim_key (
+        domain TEXT NOT NULL,
+        selector TEXT NOT NULL,
+        title TEXT,
+        key_size INTEGER,
+        created_at TEXT,
+        has_private_key INTEGER,
+        has_public_key INTEGER,
+        has_dns_record INTEGER,
+        PRIMARY KEY (domain, selector)
+    )
+";
+
 pub const CREATE_OPENVPN_PROFILE_TABLE: &str = "
     CREATE TABLE IF NOT EXISTS openvpn_profile (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,6 +149,7 @@ pub const CREATE_INDEXES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_csr_status ON csr (status)",
     "CREATE INDEX IF NOT EXISTS idx_ext_cn ON external_certificate (cn)",
     "CREATE INDEX IF NOT EXISTS idx_ext_status ON external_certificate (status)",
+    "CREATE INDEX IF NOT EXISTS idx_dkim_domain ON dkim_key (domain)",
 ];
 
 // ---------------------------------------------------------------------------
@@ -320,8 +335,25 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v8→v9: {e}")))?;
 
         version = 9;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 9, ok: true });
+    }
+
+    // v9 → v10: add the DKIM table. DKIM keys previously lived only as
+    // 1Password items; the new table lets the keys list render from local
+    // state without a vault round-trip. The first DKIM list call after
+    // upgrade populates the table from 1Password.
+    if version == 9 {
+        conn.execute_batch(CREATE_DKIM_TABLE)
+            .map_err(|e| OpcaError::SchemaMigration(format!("v9→v10 dkim_key: {e}")))?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_dkim_domain ON dkim_key (domain);
+             UPDATE config SET schema_version = 10 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v9→v10 finalise: {e}")))?;
+
+        version = 10;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 10, ok: true });
     }
 
     info.migrated = true;

@@ -6,10 +6,19 @@ import type {
   CreateDkimResult,
   DkimVerifyResult,
   DkimRoute53Result,
+  DkimCopyKind,
 } from "./types";
 
 export async function listDkimKeys(): Promise<DkimKeyItem[]> {
   return tauriInvoke<DkimKeyItem[]>("list_dkim_keys");
+}
+
+/** Pull the DKIM_<domain>_<selector> items out of 1Password and refresh the
+ * local SQLite mirror. Used after the v10 migration and on Refresh. */
+export async function syncDkimKeys(): Promise<number> {
+  return withLock("sync_dkim_keys", () =>
+    tauriInvoke<number>("sync_dkim_keys"),
+  );
 }
 
 export async function getDkimInfo(
@@ -17,6 +26,29 @@ export async function getDkimInfo(
   selector: string,
 ): Promise<DkimKeyDetail> {
   return tauriInvoke<DkimKeyDetail>("get_dkim_info", { domain, selector });
+}
+
+export async function backfillDkim(
+  domain: string,
+  selector: string,
+): Promise<DkimKeyDetail> {
+  return tauriInvoke<DkimKeyDetail>("backfill_dkim", { domain, selector });
+}
+
+export async function getDkimPrivateKey(
+  domain: string,
+  selector: string,
+): Promise<string> {
+  return tauriInvoke<string>("get_dkim_private_key", { domain, selector });
+}
+
+/** Audit-log a clipboard copy of a non-secret DKIM artefact. */
+export async function recordDkimCopy(
+  domain: string,
+  selector: string,
+  kind: DkimCopyKind,
+): Promise<void> {
+  return tauriInvoke<void>("record_dkim_copy", { domain, selector, kind });
 }
 
 export async function createDkimKey(

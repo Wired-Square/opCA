@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Server-side audit logging for every clipboard copy of a certificate, private key, chain, CRL document, or CA certificate — entries appear in the Log page alongside the existing CA operations.
 - CA Certificate tab now has the same **Stored Items** row as the cert detail pages: Certificate (green, copyable via the indicator) and Private Key (green, padlock — never copyable).
 - New **Inspect** tab on the Certificates page: paste any certificate PEM to see structured fields (subject, issuer, serial, validity, key info, signature algorithm, SANs, public-key SHA-256 fingerprint, CA flag) plus the full `openssl x509 -text -noout` style dump.
+- DKIM keys page now follows the same shape as the certificate detail pages. Clicking a row navigates to a per-key detail view at `/dkim/<domain>/<selector>`. Verify DNS, Deploy to Route53, and Delete actions live on the detail page; the keys list is just a clickable table.
+- DKIM keys are now mirrored in a `dkim_key` SQLite table (schema v10) so the keys list renders without a vault round-trip. The first list call after upgrade syncs from 1Password; subsequent calls are local. The Refresh button re-syncs.
+- DKIM detail page exposes a **Stored Items** row with Selector, Public Key, Private Key, and DNS Record indicators — green/copyable when present, padlock-blocked otherwise. Selector copies as `<selector>._domainkey` (the DNS host record name). Private-key copy goes through the Tauri confirm dialog and the same audit-logged backend path as cert keys.
+- DKIM detail page shows a **Key Pair** match status (Matched / Mismatch / —) so out-of-band tampering with the stored public key is visible.
 
 ### Changed
 

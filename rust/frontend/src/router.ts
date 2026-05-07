@@ -11,6 +11,7 @@ const CertInfo = lazy(() => import("./pages/CertInfo"));
 const ExternalCertInfo = lazy(() => import("./pages/ExternalCertInfo"));
 const CRL = lazy(() => import("./pages/CRL"));
 const DKIM = lazy(() => import("./pages/DKIM"));
+const DkimKeyDetail = lazy(() => import("./pages/DkimKeyDetail"));
 const OpenVPN = lazy(() => import("./pages/OpenVPN"));
 const Database = lazy(() => import("./pages/Database"));
 
@@ -26,6 +27,7 @@ export const routes: RouteDefinition[] = [
   { path: "/crl", component: CRL },
   { path: "/csr", component: lazy(() => import("./pages/CSR")) },
   { path: "/dkim", component: DKIM },
+  { path: "/dkim/:domain/:selector", component: DkimKeyDetail },
   { path: "/openvpn", component: OpenVPN },
   { path: "/database", component: Database },
   { path: "/vault", component: lazy(() => import("./pages/Vault")) },

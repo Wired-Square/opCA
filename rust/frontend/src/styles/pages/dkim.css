@@ -87,3 +87,15 @@
 .page-dkim .form-actions {
   margin-top: 4px;
 }
+
+/* The copyable host-record chip plus the dim domain suffix the user sees
+ * but doesn't paste into the DNS host field. */
+.dns-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dns-name-suffix {
+  color: var(--text-muted);
+}

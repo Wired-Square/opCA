@@ -338,6 +338,7 @@ pub struct InspectCsrResult {
 pub struct DkimKeyItem {
     pub domain: String,
     pub selector: String,
+    pub key_size: Option<i64>,
     pub created_at: Option<String>,
 }
 
@@ -345,13 +346,21 @@ pub struct DkimKeyItem {
 pub struct DkimKeyDetail {
     pub domain: String,
     pub selector: String,
-    pub key_size: Option<String>,
+    pub key_size: Option<i64>,
     pub dns_name: String,
     pub dns_record: Option<String>,
     /// `dns_record` reformatted as 255-byte quoted chunks for AWS Route53.
     pub dns_record_chunked: Option<String>,
     pub created_at: Option<String>,
     pub public_key: Option<String>,
+    /// `Some(true)` once the bundle has been confirmed in 1Password and the
+    /// expected field was non-empty. `None` on the fast path.
+    pub has_private_key: Option<bool>,
+    pub has_public_key: Option<bool>,
+    pub has_dns_record: Option<bool>,
+    /// `Some(true)` if the stored private key derives a public key matching
+    /// the stored public key. `None` until the slow-path verification runs.
+    pub key_pair_match: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

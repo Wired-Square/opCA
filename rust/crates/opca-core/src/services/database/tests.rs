@@ -928,7 +928,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 4); // v5→v6, v6→v7, v7→v8, v8→v9
+    assert_eq!(info.steps.len(), 5); // v5→v6, v6→v7, v7→v8, v8→v9, v9→v10
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));

@@ -151,6 +151,22 @@ pub struct CaConfig {
     pub ca_backup_store: Option<String>,
 }
 
+/// A DKIM key entry (`dkim_key` table). Mirrors the small set of metadata
+/// the keys list needs without round-tripping 1Password — full PEM material
+/// stays in the vault item titled `DKIM_<domain>_<selector>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DkimRecord {
+    pub domain: String,
+    pub selector: String,
+    pub title: Option<String>,
+    pub key_size: Option<i64>,
+    /// ISO 8601 string captured at create time.
+    pub created_at: Option<String>,
+    pub has_private_key: Option<bool>,
+    pub has_public_key: Option<bool>,
+    pub has_dns_record: Option<bool>,
+}
+
 /// CRL cache metadata (singleton row, `id=1`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrlMetadata {
