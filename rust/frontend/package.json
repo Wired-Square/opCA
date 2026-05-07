@@ -1,7 +1,7 @@
 {
   "name": "opca-frontend",
   "private": true,
-  "version": "0.99.14",
+  "version": "0.99.15",
   "type": "module",
   "scripts": {
     "dev": "vite",
