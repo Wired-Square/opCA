@@ -163,15 +163,38 @@ fn do_sync_dkim_keys(state: &State<'_, AppState>) -> Result<usize, String> {
         db.upsert_dkim(record).map_err(|e| e.to_string())?;
     }
 
+    // Reconcile deletions: drop DB rows whose 1Password item no longer
+    // exists. Without this, a key deleted by an older client (or via
+    // `op item delete` directly) would linger as a ghost row that throws
+    // on detail-page open.
+    let live: std::collections::HashSet<(String, String)> = found
+        .iter()
+        .map(|r| (r.domain.clone(), r.selector.clone()))
+        .collect();
+    let mut removed = 0usize;
+    for stale in db.query_all_dkim().map_err(|e| e.to_string())? {
+        if !live.contains(&(stale.domain.clone(), stale.selector.clone())) {
+            db.delete_dkim(&stale.domain, &stale.selector)
+                .map_err(|e| e.to_string())?;
+            removed += 1;
+        }
+    }
+
     ca.store_ca_database().map_err(|e| {
         state.log_err("sync_dkim_keys", Some(e.to_string()));
         e.to_string()
     })?;
 
-    state.log_ok(
-        "sync_dkim_keys",
-        Some(format!("Synced {} DKIM key(s) from 1Password", found.len())),
-    );
+    let summary = if removed > 0 {
+        format!(
+            "Synced {} DKIM key(s) from 1Password ({} stale row(s) removed)",
+            found.len(),
+            removed
+        )
+    } else {
+        format!("Synced {} DKIM key(s) from 1Password", found.len())
+    };
+    state.log_ok("sync_dkim_keys", Some(summary));
     Ok(found.len())
 }
 

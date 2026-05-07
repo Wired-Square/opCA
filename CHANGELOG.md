@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - DKIM detail page exposes a **Stored Items** row with Selector, Public Key, Private Key, and DNS Record indicators — green/copyable when present, padlock-blocked otherwise. Selector copies as `<selector>._domainkey` (the DNS host record name). Private-key copy goes through the Tauri confirm dialog and the same audit-logged backend path as cert keys.
 - DKIM detail page shows a **Key Pair** match status (Matched / Mismatch / —) so out-of-band tampering with the stored public key is visible.
 
+### Compatibility
+
+- The DKIM `dkim_key` table (schema v10) is populated by the new client. If a vault is touched by a mix of old (≤ 0.99.14) and new clients during rollout, an older client may create or delete a DKIM key without updating the table. The keys list on the new client reconciles fully with 1Password on Refresh — additions are picked up and stale rows for deleted items are removed. No manual intervention is required beyond clicking Refresh once after a mixed-client period.
+
 ### Changed
 
 - `CRL` detail now uses a fast/slow split: the local SQLite metadata renders immediately, and the actual CRL document loads from 1Password in the background. The previous combined fetch held the page hostage to the vault round-trip.
