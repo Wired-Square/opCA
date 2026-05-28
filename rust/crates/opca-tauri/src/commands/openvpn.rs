@@ -471,6 +471,32 @@ pub async fn list_vpn_clients(
     Ok(vpn_clients)
 }
 
+/// Look up the VPN profile previously generated for a CN, straight from the
+/// local database (no `op` round-trip). Returns the most recently recorded
+/// match, so the cert detail page can offer to regenerate it after a
+/// renew/rekey using the same template.
+#[tauri::command]
+pub async fn get_vpn_profile_for_cn(
+    state: State<'_, AppState>,
+    cn: String,
+) -> Result<Option<OpenVpnProfileItem>, String> {
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
+
+    let profile = db
+        .query_openvpn_profile_for_cn(&cn)
+        .map_err(|e| e.to_string())?
+        .map(|p| OpenVpnProfileItem {
+            cn: p.cn,
+            title: p.title,
+            created_date: p.created_date,
+            template: p.template,
+        });
+
+    Ok(profile)
+}
+
 /// Generate a VPN profile for a client CN using a template.
 #[tauri::command]
 pub async fn generate_openvpn_profile(
@@ -506,11 +532,13 @@ pub async fn generate_openvpn_profile(
         let item_title = format!("VPN_{cn}");
         let filename = format!("{cn}-{template_name}.ovpn");
 
+        // Auto (create-or-edit) so regenerating after a renew/rekey overwrites
+        // the existing VPN_<cn> document instead of failing/duplicating.
         op.store_document(
             &item_title,
             &filename,
             &profile_content,
-            StoreAction::Create,
+            StoreAction::Auto,
             dest_vault.as_deref(),
         )
         .map_err(|e| format!("Failed to store VPN profile: {e}"))?;
@@ -532,10 +560,13 @@ pub async fn generate_openvpn_profile(
         template: Some(template_name.clone()),
     };
 
-    // Try to record in database (best effort — profile is already in 1Password)
+    // Try to record in database (best effort — profile is already in 1Password).
+    // Delete any existing row for this title first so regeneration upserts
+    // rather than leaving duplicate rows for the same CN.
     if let Ok(mut conn) = state.ensure_ca() {
         if let Some(ref mut ca) = conn.ca {
             if let Some(ref mut db) = ca.ca_database {
+                let _ = db.delete_openvpn_profile(&title);
                 let _ = db.add_openvpn_profile(&OpenVpnProfile {
                     id: None,
                     cn: cn.clone(),

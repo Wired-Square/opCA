@@ -127,6 +127,10 @@ pub struct CertListItem {
     /// If this cert is expired but another same-CN cert is Valid, this is
     /// the replacement's serial. Set only for superseded rows.
     pub superseded_by: Option<String>,
+    /// Whether this (still-Valid) cert falls inside the expiry-warning window
+    /// (`certs_expires_soon`, EXPIRY_WARNING_DAYS). The list view renders it as
+    /// "Expiring Soon" rather than "Valid".
+    pub expiring_soon: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,6 +163,19 @@ pub struct CertDetail {
     pub has_chain: Option<bool>,
     /// PEM-encoded issuer chain (only populated by the slow backfill path).
     pub chain_pem: Option<String>,
+    /// Whether this (still-Valid) cert is inside the expiry-warning window —
+    /// the detail page renders it as "Expiring Soon" and offers Ignore.
+    pub expiring_soon: bool,
+}
+
+/// Result of a renew or rekey — the freshly issued certificate lives at a new
+/// serial, so the frontend navigates there to surface its key + certificate.
+#[derive(Debug, Serialize)]
+pub struct RenewRekeyResult {
+    /// Serial of the newly issued certificate.
+    pub serial: String,
+    /// PEM of the newly issued certificate.
+    pub pem: String,
 }
 
 #[derive(Debug, Serialize)]

@@ -738,14 +738,34 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         Ok(bundle)
     }
 
+    /// Auto-ignore the predecessor of a renew/rekey so it immediately drops out
+    /// of expiry alerts instead of waiting to expire. The caller flushes the DB
+    /// afterwards (`store_ca_database`), so this adds no extra `op` round-trips.
+    fn auto_ignore_predecessor(
+        &mut self,
+        old_serial: &str,
+        new_serial: &str,
+        reason: IgnoreReason,
+    ) -> Result<(), OpcaError> {
+        if let Some(db) = self.ca_database.as_mut() {
+            db.ignore_cert(
+                old_serial,
+                reason,
+                &local_user(),
+                Some(&format!("replaced by {new_serial}")),
+            )?;
+        }
+        Ok(())
+    }
+
     /// Renew a previously signed certificate from its stored CSR.
     ///
-    /// Returns the renewed certificate PEM and an optional warning if the
-    /// certificate would outlive the CA.
+    /// Returns the renewed certificate PEM, the new serial, and an optional
+    /// warning if the certificate would outlive the CA.
     pub fn renew_certificate_bundle(
         &mut self,
         lookup: &CertLookup,
-    ) -> Result<(String, Option<CertIssuanceWarning>), OpcaError> {
+    ) -> Result<(String, String, Option<CertIssuanceWarning>), OpcaError> {
         info!("[ca] renewing certificate {lookup:?}");
         let db = self.ca_database.as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
@@ -753,6 +773,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let cert_record = db.query_cert(lookup, true)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
+        let old_serial = cert_record.serial.clone();
         let item_title = cert_record.title.clone()
             .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
 
@@ -786,25 +807,26 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         // Check if the renewed cert will outlive the CA
         let warning = self.check_cert_issuance_warning();
 
-        // The old serial row stays in the database untouched; once its
-        // not_after passes, classification recognises the new Valid cert as
-        // a same-CN replacement and marks the old row as superseded.
+        // Persist the new bundle, then auto-ignore the predecessor so it stops
+        // triggering expiry alerts (Lambda + dashboard) the moment it's been
+        // replaced, rather than waiting for it to expire and be superseded.
         self.store_certbundle_for(&cert_bundle, None, None, false)?;
+        self.auto_ignore_predecessor(&old_serial, &new_serial, IgnoreReason::Renewed)?;
         self.store_ca_database()?;
 
         let pem = cert_bundle.certificate_pem()?;
-        Ok((pem, warning))
+        Ok((pem, new_serial, warning))
     }
 
     /// Rekey a previously signed certificate — generate a new private key and
     /// CSR, then sign it to produce a fresh certificate.
     ///
-    /// Returns the rekeyed certificate PEM and an optional warning if the
-    /// certificate would outlive the CA.
+    /// Returns the rekeyed certificate PEM, the new serial, and an optional
+    /// warning if the certificate would outlive the CA.
     pub fn rekey_certificate_bundle(
         &mut self,
         lookup: &CertLookup,
-    ) -> Result<(String, Option<CertIssuanceWarning>), OpcaError> {
+    ) -> Result<(String, String, Option<CertIssuanceWarning>), OpcaError> {
         info!("[ca] rekeying certificate {lookup:?}");
         let db = self.ca_database.as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
@@ -812,6 +834,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let cert_record = db.query_cert(lookup, false)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
+        let old_serial = cert_record.serial.clone();
         let item_title = cert_record.title.clone()
             .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
 
@@ -841,14 +864,15 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         // Check if the rekeyed cert will outlive the CA
         let warning = self.check_cert_issuance_warning();
 
-        // Store updated bundle (new key, CSR, and cert). The old serial row
-        // stays untouched; once its not_after passes, classification will mark
-        // it as superseded because this rekeyed cert shares the CN and is Valid.
+        // Persist the updated bundle (new key, CSR, and cert), then auto-ignore
+        // the predecessor so it stops triggering expiry alerts (Lambda +
+        // dashboard) immediately.
         self.store_certbundle_for(&cert_bundle, None, None, false)?;
+        self.auto_ignore_predecessor(&old_serial, &new_serial, IgnoreReason::Rekeyed)?;
         self.store_ca_database()?;
 
         let pem = cert_bundle.certificate_pem()?;
-        Ok((pem, warning))
+        Ok((pem, new_serial, warning))
     }
 
     // -----------------------------------------------------------------------

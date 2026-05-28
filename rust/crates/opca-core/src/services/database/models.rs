@@ -66,18 +66,23 @@ pub struct CertRecord {
     pub has_chain: Option<bool>,
 }
 
-/// Reason a certificate was ignored. Today only manual ignores are written;
-/// the enum is retained for future reasons (e.g. auto-ignore triggered by
-/// some future automated workflow).
+/// Reason a certificate was ignored. `Manual` comes from the UI's "Ignore"
+/// action; `Renewed`/`Rekeyed` are written automatically when a renew/rekey
+/// supersedes the certificate, so the predecessor stops triggering expiry
+/// alerts before it has even expired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IgnoreReason {
     Manual,
+    Renewed,
+    Rekeyed,
 }
 
 impl IgnoreReason {
     pub fn as_str(&self) -> &'static str {
         match self {
             IgnoreReason::Manual => "manual",
+            IgnoreReason::Renewed => "renewed",
+            IgnoreReason::Rekeyed => "rekeyed",
         }
     }
 }

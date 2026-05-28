@@ -374,6 +374,7 @@ pub async fn sign_csr(
             key_type: bundle.get_certificate_attrib("key_type").ok().flatten(),
             ignored_at: None,
             superseded_by: None,
+            expiring_soon: false,
             key_size: bundle
                 .get_certificate_attrib("key_size")
                 .ok()
@@ -542,6 +543,7 @@ pub async fn import_csr_cert(
             .and_then(|s| s.parse().ok()),
         ignored_at: None,
         superseded_by: None,
+        expiring_soon: false,
     })
 }
 

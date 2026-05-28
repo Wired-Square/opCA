@@ -5,7 +5,7 @@ use serde::Deserialize;
 use tauri::{Emitter, Manager, State};
 
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
-use opca_core::services::database::{CertLookup, CertRecord, ExternalCertRecord};
+use opca_core::services::database::{is_expiring_soon, CertLookup, CertRecord, ExternalCertRecord};
 
 use crate::commands::inspect_helpers::{
     public_key_summary, signature_algorithm_from_text, x509_name_to_rdn_string,
@@ -24,7 +24,7 @@ fn external_item_title(record: &ExternalCertRecord) -> Result<String, String> {
 
 use crate::commands::dto::{
     CertDetail, CertListItem, CreateCertRequest, ExternalCertDetail, ExternalCertListItem,
-    ImportCertRequest, ImportCertResult, InspectCertificateResult,
+    ImportCertRequest, ImportCertResult, InspectCertificateResult, RenewRekeyResult,
 };
 use crate::state::AppState;
 
@@ -40,9 +40,11 @@ pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>,
 
     let certs = db.query_all_certs().map_err(|e| e.to_string())?;
     let replacements = db.replacements.clone();
+    let expires_soon = db.certs_expires_soon.clone();
 
     Ok(certs.into_iter().map(|r| {
         let superseded_by = replacements.get(&r.serial).cloned();
+        let expiring_soon = expires_soon.contains(&r.serial);
         CertListItem {
             serial: r.serial.into(),
             cn: r.cn,
@@ -54,6 +56,7 @@ pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>,
             key_size: r.key_size,
             ignored_at: r.ignored_at,
             superseded_by,
+            expiring_soon,
         }
     }).collect())
 }
@@ -198,6 +201,13 @@ fn record_to_detail(
     chain_pem: Option<String>,
     superseded_by: Option<String>,
 ) -> CertDetail {
+    // Expiring-soon is a property of a still-valid cert; revoked/expired ones
+    // never show the badge. Computed from the date so it's correct even before
+    // a full classification scan has run for this session.
+    let revoked = record.revocation_date.as_deref().is_some_and(|r| !r.is_empty())
+        || record.status.as_deref() == Some("Revoked");
+    let expiring_soon = !revoked
+        && record.expiry_date.as_deref().is_some_and(is_expiring_soon);
     CertDetail {
         serial: Some(record.serial.clone()),
         cn: record.cn.clone(),
@@ -221,6 +231,7 @@ fn record_to_detail(
         has_private_key: record.has_private_key,
         has_chain: record.has_chain,
         chain_pem,
+        expiring_soon,
     }
 }
 
@@ -355,6 +366,7 @@ pub async fn create_cert(
             .and_then(|s| s.parse().ok()),
         ignored_at: None,
         superseded_by: None,
+        expiring_soon: false,
     })
 }
 
@@ -382,12 +394,12 @@ pub async fn revoke_cert(
 pub async fn renew_cert(
     state: State<'_, AppState>,
     serial: String,
-) -> Result<String, String> {
+) -> Result<RenewRekeyResult, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] renew_cert: serial={serial}");
-    let (new_pem, issuance_warning) = ca.renew_certificate_bundle(&CertLookup::Serial(serial.clone()))
+    let (new_pem, new_serial, issuance_warning) = ca.renew_certificate_bundle(&CertLookup::Serial(serial.clone()))
         .map_err(|e| {
             warn!("[tauri] renew_cert failed: {e}");
             state.log_err("renew_cert", Some(e.to_string()));
@@ -398,20 +410,20 @@ pub async fn renew_cert(
         state.log_ok("renew_cert", Some(w.message.clone()));
     }
 
-    state.log_ok("renew_cert", Some(format!("Renewed certificate {} → {}", serial, new_pem)));
-    Ok(new_pem)
+    state.log_ok("renew_cert", Some(format!("Renewed certificate {serial} → {new_serial}")));
+    Ok(RenewRekeyResult { serial: new_serial, pem: new_pem })
 }
 
 #[tauri::command]
 pub async fn rekey_cert(
     state: State<'_, AppState>,
     serial: String,
-) -> Result<String, String> {
+) -> Result<RenewRekeyResult, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] rekey_cert: serial={serial}");
-    let (new_pem, issuance_warning) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()))
+    let (new_pem, new_serial, issuance_warning) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()))
         .map_err(|e| {
             warn!("[tauri] rekey_cert failed: {e}");
             state.log_err("rekey_cert", Some(e.to_string()));
@@ -422,8 +434,8 @@ pub async fn rekey_cert(
         state.log_ok("rekey_cert", Some(w.message.clone()));
     }
 
-    state.log_ok("rekey_cert", Some(format!("Rekeyed certificate {} → {}", serial, new_pem)));
-    Ok(new_pem)
+    state.log_ok("rekey_cert", Some(format!("Rekeyed certificate {serial} → {new_serial}")));
+    Ok(RenewRekeyResult { serial: new_serial, pem: new_pem })
 }
 
 #[tauri::command]
@@ -517,6 +529,7 @@ pub async fn import_cert(
                 .and_then(|s| s.parse().ok()),
             ignored_at: None,
             superseded_by: None,
+            expiring_soon: false,
         },
         is_external,
     })

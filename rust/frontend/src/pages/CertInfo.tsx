@@ -1,19 +1,24 @@
 import { Show, For, createSignal, createResource, createEffect } from "solid-js";
-import { useParams, useNavigate } from "@solidjs/router";
+import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
 import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert, ignoreCert, unignoreCert, getCertPrivateKey, recordCertCopy } from "../api/certs";
+import { getVpnProfileForCn, generateOpenVpnProfile } from "../api/openvpn";
 import type { CertDetail } from "../api/types";
-import { getCaConfig, uploadCaDatabase } from "../api/ca";
+import { uploadDbIfPrivateStore } from "../api/ca";
 import { formatDate } from "../utils/dates";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
+import CertStatusBadge from "../components/CertStatusBadge";
 import "../styles/pages/cert-info.css";
 
 export default function CertInfo() {
   const params = useParams();
   const navigate = useNavigate();
+  // `freshFrom`/`op` are set when we land here right after a renew/rekey, to
+  // surface the new cert's key + certificate and flag where it came from.
+  const [searchParams] = useSearchParams();
   // Fast: load from local database immediately
   const [detail, { refetch, mutate }] = createResource(
     () => params.serial as string | undefined,
@@ -27,47 +32,58 @@ export default function CertInfo() {
   const [copiedChain, markChainCopied] = createCopiedSignal();
   const [exportingKey, setExportingKey] = createSignal(false);
   const [backfilling, setBackfilling] = createSignal(false);
-  const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
-  const [uploadingDb, setUploadingDb] = createSignal(false);
   const [showIgnoreForm, setShowIgnoreForm] = createSignal(false);
   const [ignoreNote, setIgnoreNote] = createSignal("");
+  const [regenerating, setRegenerating] = createSignal(false);
+  const [regenMsg, setRegenMsg] = createSignal<string | null>(null);
 
   // Slow: once the fast detail renders, fetch from 1Password in the background.
-  // Use a plain boolean to avoid re-triggering the effect on mutate.
-  let enriched = false;
+  // Track which serial we enriched (not a plain boolean) so navigating to the
+  // new cert after a renew/rekey re-runs the backfill for that serial; the
+  // mutate below keeps the serial unchanged, so it won't loop.
+  let enrichedSerial: string | null = null;
   createEffect(() => {
     const d = detail();
-    if (d && !enriched) {
-      enriched = true;
+    if (d && d.serial && enrichedSerial !== d.serial) {
+      enrichedSerial = d.serial;
       setBackfilling(true);
-      backfillCert(d.serial!)
+      backfillCert(d.serial)
         .then((result) => mutate(result))
         .catch(() => {})
         .finally(() => setBackfilling(false));
     }
   });
 
-  async function maybeShowUploadPrompt() {
-    try {
-      const config = await getCaConfig();
-      if (config.ca_private_store) {
-        setShowUploadPrompt(true);
-      }
-    } catch {
-      // Ignore — just don't show the prompt
-    }
-  }
+  // After a renew/rekey of a VPN client cert, look up that CN's existing
+  // profile (DB-backed, no `op` call) so we can offer a one-click regenerate.
+  const [vpnProfile] = createResource(
+    () => {
+      const d = detail();
+      if (d && searchParams.freshFrom && isVpnClient(d) && d.cn) return d.cn;
+      return undefined;
+    },
+    (cn: string) => getVpnProfileForCn(cn),
+  );
 
-  async function handleUploadDb() {
-    setUploadingDb(true);
+  async function handleRegenerateVpn(cn: string, template: string) {
+    setRegenerating(true);
+    setRegenMsg(null);
+    setError(null);
     try {
-      await uploadCaDatabase();
-      setShowUploadPrompt(false);
+      const profile = await generateOpenVpnProfile({ cn, template_name: template });
+      setRegenMsg(`Regenerated VPN profile for ${cn} (stored as ${profile.title}).`);
     } catch (e) {
       setError(String(e));
     } finally {
-      setUploadingDb(false);
+      setRegenerating(false);
     }
+  }
+
+  // After a mutating op, push the DB to the private store (if configured)
+  // without prompting. Progress shows in the side-nav status; surface failures
+  // on the page. Fire-and-forget so it doesn't block navigation to the new cert.
+  function syncDbToPrivateStore() {
+    void uploadDbIfPrivateStore().catch((e) => setError(String(e)));
   }
 
   async function handleRevoke() {
@@ -75,12 +91,11 @@ export default function CertInfo() {
     if (!serial) return;
     setActing("revoke");
     setError(null);
-    setShowUploadPrompt(false);
     try {
       await revokeCert(serial);
       setConfirming(false);
       refetch();
-      await maybeShowUploadPrompt();
+      syncDbToPrivateStore();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -93,11 +108,13 @@ export default function CertInfo() {
     if (!serial) return;
     setActing("rekey");
     setError(null);
-    setShowUploadPrompt(false);
     try {
-      await rekeyCert(serial);
-      refetch();
-      await maybeShowUploadPrompt();
+      const result = await rekeyCert(serial);
+      // The rekeyed cert lives at a new serial — navigate there so its new key
+      // + certificate are surfaced for copy-on-click; the DB sync runs in the
+      // background.
+      navigate(`/certs/${result.serial}?freshFrom=${serial}&op=rekey`);
+      syncDbToPrivateStore();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -110,11 +127,10 @@ export default function CertInfo() {
     if (!serial) return;
     setActing("renew");
     setError(null);
-    setShowUploadPrompt(false);
     try {
-      await renewCert(serial);
-      refetch();
-      await maybeShowUploadPrompt();
+      const result = await renewCert(serial);
+      navigate(`/certs/${result.serial}?freshFrom=${serial}&op=renew`);
+      syncDbToPrivateStore();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -159,7 +175,7 @@ export default function CertInfo() {
     const pem = detail()?.cert_pem;
     const serial = params.serial as string;
     if (pem && serial) {
-      navigator.clipboard.writeText(pem);
+      void writeClipboard(pem);
       markCopied();
       void recordCertCopy("local", serial, "certificate");
     }
@@ -169,7 +185,7 @@ export default function CertInfo() {
     const pem = detail()?.chain_pem;
     const serial = params.serial as string;
     if (pem && serial) {
-      navigator.clipboard.writeText(pem);
+      void writeClipboard(pem);
       markChainCopied();
       void recordCertCopy("local", serial, "chain");
     }
@@ -184,7 +200,7 @@ export default function CertInfo() {
     let key = "";
     try {
       key = await getCertPrivateKey(serial);
-      await navigator.clipboard.writeText(key);
+      await writeClipboard(key);
       markKeyCopied();
       // No recordCertCopy() call here: get_cert_private_key already audits
       // server-side via state.log_ok, and refuses CA keys outright.
@@ -206,6 +222,10 @@ export default function CertInfo() {
 
   function isCaCert(d: CertDetail): boolean {
     return d.cert_type?.toLowerCase() === "ca";
+  }
+
+  function isVpnClient(d: CertDetail): boolean {
+    return d.cert_type?.toLowerCase() === "vpnclient";
   }
 
   return (
@@ -256,21 +276,80 @@ export default function CertInfo() {
                   <span class="ignored-banner-label">Superseded</span>
                   <span class="ignored-banner-body">
                     Replaced by{" "}
-                    <a
-                      class="mono superseded-link"
-                      href={`/certs/${d().superseded_by}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        navigate(`/certs/${d().superseded_by}`);
-                      }}
-                    >
+                    <NavLink class="mono superseded-link" href={`/certs/${d().superseded_by}`}>
                       serial {d().superseded_by}
-                    </a>
+                    </NavLink>
                     {" "}&mdash; the newer cert with the same Common Name is
                     Valid, so this one no longer counts toward the expired-cert
                     alert.
                   </span>
                 </div>
+              </Show>
+
+              <Show when={searchParams.freshFrom}>
+                <div class="ignored-banner fresh-banner">
+                  <span class="ignored-banner-label">New certificate</span>
+                  <span class="ignored-banner-body">
+                    {searchParams.op === "rekey" ? "Rekeyed" : "Renewed"} from{" "}
+                    <NavLink class="mono superseded-link" href={`/certs/${searchParams.freshFrom}`}>
+                      serial {searchParams.freshFrom}
+                    </NavLink>
+                    {searchParams.op === "rekey"
+                      ? " — this certificate has a new private key and certificate. Copy both below."
+                      : " — a new certificate with the same private key. Copy the certificate below."}
+                  </span>
+                </div>
+              </Show>
+
+              <Show when={searchParams.freshFrom && isVpnClient(d())}>
+                <Show
+                  when={vpnProfile()}
+                  fallback={
+                    <Show when={!vpnProfile.loading}>
+                      <div class="ignored-banner vpn-regen-banner">
+                        <span class="ignored-banner-label">VPN profile</span>
+                        <span class="ignored-banner-body">
+                          This is a VPN client certificate with no recorded
+                          profile.{" "}
+                          <NavLink class="superseded-link" href="/openvpn">
+                            Generate one on the OpenVPN page
+                          </NavLink>
+                          {" "}for <span class="mono">{d().cn}</span>.
+                        </span>
+                      </div>
+                    </Show>
+                  }
+                >
+                  {(profile) => (
+                    <div class="ignored-banner vpn-regen-banner">
+                      <span class="ignored-banner-label">VPN profile</span>
+                      <span class="ignored-banner-body">
+                        Regenerate <span class="mono">{profile().cn}</span>'s VPN
+                        profile{" "}
+                        <Show when={profile().template}>
+                          (template <span class="mono">{profile().template}</span>){" "}
+                        </Show>
+                        to pick up the new key/certificate.
+                        <div class="vpn-regen-actions">
+                          <button
+                            class="btn-primary btn-sm"
+                            disabled={regenerating() || !profile().template}
+                            onClick={() => handleRegenerateVpn(profile().cn, profile().template!)}
+                          >
+                            {regenerating() ? "Regenerating…" : "Regenerate VPN profile"}
+                          </button>
+                        </div>
+                        <Show when={regenMsg()}>
+                          <div class="page-success">{regenMsg()}</div>
+                        </Show>
+                        <div class="vpn-regen-caveat">
+                          Uses the stored template; verify it references the
+                          current cert by CN.
+                        </div>
+                      </span>
+                    </div>
+                  )}
+                </Show>
               </Show>
 
               <div class="detail-grid">
@@ -280,9 +359,7 @@ export default function CertInfo() {
                 <Row label="Type" value={d().cert_type} />
                 <div class="detail-row">
                   <span class="detail-label">Status</span>
-                  <span class={`status-badge status-${(d().status ?? "").toLowerCase()}`}>
-                    {d().status ?? "\u2014"}
-                  </span>
+                  <CertStatusBadge status={d().status} expiringSoon={d().expiring_soon} />
                   <Show when={d().ignored_at}>
                     <span class="status-badge status-ignored">ignored</span>
                   </Show>
@@ -351,20 +428,6 @@ export default function CertInfo() {
                 </div>
               </Show>
 
-              <Show when={showUploadPrompt()}>
-                <div class="upload-prompt">
-                  <span>Upload database to private store?</span>
-                  <div class="upload-actions">
-                    <button class="btn-primary btn-sm" onClick={handleUploadDb} disabled={uploadingDb()}>
-                      {uploadingDb() ? "Uploading\u2026" : "Upload"}
-                    </button>
-                    <button class="btn-ghost btn-sm" onClick={() => setShowUploadPrompt(false)}>
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              </Show>
-
               <Show when={error()}>
                 <p class="page-error mt-3" role="alert">{error()}</p>
               </Show>
@@ -405,7 +468,7 @@ export default function CertInfo() {
                   </Show>
                 </Show>
 
-                <Show when={d().status === "Expired" && !d().ignored_at && !d().superseded_by && !showIgnoreForm()}>
+                <Show when={(d().status === "Expired" || d().expiring_soon) && !d().ignored_at && !d().superseded_by && !showIgnoreForm()}>
                   <button class="btn-ghost" onClick={() => setShowIgnoreForm(true)} disabled={!!acting()}>
                     Ignore
                   </button>
@@ -448,6 +511,27 @@ export default function CertInfo() {
       </div>
 
     </div>
+  );
+}
+
+/** Internal client-side navigation link (no full-page reload). */
+function NavLink(props: {
+  href: string;
+  class?: string;
+  children: import("solid-js").JSX.Element;
+}) {
+  const navigate = useNavigate();
+  return (
+    <a
+      class={props.class}
+      href={props.href}
+      onClick={(e) => {
+        e.preventDefault();
+        navigate(props.href);
+      }}
+    >
+      {props.children}
+    </a>
   );
 }
 

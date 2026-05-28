@@ -10,7 +10,7 @@ import {
   deleteDkimKey,
 } from "../api/dkim";
 import { formatDate } from "../utils/dates";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
@@ -62,7 +62,7 @@ export default function DkimKeyDetailPage() {
     const d = detail();
     if (!d) return;
     const value = `${d.selector}._domainkey`;
-    navigator.clipboard.writeText(value);
+    void writeClipboard(value);
     markSelectorCopied();
     void recordDkimCopy(d.domain, d.selector, "selector");
   }
@@ -70,7 +70,7 @@ export default function DkimKeyDetailPage() {
   function copyPublicKey() {
     const d = detail();
     if (!d?.public_key) return;
-    navigator.clipboard.writeText(d.public_key);
+    void writeClipboard(d.public_key);
     markPublicKeyCopied();
     void recordDkimCopy(d.domain, d.selector, "public_key");
   }
@@ -80,7 +80,7 @@ export default function DkimKeyDetailPage() {
     if (!d) return;
     const value = chunked() ? d.dns_record_chunked ?? d.dns_record : d.dns_record;
     if (!value) return;
-    navigator.clipboard.writeText(value);
+    void writeClipboard(value);
     markDnsRecordCopied();
     void recordDkimCopy(d.domain, d.selector, "dns_record");
   }
@@ -96,7 +96,7 @@ export default function DkimKeyDetailPage() {
     let key = "";
     try {
       key = await getDkimPrivateKey(d.domain, d.selector);
-      await navigator.clipboard.writeText(key);
+      await writeClipboard(key);
       markKeyCopied();
       // No recordDkimCopy() call here: get_dkim_private_key already audits
       // server-side via state.log_ok.

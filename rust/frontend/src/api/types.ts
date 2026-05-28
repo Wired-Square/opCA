@@ -114,6 +114,8 @@ export interface CertListItem {
   ignored_at: string | null;
   /** If expired and a same-CN Valid replacement exists, its serial. */
   superseded_by: string | null;
+  /** Still-Valid but inside the expiry-warning window — shown as "Expiring Soon". */
+  expiring_soon: boolean;
 }
 
 export interface ExternalCertListItem {
@@ -149,6 +151,12 @@ export interface CertDetail extends CertListItem {
   has_chain: boolean | null;
   /** PEM-encoded issuer chain — populated by the slow backfill path. */
   chain_pem: string | null;
+}
+
+/** Result of a renew or rekey — the new cert lives at a new serial. */
+export interface RenewRekeyResult {
+  serial: string;
+  pem: string;
 }
 
 export interface ExternalCertDetail {

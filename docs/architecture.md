@@ -97,7 +97,7 @@ Organised by concern under [src/](../rust/crates/opca-core/src):
 
 ## 1Password vault as the source of truth
 
-OPCA stores nine logical kinds of item. Titles and field labels are fixed in
+OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 [constants.rs](../rust/crates/opca-core/src/constants.rs).
 
 | Item | Title | Kind | Purpose |
@@ -106,9 +106,10 @@ OPCA stores nine logical kinds of item. Titles and field labels are fixed in
 | Database | `CA_Database` | Document | SQLite dump of every tracked cert/CSR/CRL/VPN record |
 | CRL | `CRL` | Document | Latest published Certificate Revocation List |
 | OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key, server template |
-| Certificate | `<cn>` | Secure Note | One item per issued cert (key + cert + chain + type) |
-| External cert | `<cn>` | Secure Note | Imported certificates not signed by this CA |
-| CSR | `<cn>` | Secure Note | Unsigned or awaiting-sign requests |
+| Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type) |
+| External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
+| CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests |
+| VPN profile | `VPN_<cn>` | Document | Generated OpenVPN client profile (`.ovpn`) — the template injected with the user's cert/key + CA + TLS-auth |
 | DKIM | `<selector>._domainkey.<domain>` | Secure Note | DKIM key pair and metadata |
 | Lock | `CA_Lock` | Secure Note | Advisory lock for concurrent-write safety |
 
@@ -120,36 +121,55 @@ every query, and re-serialises it to the `CA_Database` document whenever the
 catalogue changes. The dump is keyed by a `download_fingerprint` so stale
 local state is detected on reconnect.
 
-### Suppressing expired-cert noise
+### Status classification vs. problem suppression
 
-An expired cert in the database only counts toward the dashboard's
-expired-cert alert if it's still actionable. Two mechanisms pull it out of
-that set:
+A certificate is always classified by its **true status**:
+`process_ca_database` fills `certs_valid` / `certs_expires_soon` /
+`certs_expires_warning` / `certs_expired` / `certs_revoked` from the cert's
+validity dates alone. Two overlays then decide what counts as an *actionable
+problem* — without changing that classification, so the list always shows the
+real status.
 
-**Supersession (automatic)** — `process_ca_database` does a two-pass scan. The
-first pass collects, for each CN, the highest-serial currently-valid cert
-(not expired, not revoked, not ignored, not about to be revoked). The second
-pass classifies expired rows; if an expired cert's CN matches a valid-cert
-serial from the first pass, it lands in `certs_superseded` with an entry in
-the `replacements: HashMap<String, String>` mapping `old_serial → new_serial`.
-This naturally quiets old rows after renew, rekey, or any same-CN re-issuance.
-The DB rows stay untouched; supersession is a runtime classification only.
+**Supersession (automatic)** — a two-pass scan. The first pass collects, for
+each CN, the highest-serial currently-valid cert (not expired, not revoked, not
+about to be revoked). The second pass reclassifies an expired cert whose CN
+matches such a serial into `certs_superseded` (with a `replacements:
+HashMap<old_serial → new_serial>` entry) instead of `certs_expired`. This
+catches any same-CN re-issuance — including a renewed/rekeyed predecessor once
+it expires. Supersession is a runtime classification only; the DB rows aren't
+modified.
 
-**Manual ignore** — for CNs with no replacement (retired services,
-decommissioned hardware), the cert detail page exposes an `Ignore` action. It
-writes four audit-trail columns to the row — `ignored_at`, `ignored_by`
-(`username@hostname` from the `whoami` crate), `ignored_reason` (`manual`),
-and `ignored_note` (optional free-text). Ignored rows land in `certs_ignored`.
-An `Un-ignore` action clears all four columns.
+**Ignore (a "don't-notify" overlay)** — ignoring a cert **never changes its
+status**. It records four audit columns (`ignored_at`, `ignored_by` =
+`username@hostname` from the `whoami` crate, `ignored_reason` ∈ {`renewed`,
+`rekeyed`, `manual`}, `ignored_note`) and adds the serial to the `certs_ignored`
+overlay set. The cert keeps appearing in its real bucket — a still-valid ignored
+cert is `Valid` (or `Expiring Soon`), an expired ignored cert is `Expired` —
+and renders on the list with its true status badge plus an `ignored` chip. What
+"ignored" buys is **no notification about problems**; the alert consumers
+subtract the overlay:
 
-Precedence: if a row is both ignored AND superseded, ignored wins — it's the
-explicit user action with an audit trail.
+- the dashboard's expiring/expired counts (and the expired action item) use
+  `set.difference(&certs_ignored)`. The **Valid** count is the real number of
+  certs that pass validation — `certs_valid + certs_expires_warning` (every
+  non-expired, non-revoked cert, so it includes expiry-window and
+  ignored-but-valid certs); Revoked stays real too; and
+- the notification Lambda's query adds `AND ignored_at IS NULL`.
 
-Ignore is **orthogonal** to the Valid/Expired/Revoked status; the record
-keeps its real status and just drops out of the actionable set. The cert list
-gains filters for both `Ignored` and `Superseded`, and status-axis filters
-(`Expired`/`Valid`/`Revoked`) hide rows from both audit-only sets so the list
-mirrors what the dashboard counts.
+Two paths write the ignore: `renew_certificate_bundle` /
+`rekey_certificate_bundle` auto-ignore the predecessor as soon as the
+replacement is stored (`ignored_reason` = `renewed`/`rekeyed`, `ignored_note` =
+`replaced by <new_serial>`, riding the same `store_ca_database` save — no extra
+1Password calls); and the cert detail page's `Ignore` action (`ignored_reason`
+= `manual`). An `Un-ignore` action clears all four columns.
+
+On the certs list (which defaults to the `Valid` filter), status-axis filters
+match the true status: `Valid` includes valid-but-ignored certs, and an
+`Expiring Soon` badge is shown for any cert in the warning window, ignored or
+not. There are dedicated `Expiring Soon`, `Ignored`, and `Superseded` filters;
+the `Expiring Soon` filter excludes ignored certs so it matches the dashboard's
+expiring count. The same `Valid`/`Expiring Soon`/`Expired` rendering is shared
+between the list and the cert detail page via the `CertStatusBadge` component.
 
 ### Concurrent-writer safety
 
@@ -171,9 +191,10 @@ matches a single logical operation.
 ## Tauri shell (`opca-tauri`)
 
 - [main.rs](../rust/crates/opca-tauri/src/main.rs) — Tauri builder. Registers
-  the `log`, `dialog`, and `shell` plugins; extends `PATH` on macOS so bundled
-  `.app` builds can find Homebrew-installed `op`; pre-warms `op --version` so
-  macOS AMFI/OCSP verification is cached before the first real call.
+  the `log`, `dialog`, `shell`, and `clipboard-manager` plugins; extends `PATH`
+  on macOS so bundled `.app` builds can find Homebrew-installed `op`; pre-warms
+  `op --version` so macOS AMFI/OCSP verification is cached before the first real
+  call.
 - [state.rs](../rust/crates/opca-tauri/src/state.rs) — `AppState`, Tauri's
   managed singleton. Three mutex-guarded fields:
   - `conn: Connection { op, ca }` — the live 1Password handle and the loaded
@@ -260,8 +281,14 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
 - **Unit** — `cargo test -p opca-core`. Uses `MockRunner` to feed canned `op`
   output; no network, no `op` binary required.
 - **Integration** — `OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test
-  op_integration`. Requires an `op` session and a real test vault
-  (`OPCA_TEST_VAULT`, optionally `OPCA_TEST_ACCOUNT`).
+  op_integration`. Exercises the low-level `Op` wrapper against a real `op`
+  session and test vault (`OPCA_TEST_VAULT`, optionally `OPCA_TEST_ACCOUNT`).
+- **End-to-end** — `OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test e2e
+  -- --test-threads=1`. Runs the full CA lifecycle (init → issue → renew/rekey
+  → revoke → CRL → backup/restore) against a throwaway vault it creates and
+  deletes; needs an `op` session (set `OPCA_TEST_ACCOUNT`) and a `Private` vault
+  to bootstrap. Tests are ordered (`t01`…`t90`) and share state, so they run
+  single-threaded.
 
 ---
 
@@ -291,7 +318,8 @@ downloads and calls `run_tests`, which reports on:
 
 - **CA database freshness** — age of the S3 object vs. the `DAYS` threshold.
 - **Issued certificates** — SQL query against the `certificate_authority`
-  table for any non-revoked cert expiring within `DAYS`.
+  table for any non-revoked, non-ignored cert expiring within `DAYS`
+  (`ignored_at IS NULL` excludes renewed/rekeyed predecessors).
 - **External certificates** — same check against the `external_certificate`
   table (rows with `status = 'Valid'`).
 - **CA certificate validity** — current validity plus an upcoming-expiry

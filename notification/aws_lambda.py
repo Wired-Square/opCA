@@ -125,10 +125,13 @@ def run_tests(ca_cert_data, crl_data, db_data):
     crl_expiry_friendly = timestamp_until(crl_next_update)['friendly']
 
     cadb_file_age = timestamp_diff(db_data['last_modified'])
+    # Skip ignored certs (ignored_at set): renewed/rekeyed certs are
+    # auto-ignored by opCA so the predecessor stops triggering expiry alerts.
     cadb_query = """
         SELECT serial, cn, expiry_date, issuer
         FROM certificate_authority
         WHERE revocation_date IS NULL
+          AND ignored_at IS NULL
     """
     rows = ca_database_handler(db_data['path'], cadb_query)
 

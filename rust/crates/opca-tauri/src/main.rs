@@ -71,6 +71,7 @@ fn main() {
                 ])
                 .build(),
         )
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::default())
@@ -145,6 +146,7 @@ fn main() {
             commands::openvpn::get_openvpn_template,
             commands::openvpn::save_openvpn_template,
             commands::openvpn::list_vpn_clients,
+            commands::openvpn::get_vpn_profile_for_cn,
             commands::openvpn::generate_openvpn_profile,
             commands::openvpn::list_openvpn_profiles,
             commands::openvpn::send_profile_to_vault,

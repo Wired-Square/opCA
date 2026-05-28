@@ -8,6 +8,7 @@ import type {
   ImportCertRequest,
   ImportCertResult,
   InspectCertificateResult,
+  RenewRekeyResult,
 } from "./types";
 
 export async function listCerts(): Promise<CertListItem[]> {
@@ -68,15 +69,15 @@ export async function revokeCert(serial: string): Promise<boolean> {
   );
 }
 
-export async function renewCert(serial: string): Promise<string> {
+export async function renewCert(serial: string): Promise<RenewRekeyResult> {
   return withLock("renew_cert", () =>
-    tauriInvoke<string>("renew_cert", { serial }),
+    tauriInvoke<RenewRekeyResult>("renew_cert", { serial }),
   );
 }
 
-export async function rekeyCert(serial: string): Promise<string> {
+export async function rekeyCert(serial: string): Promise<RenewRekeyResult> {
   return withLock("rekey_cert", () =>
-    tauriInvoke<string>("rekey_cert", { serial }),
+    tauriInvoke<RenewRekeyResult>("rekey_cert", { serial }),
   );
 }
 

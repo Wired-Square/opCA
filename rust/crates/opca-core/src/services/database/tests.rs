@@ -567,6 +567,63 @@ fn test_openvpn_profile_crud() {
     assert!(db.query_all_openvpn_profiles().unwrap().is_empty());
 }
 
+#[test]
+fn test_openvpn_profile_regenerate_is_idempotent() {
+    let db = test_db();
+
+    let make = |template: &str| OpenVpnProfile {
+        id: None,
+        cn: "vpn.example.com".to_string(),
+        title: "VPN_vpn.example.com".to_string(),
+        created_date: Some("20250101000000Z".to_string()),
+        template: Some(template.to_string()),
+    };
+
+    db.add_openvpn_profile(&make("default")).unwrap();
+
+    // Regenerating mirrors the command: delete-by-title then re-add. Exactly
+    // one row should remain for the CN, carrying the updated template.
+    assert!(db.delete_openvpn_profile("VPN_vpn.example.com").unwrap());
+    db.add_openvpn_profile(&make("split-tunnel")).unwrap();
+
+    let profiles = db.query_all_openvpn_profiles().unwrap();
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0].cn, "vpn.example.com");
+    assert_eq!(profiles[0].template.as_deref(), Some("split-tunnel"));
+}
+
+#[test]
+fn test_query_openvpn_profile_for_cn() {
+    let db = test_db();
+    assert!(db
+        .query_openvpn_profile_for_cn("vpn.example.com")
+        .unwrap()
+        .is_none());
+
+    db.add_openvpn_profile(&OpenVpnProfile {
+        id: None,
+        cn: "vpn.example.com".to_string(),
+        title: "VPN_vpn.example.com".to_string(),
+        created_date: Some("20250101000000Z".to_string()),
+        template: Some("default".to_string()),
+    })
+    .unwrap();
+
+    // Case-insensitive match returns the row with its template.
+    let found = db
+        .query_openvpn_profile_for_cn("VPN.EXAMPLE.COM")
+        .unwrap()
+        .expect("profile found");
+    assert_eq!(found.cn, "vpn.example.com");
+    assert_eq!(found.template.as_deref(), Some("default"));
+
+    // Unrelated CN → None.
+    assert!(db
+        .query_openvpn_profile_for_cn("other.example.com")
+        .unwrap()
+        .is_none());
+}
+
 // -----------------------------------------------------------------------
 // process_ca_database
 // -----------------------------------------------------------------------
@@ -662,6 +719,31 @@ fn test_ignore_cert_sets_all_fields() {
 }
 
 #[test]
+fn test_ignore_cert_renewed_reason() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    db.add_cert(&make_cert("100", "vpn.example.com", "20200101000000Z"))
+        .unwrap();
+
+    // The auto-ignore written by the renew flow.
+    db.ignore_cert(
+        "100",
+        IgnoreReason::Renewed,
+        "alex@example.com (Alex)",
+        Some("replaced by 101"),
+    )
+    .unwrap();
+
+    let cert = db
+        .query_cert(&CertLookup::Serial("100".to_string()), false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(cert.ignored_reason.as_deref(), Some("renewed"));
+    assert_eq!(cert.ignored_note.as_deref(), Some("replaced by 101"));
+}
+
+#[test]
 fn test_ignore_cert_unknown_serial_errors() {
     use crate::services::database::models::IgnoreReason;
 
@@ -673,7 +755,7 @@ fn test_ignore_cert_unknown_serial_errors() {
 }
 
 #[test]
-fn test_process_excludes_ignored_from_certs_expired() {
+fn test_process_ignored_expired_keeps_status_but_drops_from_alert() {
     use crate::services::database::models::IgnoreReason;
 
     let mut db = test_db();
@@ -688,13 +770,82 @@ fn test_process_excludes_ignored_from_certs_expired() {
 
     db.process_ca_database(None, false).unwrap();
 
-    // Only the non-ignored expired cert is in certs_expired.
-    assert_eq!(db.certs_expired.len(), 1);
+    // True status is unchanged: both are expired. Ignoring doesn't reclassify.
     assert!(db.certs_expired.contains("100"));
-
-    // The ignored one lands in certs_ignored instead.
-    assert_eq!(db.certs_ignored.len(), 1);
+    assert!(db.certs_expired.contains("200"));
+    // The ignored one is flagged in the overlay set.
     assert!(db.certs_ignored.contains("200"));
+    assert!(!db.certs_ignored.contains("100"));
+    // Alert consumers (dashboard problem count, Lambda) subtract the overlay,
+    // so only the un-acknowledged expired cert ("100") remains a "problem".
+    assert_eq!(db.certs_expired.difference(&db.certs_ignored).count(), 1);
+}
+
+#[test]
+fn test_process_valid_ignored_cert_counts_as_valid() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    // A still-valid cert (far-future expiry) that has been ignored — e.g. a
+    // renewed/rekeyed predecessor inside its validity window. "Valid is valid":
+    // it stays in certs_valid; the ignored flag is just an overlay.
+    db.add_cert(&make_cert("100", "vpn.example.com", "20501231235959Z"))
+        .unwrap();
+    db.ignore_cert(
+        "100",
+        IgnoreReason::Renewed,
+        "alex@example.com",
+        Some("replaced by 101"),
+    )
+    .unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    assert!(db.certs_valid.contains("100"));
+    assert!(db.certs_ignored.contains("100"));
+    assert!(!db.certs_expires_soon.contains("100"));
+    assert!(!db.certs_expired.contains("100"));
+}
+
+#[test]
+fn test_is_expiring_soon_window() {
+    use super::is_expiring_soon;
+
+    let soon = (chrono::Utc::now() + chrono::Duration::days(10))
+        .format("%Y%m%d%H%M%SZ")
+        .to_string();
+    let far = (chrono::Utc::now() + chrono::Duration::days(200))
+        .format("%Y%m%d%H%M%SZ")
+        .to_string();
+
+    assert!(is_expiring_soon(&soon), "within 30 days → soon");
+    assert!(!is_expiring_soon(&far), "200 days out → not soon");
+    assert!(!is_expiring_soon("20200101000000Z"), "already expired → not soon");
+    assert!(!is_expiring_soon("not-a-date"), "unparseable → not soon");
+}
+
+#[test]
+fn test_process_expiring_soon_ignored_keeps_expiring_status() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    // A cert expiring within the warning window that has been ignored. Its true
+    // status is "expiring soon" — the list still shows that badge — so it stays
+    // in certs_expires_soon; the ignored flag is only an overlay the dashboard
+    // and Lambda subtract to suppress the alert.
+    let soon = (chrono::Utc::now() + chrono::Duration::days(10))
+        .format("%Y%m%d%H%M%SZ")
+        .to_string();
+    db.add_cert(&make_cert("100", "soon.example.com", &soon)).unwrap();
+    db.ignore_cert("100", IgnoreReason::Manual, "alex@example.com", None)
+        .unwrap();
+
+    db.process_ca_database(None, false).unwrap();
+
+    assert!(db.certs_expires_soon.contains("100"));
+    assert!(db.certs_ignored.contains("100"));
+    assert!(!db.certs_valid.contains("100"));
+    assert!(!db.certs_expired.contains("100"));
 }
 
 #[test]
@@ -708,8 +859,9 @@ fn test_unignore_restores_cert_to_expired() {
     db.ignore_cert("100", IgnoreReason::Manual, "alex@example.com", None)
         .unwrap();
     db.process_ca_database(None, true).unwrap();
+    // Ignoring flags the cert in the overlay but leaves its expired status.
     assert!(db.certs_ignored.contains("100"));
-    assert!(!db.certs_expired.contains("100"));
+    assert!(db.certs_expired.contains("100"));
 
     db.unignore_cert("100").unwrap();
     db.process_ca_database(None, true).unwrap();
@@ -779,7 +931,7 @@ fn test_process_revoked_cert_does_not_count_as_replacement() {
 }
 
 #[test]
-fn test_process_ignored_wins_over_supersession() {
+fn test_process_ignored_expired_still_superseded_by_true_status() {
     use crate::services::database::models::IgnoreReason;
 
     let mut db = test_db();
@@ -788,16 +940,18 @@ fn test_process_ignored_wins_over_supersession() {
     db.add_cert(&make_cert("200", "api.example.com", "20501231235959Z"))
         .unwrap();
 
-    // Manually ignore the expired one even though it would be superseded.
+    // Ignore the expired one; it also has a same-CN valid replacement.
     db.ignore_cert("100", IgnoreReason::Manual, "alex@MacBook", None)
         .unwrap();
 
     db.process_ca_database(None, false).unwrap();
 
-    // Ignored takes priority — cert lands in certs_ignored, not certs_superseded.
+    // True status wins: the expired cert is superseded by the valid one. The
+    // ignored flag is recorded as an overlay, not a competing status.
+    assert!(db.certs_superseded.contains("100"));
     assert!(db.certs_ignored.contains("100"));
-    assert!(!db.certs_superseded.contains("100"));
     assert!(!db.certs_expired.contains("100"));
+    assert!(db.certs_valid.contains("200"));
 }
 
 #[test]

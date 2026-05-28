@@ -7,7 +7,7 @@ import {
   recordCertCopy,
 } from "../api/certs";
 import { formatDate } from "../utils/dates";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import type { ExternalCertDetail } from "../api/types";
 import TzToggle from "../components/TzToggle";
@@ -46,7 +46,7 @@ export default function ExternalCertInfo() {
     const pem = detail()?.cert_pem;
     const serial = params.serial as string;
     if (pem && serial) {
-      navigator.clipboard.writeText(pem);
+      void writeClipboard(pem);
       markPemCopied();
       void recordCertCopy("external", serial, "certificate");
     }
@@ -56,7 +56,7 @@ export default function ExternalCertInfo() {
     const pem = detail()?.chain_pem;
     const serial = params.serial as string;
     if (pem && serial) {
-      navigator.clipboard.writeText(pem);
+      void writeClipboard(pem);
       markChainCopied();
       void recordCertCopy("external", serial, "chain");
     }
@@ -71,7 +71,7 @@ export default function ExternalCertInfo() {
     let key = "";
     try {
       key = await getExternalCertPrivateKey(serial);
-      await navigator.clipboard.writeText(key);
+      await writeClipboard(key);
       markKeyCopied();
       // No recordCertCopy() call here: get_external_cert_private_key already
       // audits server-side via state.log_ok, and refuses CA keys outright.

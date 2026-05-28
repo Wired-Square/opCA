@@ -1,6 +1,6 @@
 import { Show, createSignal, createResource, For } from "solid-js";
 import { getLogContents, getLogPath } from "../api/logs";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import "../styles/pages/log.css";
 
@@ -23,7 +23,7 @@ export default function Log() {
   function copyAll() {
     const text = contents();
     if (text) {
-      navigator.clipboard.writeText(text);
+      void writeClipboard(text);
       markCopied();
     }
   }

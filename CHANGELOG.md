@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- After a **renew** or **rekey**, opCA now navigates straight to the newly
+  issued certificate's detail page (it lives at a new serial) with a "New
+  certificate" banner linking back to the predecessor. The new cert's
+  certificate and private key are surfaced there via the existing copy-on-click
+  indicators — the banner makes clear whether the private key is new (rekey) or
+  unchanged (renew).
+- When the renewed/rekeyed cert is a **VPN client** cert, the detail page offers
+  a one-click **Regenerate VPN profile** using the template previously recorded
+  for that CN (read from the local `openvpn_profile` table — no 1Password
+  round-trip). If the CN has no recorded profile, it links to the OpenVPN page
+  instead.
+
+### Changed
+
+- Renewing or rekeying a certificate now **auto-ignores its predecessor**
+  (`ignored_reason` = `renewed`/`rekeyed`, note `replaced by <new_serial>`),
+  flushed by the existing database save — no extra 1Password calls. The
+  predecessor shows the usual "Ignored" banner and can be un-ignored.
+- **Ignoring a certificate is now purely a "don't notify about problems" flag**
+  — it no longer changes the cert's status or classification. An ignored cert
+  keeps its true status everywhere: the list shows `Valid`/`Expiring Soon`/
+  `Expired` with an `ignored` chip, and `valid_certs` counts valid-but-ignored
+  certs. Only the *alert* consumers subtract ignored certs — the dashboard's
+  expiring/expired counts (and the expired action item), and the notification
+  Lambda (`notification/aws_lambda.py`, via `AND ignored_at IS NULL`). Valid and
+  revoked counts stay real. The cert detail page's **Ignore** action is now
+  offered for **expiring-soon** certs as well as expired ones, so you can
+  silence an acknowledged upcoming expiry.
+- Certificates page: the default filter is now **Valid**; certificates inside
+  the expiry-warning window show an orange **Expiring Soon** badge (including
+  ignored ones); and the **Valid** filter lists every cert that passes
+  validation — fully-valid, expiring-soon, and valid-but-ignored alike.
+- The dashboard **Valid** count is now the real number of certs that pass
+  validation (`certs_valid + certs_expires_warning`) — expiring-window certs are
+  still valid, so they're counted as valid (and also surfaced in the Expiring
+  Soon count).
+- Dashboard count tiles (Total / Valid / Expiring Soon / Expired / Revoked) are
+  now clickable and open the Certificates page pre-filtered to that status (and
+  briefly flash when pressed). The certs page gains a matching **Expiring Soon**
+  filter.
+- Regenerating a VPN profile is now idempotent: the `VPN_<cn>` document is
+  overwritten (rather than duplicated) and the `openvpn_profile` row is upserted.
+- The `renew_cert`/`rekey_cert` Tauri commands now return `{ serial, pem }` for
+  the new certificate (previously just the PEM). New `get_vpn_profile_for_cn`
+  command looks up a CN's recorded VPN profile from the database.
+
+### Fixed
+
+- **Compatibility with 1Password CLI 2.34.0**: `op read` no longer accepts
+  `[type]` field-type qualifiers (e.g. `[text]`) inside `op://` secret
+  references, which had broken the OpenVPN params page (DH and TA key-size
+  lookups failed with `invalid character in secret reference: '['`).
+  `Op::mk_url` now strips the qualifier transparently — the SET syntax used
+  by `op item create/edit` is unaffected.
+- **Private-key copy reliability in the desktop app**: the Copy buttons on
+  the Certificate, External Certificate, and DKIM Key detail pages now go
+  through Tauri's clipboard-manager plugin, so the copy still succeeds after
+  the native confirmation dialog (previously failed with `NotAllowedError`
+  in the Tauri webview because the user-activation gesture was consumed by
+  the dialog). All other in-app clipboard copies migrate to the same plugin
+  for consistency.
+
 ## [0.99.15] - 2026-05-07
 
 ### Added

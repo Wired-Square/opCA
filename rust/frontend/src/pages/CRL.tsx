@@ -8,7 +8,7 @@ import {
   recordCrlCopy,
 } from "../api/crl";
 import { formatDate } from "../utils/dates";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
@@ -86,7 +86,7 @@ export default function CRL() {
   function copyPem() {
     const pem = info()?.crl_pem;
     if (pem) {
-      navigator.clipboard.writeText(pem);
+      void writeClipboard(pem);
       markCopied();
       void recordCrlCopy();
     }
@@ -114,7 +114,7 @@ export default function CRL() {
   function copyInspectDump() {
     const dump = inspectResult()?.text_dump;
     if (dump) {
-      navigator.clipboard.writeText(dump);
+      void writeClipboard(dump);
       markInspectCopied();
     }
   }

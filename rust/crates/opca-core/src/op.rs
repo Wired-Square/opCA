@@ -533,9 +533,17 @@ impl<R: CommandRunner> Op<R> {
     }
 
     /// Build a 1Password secret reference URL.
+    ///
+    /// Any trailing `[type]` field-type qualifier in `value_key` is stripped:
+    /// it is required in the SET syntax of `op item create/edit` but invalid
+    /// inside an `op://` path, and op 2.34.0 rejects it outright with
+    /// "invalid character in secret reference: '['".
     pub fn mk_url(&self, item_title: &str, value_key: Option<&str>) -> String {
         match value_key {
-            Some(key) => format!("op://{}/{}/{}", self.vault, item_title, key),
+            Some(key) => {
+                let clean = key.split_once('[').map_or(key, |(field, _)| field);
+                format!("op://{}/{}/{}", self.vault, item_title, clean)
+            }
             None => format!("op://{}/{}", self.vault, item_title),
         }
     }
@@ -566,9 +574,10 @@ impl<R: CommandRunner> Op<R> {
         Ok(vault)
     }
 
-    /// Delete (archive) a 1Password vault.
+    /// Permanently delete a 1Password vault. (The `op` CLI has no vault-archive
+    /// flag — `op vault delete` rejects `--archive` — so this is a hard delete.)
     pub fn vault_delete(&self, name: &str) -> Result<(), OpcaError> {
-        self.checked(&["vault", "delete", name, "--archive"], None)?;
+        self.checked(&["vault", "delete", name], None)?;
         Ok(())
     }
 
@@ -704,6 +713,21 @@ mod tests {
         assert_eq!(
             op.mk_url("MyCert", Some("private_key")),
             "op://TestVault/MyCert/private_key"
+        );
+    }
+
+    #[test]
+    fn mk_url_strips_field_type_qualifier() {
+        // op 2.34.0 rejects `[` in op:// references. Field-type qualifiers
+        // like `[text]` are valid in SET syntax but never in op:// paths.
+        let op = mock_op(vec![]);
+        assert_eq!(
+            op.mk_url("OpenVPN", Some("diffie-hellman/key_size[text]")),
+            "op://TestVault/OpenVPN/diffie-hellman/key_size",
+        );
+        assert_eq!(
+            op.mk_url("Cert", Some("serial[text]")),
+            "op://TestVault/Cert/serial",
         );
     }
 

@@ -17,6 +17,7 @@
     "@fontsource/ubuntu": "^5.2.8",
     "@solidjs/router": "^0.15.0",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-clipboard-manager": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "solid-js": "^1.9.0"

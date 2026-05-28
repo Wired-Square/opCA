@@ -7,7 +7,7 @@ import {
   deployDkimRoute53,
 } from "../api/dkim";
 import { formatDate } from "../utils/dates";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import type { DkimKeyItem } from "../api/types";
@@ -118,7 +118,7 @@ export default function DKIM() {
     const r = createResult();
     if (!r) return;
     const value = chunked() ? r.dns_record_chunked : r.dns_record;
-    navigator.clipboard.writeText(value);
+    void writeClipboard(value);
     markCopied();
   }
 

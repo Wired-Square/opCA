@@ -65,6 +65,31 @@
   text-decoration: underline;
 }
 
+.fresh-banner {
+  /* Pin the "New certificate" banner so it stays visible while scrolling the
+     PEM/detail content. Needs an opaque background (mixed over the page colour)
+     so the scrolling content doesn't show through, and a z-index above it. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-left-color: var(--success, #2e7d32);
+  background: color-mix(in srgb, var(--success, #2e7d32) 8%, var(--bg-primary));
+}
+
+.vpn-regen-banner {
+  border-left-color: var(--accent);
+}
+
+.vpn-regen-actions {
+  margin-top: 8px;
+}
+
+.vpn-regen-caveat {
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+}
+
 .ignore-note-input {
   font-family: inherit;
   font-size: 0.875rem;

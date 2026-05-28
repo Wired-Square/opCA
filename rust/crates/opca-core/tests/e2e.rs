@@ -13,7 +13,7 @@
 use std::sync::Mutex;
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::Op;
+use opca_core::op::{CommandRunner, Op};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::CertType;
 use opca_core::services::database::models::{CaConfig, CertLookup};
@@ -55,6 +55,56 @@ macro_rules! skip_unless_integration {
 }
 
 // ---------------------------------------------------------------------------
+// Assertion helpers
+// ---------------------------------------------------------------------------
+
+/// Serial of the cert matching `lookup` (any status).
+fn cert_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, lookup: &CertLookup) -> String {
+    ca.ca_database
+        .as_ref()
+        .expect("database missing")
+        .query_cert(lookup, false)
+        .expect("query_cert failed")
+        .expect("cert not found")
+        .serial
+}
+
+/// Stored title (`CRT_<serial>_<cn>`) of the cert with the given serial.
+fn cert_title_for_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, serial: &str) -> String {
+    ca.ca_database
+        .as_ref()
+        .expect("database missing")
+        .query_cert(&CertLookup::Serial(serial.to_string()), false)
+        .expect("query_cert failed")
+        .expect("cert not found")
+        .title
+        .expect("cert title missing")
+}
+
+/// Assert a renew/rekey predecessor was auto-ignored with the expected reason
+/// and a `replaced by <new_serial>` note.
+fn assert_predecessor_ignored<R: CommandRunner>(
+    ca: &CertificateAuthority<R>,
+    old_serial: &str,
+    new_serial: &str,
+    reason: &str,
+) {
+    let row = ca
+        .ca_database
+        .as_ref()
+        .expect("database missing")
+        .query_cert(&CertLookup::Serial(old_serial.to_string()), false)
+        .expect("query_cert failed")
+        .expect("predecessor row present");
+    assert!(row.ignored_at.is_some(), "predecessor should be ignored");
+    assert_eq!(row.ignored_reason.as_deref(), Some(reason));
+    assert_eq!(
+        row.ignored_note.as_deref(),
+        Some(format!("replaced by {new_serial}").as_str()),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Test sequence
 // ---------------------------------------------------------------------------
 
@@ -90,6 +140,12 @@ fn t10_ca_init() {
     let op = make_op(&s.vault);
 
     let config = CaConfig {
+        cn: Some("OPCA E2E Test CA".to_string()),
+        ca_days: Some(3650),
+        // The CA self-signs with serial `next_serial` (default 1); set it so the
+        // counter and the CA serial agree and the first issued cert doesn't
+        // collide with the CA's serial.
+        next_serial: Some(1),
         org: Some("OPCA E2E Test".to_string()),
         ou: Some("Testing".to_string()),
         country: Some("AU".to_string()),
@@ -174,8 +230,10 @@ fn t20_cert_create_server() {
     assert!(bundle.certificate.is_some());
     let pem = bundle.certificate_pem().expect("cert pem");
     assert!(pem.contains("BEGIN CERTIFICATE"));
-    s.server_cert_title = title.to_string();
-    eprintln!("[e2e] Webserver cert created: {}", title);
+    // Store the real stored title (`CRT_<serial>_<cn>`), not the bare arg, so
+    // the later Title lookups resolve the row.
+    s.server_cert_title = bundle.title.clone();
+    eprintln!("[e2e] Webserver cert created: {}", bundle.title);
 }
 
 #[test]
@@ -200,8 +258,8 @@ fn t21_cert_create_client() {
         .expect("generate vpnclient cert failed");
 
     assert!(bundle.certificate.is_some());
-    s.client_cert_title = title.to_string();
-    eprintln!("[e2e] VPN client cert created: {}", title);
+    s.client_cert_title = bundle.title.clone();
+    eprintln!("[e2e] VPN client cert created: {}", bundle.title);
 }
 
 #[test]
@@ -228,38 +286,55 @@ fn t22_cert_list() {
 fn t23_cert_renew() {
     skip_unless_integration!();
 
-    let state = STATE.lock().unwrap();
-    let s = state.as_ref().expect("t01 must run first");
+    let mut state = STATE.lock().unwrap();
+    let s = state.as_mut().expect("t01 must run first");
     let op = make_op(&s.vault);
 
     let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
 
     let lookup = CertLookup::Title(s.server_cert_title.clone());
-    let (new_pem, _warning) = ca
+    let old_serial = cert_serial(&ca, &lookup);
+
+    let (new_pem, new_serial, _warning) = ca
         .renew_certificate_bundle(&lookup)
         .expect("renew failed");
 
     assert!(new_pem.contains("BEGIN CERTIFICATE"));
-    eprintln!("[e2e] Renewed cert for {}", s.server_cert_title);
+    assert_ne!(new_serial, old_serial, "renew must mint a new serial");
+
+    // The predecessor is auto-ignored so it stops triggering expiry alerts.
+    assert_predecessor_ignored(&ca, &old_serial, &new_serial, "renewed");
+
+    // Point subsequent tests at the freshly issued cert.
+    s.server_cert_title = cert_title_for_serial(&ca, &new_serial);
+    eprintln!("[e2e] Renewed {old_serial} → {new_serial} (predecessor auto-ignored)");
 }
 
 #[test]
 fn t23b_cert_rekey() {
     skip_unless_integration!();
 
-    let state = STATE.lock().unwrap();
-    let s = state.as_ref().expect("t01 must run first");
+    let mut state = STATE.lock().unwrap();
+    let s = state.as_mut().expect("t01 must run first");
     let op = make_op(&s.vault);
 
     let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
 
     let lookup = CertLookup::Title(s.server_cert_title.clone());
-    let (new_pem, _warning) = ca
+    let old_serial = cert_serial(&ca, &lookup);
+
+    let (new_pem, new_serial, _warning) = ca
         .rekey_certificate_bundle(&lookup)
         .expect("rekey failed");
 
     assert!(new_pem.contains("BEGIN CERTIFICATE"));
-    eprintln!("[e2e] Rekeyed cert for {}", s.server_cert_title);
+    assert_ne!(new_serial, old_serial, "rekey must mint a new serial");
+
+    // The predecessor is auto-ignored so it stops triggering expiry alerts.
+    assert_predecessor_ignored(&ca, &old_serial, &new_serial, "rekeyed");
+
+    s.server_cert_title = cert_title_for_serial(&ca, &new_serial);
+    eprintln!("[e2e] Rekeyed {old_serial} → {new_serial} (predecessor auto-ignored)");
 }
 
 #[test]
@@ -403,25 +478,27 @@ fn t50_vault_backup_restore() {
 fn t90_cleanup() {
     skip_unless_integration!();
 
-    let state = STATE.lock().unwrap();
+    // Recover the inner state even if an earlier test panicked and poisoned the
+    // lock — cleanup must run regardless so the throwaway vaults don't leak.
+    let state = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let s = state.as_ref().expect("t01 must run first");
 
-    // Archive the test vaults — use a temporary Op on Private to run vault_delete
+    // Delete the test vaults — use a temporary Op on Private to run vault_delete
     let tmp_op = Op::new("Private", s.account.clone(), None)
         .expect("Need 'Private' vault for cleanup");
 
-    // Archive main test vault
+    // Delete main test vault
     match tmp_op.vault_delete(&s.vault) {
-        Ok(()) => eprintln!("[e2e] Archived vault: {}", s.vault),
-        Err(e) => eprintln!("[e2e] Warning: failed to archive vault '{}': {}", s.vault, e),
+        Ok(()) => eprintln!("[e2e] Deleted vault: {}", s.vault),
+        Err(e) => eprintln!("[e2e] Warning: failed to delete vault '{}': {}", s.vault, e),
     }
 
-    // Archive restore vault if created
+    // Delete restore vault if created
     if !s.restore_vault.is_empty() {
         match tmp_op.vault_delete(&s.restore_vault) {
-            Ok(()) => eprintln!("[e2e] Archived vault: {}", s.restore_vault),
+            Ok(()) => eprintln!("[e2e] Deleted vault: {}", s.restore_vault),
             Err(e) => eprintln!(
-                "[e2e] Warning: failed to archive vault '{}': {}",
+                "[e2e] Warning: failed to delete vault '{}': {}",
                 s.restore_vault, e
             ),
         }

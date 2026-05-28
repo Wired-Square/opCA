@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from "@solidjs/router";
 import { listCerts, listExternalCerts, inspectCertificate } from "../api/certs";
 import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
+import CertStatusBadge from "../components/CertStatusBadge";
 import type { CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
 import "../styles/pages/certs.css";
 
@@ -15,6 +16,7 @@ type Tab = "local" | "external" | "inspect";
 const VALID_FILTERS = new Set([
   "all",
   "valid",
+  "expiring",
   "expired",
   "revoked",
   "ignored",
@@ -26,7 +28,7 @@ export default function Certs() {
   const [searchParams] = useSearchParams();
   const initialFilter = typeof searchParams.filter === "string" && VALID_FILTERS.has(searchParams.filter)
     ? searchParams.filter
-    : "all";
+    : "valid";
   const initialTab: Tab =
     searchParams.tab === "external" ? "external"
     : searchParams.tab === "inspect" ? "inspect"
@@ -48,9 +50,19 @@ export default function Certs() {
       items = items.filter((c) => !!c.ignored_at);
     } else if (f === "superseded") {
       items = items.filter((c) => !!c.superseded_by);
-    } else if (f === "expired" || f === "valid" || f === "revoked") {
-      // Status filters hide ignored and superseded rows — they're audit-only
-      // and would otherwise inflate the "Expired" view the dashboard mirrors.
+    } else if (f === "valid") {
+      // A still-Valid cert that's been ignored stays on the Valid view (it
+      // renders with an "ignored" chip). Superseded rows are Expired, so they
+      // never match the Valid status anyway.
+      items = items.filter((c) => c.status?.toLowerCase() === "valid");
+    } else if (f === "expiring") {
+      // Certs inside the expiry-warning window. Ignored ones are excluded so
+      // this matches the dashboard's "Expiring Soon" count (which subtracts the
+      // acknowledged certs).
+      items = items.filter((c) => c.expiring_soon && !c.ignored_at);
+    } else if (f === "expired" || f === "revoked") {
+      // Hide ignored/superseded audit-only rows so these views match the
+      // dashboard's expired/revoked counts.
       items = items.filter(
         (c) =>
           c.status?.toLowerCase() === f && !c.ignored_at && !c.superseded_by,
@@ -115,7 +127,7 @@ export default function Certs() {
   function copyInspectDump() {
     const dump = inspectResult()?.text_dump;
     if (dump) {
-      navigator.clipboard.writeText(dump);
+      void writeClipboard(dump);
       markInspectCopied();
     }
   }
@@ -154,6 +166,7 @@ export default function Certs() {
             >
               <option value="all">All</option>
               <option value="valid">Valid</option>
+              <option value="expiring">Expiring Soon</option>
               <option value="expired">Expired</option>
               <option value="revoked">Revoked</option>
               <option value="superseded">Superseded</option>
@@ -238,7 +251,7 @@ export default function Certs() {
                       <td>{cert.cn ?? "\u2014"}</td>
                       <td>{cert.cert_type ?? "\u2014"}</td>
                       <td>
-                        <span class={statusBadgeClass(cert.status)}>{cert.status ?? "\u2014"}</span>
+                        <CertStatusBadge status={cert.status} expiringSoon={cert.expiring_soon} />
                         <Show when={cert.ignored_at}>
                           <span class="status-badge status-ignored">ignored</span>
                         </Show>

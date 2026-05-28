@@ -62,7 +62,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, background 0.1s ease, transform 0.1s ease;
 }
 
 .stat-card:hover {
@@ -114,6 +114,13 @@
 .stat-card-clickable:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Flash + slight depress on press for tactile feedback before navigating. */
+.stat-card-clickable:active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  transform: scale(0.98);
 }
 
 .action-items {

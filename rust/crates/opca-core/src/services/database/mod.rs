@@ -20,6 +20,19 @@ const EXPIRY_WARNING_DAYS: i64 = 30;
 /// Caution expiry warning window in days (6 months).
 const EXPIRY_CAUTION_DAYS: i64 = 183;
 
+/// Whether an OpenSSL-format expiry timestamp is inside the expiry-warning
+/// window and hasn't already passed — the same test `process_ca_database` uses
+/// to populate `certs_expires_soon`. Exposed for the cert detail page, which
+/// may render a single record before a full classification scan has run.
+pub fn is_expiring_soon(expiry_date: &str) -> bool {
+    let Ok(expiry) = datetime::parse_datetime(expiry_date, DateTimeFormat::Openssl) else {
+        return false;
+    };
+    let now = chrono::Utc::now().naive_utc();
+    let expiry = expiry.naive_utc();
+    now <= expiry && expiry < now + chrono::Duration::days(EXPIRY_WARNING_DAYS)
+}
+
 // ---------------------------------------------------------------------------
 // Main struct
 // ---------------------------------------------------------------------------
@@ -40,7 +53,11 @@ pub struct CertificateAuthorityDB {
     pub certs_expires_warning: HashSet<String>,
     pub certs_revoked: HashSet<String>,
     pub certs_valid: HashSet<String>,
-    /// Certs whose `ignored_at` is set — excluded from `certs_expired`.
+    /// Overlay set of certs whose `ignored_at` is set. Orthogonal to the status
+    /// sets above — an ignored cert still appears in its true status bucket
+    /// (valid/expiring/expired). Consumers that drive *alerts* (the dashboard
+    /// problem counts, the notification Lambda) subtract this set so an
+    /// acknowledged cert stops nagging, without altering what the list shows.
     pub certs_ignored: HashSet<String>,
     /// Expired certs whose CN matches a currently-valid cert — excluded from
     /// `certs_expired` because the replacement covers them.
@@ -1072,6 +1089,35 @@ impl CertificateAuthorityDB {
         Ok(results)
     }
 
+    /// Return the most recently recorded OpenVPN profile for a CN (highest id),
+    /// or `None`. Case-insensitive on CN.
+    pub fn query_openvpn_profile_for_cn(
+        &self,
+        cn: &str,
+    ) -> Result<Option<OpenVpnProfile>, OpcaError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, cn, title, created_date, template
+             FROM openvpn_profile
+             WHERE cn = ?1 COLLATE NOCASE
+             ORDER BY id DESC LIMIT 1",
+        )?;
+
+        let mut rows = stmt.query_map([cn], |row| {
+            Ok(OpenVpnProfile {
+                id: row.get(0)?,
+                cn: row.get(1)?,
+                title: row.get(2)?,
+                created_date: row.get(3)?,
+                template: row.get(4)?,
+            })
+        })?;
+
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
     /// Delete an OpenVPN profile by title.
     pub fn delete_openvpn_profile(&self, title: &str) -> Result<bool, OpcaError> {
         let rows = self
@@ -1307,15 +1353,23 @@ impl CertificateAuthorityDB {
 
             let expires_warning = caution_boundary > expiry_date;
 
+            // `ignored` is an orthogonal "acknowledged — don't notify" flag, not
+            // a status. Classify the cert by its true state below regardless;
+            // the overlay set lets the dashboard and Lambda hold ignored certs
+            // out of the *problem* alerts without changing what the list shows
+            // (an ignored cert still renders its real "Expiring Soon"/"Expired"
+            // status plus an "ignored" chip).
+            if cert.ignored_at.is_some() {
+                self.certs_ignored.insert(cert.serial.clone());
+            }
+
             if expired {
                 if cert.status.as_deref() != Some("Expired") {
                     cert_changed = true;
                     db_changed = true;
                     cert.status = Some("Expired".to_string());
                 }
-                if cert.ignored_at.is_some() {
-                    self.certs_ignored.insert(cert.serial.clone());
-                } else if let Some(replacement) = cert
+                if let Some(replacement) = cert
                     .cn
                     .as_deref()
                     .and_then(|cn| valid_cn_to_serial.get(cn))

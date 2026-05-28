@@ -4,7 +4,7 @@ import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
 import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, resignCa, recordCaCertCopy } from "../api/ca";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
 import { formatDate } from "../utils/dates";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
@@ -100,7 +100,7 @@ function CertificateTab(props: {
   function copyPem() {
     const pem = props.info()?.cert_pem;
     if (pem) {
-      navigator.clipboard.writeText(pem);
+      void writeClipboard(pem);
       markCopied();
       void recordCaCertCopy();
     }

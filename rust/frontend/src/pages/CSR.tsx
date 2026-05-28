@@ -8,7 +8,7 @@ import {
   importCsrCert,
   inspectCsr,
 } from "../api/csr";
-import { createCopiedSignal } from "../utils/clipboard";
+import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
@@ -148,7 +148,7 @@ export default function CSR() {
   function copyInspectDump() {
     const dump = inspectResult()?.text_dump;
     if (dump) {
-      navigator.clipboard.writeText(dump);
+      void writeClipboard(dump);
       markInspectCopied();
     }
   }
@@ -172,7 +172,7 @@ export default function CSR() {
   function copyPem() {
     const pem = detail()?.csr_pem ?? createResult()?.csr_pem;
     if (pem) {
-      navigator.clipboard.writeText(pem);
+      void writeClipboard(pem);
       markCopied();
     }
   }
@@ -733,7 +733,7 @@ export default function CSR() {
                         type="button"
                         class="btn-ghost btn-sm"
                         onClick={() => {
-                          navigator.clipboard.writeText(r().cert_pem);
+                          void writeClipboard(r().cert_pem);
                           markCopied();
                         }}
                       >

@@ -1,7 +1,7 @@
 import { createSignal, Show, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
-import { getCaConfig, uploadCaDatabase } from "../api/ca";
+import { uploadDbIfPrivateStore } from "../api/ca";
 import { CERT_TYPES } from "../api/types";
 import "../styles/pages/cert-create.css";
 
@@ -14,8 +14,6 @@ export default function CertCreate() {
   const [sans, setSans] = createSignal<string[]>([]);
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
-  const [uploadingDb, setUploadingDb] = createSignal(false);
 
   function addSan() {
     const value = sanInput().trim();
@@ -27,18 +25,6 @@ export default function CertCreate() {
 
   function removeSan(index: number) {
     setSans(sans().filter((_, i) => i !== index));
-  }
-
-  async function handleUploadDb() {
-    setUploadingDb(true);
-    try {
-      await uploadCaDatabase();
-      navigate("/certs");
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setUploadingDb(false);
-    }
   }
 
   async function handleSubmit(e: Event) {
@@ -54,13 +40,10 @@ export default function CertCreate() {
         alt_dns_names: sans().length > 0 ? sans() : undefined,
         key_size: keySize(),
       });
-      // Check if private store is configured — offer to upload database
-      const config = await getCaConfig();
-      if (config.ca_private_store) {
-        setShowUploadPrompt(true);
-      } else {
-        navigate("/certs");
-      }
+      // Sync the DB to the private store if one is configured (no prompt;
+      // progress shows in the side-nav status), then go to the cert list.
+      await uploadDbIfPrivateStore();
+      navigate("/certs");
     } catch (err) {
       setError(String(err));
     } finally {
@@ -149,34 +132,18 @@ export default function CertCreate() {
           </Show>
         </div>
 
-        <Show when={showUploadPrompt()}>
-          <div class="upload-prompt">
-            <span>Upload database to private store?</span>
-            <div class="upload-actions">
-              <button class="btn-primary btn-sm" type="button" onClick={handleUploadDb} disabled={uploadingDb()}>
-                {uploadingDb() ? "Uploading\u2026" : "Upload"}
-              </button>
-              <button class="btn-ghost btn-sm" type="button" onClick={() => navigate("/certs")}>
-                Skip
-              </button>
-            </div>
-          </div>
-        </Show>
-
         <Show when={error()}>
           <p class="form-error" role="alert">{error()}</p>
         </Show>
 
-        <Show when={!showUploadPrompt()}>
-          <div class="form-actions">
-            <button class="btn-primary" type="submit" disabled={saving() || !cn().trim()}>
-              {saving() ? "Creating\u2026" : "Create Certificate"}
-            </button>
-            <button class="btn-ghost" type="button" onClick={() => navigate("/certs")}>
-              Cancel
-            </button>
-          </div>
-        </Show>
+        <div class="form-actions">
+          <button class="btn-primary" type="submit" disabled={saving() || !cn().trim()}>
+            {saving() ? "Creating\u2026" : "Create Certificate"}
+          </button>
+          <button class="btn-ghost" type="button" onClick={() => navigate("/certs")}>
+            Cancel
+          </button>
+        </div>
       </form>
 
     </div>

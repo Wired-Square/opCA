@@ -181,31 +181,45 @@ export default function Dashboard() {
             <h3 class="section-heading">Certificates</h3>
 
             <div class="dashboard-grid">
-              <div class="stat-card">
-                <span class="stat-label">Total</span>
-                <span class="stat-value">{d().total_certs}</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">Valid</span>
-                <span class="stat-value text-success">{d().valid_certs}</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">Expiring Soon</span>
-                <span class="stat-value text-warning">{d().expiring_certs}</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">Expired</span>
-                <span class="stat-value text-error">{d().expired_certs}</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">Revoked</span>
-                <span class="stat-value text-muted">{d().revoked_certs}</span>
-              </div>
+              <StatTile label="Total" value={d().total_certs} filter="all" />
+              <StatTile label="Valid" value={d().valid_certs} filter="valid" valueClass="text-success" />
+              <StatTile label="Expiring Soon" value={d().expiring_certs} filter="expiring" valueClass="text-warning" />
+              <StatTile label="Expired" value={d().expired_certs} filter="expired" valueClass="text-error" />
+              <StatTile label="Revoked" value={d().revoked_certs} filter="revoked" valueClass="text-muted" />
             </div>
           </>
         )}
       </Show>
 
+    </div>
+  );
+}
+
+/** A dashboard count tile that navigates to the certificates page, pre-filtered
+ * to the matching status. */
+function StatTile(props: {
+  label: string;
+  value: number;
+  filter: string;
+  valueClass?: string;
+}) {
+  const navigate = useNavigate();
+  const go = () => navigate(`/certs?filter=${props.filter}`);
+  return (
+    <div
+      class="stat-card stat-card-clickable"
+      role="button"
+      tabindex="0"
+      onClick={go}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          go();
+        }
+      }}
+    >
+      <span class="stat-label">{props.label}</span>
+      <span class={`stat-value ${props.valueClass ?? ""}`}>{props.value}</span>
     </div>
   );
 }

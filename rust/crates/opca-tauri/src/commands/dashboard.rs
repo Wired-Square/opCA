@@ -97,10 +97,19 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         .map_err(|e| e.to_string())?;
 
     let total_certs = db.count_certs().unwrap_or(0);
-    let valid_certs = db.certs_valid.len();
-    let expired_certs = db.certs_expired.len();
-    let expiring_certs = db.certs_expires_soon.len();
-    let warning_certs = db.certs_expires_warning.len();
+    // "Valid" = passes validation (not expired, not revoked). That includes
+    // certs in the expiry-warning window (still valid, just expiring) and
+    // ignored-but-valid certs. `certs_valid` (beyond the caution window) and
+    // `certs_expires_warning` (within it, and already a superset of
+    // `certs_expires_soon`) are disjoint and together cover every non-expired,
+    // non-revoked cert.
+    let valid_certs = db.certs_valid.len() + db.certs_expires_warning.len();
+    // The "problem" counts subtract ignored certs so an acknowledged cert stops
+    // nagging here and in the action items — "ignored" means "don't notify about
+    // problems". (A still-valid ignored cert remains counted as valid above.)
+    let expired_certs = db.certs_expired.difference(&db.certs_ignored).count();
+    let expiring_certs = db.certs_expires_soon.difference(&db.certs_ignored).count();
+    let warning_certs = db.certs_expires_warning.difference(&db.certs_ignored).count();
     let revoked_certs = db.certs_revoked.len();
 
     let pending_csrs = db

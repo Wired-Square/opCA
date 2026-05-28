@@ -55,6 +55,14 @@ export async function listVpnClients(): Promise<string[]> {
   return tauriInvoke<string[]>("list_vpn_clients");
 }
 
+/** Look up the VPN profile previously generated for a CN (DB-backed, no `op`
+ * call). Returns null if the CN has no recorded profile. */
+export async function getVpnProfileForCn(
+  cn: string,
+): Promise<OpenVpnProfileItem | null> {
+  return tauriInvoke<OpenVpnProfileItem | null>("get_vpn_profile_for_cn", { cn });
+}
+
 export async function generateOpenVpnProfile(
   request: GenerateProfileRequest,
 ): Promise<OpenVpnProfileItem> {
