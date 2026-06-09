@@ -105,11 +105,11 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 | CA | `CA` | Secure Note | CA certificate, private key, subject, validity, serial counters |
 | Database | `CA_Database` | Document | SQLite dump of every tracked cert/CSR/CRL/VPN record |
 | CRL | `CRL` | Document | Latest published Certificate Revocation List |
-| OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key, server template |
+| OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key, server config, and the named templates (canonical store; mirrored into the `openvpn_template` table for fast reads) |
 | Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type) |
 | External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
 | CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests |
-| VPN profile | `VPN_<cn>` | Document | Generated OpenVPN client profile (`.ovpn`) — the template injected with the user's cert/key + CA + TLS-auth |
+| VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial) is also written to the `openvpn_profile` table and persisted on generate, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. Legacy profiles may still be titled `VPN_<cn>`. |
 | DKIM | `<selector>._domainkey.<domain>` | Secure Note | DKIM key pair and metadata |
 | Lock | `CA_Lock` | Secure Note | Advisory lock for concurrent-write safety |
 
@@ -120,6 +120,17 @@ or index support. OPCA keeps a full SQLite mirror in memory, consults it for
 every query, and re-serialises it to the `CA_Database` document whenever the
 catalogue changes. The dump is keyed by a `download_fingerprint` so stale
 local state is detected on reconnect.
+
+The same mirror pattern backs DKIM keys, OpenVPN templates, and OpenVPN profile
+records: the 1Password items remain canonical, but each is shadowed in a table
+(`dkim_key`, `openvpn_template`, `openvpn_profile`) so list/detail views read
+from SQLite instead of spawning `op`. On first read of an empty table the
+command seeds it from 1Password (reconciling deletions); thereafter every
+mutation upserts the row and calls `store_ca_database()` to persist. The OpenVPN
+page is Profiles-first — a generated profile's record lands in the DB on create
+(it previously lived only in memory and vanished on restart), and the template
+dropdown is served from the mirror so it is populated immediately rather than
+waiting on a lazy `op` fetch.
 
 ### Status classification vs. problem suppression
 

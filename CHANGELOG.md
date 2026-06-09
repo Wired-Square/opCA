@@ -19,7 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a one-click **Regenerate VPN profile** using the template previously recorded
   for that CN (read from the local `openvpn_profile` table — no 1Password
   round-trip). If the CN has no recorded profile, it links to the OpenVPN page
-  instead.
+  instead — and that link now opens the OpenVPN **Add-profile modal** with the
+  cert **pre-selected by serial**, ready to generate.
+- The OpenVPN **Add-profile** modal's certificate picker lists each valid VPN
+  client *and server* certificate with a **coloured serial badge** (green =
+  valid, orange = expiring soon) and its expiry date, so renewal duplicates —
+  two valid certs sharing a CN — can be told apart and the current one
+  identified. The profile's Client/Server type is inferred from the chosen cert.
+- The OpenVPN page is now **Profiles-first**: the Profiles view is the landing
+  tab, with **All / Client / Server** filter chips and a **+ Add** button that
+  opens a modal to generate a profile (pick a cert, pick a template — the
+  template defaults to the one last used for that CN). Server configuration (DH
+  parameters, TLS-auth key) and template editing move to a separate
+  **Configuration** tab.
 
 ### Changed
 
@@ -49,13 +61,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   now clickable and open the Certificates page pre-filtered to that status (and
   briefly flash when pressed). The certs page gains a matching **Expiring Soon**
   filter.
-- Regenerating a VPN profile is now idempotent: the `VPN_<cn>` document is
-  overwritten (rather than duplicated) and the `openvpn_profile` row is upserted.
+- VPN profiles are now stored as **`VPN_{serial}_{cn}`** (was `VPN_{cn}`),
+  mirroring the cert's own `CRT_{serial}_{cn}` item: a renewed cert (new serial)
+  gets a distinct profile rather than clobbering the previous one, while
+  regenerating the *same* cert overwrites its document and upserts the
+  `openvpn_profile` row.
+- The OpenVPN **Profiles** tab now lists from the local database (no 1Password
+  round-trip) with **Type** (Client/Server), **CN**, **Serial**, **Template**,
+  and **Created** columns. The type is derived from the cert each profile was
+  generated from.
+- OpenVPN **templates** are now served from the local database (mirrored from the
+  `OpenVPN` 1Password item) instead of a lazy `op` fetch, so the template
+  dropdown is populated immediately — fixing the empty dropdown when arriving via
+  the cert detail page's deep-link. The mirror seeds itself on first use (reading
+  every template from a single item fetch rather than one `op` call per template)
+  and the Configuration tab gains a **Refresh** that re-syncs from 1Password.
+- The post-renew **"New certificate"** and **"VPN profile"** banners on the cert
+  detail page are now pinned so they stay visible while scrolling the
+  certificate/key content.
 - The `renew_cert`/`rekey_cert` Tauri commands now return `{ serial, pem }` for
   the new certificate (previously just the PEM). New `get_vpn_profile_for_cn`
   command looks up a CN's recorded VPN profile from the database.
 
 ### Fixed
+
+- **Generated VPN profiles disappeared on restart.** The profile record was
+  added to the in-memory database but never persisted, so it was lost when the
+  CA database was reloaded from 1Password on the next launch (only the `.ovpn`
+  document survived). Generating a profile now calls `store_ca_database()` after
+  recording the row — mirroring the DKIM commands — so the Profiles list is
+  retained across restarts.
+- **VPN profile generation used the wrong certificate when two valid certs
+  shared a CN** (e.g. after renewing a VPN client before the old cert expired):
+  the template's `op://.../$OPCA_USER/...` references resolved `OPCA_USER` to the
+  bare CN, which 1Password matched to the older, legacy-named item. Generation
+  now selects the chosen cert by **serial** and points `OPCA_USER` at that cert's
+  exact stored item title, so the profile always carries the selected cert's
+  key/certificate. The picker disambiguates duplicates and the chosen serial is
+  recorded on the profile (schema **v11** adds `openvpn_profile.serial`).
 
 - **Compatibility with 1Password CLI 2.34.0**: `op read` no longer accepts
   `[type]` field-type qualifiers (e.g. `[text]`) inside `op://` secret

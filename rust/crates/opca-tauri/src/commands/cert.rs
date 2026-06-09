@@ -28,6 +28,32 @@ use crate::commands::dto::{
 };
 use crate::state::AppState;
 
+/// Build a `CertListItem` from a raw `CertRecord`, folding in the classification
+/// state (`replacements`, `certs_expires_soon`) computed by `process_ca_database`.
+/// Shared by `list_certs` and `list_vpn_certs` so both surface the same
+/// superseded / expiring-soon flags.
+pub(crate) fn cert_list_item(
+    r: CertRecord,
+    replacements: &std::collections::HashMap<String, String>,
+    expires_soon: &std::collections::HashSet<String>,
+) -> CertListItem {
+    let superseded_by = replacements.get(&r.serial).cloned();
+    let expiring_soon = expires_soon.contains(&r.serial);
+    CertListItem {
+        serial: r.serial.into(),
+        cn: r.cn,
+        title: r.title,
+        status: r.status,
+        cert_type: r.cert_type,
+        expiry_date: r.expiry_date,
+        key_type: r.key_type,
+        key_size: r.key_size,
+        ignored_at: r.ignored_at,
+        superseded_by,
+        expiring_soon,
+    }
+}
+
 #[tauri::command]
 pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>, String> {
     let mut conn = state.ensure_ca()?;
@@ -42,23 +68,10 @@ pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>,
     let replacements = db.replacements.clone();
     let expires_soon = db.certs_expires_soon.clone();
 
-    Ok(certs.into_iter().map(|r| {
-        let superseded_by = replacements.get(&r.serial).cloned();
-        let expiring_soon = expires_soon.contains(&r.serial);
-        CertListItem {
-            serial: r.serial.into(),
-            cn: r.cn,
-            title: r.title,
-            status: r.status,
-            cert_type: r.cert_type,
-            expiry_date: r.expiry_date,
-            key_type: r.key_type,
-            key_size: r.key_size,
-            ignored_at: r.ignored_at,
-            superseded_by,
-            expiring_soon,
-        }
-    }).collect())
+    Ok(certs
+        .into_iter()
+        .map(|r| cert_list_item(r, &replacements, &expires_soon))
+        .collect())
 }
 
 #[tauri::command]

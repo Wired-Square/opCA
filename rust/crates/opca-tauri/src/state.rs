@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::{info, warn};
 use opca_core::op::{Op, ShellRunner};
 use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::database::CertificateAuthorityDB;
 use opca_core::vault_lock::VaultLock;
 
 use crate::commands::dto::LogEntry;
@@ -16,6 +17,18 @@ use crate::commands::dto::LogEntry;
 pub struct Connection {
     pub op: Option<Op>,
     pub ca: Option<CertificateAuthority<ShellRunner>>,
+}
+
+impl Connection {
+    /// Borrow the loaded CA's in-memory database, or error if the CA (and hence
+    /// its database) isn't available. Saves the
+    /// `ca.as_ref().and_then(|ca| ca.ca_database.as_ref())` dance at read sites.
+    pub fn db(&self) -> Result<&CertificateAuthorityDB, String> {
+        self.ca
+            .as_ref()
+            .and_then(|ca| ca.ca_database.as_ref())
+            .ok_or_else(|| "Database not loaded".to_string())
+    }
 }
 
 /// Shared application state managed by Tauri.

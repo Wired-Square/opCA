@@ -554,12 +554,14 @@ fn test_openvpn_profile_crud() {
         title: "server.example.com_default".to_string(),
         created_date: Some("20250101000000Z".to_string()),
         template: Some("default".to_string()),
+        serial: Some("42".to_string()),
     })
     .unwrap();
 
     let profiles = db.query_all_openvpn_profiles().unwrap();
     assert_eq!(profiles.len(), 1);
     assert_eq!(profiles[0].cn, "server.example.com");
+    assert_eq!(profiles[0].serial.as_deref(), Some("42"));
 
     assert!(db
         .delete_openvpn_profile("server.example.com_default")
@@ -577,6 +579,7 @@ fn test_openvpn_profile_regenerate_is_idempotent() {
         title: "VPN_vpn.example.com".to_string(),
         created_date: Some("20250101000000Z".to_string()),
         template: Some(template.to_string()),
+        serial: None,
     };
 
     db.add_openvpn_profile(&make("default")).unwrap();
@@ -606,6 +609,7 @@ fn test_query_openvpn_profile_for_cn() {
         title: "VPN_vpn.example.com".to_string(),
         created_date: Some("20250101000000Z".to_string()),
         template: Some("default".to_string()),
+        serial: None,
     })
     .unwrap();
 
@@ -1082,7 +1086,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 5); // v5→v6, v6→v7, v7→v8, v8→v9, v9→v10
+    assert_eq!(info.steps.len(), 6); // v5→v6, v6→v7, v7→v8, v8→v9, v9→v10, v10→v11
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));

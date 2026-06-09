@@ -1,5 +1,6 @@
 import { tauriInvoke, withLock } from "./tauri";
 import type {
+  CertListItem,
   OpenVpnServerParams,
   OpenVpnTemplateItem,
   OpenVpnTemplateDetail,
@@ -36,6 +37,13 @@ export async function listOpenVpnTemplates(): Promise<OpenVpnTemplateItem[]> {
   return tauriInvoke<OpenVpnTemplateItem[]>("list_openvpn_templates");
 }
 
+/** Re-sync the template mirror from 1Password (Configuration tab Refresh). */
+export async function syncOpenVpnTemplates(): Promise<number> {
+  return withLock("sync_templates", () =>
+    tauriInvoke<number>("sync_openvpn_templates"),
+  );
+}
+
 export async function getOpenVpnTemplate(
   name: string,
 ): Promise<OpenVpnTemplateDetail> {
@@ -51,8 +59,12 @@ export async function saveOpenVpnTemplate(
   );
 }
 
-export async function listVpnClients(): Promise<string[]> {
-  return tauriInvoke<string[]>("list_vpn_clients");
+/** Valid `vpnclient` and `vpnserver` certificates, enriched with serial /
+ * status / expiry so the picker can render a coloured serial badge. Sorted by
+ * CN, then serial desc (current cert first within a renewed CN). The Add-profile
+ * flow infers Client/Server from the chosen cert's `cert_type`. */
+export async function listVpnCerts(): Promise<CertListItem[]> {
+  return tauriInvoke<CertListItem[]>("list_vpn_certs");
 }
 
 /** Look up the VPN profile previously generated for a CN (DB-backed, no `op`
@@ -76,11 +88,13 @@ export async function listOpenVpnProfiles(): Promise<OpenVpnProfileItem[]> {
 }
 
 export async function sendProfileToVault(
+  title: string,
   cn: string,
   destVault: string,
 ): Promise<boolean> {
   return withLock("send_profile", () =>
     tauriInvoke<boolean>("send_profile_to_vault", {
+      title,
       cn,
       destVault,
     }),

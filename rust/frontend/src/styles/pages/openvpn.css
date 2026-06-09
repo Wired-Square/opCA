@@ -28,10 +28,16 @@
   margin-top: 4px;
 }
 
-.generated-profile-section {
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
-  max-width: 480px;
+.add-profile-done {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-hint {
+  margin: 6px 0 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
 }
 
 .server-params {
@@ -55,8 +61,15 @@
 }
 
 .template-section h3 {
-  margin: 0 0 12px 0;
+  margin: 0;
   font-size: 1rem;
+}
+
+.template-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
 .template-header {
@@ -99,9 +112,36 @@
 
 .profiles-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   align-items: center;
+}
+
+.profiles-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.filter-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.filter-chips .chip {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.filter-chips .chip-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 .page-openvpn .data-table-wrap {

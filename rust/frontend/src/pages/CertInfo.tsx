@@ -70,7 +70,11 @@ export default function CertInfo() {
     setRegenMsg(null);
     setError(null);
     try {
-      const profile = await generateOpenVpnProfile({ cn, template_name: template });
+      const profile = await generateOpenVpnProfile({
+        cn,
+        serial: params.serial as string,
+        template_name: template,
+      });
       setRegenMsg(`Regenerated VPN profile for ${cn} (stored as ${profile.title}).`);
     } catch (e) {
       setError(String(e));
@@ -286,6 +290,7 @@ export default function CertInfo() {
                 </div>
               </Show>
 
+              <div class="cert-info-sticky-banners">
               <Show when={searchParams.freshFrom}>
                 <div class="ignored-banner fresh-banner">
                   <span class="ignored-banner-label">New certificate</span>
@@ -311,7 +316,10 @@ export default function CertInfo() {
                         <span class="ignored-banner-body">
                           This is a VPN client certificate with no recorded
                           profile.{" "}
-                          <NavLink class="superseded-link" href="/openvpn">
+                          <NavLink
+                            class="superseded-link"
+                            href={`/openvpn?add=1&serial=${encodeURIComponent(d().serial ?? "")}&cn=${encodeURIComponent(d().cn ?? "")}`}
+                          >
                             Generate one on the OpenVPN page
                           </NavLink>
                           {" "}for <span class="mono">{d().cn}</span>.
@@ -351,6 +359,7 @@ export default function CertInfo() {
                   )}
                 </Show>
               </Show>
+              </div>
 
               <div class="detail-grid">
                 <Row label="Serial" value={d().serial} mono />

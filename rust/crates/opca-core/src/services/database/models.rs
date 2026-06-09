@@ -200,6 +200,9 @@ pub struct OpenVpnProfile {
     pub title: String,
     pub created_date: Option<String>,
     pub template: Option<String>,
+    /// Serial of the cert this profile was generated from. None for rows
+    /// recorded before v11, or when generated without a serial.
+    pub serial: Option<String>,
 }
 
 /// Schema migration report.

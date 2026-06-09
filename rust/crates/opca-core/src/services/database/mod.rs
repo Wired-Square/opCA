@@ -1044,6 +1044,16 @@ impl CertificateAuthorityDB {
             .execute("DELETE FROM openvpn_template WHERE name = ?1", [name])?;
         Ok(rows > 0)
     }
+
+    /// Count OpenVPN templates — used to decide whether the mirror needs seeding.
+    pub fn count_openvpn_template(&self) -> Result<i64, OpcaError> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM openvpn_template",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,13 +1064,14 @@ impl CertificateAuthorityDB {
     /// Add an OpenVPN profile registry entry.
     pub fn add_openvpn_profile(&self, profile: &OpenVpnProfile) -> Result<(), OpcaError> {
         self.conn.execute(
-            "INSERT INTO openvpn_profile (cn, title, created_date, template)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO openvpn_profile (cn, title, created_date, template, serial)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![
                 profile.cn,
                 profile.title,
                 profile.created_date,
                 profile.template,
+                profile.serial,
             ],
         )?;
         Ok(())
@@ -1069,7 +1080,8 @@ impl CertificateAuthorityDB {
     /// Return all OpenVPN profiles ordered by CN.
     pub fn query_all_openvpn_profiles(&self) -> Result<Vec<OpenVpnProfile>, OpcaError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, cn, title, created_date, template FROM openvpn_profile ORDER BY cn",
+            "SELECT id, cn, title, created_date, template, serial
+             FROM openvpn_profile ORDER BY cn",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -1079,6 +1091,7 @@ impl CertificateAuthorityDB {
                 title: row.get(2)?,
                 created_date: row.get(3)?,
                 template: row.get(4)?,
+                serial: row.get(5)?,
             })
         })?;
 
@@ -1096,7 +1109,7 @@ impl CertificateAuthorityDB {
         cn: &str,
     ) -> Result<Option<OpenVpnProfile>, OpcaError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, cn, title, created_date, template
+            "SELECT id, cn, title, created_date, template, serial
              FROM openvpn_profile
              WHERE cn = ?1 COLLATE NOCASE
              ORDER BY id DESC LIMIT 1",
@@ -1109,6 +1122,7 @@ impl CertificateAuthorityDB {
                 title: row.get(2)?,
                 created_date: row.get(3)?,
                 template: row.get(4)?,
+                serial: row.get(5)?,
             })
         })?;
 

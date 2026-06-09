@@ -1,0 +1,97 @@
+.vpn-picker {
+  position: relative;
+  max-width: 560px;
+}
+
+/* Trigger and rows share the same badge / CN / expiry layout so the selected
+   cert reads identically to its dropdown row. */
+.vpn-picker-trigger,
+.vpn-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.vpn-picker-trigger {
+  width: 100%;
+  max-width: none;
+  text-align: left;
+  cursor: pointer;
+  min-height: 38px;
+}
+
+.vpn-picker-placeholder {
+  color: var(--text-secondary);
+}
+
+/* Equal-width badge column so the CNs line up vertically across rows
+   regardless of serial length (#9 vs #100). */
+.vpn-picker-trigger .status-badge,
+.vpn-picker-item .status-badge {
+  flex-shrink: 0;
+  min-width: 56px;
+  text-align: center;
+}
+
+.vpn-picker-cn {
+  flex: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vpn-picker-expiry {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Invisible full-screen layer so an outside click closes the menu. */
+.vpn-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+}
+
+.vpn-picker-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.vpn-picker-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+
+.vpn-picker-item:hover {
+  background: var(--bg-elevated);
+}
+
+.vpn-picker-item-selected {
+  background: var(--accent-glow);
+}
+
+.vpn-picker-item + .vpn-picker-item {
+  border-top: 1px solid var(--border);
+}
+
+.vpn-picker-loading,
+.vpn-picker-empty {
+  padding: 12px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}

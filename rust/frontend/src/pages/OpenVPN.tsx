@@ -1,14 +1,15 @@
-import { Show, For, createSignal, createResource } from "solid-js";
+import { Show, For, createSignal, createResource, onMount } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
 import {
   getOpenVpnParams,
   generateOpenVpnDh,
   generateOpenVpnTa,
   setupOpenVpnServer,
   listOpenVpnTemplates,
+  syncOpenVpnTemplates,
   getOpenVpnTemplate,
   saveOpenVpnTemplate,
-  listVpnClients,
-  generateOpenVpnProfile,
+  listVpnCerts,
   listOpenVpnProfiles,
   sendProfileToVault,
 } from "../api/openvpn";
@@ -16,75 +17,102 @@ import { formatDate } from "../utils/dates";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import VaultPicker from "../components/VaultPicker";
+import AddProfileModal from "../components/AddProfileModal";
 import type {
+  CertListItem,
   OpenVpnServerParams,
   OpenVpnTemplateItem,
   OpenVpnProfileItem,
 } from "../api/types";
 import "../styles/pages/openvpn.css";
 
-type Tab = "client" | "server" | "profiles";
+type Tab = "profiles" | "config";
+type ProfileFilter = "all" | "client" | "server";
 
 export default function OpenVPN() {
   const [tab, setTab] = createSignal<Tab>("profiles");
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
 
-  // ── Server tab state ──────────────────────────────────────────
-  const [params, { refetch: refetchParams }] =
-    createResource<OpenVpnServerParams>(getOpenVpnParams);
+  // ── Shared resources (loaded at mount so the Add modal is ready) ──
   const [templates, { refetch: refetchTemplates }] =
     createResource<OpenVpnTemplateItem[]>(listOpenVpnTemplates);
+  const [vpnCerts, { refetch: refetchCerts }] =
+    createResource<CertListItem[]>(listVpnCerts);
+
+  // ── Configuration tab state ───────────────────────────────────
+  const [params, { refetch: refetchParams }] =
+    createResource<OpenVpnServerParams>(getOpenVpnParams);
   const [selectedTemplate, setSelectedTemplate] = createSignal("");
   const [templateContent, setTemplateContent] = createSignal("");
   const [loadingTemplate, setLoadingTemplate] = createSignal(false);
   const [acting, setActing] = createSignal(false);
   const [generatingDh, setGeneratingDh] = createSignal(false);
   const [generatingTa, setGeneratingTa] = createSignal(false);
+  const [syncing, setSyncing] = createSignal(false);
   const [newTemplateName, setNewTemplateName] = createSignal("");
   const [showNewTemplate, setShowNewTemplate] = createSignal(false);
-
-  // ── Client tab state ──────────────────────────────────────────
-  const [vpnClients, { refetch: refetchClients }] =
-    createResource<string[]>(listVpnClients);
-  const [clientTemplate, setClientTemplate] = createSignal("");
-  const [clientCn, setClientCn] = createSignal("");
-  const [clientDestVault, setClientDestVault] = createSignal("");
-  const [generatedProfile, setGeneratedProfile] = createSignal<OpenVpnProfileItem | null>(null);
-  const [sendingProfile, setSendingProfile] = createSignal(false);
 
   // ── Profiles tab state ────────────────────────────────────────
   const [profiles, { refetch: refetchProfiles }] =
     createResource<OpenVpnProfileItem[]>(listOpenVpnProfiles);
   const [profileSearch, setProfileSearch] = createSignal("");
+  const [profileFilter, setProfileFilter] = createSignal<ProfileFilter>("all");
   const [selectedProfile, setSelectedProfile] = createSignal<OpenVpnProfileItem | null>(null);
   const [destVault, setDestVault] = createSignal("");
+
+  // ── Add-profile modal ─────────────────────────────────────────
+  const [showAdd, setShowAdd] = createSignal(false);
+  const [prefillCn, setPrefillCn] = createSignal("");
+  const [prefillSerial, setPrefillSerial] = createSignal<string | null>(null);
 
   const filteredProfiles = () => {
     const items = profiles() ?? [];
     const q = profileSearch().toLowerCase();
-    if (!q) return items;
-    return items.filter((p) =>
-      [p.cn, p.created_date ? formatDate(p.created_date) : null].some((v) => v?.toLowerCase().includes(q))
-    );
+    const f = profileFilter();
+    return items.filter((p) => {
+      if (f !== "all" && (p.profile_type ?? "").toLowerCase() !== f) return false;
+      if (!q) return true;
+      return [p.cn, p.created_date ? formatDate(p.created_date) : null].some((v) =>
+        v?.toLowerCase().includes(q),
+      );
+    });
   };
 
   function switchTab(t: Tab) {
     setTab(t);
     setError(null);
     setSuccess(null);
-    if (t === "server") {
+    if (t === "config") {
       refetchParams();
       refetchTemplates();
-    } else if (t === "client") {
-      refetchTemplates();
-      refetchClients();
-    } else if (t === "profiles") {
+    } else {
       refetchProfiles();
     }
   }
 
-  // ── Server handlers ───────────────────────────────────────────
+  function openAdd(cn = "", serial: string | null = null) {
+    setPrefillCn(cn);
+    setPrefillSerial(serial);
+    // Refetch both lists on open so a deep-link (page just mounted) doesn't show
+    // a modal whose pickers are still loading from the initial mount fetch.
+    refetchCerts();
+    refetchTemplates();
+    setShowAdd(true);
+  }
+
+  // Deep link from the cert detail page ("Generate one on the OpenVPN page"):
+  // open the Add-profile modal with the cert pre-selected by serial.
+  const [searchParams] = useSearchParams();
+  onMount(() => {
+    if (!searchParams.add && !searchParams.cn) return;
+    openAdd(
+      (searchParams.cn as string) ?? "",
+      (searchParams.serial as string) ?? null,
+    );
+  });
+
+  // ── Configuration handlers ────────────────────────────────────
 
   async function handleLoadTemplate(name: string) {
     setSelectedTemplate(name);
@@ -113,6 +141,7 @@ export default function OpenVPN() {
     setError(null);
     try {
       await saveOpenVpnTemplate(name, content);
+      await refetchTemplates();
       setSuccess(`Template '${name}' saved`);
     } catch (e) {
       setError(String(e));
@@ -138,6 +167,20 @@ export default function OpenVPN() {
       setError(String(e));
     } finally {
       setActing(false);
+    }
+  }
+
+  async function handleSyncTemplates() {
+    setSyncing(true);
+    setError(null);
+    try {
+      const n = await syncOpenVpnTemplates();
+      await refetchTemplates();
+      setSuccess(`Synced ${n} template(s) from 1Password`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -169,48 +212,6 @@ export default function OpenVPN() {
     }
   }
 
-  // ── Client handlers ───────────────────────────────────────────
-
-  async function handleGenerateProfile() {
-    const tmpl = clientTemplate();
-    const cn = clientCn();
-    if (!tmpl && !cn) { setError("Please select a template and a VPN client before generating a profile."); setSuccess(null); return; }
-    if (!tmpl) { setError("Please select a template before generating a profile."); setSuccess(null); return; }
-    if (!cn) { setError("Please select a VPN client before generating a profile."); setSuccess(null); return; }
-    setActing(true);
-    setError(null);
-    setGeneratedProfile(null);
-    try {
-      const profile = await generateOpenVpnProfile({ cn, template_name: tmpl });
-      setGeneratedProfile(profile);
-      setSuccess(`Profile generated for '${cn}'`);
-      setClientCn("");
-      setClientDestVault("");
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setActing(false);
-    }
-  }
-
-  async function handleSendGeneratedProfile() {
-    const profile = generatedProfile();
-    const vault = clientDestVault().trim();
-    if (!profile || !vault) return;
-    setSendingProfile(true);
-    setError(null);
-    try {
-      await sendProfileToVault(profile.cn, vault);
-      setSuccess(`Sent VPN_${profile.cn} to vault '${vault}'`);
-      setGeneratedProfile(null);
-      setClientDestVault("");
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSendingProfile(false);
-    }
-  }
-
   // ── Profiles handlers ─────────────────────────────────────────
 
   async function handleSendToVault() {
@@ -221,8 +222,8 @@ export default function OpenVPN() {
     setActing(true);
     setError(null);
     try {
-      await sendProfileToVault(profile.cn, vault);
-      setSuccess(`Sent VPN_${profile.cn} to vault '${vault}'`);
+      await sendProfileToVault(profile.title, profile.cn, vault);
+      setSuccess(`Sent ${profile.title} to vault '${vault}'`);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -244,90 +245,102 @@ export default function OpenVPN() {
           Profiles
         </button>
         <button
-          class={`tab-btn ${tab() === "client" ? "tab-active" : ""}`}
-          onClick={() => switchTab("client")}
+          class={`tab-btn ${tab() === "config" ? "tab-active" : ""}`}
+          onClick={() => switchTab("config")}
         >
-          Client
-        </button>
-        <button
-          class={`tab-btn ${tab() === "server" ? "tab-active" : ""}`}
-          onClick={() => switchTab("server")}
-        >
-          Server
+          Configuration
         </button>
       </div>
 
-      {/* ── Client Tab ─────────────────────────────────────────── */}
-      <Show when={tab() === "client"}>
+      {/* ── Profiles Tab ───────────────────────────────────────── */}
+      <Show when={tab() === "profiles"}>
         <div class="tab-content">
-          <div class="form-group">
-            <label class="form-label">Template</label>
-            <select
-              class="form-select"
-              value={clientTemplate()}
-              onChange={(e) => setClientTemplate(e.currentTarget.value)}
-            >
-              <option value="">Select template</option>
-              <For each={templates()}>
-                {(t) => <option value={t.name}>{t.name}</option>}
-              </For>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Client CN</label>
-            <Show when={vpnClients.loading}>
-              <Spinner message="Loading VPN clients..." small />
-            </Show>
-            <select
-              class="form-select"
-              value={clientCn()}
-              onChange={(e) => setClientCn(e.currentTarget.value)}
-            >
-              <option value="">Select VPN client</option>
-              <For each={vpnClients()}>
-                {(cn) => <option value={cn}>{cn}</option>}
-              </For>
-            </select>
-          </div>
-
-          <div class="form-actions">
-            <button
-              class="btn-primary"
-              onClick={handleGenerateProfile}
-              disabled={acting()}
-            >
-              {acting() ? "Generating..." : "Generate Profile"}
-            </button>
-          </div>
-
-          <Show when={generatedProfile()}>
-            {(profile) => (
-              <div class="generated-profile-section">
-                <p class="page-success">
-                  Profile generated for '{profile().cn}' (stored as {profile().title})
-                </p>
-                <div class="form-group">
-                  <label class="form-label">Send to vault (optional)</label>
-                  <VaultPicker value={clientDestVault()} onChange={setClientDestVault} />
-                </div>
-                <div class="form-actions">
+          <div class="profiles-header">
+            <div class="filter-chips">
+              <For each={["all", "client", "server"] as ProfileFilter[]}>
+                {(f) => (
                   <button
-                    class="btn-primary"
-                    onClick={handleSendGeneratedProfile}
-                    disabled={sendingProfile() || !clientDestVault().trim()}
+                    class={`chip ${profileFilter() === f ? "chip-active" : ""}`}
+                    onClick={() => setProfileFilter(f)}
                   >
-                    {sendingProfile() ? "Sending..." : "Send to Vault"}
+                    {f === "all" ? "All" : f === "client" ? "Client" : "Server"}
                   </button>
-                </div>
+                )}
+              </For>
+            </div>
+            <div class="profiles-actions">
+              <SearchInput value={profileSearch()} onInput={setProfileSearch} />
+              <button class="btn-ghost" onClick={() => refetchProfiles()} disabled={profiles.loading}>
+                Refresh
+              </button>
+              <button class="btn-primary" onClick={() => openAdd()}>
+                + Add
+              </button>
+            </div>
+          </div>
+
+          <Show when={profiles.loading}>
+            <Spinner message="Loading profiles..." />
+          </Show>
+
+          <Show when={!profiles.loading && filteredProfiles().length === 0}>
+            <p class="text-muted">No VPN profiles found.</p>
+          </Show>
+
+          <Show when={filteredProfiles().length > 0}>
+            <div class="data-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>CN</th>
+                    <th>Serial</th>
+                    <th>Template</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={filteredProfiles()}>
+                    {(profile) => (
+                      <tr
+                        class={`data-table-row ${selectedProfile()?.title === profile.title ? "data-table-row-selected" : ""}`}
+                        onClick={() => setSelectedProfile(profile)}
+                      >
+                        <td>{profile.profile_type ?? "—"}</td>
+                        <td>{profile.cn}</td>
+                        <td class="mono">{profile.serial ?? "—"}</td>
+                        <td>{profile.template ?? "—"}</td>
+                        <td class="mono">{formatDate(profile.created_date)}</td>
+                      </tr>
+                    )}
+                  </For>
+                </tbody>
+              </table>
+            </div>
+          </Show>
+
+          <Show when={selectedProfile()}>
+            <div class="send-section">
+              <div class="form-group">
+                <label class="form-label">Destination vault</label>
+                <VaultPicker value={destVault()} onChange={setDestVault} />
               </div>
-            )}
+              <div class="form-actions">
+                <button
+                  class="btn-primary"
+                  onClick={handleSendToVault}
+                  disabled={acting() || !destVault().trim()}
+                >
+                  {acting() ? "Sending..." : "Send to Vault"}
+                </button>
+              </div>
+            </div>
           </Show>
         </div>
       </Show>
 
-      {/* ── Server Tab ─────────────────────────────────────────── */}
-      <Show when={tab() === "server"}>
+      {/* ── Configuration Tab ──────────────────────────────────── */}
+      <Show when={tab() === "config"}>
         <div class="tab-content">
           <Show when={params.loading}>
             <Spinner message="Loading server parameters..." />
@@ -372,7 +385,12 @@ export default function OpenVPN() {
           </Show>
 
           <div class="template-section">
-            <h3>Templates</h3>
+            <div class="template-section-header">
+              <h3>Templates</h3>
+              <button class="btn-ghost" onClick={handleSyncTemplates} disabled={syncing()}>
+                {syncing() ? "Syncing..." : "Refresh"}
+              </button>
+            </div>
             <div class="template-header">
               <select
                 class="form-select"
@@ -445,69 +463,17 @@ export default function OpenVPN() {
         </div>
       </Show>
 
-      {/* ── Profiles Tab ───────────────────────────────────────── */}
-      <Show when={tab() === "profiles"}>
-        <div class="tab-content">
-          <div class="profiles-header">
-            <SearchInput value={profileSearch()} onInput={setProfileSearch} />
-            <button class="btn-ghost" onClick={() => refetchProfiles()} disabled={profiles.loading}>
-              Refresh
-            </button>
-          </div>
-
-          <Show when={profiles.loading}>
-            <Spinner message="Loading profiles..." />
-          </Show>
-
-          <Show when={!profiles.loading && filteredProfiles().length === 0}>
-            <p class="text-muted">No VPN profiles found.</p>
-          </Show>
-
-          <Show when={filteredProfiles().length > 0}>
-            <div class="data-table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>CN</th>
-                    <th>Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={filteredProfiles()}>
-                    {(profile) => (
-                      <tr
-                        class={`data-table-row ${selectedProfile()?.cn === profile.cn ? "data-table-row-selected" : ""}`}
-                        onClick={() => setSelectedProfile(profile)}
-                      >
-                        <td>{profile.cn}</td>
-                        <td class="mono">{formatDate(profile.created_date)}</td>
-                      </tr>
-                    )}
-                  </For>
-                </tbody>
-              </table>
-            </div>
-          </Show>
-
-          <Show when={selectedProfile()}>
-            <div class="send-section">
-              <div class="form-group">
-                <label class="form-label">Destination vault</label>
-                <VaultPicker value={destVault()} onChange={setDestVault} />
-              </div>
-              <div class="form-actions">
-                <button
-                  class="btn-primary"
-                  onClick={handleSendToVault}
-                  disabled={acting() || !destVault().trim()}
-                >
-                  {acting() ? "Sending..." : "Send to Vault"}
-                </button>
-              </div>
-            </div>
-          </Show>
-        </div>
-      </Show>
+      {/* ── Add-profile modal ──────────────────────────────────── */}
+      <AddProfileModal
+        open={showAdd()}
+        onClose={() => setShowAdd(false)}
+        certs={vpnCerts() ?? []}
+        certsLoading={vpnCerts.loading}
+        templates={templates() ?? []}
+        prefillCn={prefillCn()}
+        prefillSerial={prefillSerial()}
+        onGenerated={() => { refetchProfiles(); setSuccess("VPN profile generated"); }}
+      />
 
       {/* ── Feedback ───────────────────────────────────────────── */}
       <Show when={error()}>
@@ -530,7 +496,7 @@ function Row(props: {
     <div class="detail-row">
       <span class="detail-label">{props.label}</span>
       <span class={`detail-value ${props.mono ? "mono" : ""}`}>
-        {props.value ?? "\u2014"}
+        {props.value ?? "—"}
       </span>
     </div>
   );

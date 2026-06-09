@@ -5,7 +5,7 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 10;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 11;
 
 // ---------------------------------------------------------------------------
 // Table DDL (v8 — current)
@@ -133,7 +133,8 @@ pub const CREATE_OPENVPN_PROFILE_TABLE: &str = "
         cn TEXT NOT NULL,
         title TEXT NOT NULL,
         created_date TEXT,
-        template TEXT
+        template TEXT,
+        serial TEXT
     )
 ";
 
@@ -300,8 +301,18 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
             .map_err(|e| OpcaError::SchemaMigration(format!("v6→v7 crl_metadata: {e}")))?;
         conn.execute_batch(CREATE_OPENVPN_TEMPLATE_TABLE)
             .map_err(|e| OpcaError::SchemaMigration(format!("v6→v7 openvpn_template: {e}")))?;
-        conn.execute_batch(CREATE_OPENVPN_PROFILE_TABLE)
-            .map_err(|e| OpcaError::SchemaMigration(format!("v6→v7 openvpn_profile: {e}")))?;
+        // Frozen v7-era schema (no `serial` — that's added in v11), so this step
+        // doesn't collide with the v10→v11 `ALTER ... ADD COLUMN serial`.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS openvpn_profile (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cn TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_date TEXT,
+                template TEXT
+            )",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v6→v7 openvpn_profile: {e}")))?;
 
         version = 7;
         info.steps.push(MigrationStep { to: 7, ok: true });
@@ -352,8 +363,22 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v9→v10 finalise: {e}")))?;
 
         version = 10;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 10, ok: true });
+    }
+
+    // v10 → v11: record which cert serial a VPN profile was generated from, so
+    // the profiles list can show it and derive the client/server type exactly
+    // (rather than re-resolving by CN). Existing rows get NULL.
+    if version == 10 {
+        conn.execute_batch(
+            "ALTER TABLE openvpn_profile ADD COLUMN serial TEXT;
+             UPDATE config SET schema_version = 11 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v10→v11: {e}")))?;
+
+        version = 11;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 11, ok: true });
     }
 
     info.migrated = true;

@@ -374,10 +374,17 @@ export interface OpenVpnProfileItem {
   title: string;
   created_date: string | null;
   template: string | null;
+  /** Serial of the cert the profile was generated from (null for pre-v11 rows). */
+  serial: string | null;
+  /** "Client" or "Server", derived from the cert type (list view only). */
+  profile_type: string | null;
 }
 
 export interface GenerateProfileRequest {
   cn: string;
+  /** Serial of the exact cert to pull material from — disambiguates two valid
+   * certs sharing a CN. Falls back to the CN when omitted. */
+  serial?: string | null;
   template_name: string;
   dest_vault?: string;
 }

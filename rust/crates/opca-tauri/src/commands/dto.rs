@@ -452,12 +452,21 @@ pub struct OpenVpnProfileItem {
     pub title: String,
     pub created_date: Option<String>,
     pub template: Option<String>,
+    /// Serial of the cert this profile was generated from (None for pre-v11 rows).
+    pub serial: Option<String>,
+    /// "Client" or "Server", derived from the cert's type for the list view.
+    /// None for single-profile lookups that don't resolve it.
+    pub profile_type: Option<String>,
 }
 
 /// Request to generate a VPN profile.
 #[derive(Debug, Deserialize)]
 pub struct GenerateProfileRequest {
     pub cn: String,
+    /// Serial of the exact certificate to pull cert/key material from. Needed to
+    /// disambiguate renewal duplicates (two valid certs sharing a CN); when
+    /// omitted, resolution falls back to the CN.
+    pub serial: Option<String>,
     pub template_name: String,
     pub dest_vault: Option<String>,
 }
