@@ -17,17 +17,28 @@
   color: var(--text-primary);
 }
 
+.san-copy-all {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font: inherit;
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.san-copy-all:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
 .cert-actions {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-top: 24px;
-}
-
-.confirm-inline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .ignored-banner {
@@ -50,10 +61,6 @@
   letter-spacing: 0.04em;
   font-size: 0.75rem;
   color: var(--text-primary);
-}
-
-.ignore-inline {
-  flex-wrap: wrap;
 }
 
 .superseded-banner {
@@ -95,16 +102,3 @@
   font-size: 0.8125rem;
   color: var(--text-tertiary);
 }
-
-.ignore-note-input {
-  font-family: inherit;
-  font-size: 0.875rem;
-  padding: 6px 10px;
-  min-width: 240px;
-  flex: 1;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-primary);
-}
-

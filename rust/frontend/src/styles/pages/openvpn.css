@@ -144,15 +144,6 @@
   color: #fff;
 }
 
-.page-openvpn .data-table-wrap {
-  max-height: 280px;
-}
-
 .page-openvpn .detail-label {
   min-width: 120px;
-}
-
-.send-section {
-  margin-top: 16px;
-  max-width: 400px;
 }

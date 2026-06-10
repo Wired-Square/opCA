@@ -11,16 +11,16 @@ import {
   saveOpenVpnTemplate,
   listVpnCerts,
   listOpenVpnProfiles,
-  sendProfileToVault,
+  generateOpenVpnProfile,
 } from "../api/openvpn";
 import { formatDate } from "../utils/dates";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
-import VaultPicker from "../components/VaultPicker";
 import AddProfileModal from "../components/AddProfileModal";
+import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import SendToVaultDialog from "../components/SendToVaultDialog";
 import type {
   CertListItem,
-  OpenVpnServerParams,
   OpenVpnTemplateItem,
   OpenVpnProfileItem,
 } from "../api/types";
@@ -41,8 +41,12 @@ export default function OpenVPN() {
     createResource<CertListItem[]>(listVpnCerts);
 
   // ── Configuration tab state ───────────────────────────────────
+  // Lazy: getOpenVpnParams reads from 1Password (slow) and is gated on the
+  // Configuration tab being open so it doesn't fire on mount and stall the
+  // DB-only Profiles query behind the shared connection lock. Re-opening the
+  // tab re-fetches (the source toggles false→true again).
   const [params, { refetch: refetchParams }] =
-    createResource<OpenVpnServerParams>(getOpenVpnParams);
+    createResource(() => tab() === "config", getOpenVpnParams);
   const [selectedTemplate, setSelectedTemplate] = createSignal("");
   const [templateContent, setTemplateContent] = createSignal("");
   const [loadingTemplate, setLoadingTemplate] = createSignal(false);
@@ -58,8 +62,7 @@ export default function OpenVPN() {
     createResource<OpenVpnProfileItem[]>(listOpenVpnProfiles);
   const [profileSearch, setProfileSearch] = createSignal("");
   const [profileFilter, setProfileFilter] = createSignal<ProfileFilter>("all");
-  const [selectedProfile, setSelectedProfile] = createSignal<OpenVpnProfileItem | null>(null);
-  const [destVault, setDestVault] = createSignal("");
+  const [sendTarget, setSendTarget] = createSignal<OpenVpnProfileItem | null>(null);
 
   // ── Add-profile modal ─────────────────────────────────────────
   const [showAdd, setShowAdd] = createSignal(false);
@@ -84,7 +87,8 @@ export default function OpenVPN() {
     setError(null);
     setSuccess(null);
     if (t === "config") {
-      refetchParams();
+      // params re-fetches itself via its tab-gated source; just refresh
+      // templates (eagerly loaded, so a manual nudge keeps them current).
       refetchTemplates();
     } else {
       refetchProfiles();
@@ -214,21 +218,31 @@ export default function OpenVPN() {
 
   // ── Profiles handlers ─────────────────────────────────────────
 
-  async function handleSendToVault() {
-    const profile = selectedProfile();
-    const vault = destVault().trim();
-    if (!profile) { setError("Select a profile from the table"); return; }
-    if (!vault) { setError("Enter a destination vault"); return; }
+  async function handleRegenerate(profile: OpenVpnProfileItem) {
+    if (!profile.template) return;
     setActing(true);
     setError(null);
+    setSuccess(null);
     try {
-      await sendProfileToVault(profile.title, profile.cn, vault);
-      setSuccess(`Sent ${profile.title} to vault '${vault}'`);
+      const result = await generateOpenVpnProfile({
+        cn: profile.cn,
+        serial: profile.serial,
+        template_name: profile.template,
+      });
+      setSuccess(`Regenerated profile for '${result.cn}' (stored as ${result.title}).`);
+      refetchProfiles();
     } catch (e) {
       setError(String(e));
     } finally {
       setActing(false);
     }
+  }
+
+  function profileMenuItems(profile: OpenVpnProfileItem): KebabItem[] {
+    return [
+      { label: "Send to Vault", onSelect: () => setSendTarget(profile) },
+      { label: "Regenerate", disabled: !profile.template, onSelect: () => void handleRegenerate(profile) },
+    ];
   }
 
   return (
@@ -297,43 +311,26 @@ export default function OpenVPN() {
                     <th>Serial</th>
                     <th>Template</th>
                     <th>Created</th>
+                    <th class="kebab-col"></th>
                   </tr>
                 </thead>
                 <tbody>
                   <For each={filteredProfiles()}>
                     {(profile) => (
-                      <tr
-                        class={`data-table-row ${selectedProfile()?.title === profile.title ? "data-table-row-selected" : ""}`}
-                        onClick={() => setSelectedProfile(profile)}
-                      >
+                      <tr class="data-table-row">
                         <td>{profile.profile_type ?? "—"}</td>
                         <td>{profile.cn}</td>
                         <td class="mono">{profile.serial ?? "—"}</td>
                         <td>{profile.template ?? "—"}</td>
                         <td class="mono">{formatDate(profile.created_date)}</td>
+                        <td class="kebab-col">
+                          <KebabMenu items={profileMenuItems(profile)} />
+                        </td>
                       </tr>
                     )}
                   </For>
                 </tbody>
               </table>
-            </div>
-          </Show>
-
-          <Show when={selectedProfile()}>
-            <div class="send-section">
-              <div class="form-group">
-                <label class="form-label">Destination vault</label>
-                <VaultPicker value={destVault()} onChange={setDestVault} />
-              </div>
-              <div class="form-actions">
-                <button
-                  class="btn-primary"
-                  onClick={handleSendToVault}
-                  disabled={acting() || !destVault().trim()}
-                >
-                  {acting() ? "Sending..." : "Send to Vault"}
-                </button>
-              </div>
             </div>
           </Show>
         </div>
@@ -473,6 +470,13 @@ export default function OpenVPN() {
         prefillCn={prefillCn()}
         prefillSerial={prefillSerial()}
         onGenerated={() => { refetchProfiles(); setSuccess("VPN profile generated"); }}
+      />
+
+      <SendToVaultDialog
+        open={!!sendTarget()}
+        profile={sendTarget()}
+        onClose={() => setSendTarget(null)}
+        onDone={(vault) => setSuccess(`Sent ${sendTarget()?.title} to vault '${vault}'`)}
       />
 
       {/* ── Feedback ───────────────────────────────────────────── */}

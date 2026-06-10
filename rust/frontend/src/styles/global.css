@@ -277,6 +277,14 @@ input::placeholder {
   color: var(--text-secondary);
 }
 
+/* Label with a trailing inline action (e.g. a "Remove" button). */
+.form-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .form-actions {
   margin-top: 24px;
   display: flex;
@@ -553,6 +561,13 @@ input::placeholder {
   color: var(--text-primary);
 }
 
+/* Trailing actions column: just wide enough for the kebab trigger. */
+.kebab-col {
+  width: 44px;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .data-table-row {
   cursor: pointer;
   transition: background 0.1s;
@@ -709,6 +724,13 @@ input::placeholder {
 
 .modal-body {
   padding: 16px 20px 20px;
+}
+
+.confirm-message {
+  margin: 0 0 16px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 /* ── Inspect-tab text dump (used by CSR and CRL inspect panes) ─────── */

@@ -1,7 +1,6 @@
 import { createSignal, Show, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
-import { uploadDbIfPrivateStore } from "../api/ca";
 import { CERT_TYPES } from "../api/types";
 import "../styles/pages/cert-create.css";
 
@@ -40,9 +39,8 @@ export default function CertCreate() {
         alt_dns_names: sans().length > 0 ? sans() : undefined,
         key_size: keySize(),
       });
-      // Sync the DB to the private store if one is configured (no prompt;
-      // progress shows in the side-nav status), then go to the cert list.
-      await uploadDbIfPrivateStore();
+      // create_cert already persisted the DB (1Password + private store), so
+      // just return to the list.
       navigate("/certs");
     } catch (err) {
       setError(String(err));

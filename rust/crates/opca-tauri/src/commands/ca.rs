@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
 use log::{info, warn, error, debug};
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
 
+use opca_core::op::ShellRunner;
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::database::CaConfig;
+use opca_core::services::storage::storage_from_uri;
 
 use crate::commands::dto::{CaConfigDto, CaInfo};
 use crate::state::AppState;
@@ -156,6 +158,53 @@ pub async fn upload_ca_database(state: State<'_, AppState>) -> Result<(), String
     })?;
 
     state.log_ok("upload_ca_database", Some("Database uploaded to private store".to_string()));
+    Ok(())
+}
+
+/// Sync the CA database to the private store (e.g. S3) in the background.
+///
+/// Fired fire-and-forget by the frontend after every locked mutation. The DB
+/// snapshot is taken under a brief `conn` lock, then the slow upload (AWS creds
+/// fetch + PUT) runs in a blocking task that holds only `private_store_lock` —
+/// so reads (the profiles/cert lists, etc.) are never blocked by it. Uploads
+/// are skipped when the database is unchanged since the last successful sync.
+#[tauri::command]
+pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let job = {
+        let conn = state.ensure_ca()?;
+        let ca = conn.ca.as_ref().ok_or("CA not available")?;
+        ca.private_store_upload_job().map_err(|e| e.to_string())?
+    };
+    let Some(job) = job else { return Ok(()) };
+
+    // Nothing changed since the last sync — skip the upload.
+    if state.last_private_store_sync.lock().expect("mutex poisoned").as_deref()
+        == Some(job.fingerprint.as_str())
+    {
+        return Ok(());
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let state: State<'_, AppState> = app.state();
+        // Serialise uploads on a dedicated lock (not `conn`) so reads stay free.
+        let _guard = state.private_store_lock.lock().expect("mutex poisoned");
+        let _ = app.emit("op-status", Some("sync_private_store"));
+        let result = storage_from_uri(&job.uri, &ShellRunner, job.account.as_deref())
+            .and_then(|backend| backend.upload(&job.bytes, &job.uri));
+        match result {
+            Ok(()) => {
+                *state.last_private_store_sync.lock().expect("mutex poisoned") =
+                    Some(job.fingerprint);
+                state.log_ok("sync_private_store", Some("Database synced to private store".to_string()));
+            }
+            Err(e) => {
+                warn!("[tauri] sync_private_store failed: {e}");
+                state.log_err("sync_private_store", Some(e.to_string()));
+            }
+        }
+        let _ = app.emit("op-status", None::<String>);
+    });
+
     Ok(())
 }
 

@@ -1,6 +1,7 @@
 import { Show, For, createSignal, createResource } from "solid-js";
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { listCerts, listExternalCerts, inspectCertificate } from "../api/certs";
+import { listCerts, listExternalCerts, inspectCertificate, unignoreCert, backfillCert } from "../api/certs";
+import { rekeyAndGo, renewAndGo, certKebabItems } from "../api/certActions";
 import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
@@ -8,6 +9,9 @@ import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import CertStatusBadge from "../components/CertStatusBadge";
+import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import IgnoreCertDialog from "../components/IgnoreCertDialog";
+import RevokeCertDialog from "../components/RevokeCertDialog";
 import type { CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
 import "../styles/pages/certs.css";
 
@@ -23,12 +27,18 @@ const VALID_FILTERS = new Set([
   "superseded",
 ]);
 
+// The chosen status filter, remembered for the session (module scope outlives
+// the page component) so returning to Certificates keeps the selection. An
+// explicit ?filter= in the URL still wins.
+let sessionFilter = "valid";
+
 export default function Certs() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialFilter = typeof searchParams.filter === "string" && VALID_FILTERS.has(searchParams.filter)
     ? searchParams.filter
-    : "valid";
+    : sessionFilter;
+  sessionFilter = initialFilter;
   const initialTab: Tab =
     searchParams.tab === "external" ? "external"
     : searchParams.tab === "inspect" ? "inspect"
@@ -99,6 +109,50 @@ export default function Certs() {
   const [generatingSerial, setGeneratingSerial] = createSignal<string | null>(null);
   const [generateError, setGenerateError] = createSignal<string | null>(null);
 
+  // Per-row certificate actions (kebab menu). Rekey/Renew navigate away to the
+  // new cert; Revoke/Ignore use shared dialogs; Unignore acts immediately.
+  const [actionError, setActionError] = createSignal<string | null>(null);
+  const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
+  const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
+
+  // Run a per-row action, surfacing any failure in the list-level error banner.
+  async function run(fn: () => Promise<unknown>) {
+    setActionError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setActionError(String(e));
+    }
+  }
+
+  // Enrich a legacy cert whose type is still "—" via the existing backfill
+  // (one op read, persists in the background). Returns true if it ran.
+  async function backfillTypeIfMissing(cert: CertListItem): Promise<boolean> {
+    if (cert.cert_type || !cert.serial) return false;
+    await backfillCert(cert.serial).catch(() => {});
+    return true;
+  }
+
+  // Tail for list-resident actions (revoke/ignore/unignore): show the result
+  // immediately, then enrich a missing type and refresh again.
+  async function finishListAction(cert: CertListItem) {
+    refetchLocal();
+    if (await backfillTypeIfMissing(cert)) refetchLocal();
+  }
+
+  function certMenuItems(cert: CertListItem): KebabItem[] {
+    const serial = cert.serial;
+    // Wrap a row action: no-op without a serial, otherwise run via run().
+    const act = (fn: () => Promise<unknown>) => () => { if (serial) void run(fn); };
+    return certKebabItems(cert, {
+      onRekey: act(async () => { await backfillTypeIfMissing(cert); await rekeyAndGo(navigate, serial!); }),
+      onRenew: act(async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
+      onRevoke: () => setRevokeTarget(cert),
+      onIgnore: () => setIgnoreTarget(cert),
+      onUnignore: act(async () => { await unignoreCert(serial!); await finishListAction(cert); }),
+    });
+  }
+
   const [inspectPem, setInspectPem] = createSignal("");
   const [inspecting, setInspecting] = createSignal(false);
   const [inspectError, setInspectError] = createSignal<string | null>(null);
@@ -157,12 +211,15 @@ export default function Certs() {
       <div class="page-header">
         <h2>Certificates</h2>
         <div class="header-actions">
+          {/* Search/filter/Refresh apply only to the list tabs. Import stays
+              visible on every tab so the header keeps a constant height and the
+              tabs/table below don't shift when switching to Inspect. */}
           <Show when={tab() !== "inspect"}>
             <SearchInput value={search()} onInput={setSearch} />
             <select
               class="status-filter"
               value={filter()}
-              onChange={(e) => setFilter(e.currentTarget.value)}
+              onChange={(e) => { setFilter(e.currentTarget.value); sessionFilter = e.currentTarget.value; }}
             >
               <option value="all">All</option>
               <option value="valid">Valid</option>
@@ -180,10 +237,10 @@ export default function Certs() {
                 Create
               </button>
             </Show>
-            <button class="btn-secondary" onClick={() => navigate("/certs/import")}>
-              Import
-            </button>
           </Show>
+          <button class="btn-secondary" onClick={() => navigate("/certs/import")}>
+            Import
+          </button>
         </div>
       </div>
 
@@ -218,6 +275,10 @@ export default function Certs() {
 
       {/* Local certificates tab */}
       <Show when={tab() === "local"}>
+        <Show when={actionError()}>
+          <p class="page-error" role="alert">{actionError()}</p>
+        </Show>
+
         <Show when={!localCerts.loading && filteredLocal().length === 0}>
           <p class="text-muted mt-3">
             No local certificates found.
@@ -234,6 +295,7 @@ export default function Certs() {
                   <th>Type</th>
                   <th>Status</th>
                   <th>Expiry <TzToggle /></th>
+                  <th class="kebab-col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -260,6 +322,9 @@ export default function Certs() {
                         </Show>
                       </td>
                       <td class="mono">{formatDate(cert.expiry_date)}</td>
+                      <td class="kebab-col" onClick={(e) => e.stopPropagation()}>
+                        <KebabMenu items={certMenuItems(cert)} />
+                      </td>
                     </tr>
                   )}
                 </For>
@@ -437,6 +502,22 @@ export default function Certs() {
           )}
         </Show>
       </Show>
+
+      <IgnoreCertDialog
+        open={!!ignoreTarget()}
+        serial={ignoreTarget()?.serial ?? null}
+        cn={ignoreTarget()?.cn ?? null}
+        onClose={() => setIgnoreTarget(null)}
+        onDone={() => { const c = ignoreTarget(); if (c) void finishListAction(c); }}
+      />
+
+      <RevokeCertDialog
+        open={!!revokeTarget()}
+        serial={revokeTarget()?.serial ?? null}
+        cn={revokeTarget()?.cn ?? null}
+        onClose={() => setRevokeTarget(null)}
+        onDone={() => { const c = revokeTarget(); if (c) void finishListAction(c); }}
+      />
 
     </div>
   );

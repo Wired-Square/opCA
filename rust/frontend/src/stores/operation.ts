@@ -82,20 +82,47 @@ const operationLabels: Record<string, string> = {
   generate_password: "Generating password\u2026",
   store_password_in_op: "Storing password in 1Password\u2026",
 
+  // Locking \u2014 acquire/release each write to 1Password (slow), so they get
+  // visible labels: "Acquiring lock\u2026" gives feedback before the operation runs,
+  // "Releasing lock\u2026" fills the trailing pause after it completes.
+  acquire_lock: "Acquiring lock\u2026",
+  release_lock: "Releasing lock\u2026",
+
   // Background (emitted via Tauri event)
   store_database: "Saving database\u2026",
+  sync_private_store: "Syncing backup\u2026",
 };
 
 /** Commands that should not update the status indicator. */
 const hiddenOps = new Set([
-  "acquire_lock",
-  "release_lock",
   "read_text_file",
   "check_for_updates",
   "check_op_cli",
 ]);
 
+// Operations currently in flight, most-recent last. The indicator shows the top
+// of the stack, so it never blanks while work is ongoing and a finishing
+// background task (which emits `op-status: null`) can't clear a foreground op
+// that's still running — it only removes its own entry.
+const stack: string[] = [];
 const [activeOperation, setActiveOperation] = createSignal<string | null>(null);
+
+function refresh() {
+  setActiveOperation(stack.length > 0 ? stack[stack.length - 1] : null);
+}
+
+/** Mark an operation as started. */
+export function beginOp(cmd: string): void {
+  stack.push(cmd);
+  refresh();
+}
+
+/** Mark an operation as finished (removes its most recent entry). */
+export function endOp(cmd: string): void {
+  const i = stack.lastIndexOf(cmd);
+  if (i !== -1) stack.splice(i, 1);
+  refresh();
+}
 
 /** Human-readable label for the currently active operation, or null when idle. */
 export function operationLabel(): string | null {
@@ -109,10 +136,19 @@ export function isVisibleOp(cmd: string): boolean {
   return !hiddenOps.has(cmd);
 }
 
-/** Start listening for background operation events from Rust. */
+/** Start listening for background operation events from Rust. Each task brackets
+ * its work with `op-status: Some(name)` … `op-status: null`; we track them on a
+ * parallel stack so an unnamed end pops the right entry. */
 export async function initOperationListener(): Promise<void> {
+  const bgStack: string[] = [];
   await listen<string | null>("op-status", (event) => {
-    setActiveOperation(event.payload);
+    if (event.payload) {
+      bgStack.push(event.payload);
+      beginOp(event.payload);
+    } else {
+      const op = bgStack.pop();
+      if (op) endOp(op);
+    }
   });
 }
 

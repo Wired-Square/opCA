@@ -143,16 +143,6 @@ pub async fn backfill_cert(
             .map_err(|e| e.to_string())?
             .ok_or("Certificate not found")?;
 
-        // Retrieve cert bundle from 1Password (for PEM and/or backfill)
-        let title = record.title.as_deref().unwrap_or(&record.serial);
-        let bundle = ca.retrieve_certbundle(title)
-            .ok()
-            .flatten();
-
-        let cert_pem = bundle.as_ref()
-            .and_then(|b| b.certificate_pem().ok());
-        let chain_pem = bundle.as_ref().and_then(|b| b.chain_pem());
-
         // Determine if metadata is missing — if so backfill from the bundle.
         // The has_*_key/has_chain flags also need backfilling for legacy
         // rows that pre-date the v9 schema.
@@ -164,6 +154,26 @@ pub async fn backfill_cert(
             || record.issuer.is_none()
             || record.has_private_key.is_none()
             || record.has_chain.is_none();
+
+        // Reuse the freshly-issued PEM captured during renew/rekey to skip the
+        // 1Password round-trip — but only when the row is already complete and
+        // has no chain to fetch (the cache holds the leaf cert only).
+        let fresh_pem = state.take_fresh_pem(&record.serial);
+        let skip_fetch = fresh_pem.is_some()
+            && !needs_backfill
+            && record.has_chain == Some(false);
+
+        // Retrieve cert bundle from 1Password (for PEM and/or backfill)
+        let title = record.title.as_deref().unwrap_or(&record.serial);
+        let bundle = if skip_fetch {
+            None
+        } else {
+            ca.retrieve_certbundle(title).ok().flatten()
+        };
+
+        let cert_pem = fresh_pem
+            .or_else(|| bundle.as_ref().and_then(|b| b.certificate_pem().ok()));
+        let chain_pem = bundle.as_ref().and_then(|b| b.chain_pem());
 
         let mut did_backfill = false;
         if needs_backfill {
@@ -424,6 +434,7 @@ pub async fn renew_cert(
     }
 
     state.log_ok("renew_cert", Some(format!("Renewed certificate {serial} → {new_serial}")));
+    state.cache_fresh_pem(new_serial.clone(), new_pem.clone());
     Ok(RenewRekeyResult { serial: new_serial, pem: new_pem })
 }
 
@@ -448,6 +459,7 @@ pub async fn rekey_cert(
     }
 
     state.log_ok("rekey_cert", Some(format!("Rekeyed certificate {serial} → {new_serial}")));
+    state.cache_fresh_pem(new_serial.clone(), new_pem.clone());
     Ok(RenewRekeyResult { serial: new_serial, pem: new_pem })
 }
 

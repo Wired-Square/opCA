@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,6 +40,16 @@ pub struct AppState {
     pub conn: Mutex<Connection>,
     pub vault_lock: Mutex<VaultLock>,
     pub action_log: Mutex<Vec<LogEntry>>,
+    /// Serialises background private-store (S3) uploads so they never run
+    /// concurrently — held instead of `conn` so reads aren't blocked.
+    pub private_store_lock: Mutex<()>,
+    /// Fingerprint of the last database successfully synced to the private
+    /// store, so an unchanged database isn't re-uploaded.
+    pub last_private_store_sync: Mutex<Option<String>>,
+    /// Freshly-issued certificate PEMs (serial → PEM) captured during
+    /// renew/rekey, so the detail page can show them without re-reading the
+    /// bundle from 1Password. Consumed (one-shot) by `backfill_cert`.
+    pub fresh_cert_pems: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
@@ -109,6 +120,17 @@ impl AppState {
     pub fn log_err(&self, action: &str, detail: impl Into<Option<String>>) {
         self.log_action(action, detail.into(), false);
     }
+
+    /// Remember a freshly-issued certificate's PEM so the detail page can show
+    /// it without re-reading the bundle from 1Password.
+    pub fn cache_fresh_pem(&self, serial: String, pem: String) {
+        self.fresh_cert_pems.lock().expect("mutex poisoned").insert(serial, pem);
+    }
+
+    /// Take (one-shot) a freshly-issued certificate's PEM, if cached.
+    pub fn take_fresh_pem(&self, serial: &str) -> Option<String> {
+        self.fresh_cert_pems.lock().expect("mutex poisoned").remove(serial)
+    }
 }
 
 impl Default for AppState {
@@ -117,6 +139,9 @@ impl Default for AppState {
             conn: Mutex::new(Connection { op: None, ca: None }),
             vault_lock: Mutex::new(VaultLock::new(None)),
             action_log: Mutex::new(Vec::new()),
+            private_store_lock: Mutex::new(()),
+            last_private_store_sync: Mutex::new(None),
+            fresh_cert_pems: Mutex::new(HashMap::new()),
         }
     }
 }

@@ -1,16 +1,20 @@
 import { Show, For, createSignal, createResource, createEffect } from "solid-js";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
-import { getCertInfo, backfillCert, revokeCert, renewCert, rekeyCert, ignoreCert, unignoreCert, getCertPrivateKey, recordCertCopy } from "../api/certs";
+import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy } from "../api/certs";
+import { rekeyAndGo, renewAndGo, certKebabItems } from "../api/certActions";
 import { getVpnProfileForCn, generateOpenVpnProfile } from "../api/openvpn";
 import type { CertDetail } from "../api/types";
-import { uploadDbIfPrivateStore } from "../api/ca";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
+import CopyableValue from "../components/CopyableValue";
 import CertStatusBadge from "../components/CertStatusBadge";
+import IgnoreCertDialog from "../components/IgnoreCertDialog";
+import RevokeCertDialog from "../components/RevokeCertDialog";
+import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import "../styles/pages/cert-info.css";
 
 export default function CertInfo() {
@@ -24,16 +28,16 @@ export default function CertInfo() {
     () => params.serial as string | undefined,
     (serial: string) => getCertInfo(serial),
   );
-  const [confirming, setConfirming] = createSignal(false);
+  const [showRevoke, setShowRevoke] = createSignal(false);
   const [acting, setActing] = createSignal<string | false>(false);
   const [error, setError] = createSignal<string | null>(null);
   const [copied, markCopied] = createCopiedSignal();
   const [copiedKey, markKeyCopied] = createCopiedSignal();
   const [copiedChain, markChainCopied] = createCopiedSignal();
+  const [copiedSan, markSanCopied] = createCopiedSignal();
   const [exportingKey, setExportingKey] = createSignal(false);
   const [backfilling, setBackfilling] = createSignal(false);
-  const [showIgnoreForm, setShowIgnoreForm] = createSignal(false);
-  const [ignoreNote, setIgnoreNote] = createSignal("");
+  const [showIgnore, setShowIgnore] = createSignal(false);
   const [regenerating, setRegenerating] = createSignal(false);
   const [regenMsg, setRegenMsg] = createSignal<string | null>(null);
 
@@ -83,42 +87,16 @@ export default function CertInfo() {
     }
   }
 
-  // After a mutating op, push the DB to the private store (if configured)
-  // without prompting. Progress shows in the side-nav status; surface failures
-  // on the page. Fire-and-forget so it doesn't block navigation to the new cert.
-  function syncDbToPrivateStore() {
-    void uploadDbIfPrivateStore().catch((e) => setError(String(e)));
-  }
-
-  async function handleRevoke() {
-    const serial = params.serial as string;
-    if (!serial) return;
-    setActing("revoke");
-    setError(null);
-    try {
-      await revokeCert(serial);
-      setConfirming(false);
-      refetch();
-      syncDbToPrivateStore();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setActing(false);
-    }
-  }
-
   async function handleRekey() {
     const serial = params.serial as string;
     if (!serial) return;
     setActing("rekey");
     setError(null);
     try {
-      const result = await rekeyCert(serial);
-      // The rekeyed cert lives at a new serial — navigate there so its new key
-      // + certificate are surfaced for copy-on-click; the DB sync runs in the
+      // Navigates to the rekeyed cert's new serial so its fresh key +
+      // certificate are surfaced for copy-on-click; the DB sync runs in the
       // background.
-      navigate(`/certs/${result.serial}?freshFrom=${serial}&op=rekey`);
-      syncDbToPrivateStore();
+      await rekeyAndGo(navigate, serial);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -132,27 +110,7 @@ export default function CertInfo() {
     setActing("renew");
     setError(null);
     try {
-      const result = await renewCert(serial);
-      navigate(`/certs/${result.serial}?freshFrom=${serial}&op=renew`);
-      syncDbToPrivateStore();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setActing(false);
-    }
-  }
-
-  async function handleIgnore() {
-    const serial = params.serial as string;
-    if (!serial) return;
-    setActing("ignore");
-    setError(null);
-    try {
-      const note = ignoreNote().trim() || undefined;
-      await ignoreCert(serial, note);
-      setShowIgnoreForm(false);
-      setIgnoreNote("");
-      refetch();
+      await renewAndGo(navigate, serial);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -173,6 +131,17 @@ export default function CertInfo() {
     } finally {
       setActing(false);
     }
+  }
+
+  // Header actions menu — gating shared with the certificates list kebab.
+  function certActions(d: CertDetail): KebabItem[] {
+    return certKebabItems(d, {
+      onRekey: () => void handleRekey(),
+      onRenew: () => void handleRenew(),
+      onRevoke: () => setShowRevoke(true),
+      onIgnore: () => setShowIgnore(true),
+      onUnignore: () => void handleUnignore(),
+    }, !!acting());
   }
 
   function copyPem() {
@@ -236,9 +205,14 @@ export default function CertInfo() {
     <div class="page-cert-info">
       <div class="page-header">
         <h2>Certificate Detail</h2>
-        <button class="btn-ghost" onClick={() => navigate("/certs")}>
-          Back to list
-        </button>
+        <div class="header-actions">
+          <button class="btn-ghost" onClick={() => navigate("/certs")}>
+            Back to list
+          </button>
+          <Show when={detail()}>
+            {(d) => <KebabMenu items={certActions(d())} ariaLabel="Certificate actions" />}
+          </Show>
+        </div>
       </div>
 
       <div class="cert-info-scroll">
@@ -362,34 +336,6 @@ export default function CertInfo() {
               </div>
 
               <div class="detail-grid">
-                <Row label="Serial" value={d().serial} mono />
-                <Row label="Common Name" value={d().cn} />
-                <Row label="Title" value={d().title} />
-                <Row label="Type" value={d().cert_type} />
-                <div class="detail-row">
-                  <span class="detail-label">Status</span>
-                  <CertStatusBadge status={d().status} expiringSoon={d().expiring_soon} />
-                  <Show when={d().ignored_at}>
-                    <span class="status-badge status-ignored">ignored</span>
-                  </Show>
-                </div>
-                <Row label="Subject" value={d().subject} mono />
-                <Row label="Issuer" value={d().issuer} mono />
-                <Row label={<>Valid From <TzToggle /></>} value={formatDate(d().not_before)} />
-                <Row label="Expiry" value={formatDate(d().expiry_date)} />
-                <Row label="Revocation Date" value={formatDate(d().revocation_date)} />
-                <Row label="Key Type" value={d().key_type} />
-                <Row label="Key Size" value={d().key_size != null ? String(d().key_size) : null} />
-                <div class="detail-row">
-                  <span class="detail-label">SAN</span>
-                  <Show when={d().san} fallback={<span class="detail-value">{"\u2014"}</span>}>
-                    <div class="san-list">
-                      <For each={d().san!.split(",").map((s: string) => s.trim()).filter(Boolean)}>
-                        {(name) => <span class="san-entry mono">{name}</span>}
-                      </For>
-                    </div>
-                  </Show>
-                </div>
                 <div class="detail-row">
                   <span class="detail-label">Stored Items</span>
                   <div class="stored-items">
@@ -417,6 +363,46 @@ export default function CertInfo() {
                     />
                   </div>
                 </div>
+                <Row label="Serial" value={d().serial} mono copy />
+                <Row label="Common Name" value={d().cn} copy />
+                <Row label="Title" value={d().title} copy />
+                <Row label="Type" value={d().cert_type} />
+                <div class="detail-row">
+                  <span class="detail-label">Status</span>
+                  <CertStatusBadge status={d().status} expiringSoon={d().expiring_soon} />
+                  <Show when={d().ignored_at}>
+                    <span class="status-badge status-ignored">ignored</span>
+                  </Show>
+                </div>
+                <Row label="Subject" value={d().subject} mono copy />
+                <Row label="Issuer" value={d().issuer} mono copy />
+                <Row label={<>Valid From <TzToggle /></>} value={formatDate(d().not_before)} />
+                <Row label="Expiry" value={formatDate(d().expiry_date)} />
+                <Row label="Revocation Date" value={formatDate(d().revocation_date)} />
+                <Row label="Key Type" value={d().key_type} />
+                <Row label="Key Size" value={d().key_size != null ? String(d().key_size) : null} />
+                <div class="detail-row">
+                  <span class="detail-label">
+                    SAN
+                    <Show when={sanList(d()).length > 1}>
+                      <button
+                        type="button"
+                        class="san-copy-all"
+                        title="Copy all SANs"
+                        onClick={() => { void writeClipboard(d().san!); markSanCopied(); }}
+                      >
+                        {copiedSan() ? "Copied" : "Copy all"}
+                      </button>
+                    </Show>
+                  </span>
+                  <Show when={sanList(d()).length > 0} fallback={<span class="detail-value">{"\u2014"}</span>}>
+                    <div class="san-list">
+                      <For each={sanList(d())}>
+                        {(name) => <CopyableValue value={name} mono />}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
               </div>
 
               <Show when={d().cert_pem}>
@@ -441,79 +427,21 @@ export default function CertInfo() {
                 <p class="page-error mt-3" role="alert">{error()}</p>
               </Show>
 
-              <div class="cert-actions">
-                <Show when={!acting() || acting() === "rekey"}>
-                  <button class="btn-primary" onClick={handleRekey} disabled={!!acting()}>
-                    {acting() === "rekey" ? "Rekeying…" : "Rekey"}
-                  </button>
-                </Show>
-                <Show when={d().status === "Valid"}>
-                  <Show when={!acting() || acting() === "renew"}>
-                    <button class="btn-primary" onClick={handleRenew} disabled={!!acting()}>
-                      {acting() === "renew" ? "Renewing…" : "Renew"}
-                    </button>
-                  </Show>
-                  <Show when={!acting() && !confirming()}>
-                    <button class="btn-danger" onClick={() => setConfirming(true)}>
-                      Revoke
-                    </button>
-                  </Show>
-                  <Show when={confirming()}>
-                    <Show when={!acting() || acting() === "revoke"}>
-                      <div class="confirm-inline">
-                        <Show when={!acting()}>
-                          <span class="text-warning">Are you sure?</span>
-                        </Show>
-                        <button class="btn-danger" onClick={handleRevoke} disabled={!!acting()}>
-                          {acting() === "revoke" ? "Revoking…" : "Confirm Revoke"}
-                        </button>
-                        <Show when={!acting()}>
-                          <button class="btn-ghost" onClick={() => setConfirming(false)}>
-                            Cancel
-                          </button>
-                        </Show>
-                      </div>
-                    </Show>
-                  </Show>
-                </Show>
+              <IgnoreCertDialog
+                open={showIgnore()}
+                serial={d().serial}
+                cn={d().cn}
+                onClose={() => setShowIgnore(false)}
+                onDone={() => refetch()}
+              />
 
-                <Show when={(d().status === "Expired" || d().expiring_soon) && !d().ignored_at && !d().superseded_by && !showIgnoreForm()}>
-                  <button class="btn-ghost" onClick={() => setShowIgnoreForm(true)} disabled={!!acting()}>
-                    Ignore
-                  </button>
-                </Show>
-
-                <Show when={showIgnoreForm() && !d().ignored_at}>
-                  <div class="confirm-inline ignore-inline">
-                    <input
-                      type="text"
-                      class="ignore-note-input"
-                      value={ignoreNote()}
-                      onInput={(e) => setIgnoreNote(e.currentTarget.value)}
-                      placeholder={"Optional note \u2014 why?"}
-                      disabled={!!acting()}
-                      autofocus
-                    />
-                    <button class="btn-primary" onClick={handleIgnore} disabled={!!acting()}>
-                      {acting() === "ignore" ? "Ignoring\u2026" : "Confirm Ignore"}
-                    </button>
-                    <Show when={!acting()}>
-                      <button
-                        class="btn-ghost"
-                        onClick={() => { setShowIgnoreForm(false); setIgnoreNote(""); }}
-                      >
-                        Cancel
-                      </button>
-                    </Show>
-                  </div>
-                </Show>
-
-                <Show when={d().ignored_at}>
-                  <button class="btn-ghost" onClick={handleUnignore} disabled={!!acting()}>
-                    {acting() === "unignore" ? "Un-ignoring\u2026" : "Un-ignore"}
-                  </button>
-                </Show>
-              </div>
+              <RevokeCertDialog
+                open={showRevoke()}
+                serial={d().serial}
+                cn={d().cn}
+                onClose={() => setShowRevoke(false)}
+                onDone={() => refetch()}
+              />
             </>
           )}
         </Show>
@@ -549,14 +477,28 @@ function Row(props: {
   value: string | null | undefined;
   mono?: boolean;
   cls?: string;
+  /** When set, the value becomes a click-to-copy affordance. */
+  copy?: boolean;
 }) {
   return (
     <div class="detail-row">
       <span class="detail-label">{props.label}</span>
-      <span class={`detail-value ${props.mono ? "mono" : ""} ${props.cls ?? ""}`}>
-        {props.value ?? "\u2014"}
-      </span>
+      <Show
+        when={props.copy}
+        fallback={
+          <span class={`detail-value ${props.mono ? "mono" : ""} ${props.cls ?? ""}`}>
+            {props.value ?? "\u2014"}
+          </span>
+        }
+      >
+        <CopyableValue value={props.value} mono={props.mono} />
+      </Show>
     </div>
   );
+}
+
+/** Split a cert's comma-separated SAN string into trimmed, non-empty names. */
+function sanList(d: CertDetail): string[] {
+  return (d.san ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 

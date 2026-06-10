@@ -183,6 +183,17 @@ pub struct CertificateAuthority<R: CommandRunner> {
     pub crl: Option<String>,
 }
 
+/// A self-contained snapshot for uploading the CA database to the private
+/// store off the connection lock (see [`CertificateAuthority::private_store_upload_job`]).
+#[derive(Debug, Clone)]
+pub struct PrivateStoreJob {
+    pub bytes: Vec<u8>,
+    pub uri: String,
+    pub account: Option<String>,
+    /// SHA-256 of `bytes`, so callers can skip an upload when unchanged.
+    pub fingerprint: String,
+}
+
 impl<R: CommandRunner> CertificateAuthority<R> {
     // -----------------------------------------------------------------------
     // Constructors
@@ -1431,13 +1442,41 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             None,
         )?;
 
-        // Upload to private store if configured
-        let ca_config = db.get_config()?;
-        if ca_config.ca_private_store.is_some() {
-            let _ = self.upload_ca_database("");
-        }
-
+        // NB: the private-store (e.g. S3) copy is intentionally NOT uploaded
+        // here. That upload is slow (AWS creds fetch + PUT) and would hold the
+        // caller's connection lock; instead the Tauri layer drains
+        // `private_store_upload_job()` into a background task after the
+        // operation returns. See `sync_private_store`.
         Ok(())
+    }
+
+    /// Snapshot everything needed to upload the CA database to the private
+    /// store, or `None` when no private store is configured. Returned by value
+    /// so the caller can perform the (slow) upload off the connection lock; the
+    /// `fingerprint` lets the caller skip an upload when nothing has changed.
+    pub fn private_store_upload_job(&self) -> Result<Option<PrivateStoreJob>, OpcaError> {
+        let Some(uri) = self.private_store_uri()? else { return Ok(None) };
+        let db = self.ca_database.as_ref()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
+        let bytes = db.export_database_binary()?;
+        let fingerprint = sha256_hex(&bytes);
+        Ok(Some(PrivateStoreJob {
+            bytes,
+            uri,
+            account: self.op.account().map(String::from),
+            fingerprint,
+        }))
+    }
+
+    /// The configured private-store URI for this CA's database, or `None` when
+    /// no private store is set.
+    fn private_store_uri(&self) -> Result<Option<String>, OpcaError> {
+        let db = self.ca_database.as_ref()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
+        Ok(db.get_config()?.ca_private_store.map(|store| {
+            let vault_name = self.op.vault.trim().to_lowercase();
+            format!("{}/{vault_name}.sqlite", store.trim_end_matches('/'))
+        }))
     }
 
     /// Update the stored fingerprint to reflect what we are about to upload.
@@ -1552,19 +1591,15 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 
     /// Upload the CA database to the private store.
     pub fn upload_ca_database(&self, store_uri: &str) -> Result<(), OpcaError> {
-        let db = self.ca_database.as_ref()
-            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
-
         let uri = if store_uri.is_empty() {
-            let config = db.get_config()?;
-            let cfg_store = config.ca_private_store
-                .ok_or_else(|| OpcaError::Storage("No private store configured".into()))?;
-            let vault_name = self.op.vault.trim().to_lowercase();
-            format!("{}/{vault_name}.sqlite", cfg_store.trim_end_matches('/'))
+            self.private_store_uri()?
+                .ok_or_else(|| OpcaError::Storage("No private store configured".into()))?
         } else {
             store_uri.to_string()
         };
 
+        let db = self.ca_database.as_ref()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         let binary_db = db.export_database_binary()?;
         self.upload_content(&binary_db, &uri)
     }

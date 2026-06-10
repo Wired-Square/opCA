@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { setAppState } from "../stores/app";
-import { setActiveOperation, isVisibleOp } from "../stores/operation";
+import { beginOp, endOp, isVisibleOp } from "../stores/operation";
 
 /**
  * Typed wrapper around Tauri's invoke.
@@ -14,14 +14,14 @@ export async function tauriInvoke<T>(
   const visible = isVisibleOp(cmd);
   try {
     setAppState("error", null);
-    if (visible) setActiveOperation(cmd);
+    if (visible) beginOp(cmd);
     return await invoke<T>(cmd, args);
   } catch (err) {
     const message = typeof err === "string" ? err : String(err);
     setAppState("error", message);
     throw new Error(message);
   } finally {
-    if (visible) setActiveOperation(null);
+    if (visible) endOp(cmd);
   }
 }
 
@@ -40,5 +40,9 @@ export async function withLock<T>(
     return await fn();
   } finally {
     await tauriInvoke("release_lock");
+    // Sync the database to the private store (if configured) without blocking:
+    // the backend snapshots under a brief lock then uploads off the connection
+    // lock, so this never delays the screen refresh. Skipped when unchanged.
+    void invoke("sync_private_store").catch(() => {});
   }
 }

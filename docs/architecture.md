@@ -197,6 +197,17 @@ The frontend wraps write calls in `withLock()` in
 [api/tauri.ts](../rust/frontend/src/api/tauri.ts) so the lock lifetime always
 matches a single logical operation.
 
+`store_ca_database()` persists the SQLite dump to the canonical `CA_Database`
+1Password document only. The slower **private-store** copy (e.g. the `s3://`
+backup, which fetches AWS creds and PUTs) is *not* uploaded inline — that would
+hold the `AppState.conn` mutex and stall reads (cert/profile lists). Instead
+`withLock()` fires the `sync_private_store` command fire-and-forget after each
+mutation: it snapshots the DB under a brief `conn` lock, then uploads in a
+background task holding only `AppState.private_store_lock`, so reads stay
+unblocked and the upload trails the screen refresh. The snapshot's SHA-256 is
+compared against the last successful sync to skip no-op uploads. (The Database
+page's manual `upload_ca_database` remains a synchronous, foreground sync.)
+
 ---
 
 ## Tauri shell (`opca-tauri`)
@@ -207,7 +218,7 @@ matches a single logical operation.
   `op --version` so macOS AMFI/OCSP verification is cached before the first real
   call.
 - [state.rs](../rust/crates/opca-tauri/src/state.rs) — `AppState`, Tauri's
-  managed singleton. Three mutex-guarded fields:
+  managed singleton. Mutex-guarded fields:
   - `conn: Connection { op, ca }` — the live 1Password handle and the loaded
     `CertificateAuthority`. A single mutex makes connect/disconnect atomic
     with respect to in-flight operations. `ensure_ca()` lazily retrieves the
@@ -215,6 +226,12 @@ matches a single logical operation.
   - `vault_lock: VaultLock` — the current process's advisory lock handle.
   - `action_log: Vec<LogEntry>` — in-memory audit trail surfaced on the Log
     page.
+  - `private_store_lock` / `last_private_store_sync` — serialise the background
+    private-store upload (off `conn`) and skip it when the DB is unchanged (see
+    Concurrent-writer safety).
+  - `fresh_cert_pems` — one-shot cache of a just-issued certificate's PEM
+    (keyed by serial), so the detail page can show a freshly renewed/rekeyed
+    cert without re-reading its bundle from 1Password.
 - [commands/](../rust/crates/opca-tauri/src/commands) — one module per
   feature area (`ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
   `vault`, `lock`, `connect`, `dashboard`, `files`, `logs`, `update`). Each
@@ -258,12 +275,20 @@ A single-page SolidJS app. Key conventions:
 - [api/](../rust/frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
   [api/tauri.ts](../rust/frontend/src/api/tauri.ts). `tauriInvoke`
-  centralises error surfacing and the in-flight-operation indicator;
-  `withLock()` wraps any mutation in acquire/release calls.
+  centralises error surfacing and the in-flight-operation indicator — tracked
+  as a stack in [stores/operation.ts](../rust/frontend/src/stores/operation.ts)
+  (the side-nav shows the most recent op and never blanks mid-flight, and a
+  finishing background task can't clear a running foreground one). `withLock()`
+  wraps any mutation in acquire/release calls and then fires the background
+  `sync_private_store`.
 - [stores/](../rust/frontend/src/stores) — small reactive stores (`app`,
   `operation`, `theme`, `update`). No global state framework.
 - [pages/](../rust/frontend/src/pages) mirror the Tauri command modules
   roughly 1-to-1.
+- [components/](../rust/frontend/src/components) — reusable UI. Mutating
+  actions on the certificate list/detail and the OpenVPN Profiles list share a
+  per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
+  `Modal` dialogs reused across those pages.
 
 ---
 
@@ -279,7 +304,8 @@ A single-page SolidJS app. Key conventions:
    `store_document`).
 7. The queue flushes — each queued op becomes an `op` CLI invocation.
 8. The handler serialises the result; the frontend updates its view.
-9. `withLock` releases `CA_Lock` in its `finally` clause.
+9. `withLock` releases `CA_Lock` in its `finally` clause, then fires
+   `sync_private_store` (fire-and-forget) to back the DB up off the lock.
 10. An entry lands in `action_log` for display on the Log page.
 
 If any step fails, the error propagates as an `OpcaError` through every

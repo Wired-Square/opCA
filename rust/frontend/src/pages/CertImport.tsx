@@ -1,7 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { importCert } from "../api/certs";
-import { uploadDbIfPrivateStore } from "../api/ca";
 import PemInput from "../components/PemInput";
 import "../styles/pages/cert-import.css";
 
@@ -52,9 +51,8 @@ export default function CertImport() {
         chain_pem: chainPem().trim() || undefined,
       });
 
-      // Sync the DB to the private store if one is configured (no prompt;
-      // progress shows in the side-nav status), then go to the cert list.
-      await uploadDbIfPrivateStore();
+      // import_cert already persisted the DB (1Password + private store), so
+      // just return to the list.
       navigate("/certs");
     } catch (err) {
       setError(String(err));

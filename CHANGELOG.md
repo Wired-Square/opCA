@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The **Certificates → Local** list now has a per-row **⋮ actions menu** with
+  Rekey, Renew, Revoke and Ignore/Unignore, so certificates can be actioned
+  without opening them first. The menu's items mirror each cert's state (Renew
+  and Revoke only on valid certs; Ignore only on expired/expiring certs that
+  aren't already ignored or superseded; Unignore on ignored certs).
+- **Ignore** now opens a unified dialog that **requires a reason**, used
+  identically from the list and the certificate detail page; **Revoke** uses a
+  shared styled confirmation dialog in both places.
+- A kebab action on a legacy certificate whose **TYPE** shows "—" now
+  opportunistically backfills its type from 1Password while it's already being
+  touched, so the column fills in (rekey/renew enrich the source cert before
+  acting; revoke/ignore/unignore enrich and refresh the list afterwards).
+- The **OpenVPN → Profiles** list now has a per-row **⋮ actions menu** with
+  **Send to Vault** and **Regenerate**, replacing the select-row-then-send panel
+  below the table. Send to Vault opens a dialog that **remembers the destination
+  vault** for the session once a send succeeds (with a **Remove** to clear it);
+  Regenerate re-creates the `.ovpn` from the row's CN/serial/template.
+- The certificate **detail** page now puts **Stored Items** at the top and makes
+  the Serial, Common Name, Title, Subject, Issuer and SAN fields
+  **click-to-copy** (each SAN copies individually, with a **Copy all** for the
+  whole list). Its Rekey/Renew/Revoke/Ignore actions now live in a **⋮ menu**
+  next to "Back to list" rather than a row of buttons at the bottom.
 - After a **renew** or **rekey**, opCA now navigates straight to the newly
   issued certificate's detail page (it lives at a new serial) with a "New
   certificate" banner linking back to the predecessor. The new cert's
@@ -83,8 +105,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the new certificate (previously just the PEM). New `get_vpn_profile_for_cn`
   command looks up a CN's recorded VPN profile from the database.
 
+### Changed
+
+- **Opening a just-renewed/rekeyed certificate no longer re-reads it from
+  1Password.** The detail page's "Fetching details from vault…" step exists to
+  pull the certificate PEM (not kept in the local DB); for a freshly-issued cert
+  we now reuse the PEM captured during the renew/rekey, so the detail page shows
+  it immediately instead of spending an `op` round-trip re-downloading what we
+  just created. (Certs with an intermediate chain still fetch, to retrieve the
+  chain PEM.)
+- **The private-store (S3) database backup now uploads off the connection
+  lock.** `store_ca_database` persists only the canonical 1Password document
+  synchronously; the slower private-store copy (AWS creds fetch + PUT) runs in a
+  background task that holds a dedicated lock rather than the shared connection
+  mutex, so it no longer blocks reads (the cert/profile lists) or delays the
+  screen refresh after an action. It's triggered once per mutation and skipped
+  when the database is unchanged.
+
 ### Fixed
 
+- **The side-nav activity status no longer blanks mid-operation.** A finishing
+  background task (e.g. the database save after a backfill) emitted an
+  "idle" status that cleared whatever foreground op was running — so a rekey
+  showed "Acquiring lock…" → *nothing* → "Rekeying certificate…". In-flight
+  operations are now tracked as a stack: the most recent is shown, a finishing
+  background task only removes its own entry, and the indicator blanks only when
+  nothing is actually running.
+- **Mutating operations no longer upload the CA database to the private store
+  twice.** `store_ca_database` already syncs the private store (S3) as part of
+  every persist, yet the frontend also fired a second `upload_ca_database` after
+  create/import/rekey/renew/revoke. Each upload holds the connection lock, so
+  the duplicate doubled the post-action stall (and blocked the OpenVPN Profiles
+  list behind it). The redundant frontend upload is removed; manual sync from
+  the Database page is unchanged.
+- **The OpenVPN Profiles list now fills the available height.** A leftover
+  `max-height` (from when a send panel sat below the table) capped it at ~280px,
+  leaving the lower half of the screen empty; the table now grows and scrolls
+  like the other lists.
+- **The Certificates header no longer shifts when switching tabs.** Moving to
+  the Inspect tab previously hid the whole action bar, collapsing the header to
+  the title height and nudging the tabs/table up; the Import button now stays
+  visible on every tab so the header keeps a constant height.
+- **Mutation actions (rekey, renew, revoke, …) now show "Acquiring lock…" and
+  "Releasing lock…" statuses.** Acquiring and releasing the vault lock each
+  write to 1Password (a few seconds) and previously ran with no indicator, so
+  the spinner only appeared once the operation itself started and an
+  unexplained pause followed it. Both lock steps now drive the side-nav status,
+  bracketing the operation's own label.
+- **The OpenVPN Profiles list showed a "Loading profiles…" delay** even though
+  profiles come straight from the in-memory database. The Configuration tab's
+  server-parameters resource (which reads from 1Password) was fetched eagerly on
+  mount and, sharing the single connection lock, stalled the DB-only Profiles
+  query behind it. That resource is now loaded lazily — only when the
+  Configuration tab is opened — so the Profiles list renders immediately.
+- **The Certificates status filter now sticks for the session.** Changing it
+  (e.g. to "Expiring Soon") and navigating away then back to the Certificates
+  page keeps the selection rather than resetting to "Valid". An explicit
+  `?filter=` deep-link (e.g. from the Dashboard) still takes precedence.
 - **Generated VPN profiles disappeared on restart.** The profile record was
   added to the in-memory database but never persisted, so it was lost when the
   CA database was reloaded from 1Password on the next launch (only the `.ovpn`

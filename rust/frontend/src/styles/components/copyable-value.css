@@ -1,0 +1,42 @@
+.copyable-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.copyable-value:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+
+.copyable-value-text {
+  word-break: break-all;
+}
+
+/* Copy glyph sits faint until the row is hovered. */
+.copyable-value .stored-copy-icon {
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity 0.12s ease;
+}
+
+.copyable-value:hover .stored-copy-icon {
+  opacity: 1;
+}
+
+.copyable-value-copied {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--success);
+}

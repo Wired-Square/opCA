@@ -92,6 +92,7 @@ fn main() {
             commands::ca::test_stores,
             commands::ca::upload_ca_cert,
             commands::ca::upload_ca_database,
+            commands::ca::sync_private_store,
             commands::ca::resign_ca,
             commands::ca::record_ca_cert_copy,
             commands::csr::decode_csr,

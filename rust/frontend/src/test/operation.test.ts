@@ -6,11 +6,14 @@ describe("operation store", () => {
     it("returns true for regular commands", () => {
       expect(isVisibleOp("get_ca_info")).toBe(true);
       expect(isVisibleOp("create_cert")).toBe(true);
+      // The lock ops are visible so their "Acquiring lock…" / "Releasing lock…"
+      // statuses cover the (slow) lock writes around an operation.
+      expect(isVisibleOp("acquire_lock")).toBe(true);
+      expect(isVisibleOp("release_lock")).toBe(true);
     });
 
     it("returns false for hidden commands", () => {
-      expect(isVisibleOp("acquire_lock")).toBe(false);
-      expect(isVisibleOp("release_lock")).toBe(false);
+      expect(isVisibleOp("read_text_file")).toBe(false);
       expect(isVisibleOp("check_for_updates")).toBe(false);
     });
   });
