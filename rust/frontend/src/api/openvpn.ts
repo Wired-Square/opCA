@@ -1,5 +1,7 @@
 import { tauriInvoke, withLock } from "./tauri";
 import type {
+  BulkGenerateProfileItem,
+  BulkProfileResult,
   CertListItem,
   OpenVpnServerParams,
   OpenVpnTemplateItem,
@@ -85,6 +87,41 @@ export async function generateOpenVpnProfile(
 
 export async function listOpenVpnProfiles(): Promise<OpenVpnProfileItem[]> {
   return tauriInvoke<OpenVpnProfileItem[]>("list_openvpn_profiles");
+}
+
+/** Regenerate many profiles in one vault-lock cycle (typically the needs-regen
+ * rows, against their replacement serials). Returns a per-profile result. */
+export async function bulkGenerateOpenVpnProfiles(
+  items: BulkGenerateProfileItem[],
+): Promise<BulkProfileResult[]> {
+  return withLock("bulk_generate_profile", () =>
+    tauriInvoke<BulkProfileResult[]>("bulk_generate_openvpn_profiles", { items }),
+  );
+}
+
+/** Register profiles WITHOUT generating their `.ovpn` documents (Add with
+ * "Generate Profile" unticked). The rows flag for later generation. */
+export async function addOpenVpnProfileEntries(
+  items: BulkGenerateProfileItem[],
+): Promise<BulkProfileResult[]> {
+  return withLock("add_profile_entry", () =>
+    tauriInvoke<BulkProfileResult[]>("add_openvpn_profile_entries", { items }),
+  );
+}
+
+/** Remove a profile from the registry (row only; the `.ovpn` document stays). */
+export async function deleteOpenVpnProfile(title: string): Promise<boolean> {
+  return withLock("delete_profile", () =>
+    tauriInvoke<boolean>("delete_openvpn_profile", { title }),
+  );
+}
+
+export async function bulkDeleteOpenVpnProfiles(
+  titles: string[],
+): Promise<BulkProfileResult[]> {
+  return withLock("bulk_delete_profile", () =>
+    tauriInvoke<BulkProfileResult[]>("bulk_delete_openvpn_profiles", { titles }),
+  );
 }
 
 export async function sendProfileToVault(

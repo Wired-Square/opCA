@@ -109,7 +109,7 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 | Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type) |
 | External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
 | CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests |
-| VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial) is also written to the `openvpn_profile` table and persisted on generate, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. Legacy profiles may still be titled `VPN_<cn>`. |
+| VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial, `generated`) is also written to the `openvpn_profile` table and persisted, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. A profile can be **registered without generating** (`generated = 0`, no document yet) and produced later via Regenerate; such rows surface as Needs Regen. Legacy profiles may still be titled `VPN_<cn>`. |
 | DKIM | `<selector>._domainkey.<domain>` | Secure Note | DKIM key pair and metadata |
 | Lock | `CA_Lock` | Secure Note | Advisory lock for concurrent-write safety |
 
@@ -148,7 +148,22 @@ matches such a serial into `certs_superseded` (with a `replacements:
 HashMap<old_serial → new_serial>` entry) instead of `certs_expired`. This
 catches any same-CN re-issuance — including a renewed/rekeyed predecessor once
 it expires. Supersession is a runtime classification only; the DB rows aren't
-modified.
+modified. The first pass also exposes its result as `valid_cn_to_serial`
+(CN → current valid serial), reused below for VPN profile status.
+
+**VPN profile status (derived, never stored)** — `list_openvpn_profiles` runs
+`process_ca_database` then calls `derive_vpn_profile_status` for each profile,
+comparing the profile's pinned cert serial against `certs_revoked` /
+`certs_expired` / `replacements` / `valid_cn_to_serial`. It returns one of
+`current` / `needs_regen` (with the replacement serial) / `revoked` / `expired`
+(precedence in that order). Because a rekey/renew auto-ignores the old cert, the
+CN's current valid serial is already the new one while the profile still pins
+the old — so `needs_regen` fires immediately, before calendar expiry. A row with
+`generated = 0` (registered but not yet produced) also reports `needs_regen`,
+against the CN's current valid serial. There is no cert→profile write coupling:
+the status is computed fresh on every list load, so any cert change (revoke,
+expire, renew, rekey, manual import) surfaces on the Profiles view without an
+event system.
 
 **Ignore (a "don't-notify" overlay)** — ignoring a cert **never changes its
 status**. It records four audit columns (`ignored_at`, `ignored_by` =
@@ -261,6 +276,20 @@ severity, human-readable message, button label, and an `action` token that
 the frontend dispatches on (`regenerate_and_upload_crl`, `regenerate_crl`,
 `view_expired_certs`, `view_pending_csrs`, `view_ca`). Threshold logic lives
 entirely in the Rust layer to avoid duplication in TypeScript.
+
+### Bulk command group
+
+The `bulk_*` commands (`bulk_rekey_certs`, `bulk_renew_certs`,
+`bulk_revoke_certs`, `bulk_ignore_certs`, `bulk_unignore_certs`, plus
+`bulk_generate_openvpn_profiles` and `bulk_delete_openvpn_profiles`) each loop
+the same `opca-core` method their single-cert sibling calls, taking one CA
+borrow for the whole batch. The frontend wraps the single invocation in one
+`withLock`, so a batch of N items costs **one** vault-lock cycle rather than N.
+Per-item failures are collected into a result vector (`BulkCertResult` /
+`BulkProfileResult`) and the loop continues; the command-level `Err` is reserved
+for the CA being unavailable. Each underlying `*_certificate*` / generate call
+still flushes via `store_ca_database()`, so a batch of N does N flushes —
+accepted for now; batching the flushes is future work.
 
 ---
 

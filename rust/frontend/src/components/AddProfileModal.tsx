@@ -5,9 +5,12 @@ import VaultPicker from "./VaultPicker";
 import {
   getVpnProfileForCn,
   generateOpenVpnProfile,
+  bulkGenerateOpenVpnProfiles,
+  addOpenVpnProfileEntries,
   sendProfileToVault,
 } from "../api/openvpn";
 import type {
+  BulkProfileResult,
   CertListItem,
   OpenVpnTemplateItem,
   OpenVpnProfileItem,
@@ -37,27 +40,51 @@ function typeLabel(certType: string | null | undefined): string | null {
 }
 
 /**
- * Create-a-VPN-profile modal. The user picks a VPN certificate (client or
- * server); the profile's type is inferred from the cert. The template dropdown
- * preselects the one last used for that CN (else the first available).
+ * Create-VPN-profile(s) modal. The user picks one or more VPN certificates and a
+ * single template; one profile is generated per cert (the cert's type is
+ * inferred). A single pick keeps the optional "send to vault" follow-up; picking
+ * several runs the bulk generate and reports a per-cert summary.
  */
 export default function AddProfileModal(props: AddProfileModalProps) {
-  const [cn, setCn] = createSignal("");
-  const [serial, setSerial] = createSignal<string | null>(null);
+  const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [template, setTemplate] = createSignal("");
+  const [genNow, setGenNow] = createSignal(true);
   const [destVault, setDestVault] = createSignal("");
   const [generated, setGenerated] = createSignal<OpenVpnProfileItem | null>(null);
+  const [bulkResults, setBulkResults] = createSignal<BulkProfileResult[] | null>(null);
+  const [resultVerb, setResultVerb] = createSignal<"generated" | "added">("generated");
   const [acting, setActing] = createSignal(false);
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
-  // The cert backing the current selection, for the inferred type label.
-  const selectedCert = createMemo(
-    () =>
-      props.certs.find((c) => c.serial === serial() && c.cn === cn())
-      ?? props.certs.find((c) => c.cn === cn())
-      ?? null,
+  const selectedCerts = createMemo(() =>
+    props.certs.filter((c) => c.serial && selected().has(c.serial)),
   );
+
+  // Hint under the picker: the inferred type for a single pick, else a count.
+  const hint = () => {
+    const certs = selectedCerts();
+    if (certs.length === 1) {
+      const t = typeLabel(certs[0]?.cert_type);
+      return t ? `Profile type: ${t}` : null;
+    }
+    return certs.length > 1 ? `${certs.length} certificates selected` : null;
+  };
+
+  function toggleCert(cert: CertListItem) {
+    if (!cert.serial) return;
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(cert.serial!) ? n.delete(cert.serial!) : n.add(cert.serial!);
+      return n;
+    });
+    setError(null);
+    // When this pick is the first one, default the template to the one last
+    // used for its CN.
+    if (cert.cn && selected().size === 1 && selected().has(cert.serial!)) {
+      void preselectTemplate(cert.cn);
+    }
+  }
 
   // Reset / apply prefill on each open transition. Kept free of any
   // props.templates read so it only re-runs when `open` flips.
@@ -67,19 +94,18 @@ export default function AddProfileModal(props: AddProfileModalProps) {
     if (open && !lastOpen) {
       setError(null);
       setGenerated(null);
+      setBulkResults(null);
+      setGenNow(true);
       setDestVault("");
       setTemplate("");
-      setCn(props.prefillCn ?? "");
-      setSerial(props.prefillSerial ?? null);
+      setSelected(props.prefillSerial ? new Set([props.prefillSerial]) : new Set<string>());
       if (props.prefillCn) void preselectTemplate(props.prefillCn);
     }
     lastOpen = open;
   });
 
   // Default the template to the first available once templates load, if nothing
-  // is selected yet. This handles a deep-link open where the templates resource
-  // is still loading when the modal appears (and the picker would otherwise
-  // stay empty until reopened).
+  // is selected yet (handles a deep-link open where templates were still loading).
   createEffect(() => {
     if (props.open && !template() && props.templates.length > 0) {
       setTemplate(props.templates[0].name);
@@ -96,27 +122,26 @@ export default function AddProfileModal(props: AddProfileModalProps) {
     }
   }
 
-  function selectCert(nextCn: string, nextSerial: string | null) {
-    setCn(nextCn);
-    setSerial(nextSerial);
-    setError(null);
-    if (nextCn) void preselectTemplate(nextCn);
-  }
-
-  async function handleGenerate() {
+  async function handleAdd() {
     const tmpl = template();
-    const targetCn = cn();
-    if (!tmpl) { setError("Select a template before generating a profile."); return; }
-    if (!targetCn) { setError("Select a VPN certificate before generating a profile."); return; }
+    const certs = selectedCerts();
+    if (!tmpl) { setError("Select a template first."); return; }
+    if (certs.length === 0) { setError("Select at least one VPN certificate."); return; }
     setActing(true);
     setError(null);
+    const items = certs.map((c) => ({ cn: c.cn ?? "", serial: c.serial, template_name: tmpl }));
     try {
-      const profile = await generateOpenVpnProfile({
-        cn: targetCn,
-        serial: serial(),
-        template_name: tmpl,
-      });
-      setGenerated(profile);
+      if (!genNow()) {
+        // Register the rows without producing documents — generate later.
+        setResultVerb("added");
+        setBulkResults(await addOpenVpnProfileEntries(items));
+      } else if (items.length === 1) {
+        // A single generate keeps the optional send-to-vault follow-up.
+        setGenerated(await generateOpenVpnProfile(items[0]));
+      } else {
+        setResultVerb("generated");
+        setBulkResults(await bulkGenerateOpenVpnProfiles(items));
+      }
       props.onGenerated();
     } catch (e) {
       setError(String(e));
@@ -142,14 +167,16 @@ export default function AddProfileModal(props: AddProfileModalProps) {
     }
   }
 
+  const isForm = () => !generated() && !bulkResults();
+
   return (
     <Modal open={props.open} onClose={props.onClose} title="Add VPN Profile">
-      <Show
-        when={!generated()}
-        fallback={
+      {/* Single result — offer the optional send-to-vault follow-up. */}
+      <Show when={generated()}>
+        {(profile) => (
           <div class="add-profile-done">
             <p class="page-success">
-              Profile generated for '{generated()!.cn}' (stored as {generated()!.title}).
+              Profile generated for '{profile().cn}' (stored as {profile().title}).
             </p>
             <div class="form-group">
               <label class="form-label">Send to vault (optional)</label>
@@ -166,19 +193,46 @@ export default function AddProfileModal(props: AddProfileModalProps) {
               <button class="btn-ghost" onClick={props.onClose}>Done</button>
             </div>
           </div>
-        }
-      >
+        )}
+      </Show>
+
+      {/* Multiple results — per-cert summary. */}
+      <Show when={bulkResults()}>
+        {(results) => {
+          const ok = () => results().filter((r) => r.ok).length;
+          const failed = () => results().filter((r) => !r.ok);
+          return (
+            <div class="add-profile-done">
+              <p class="page-success">
+                {ok()} profile(s) {resultVerb()}
+                <Show when={failed().length > 0}>, {failed().length} failed</Show>.
+              </p>
+              <Show when={failed().length > 0}>
+                <ul class="bulk-summary-failures">
+                  <For each={failed()}>
+                    {(f) => <li><span class="mono">{f.cn}</span> — {f.error ?? "failed"}</li>}
+                  </For>
+                </ul>
+              </Show>
+              <div class="form-actions">
+                <button class="btn-ghost" onClick={props.onClose}>Done</button>
+              </div>
+            </div>
+          );
+        }}
+      </Show>
+
+      <Show when={isForm()}>
         <div class="form-group">
           <label class="form-label">VPN Certificate</label>
           <VpnClientPicker
-            value={cn()}
-            serial={serial()}
+            selected={selected()}
             clients={props.certs}
             loading={props.certsLoading}
-            onChange={selectCert}
+            onToggle={toggleCert}
           />
-          <Show when={typeLabel(selectedCert()?.cert_type)}>
-            {(label) => <p class="form-hint">Profile type: {label()}</p>}
+          <Show when={hint()}>
+            {(text) => <p class="form-hint">{text()}</p>}
           </Show>
         </div>
 
@@ -196,13 +250,22 @@ export default function AddProfileModal(props: AddProfileModalProps) {
           </select>
         </div>
 
+        <label class="form-check">
+          <input
+            type="checkbox"
+            checked={genNow()}
+            onChange={(e) => setGenNow(e.currentTarget.checked)}
+          />
+          <span>Generate Profile</span>
+        </label>
+
         <Show when={error()}>
           <p class="page-error" role="alert">{error()}</p>
         </Show>
 
         <div class="form-actions">
-          <button class="btn-primary" onClick={handleGenerate} disabled={acting()}>
-            {acting() ? "Generating..." : "Generate Profile"}
+          <button class="btn-primary" onClick={handleAdd} disabled={acting()}>
+            {acting() ? (genNow() ? "Generating..." : "Adding...") : "Add"}
           </button>
           <button class="btn-ghost" onClick={props.onClose}>Cancel</button>
         </div>

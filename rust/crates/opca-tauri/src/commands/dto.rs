@@ -178,6 +178,36 @@ pub struct RenewRekeyResult {
     pub pem: String,
 }
 
+/// Live progress for a bulk operation, emitted as a `bulk-progress` event after
+/// each item so the status indicator can show "{verb} {current}/{total}".
+#[derive(Debug, Clone, Serialize)]
+pub struct BulkProgress {
+    pub verb: String,
+    pub current: usize,
+    pub total: usize,
+}
+
+impl BulkProgress {
+    /// Emit a `bulk-progress` event for item `current` of `total`. Best-effort:
+    /// a failed emit (no frontend listening) is ignored.
+    pub fn emit(app: &tauri::AppHandle, verb: &str, current: usize, total: usize) {
+        use tauri::Emitter;
+        let _ = app.emit("bulk-progress", BulkProgress { verb: verb.to_string(), current, total });
+    }
+}
+
+/// Outcome of one certificate in a bulk operation. `ok == false` carries an
+/// `error`; `new_serial` is set for a successful rekey/renew (the freshly
+/// issued cert). Partial success is reported per-serial, so the command-level
+/// `Result` is reserved for the CA itself being unavailable.
+#[derive(Debug, Serialize)]
+pub struct BulkCertResult {
+    pub serial: String,
+    pub ok: bool,
+    pub error: Option<String>,
+    pub new_serial: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct InspectCertificateResult {
     pub cn: Option<String>,
@@ -457,6 +487,13 @@ pub struct OpenVpnProfileItem {
     /// "Client" or "Server", derived from the cert's type for the list view.
     /// None for single-profile lookups that don't resolve it.
     pub profile_type: Option<String>,
+    /// Derived lifecycle status of the profile relative to the live CA database:
+    /// "current" | "needs_regen" | "revoked" | "expired". None for single-profile
+    /// lookups that lack classification context (the list view is the source of truth).
+    pub profile_status: Option<String>,
+    /// When `profile_status == "needs_regen"`, the CN's current valid replacement
+    /// serial to regenerate the profile against. None for the other statuses.
+    pub replacement_serial: Option<String>,
 }
 
 /// Request to generate a VPN profile.
@@ -469,6 +506,25 @@ pub struct GenerateProfileRequest {
     pub serial: Option<String>,
     pub template_name: String,
     pub dest_vault: Option<String>,
+}
+
+/// One item in a bulk profile-generation request.
+#[derive(Debug, Deserialize)]
+pub struct BulkGenerateProfileItem {
+    pub cn: String,
+    pub serial: Option<String>,
+    pub template_name: String,
+    pub dest_vault: Option<String>,
+}
+
+/// Outcome of generating or deleting one profile in a bulk run.
+#[derive(Debug, Serialize)]
+pub struct BulkProfileResult {
+    pub cn: String,
+    /// `VPN_{serial}_{cn}` on a successful generate; the deleted title on delete.
+    pub title: Option<String>,
+    pub ok: bool,
+    pub error: Option<String>,
 }
 
 /// Request to set up the OpenVPN server object.

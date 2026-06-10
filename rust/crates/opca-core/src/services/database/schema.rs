@@ -5,7 +5,7 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 11;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 12;
 
 // ---------------------------------------------------------------------------
 // Table DDL (v8 — current)
@@ -134,7 +134,8 @@ pub const CREATE_OPENVPN_PROFILE_TABLE: &str = "
         title TEXT NOT NULL,
         created_date TEXT,
         template TEXT,
-        serial TEXT
+        serial TEXT,
+        generated INTEGER NOT NULL DEFAULT 1
     )
 ";
 
@@ -377,8 +378,22 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v10→v11: {e}")))?;
 
         version = 11;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 11, ok: true });
+    }
+
+    // v11 → v12: track whether a VPN profile's `.ovpn` document has been
+    // generated. Profiles can now be registered without generating (Add with
+    // the "Generate Profile" box unticked); existing rows were all generated.
+    if version == 11 {
+        conn.execute_batch(
+            "ALTER TABLE openvpn_profile ADD COLUMN generated INTEGER NOT NULL DEFAULT 1;
+             UPDATE config SET schema_version = 12 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v11→v12: {e}")))?;
+
+        version = 12;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 12, ok: true });
     }
 
     info.migrated = true;

@@ -1,5 +1,6 @@
 import { tauriInvoke, withLock } from "./tauri";
 import type {
+  BulkCertResult,
   CertListItem,
   ExternalCertListItem,
   CertDetail,
@@ -96,5 +97,39 @@ export async function unignoreCert(serial: string): Promise<void> {
 export async function importCert(request: ImportCertRequest): Promise<ImportCertResult> {
   return withLock("import_cert", () =>
     tauriInvoke<ImportCertResult>("import_cert", { request }),
+  );
+}
+
+// --- Bulk operations ---------------------------------------------------------
+// One Tauri command per action, wrapped in a single `withLock` so a batch of N
+// certs costs one vault-lock cycle. Each returns a per-serial result vector.
+
+export async function bulkRekeyCerts(serials: string[]): Promise<BulkCertResult[]> {
+  return withLock("bulk_rekey", () =>
+    tauriInvoke<BulkCertResult[]>("bulk_rekey_certs", { serials }),
+  );
+}
+
+export async function bulkRenewCerts(serials: string[]): Promise<BulkCertResult[]> {
+  return withLock("bulk_renew", () =>
+    tauriInvoke<BulkCertResult[]>("bulk_renew_certs", { serials }),
+  );
+}
+
+export async function bulkRevokeCerts(serials: string[]): Promise<BulkCertResult[]> {
+  return withLock("bulk_revoke", () =>
+    tauriInvoke<BulkCertResult[]>("bulk_revoke_certs", { serials }),
+  );
+}
+
+export async function bulkIgnoreCerts(serials: string[], note?: string): Promise<BulkCertResult[]> {
+  return withLock("bulk_ignore", () =>
+    tauriInvoke<BulkCertResult[]>("bulk_ignore_certs", { serials, note: note ?? null }),
+  );
+}
+
+export async function bulkUnignoreCerts(serials: string[]): Promise<BulkCertResult[]> {
+  return withLock("bulk_unignore", () =>
+    tauriInvoke<BulkCertResult[]>("bulk_unignore_certs", { serials }),
   );
 }

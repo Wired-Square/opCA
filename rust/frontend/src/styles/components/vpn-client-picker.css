@@ -48,24 +48,37 @@
   white-space: nowrap;
 }
 
-/* Invisible full-screen layer so an outside click closes the menu. */
+/* Invisible full-screen layer so an outside click closes the menu. Both this
+   and the dropdown are portalled to <body> and sit above the modal overlay
+   (z-index 100), so the list is never clipped by the dialog's scroll box. */
 .vpn-picker-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 9;
+  z-index: 200;
 }
 
 .vpn-picker-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  position: fixed;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  z-index: 10;
-  max-height: 320px;
+  z-index: 201;
+  overflow: hidden;
+}
+
+/* Search header stays put; only the rows below it scroll. */
+.vpn-picker-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.vpn-picker-search .form-input {
+  width: 100%;
+}
+
+.vpn-picker-list {
+  max-height: 280px;
   overflow-y: auto;
 }
 

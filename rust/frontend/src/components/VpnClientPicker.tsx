@@ -1,4 +1,5 @@
-import { Show, For, createSignal, createMemo } from "solid-js";
+import { Show, For, createSignal, createMemo, onCleanup } from "solid-js";
+import { Portal } from "solid-js/web";
 import CertStatusBadge from "./CertStatusBadge";
 import Spinner from "./Spinner";
 import { formatDate } from "../utils/dates";
@@ -6,21 +7,17 @@ import type { CertListItem } from "../api/types";
 import "../styles/components/vpn-client-picker.css";
 
 interface VpnClientPickerProps {
-  /** Currently selected CN. */
-  value: string;
-  /** Serial of the selected cert — pins the selection to the exact cert when
-   * duplicates share a CN (and lets the caller pre-fill a specific cert). */
-  serial: string | null;
-  /** Valid vpnclient certificates to choose from. */
+  /** Serials of the currently-selected certs. */
+  selected: Set<string>;
+  /** Valid vpnclient/vpnserver certificates to choose from. */
   clients: CertListItem[];
   loading: boolean;
-  /** Called with the selected certificate's CN and serial. */
-  onChange: (cn: string, serial: string | null) => void;
+  /** Toggle a certificate in/out of the selection. */
+  onToggle: (cert: CertListItem) => void;
 }
 
 /** A single row: coloured serial badge (green = valid, orange = expiring soon)
- * prefix, then the CN, with the expiry date right-aligned. Shared by the trigger
- * (selected cert) and the dropdown list. */
+ * prefix, then the CN, with the expiry date right-aligned. */
 function ClientRow(props: { cert: CertListItem }) {
   return (
     <>
@@ -36,71 +33,123 @@ function ClientRow(props: { cert: CertListItem }) {
 }
 
 /**
- * Dropdown for choosing a VPN client certificate. Unlike a native <select> it
- * renders a coloured serial badge plus the expiry date per row, so renewal
- * duplicates — two valid certs sharing a CN — can be told apart. Selection sets
- * the CN; profile generation is CN-keyed, so the serial badge is informational.
+ * Multi-select dropdown for choosing VPN certificates. Unlike a native <select>
+ * it renders a coloured serial badge plus the expiry date per row, so renewal
+ * duplicates — two valid certs sharing a CN — can be told apart. Clicking a row
+ * toggles it without closing the menu, so several certs can be picked in one
+ * pass. The menu is portalled with fixed positioning so it is never clipped by
+ * the dialog's scroll box.
  */
 export default function VpnClientPicker(props: VpnClientPickerProps) {
   const [open, setOpen] = createSignal(false);
+  const [query, setQuery] = createSignal("");
+  // Anchored position for the portalled dropdown (escapes the modal's clip).
+  const [pos, setPos] = createSignal({ top: 0, left: 0, width: 0 });
+  let triggerEl: HTMLButtonElement | undefined;
 
-  // The cert backing the selection — match the exact serial the parent holds,
-  // else the first match for the CN (the current, highest-serial cert, since the
-  // list is sorted serial-desc within a CN). Read from props.clients so it stays
-  // fresh, and so an externally pre-filled serial selects the right row.
-  const selectedCert = createMemo(
-    () =>
-      props.clients.find((c) => c.serial === props.serial && c.cn === props.value)
-      ?? props.clients.find((c) => c.cn === props.value)
-      ?? null,
-  );
+  const isSelected = (cert: CertListItem) =>
+    !!cert.serial && props.selected.has(cert.serial);
 
-  function select(cert: CertListItem) {
-    props.onChange(cert.cn ?? "", cert.serial);
+  // Typeahead over CN and serial, so a long fleet stays navigable.
+  const matches = createMemo(() => {
+    const q = query().trim().toLowerCase();
+    if (!q) return props.clients;
+    return props.clients.filter(
+      (c) => (c.cn ?? "").toLowerCase().includes(q) || (c.serial ?? "").includes(q),
+    );
+  });
+
+  function close() {
     setOpen(false);
+    window.removeEventListener("resize", close);
+  }
+  onCleanup(close);
+
+  function toggle() {
+    if (open()) { close(); return; }
+    setQuery("");
+    const r = triggerEl!.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    setOpen(true);
+    // The anchor is captured once; a resize invalidates it, so dismiss.
+    window.addEventListener("resize", close);
   }
 
   return (
     <div class="vpn-picker">
       <button
+        ref={triggerEl}
         type="button"
         class="form-select vpn-picker-trigger"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
       >
         <Show
-          when={selectedCert()}
+          when={props.selected.size > 0}
           fallback={
-            <span class="vpn-picker-placeholder">Select VPN certificate</span>
+            <span class="vpn-picker-placeholder">Select VPN certificate(s)</span>
           }
         >
-          {(cert) => <ClientRow cert={cert()} />}
+          <span class="vpn-picker-cn">{props.selected.size} selected</span>
         </Show>
       </button>
 
       <Show when={open()}>
-        <div class="vpn-picker-backdrop" onClick={() => setOpen(false)} />
-        <div class="vpn-picker-dropdown">
-          <Show when={props.loading}>
-            <div class="vpn-picker-loading">
-              <Spinner message="Loading VPN certificates..." small />
+        <Portal>
+          <div class="vpn-picker-backdrop" onClick={close} />
+          <div
+            class="vpn-picker-dropdown"
+            style={{ top: `${pos().top}px`, left: `${pos().left}px`, width: `${pos().width}px` }}
+          >
+          <Show when={!props.loading && props.clients.length > 0}>
+            <div class="vpn-picker-search">
+              <input
+                type="text"
+                class="form-input"
+                placeholder="Filter by name or serial…"
+                value={query()}
+                onInput={(e) => setQuery(e.currentTarget.value)}
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck={false}
+                ref={(el) => queueMicrotask(() => el.focus())}
+              />
             </div>
           </Show>
 
-          <Show when={!props.loading && props.clients.length === 0}>
-            <div class="vpn-picker-empty">No VPN certificates found</div>
-          </Show>
-
-          <For each={props.clients}>
-            {(cert) => (
-              <div
-                class={`vpn-picker-item ${cert.serial === selectedCert()?.serial ? "vpn-picker-item-selected" : ""}`}
-                onClick={() => select(cert)}
-              >
-                <ClientRow cert={cert} />
+          <div class="vpn-picker-list">
+            <Show when={props.loading}>
+              <div class="vpn-picker-loading">
+                <Spinner message="Loading VPN certificates..." small />
               </div>
-            )}
-          </For>
-        </div>
+            </Show>
+
+            <Show when={!props.loading && matches().length === 0}>
+              <div class="vpn-picker-empty">
+                {props.clients.length === 0 ? "No VPN certificates found" : "No matches"}
+              </div>
+            </Show>
+
+            <For each={matches()}>
+              {(cert) => (
+                <div
+                  class={`vpn-picker-item ${isSelected(cert) ? "vpn-picker-item-selected" : ""}`}
+                  onClick={() => props.onToggle(cert)}
+                >
+                  <input
+                    type="checkbox"
+                    class="table-checkbox"
+                    style={{ "pointer-events": "none" }}
+                    checked={isSelected(cert)}
+                    tabindex={-1}
+                  />
+                  <ClientRow cert={cert} />
+                </div>
+              )}
+            </For>
+          </div>
+          </div>
+        </Portal>
       </Show>
     </div>
   );

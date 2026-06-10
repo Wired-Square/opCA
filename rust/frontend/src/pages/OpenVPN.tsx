@@ -1,4 +1,4 @@
-import { Show, For, createSignal, createResource, onMount } from "solid-js";
+import { Show, For, createSignal, createMemo, createResource, onMount } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import {
   getOpenVpnParams,
@@ -12,6 +12,9 @@ import {
   listVpnCerts,
   listOpenVpnProfiles,
   generateOpenVpnProfile,
+  bulkGenerateOpenVpnProfiles,
+  deleteOpenVpnProfile,
+  bulkDeleteOpenVpnProfiles,
 } from "../api/openvpn";
 import { formatDate } from "../utils/dates";
 import Spinner from "../components/Spinner";
@@ -19,12 +22,34 @@ import SearchInput from "../components/SearchInput";
 import AddProfileModal from "../components/AddProfileModal";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
+import BulkConfirmDialog from "../components/BulkConfirmDialog";
+import BulkResultBanner from "../components/BulkResultBanner";
+import SelectAllCheckbox from "../components/SelectAllCheckbox";
+import { createSelection } from "../utils/selection";
 import type {
+  BulkProfileResult,
   CertListItem,
   OpenVpnTemplateItem,
   OpenVpnProfileItem,
+  VpnProfileStatus,
 } from "../api/types";
 import "../styles/pages/openvpn.css";
+
+/** Map a derived profile status to a badge class + label. */
+function profileStatusBadge(p: OpenVpnProfileItem): { cls: string; label: string } {
+  const status = p.profile_status as VpnProfileStatus | null;
+  switch (status) {
+    case "needs_regen":
+      return {
+        cls: "status-expiring",
+        label: p.replacement_serial ? `Needs Regen → #${p.replacement_serial}` : "Needs Regen",
+      };
+    case "revoked": return { cls: "status-revoked", label: "Revoked" };
+    case "expired": return { cls: "status-expired", label: "Expired" };
+    case "current": return { cls: "status-valid", label: "Current" };
+    default: return { cls: "status-ignored", label: "—" };
+  }
+}
 
 type Tab = "profiles" | "config";
 type ProfileFilter = "all" | "client" | "server";
@@ -69,18 +94,123 @@ export default function OpenVPN() {
   const [prefillCn, setPrefillCn] = createSignal("");
   const [prefillSerial, setPrefillSerial] = createSignal<string | null>(null);
 
+  const serialNum = (s: string | null) => (s && Number.isFinite(+s) ? +s : -1);
+
+  // Certs offerable in the Add dialog: the current (highest-serial) cert per CN,
+  // dropping CNs that already have a profile (use Regenerate for those) and any
+  // replaced/renewed duplicate. The deep-linked CN is always kept so a
+  // "Generate one" link can't land on an empty picker.
+  const addableCerts = createMemo(() => {
+    const taken = new Set((profiles() ?? []).map((p) => p.cn.toLowerCase()));
+    const keep = prefillCn().toLowerCase();
+    const byCn = new Map<string, CertListItem>();
+    for (const c of vpnCerts() ?? []) {
+      const cn = c.cn?.toLowerCase();
+      if (!cn || (taken.has(cn) && cn !== keep)) continue;
+      const cur = byCn.get(cn);
+      if (!cur || serialNum(c.serial) > serialNum(cur.serial)) byCn.set(cn, c);
+    }
+    return [...byCn.values()];
+  });
+
+  // Runtime sort: click a column header to set/flip it. Defaults to CN ascending.
+  type SortKey = "profile_type" | "cn" | "serial" | "template" | "profile_status" | "created_date";
+  const sortColumns: { key: SortKey; label: string }[] = [
+    { key: "profile_type", label: "Type" },
+    { key: "cn", label: "CN" },
+    { key: "serial", label: "Serial" },
+    { key: "template", label: "Template" },
+    { key: "profile_status", label: "Status" },
+    { key: "created_date", label: "Created" },
+  ];
+  const [sortKey, setSortKey] = createSignal<SortKey>("cn");
+  const [sortDir, setSortDir] = createSignal<"asc" | "desc">("asc");
+
+  function toggleSort(key: SortKey) {
+    if (sortKey() === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      // Serial and date read most-naturally newest-first; text columns A–Z.
+      setSortDir(key === "serial" || key === "created_date" ? "desc" : "asc");
+    }
+  }
+  const sortIndicator = (key: SortKey) =>
+    sortKey() === key ? (sortDir() === "asc" ? " ▲" : " ▼") : "";
+
+  function compareProfiles(a: OpenVpnProfileItem, b: OpenVpnProfileItem) {
+    const key = sortKey();
+    const c =
+      key === "serial"
+        ? serialNum(a.serial) - serialNum(b.serial)
+        : (a[key] ?? "").localeCompare(b[key] ?? "");
+    return sortDir() === "asc" ? c : -c;
+  }
+
   const filteredProfiles = () => {
     const items = profiles() ?? [];
     const q = profileSearch().toLowerCase();
     const f = profileFilter();
-    return items.filter((p) => {
-      if (f !== "all" && (p.profile_type ?? "").toLowerCase() !== f) return false;
-      if (!q) return true;
-      return [p.cn, p.created_date ? formatDate(p.created_date) : null].some((v) =>
-        v?.toLowerCase().includes(q),
-      );
-    });
+    return items
+      .filter((p) => {
+        if (f !== "all" && (p.profile_type ?? "").toLowerCase() !== f) return false;
+        if (!q) return true;
+        return [p.cn, p.created_date ? formatDate(p.created_date) : null].some((v) =>
+          v?.toLowerCase().includes(q),
+        );
+      })
+      .sort(compareProfiles);
   };
+
+  // ── Profile multi-select (keyed by title; auto-clears on profile reload) ──
+  const sel = createSelection(filteredProfiles, (p) => p.title, profiles);
+  const [bulkResults, setBulkResults] = createSignal<BulkProfileResult[] | null>(null);
+  // null = closed; a profile = single delete; "bulk" = bulk delete confirm.
+  const [confirmDelete, setConfirmDelete] = createSignal<OpenVpnProfileItem | "bulk" | null>(null);
+  const [bulkActing, setBulkActing] = createSignal(false);
+
+  // Regenerate is gated to needs-regen rows that still have a template.
+  const canRegenerate = () =>
+    sel.selectedItems().length > 0 &&
+    sel.selectedItems().every((p) => p.profile_status === "needs_regen" && !!p.template);
+
+  async function handleBulkRegenerate() {
+    const items = sel.selectedItems()
+      .filter((p) => p.template)
+      .map((p) => ({
+        cn: p.cn,
+        serial: p.replacement_serial ?? p.serial,
+        template_name: p.template!,
+      }));
+    if (items.length === 0) return;
+    setBulkActing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const results = await bulkGenerateOpenVpnProfiles(items);
+      setBulkResults(results);
+      sel.clear();
+      refetchProfiles();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBulkActing(false);
+    }
+  }
+
+  async function runConfirmDelete() {
+    const target = confirmDelete();
+    if (target === "bulk") {
+      const titles = sel.selectedItems().map((p) => p.title);
+      const results = await bulkDeleteOpenVpnProfiles(titles);
+      setBulkResults(results);
+      sel.clear();
+    } else if (target) {
+      await deleteOpenVpnProfile(target.title);
+      setSuccess(`Deleted VPN profile ${target.title}`);
+    }
+    refetchProfiles();
+  }
 
   function switchTab(t: Tab) {
     setTab(t);
@@ -226,7 +356,8 @@ export default function OpenVPN() {
     try {
       const result = await generateOpenVpnProfile({
         cn: profile.cn,
-        serial: profile.serial,
+        // Regenerate against the current valid cert when the profile is stale.
+        serial: profile.replacement_serial ?? profile.serial,
         template_name: profile.template,
       });
       setSuccess(`Regenerated profile for '${result.cn}' (stored as ${result.title}).`);
@@ -242,6 +373,7 @@ export default function OpenVPN() {
     return [
       { label: "Send to Vault", onSelect: () => setSendTarget(profile) },
       { label: "Regenerate", disabled: !profile.template, onSelect: () => void handleRegenerate(profile) },
+      { label: "Delete", danger: true, onSelect: () => setConfirmDelete(profile) },
     ];
   }
 
@@ -297,6 +429,31 @@ export default function OpenVPN() {
             <Spinner message="Loading profiles..." />
           </Show>
 
+          <Show when={bulkResults()}>
+            {(results) => (
+              <BulkResultBanner
+                results={results().map((r) => ({ id: r.title ?? r.cn, ok: r.ok, error: r.error }))}
+                onDismiss={() => setBulkResults(null)}
+              />
+            )}
+          </Show>
+
+          <Show when={sel.selected().size > 0}>
+            <div class="bulk-action-bar">
+              <span class="bulk-count">{sel.selected().size} selected</span>
+              <button
+                class="btn-primary btn-sm"
+                disabled={!canRegenerate() || bulkActing()}
+                title={canRegenerate() ? undefined : "All selected profiles must be Needs Regen and have a template"}
+                onClick={handleBulkRegenerate}
+              >
+                {bulkActing() ? "Regenerating…" : "Regenerate"}
+              </button>
+              <button class="btn-danger btn-sm" onClick={() => setConfirmDelete("bulk")}>Delete</button>
+              <button class="btn-ghost btn-sm" onClick={sel.clear}>Clear</button>
+            </div>
+          </Show>
+
           <Show when={!profiles.loading && filteredProfiles().length === 0}>
             <p class="text-muted">No VPN profiles found.</p>
           </Show>
@@ -306,28 +463,51 @@ export default function OpenVPN() {
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th>Type</th>
-                    <th>CN</th>
-                    <th>Serial</th>
-                    <th>Template</th>
-                    <th>Created</th>
+                    <th class="checkbox-col">
+                      <SelectAllCheckbox all={sel.allSelected()} some={sel.someSelected()} onToggle={sel.toggleAll} />
+                    </th>
+                    <For each={sortColumns}>
+                      {(col) => (
+                        <th class="th-sort" onClick={() => toggleSort(col.key)}>
+                          {col.label}{sortIndicator(col.key)}
+                        </th>
+                      )}
+                    </For>
                     <th class="kebab-col"></th>
                   </tr>
                 </thead>
                 <tbody>
                   <For each={filteredProfiles()}>
-                    {(profile) => (
-                      <tr class="data-table-row">
+                    {(profile) => {
+                      const badge = profileStatusBadge(profile);
+                      return (
+                      <tr
+                        class="data-table-row"
+                        classList={{ "data-table-row-selected": sel.isSelected(profile.title) }}
+                      >
+                        <td class="checkbox-col">
+                          <input
+                            type="checkbox"
+                            class="table-checkbox"
+                            checked={sel.isSelected(profile.title)}
+                            onChange={() => sel.toggle(profile.title)}
+                            aria-label={`Select ${profile.cn}`}
+                          />
+                        </td>
                         <td>{profile.profile_type ?? "—"}</td>
                         <td>{profile.cn}</td>
                         <td class="mono">{profile.serial ?? "—"}</td>
                         <td>{profile.template ?? "—"}</td>
+                        <td>
+                          <span class={`status-badge ${badge.cls}`}>{badge.label}</span>
+                        </td>
                         <td class="mono">{formatDate(profile.created_date)}</td>
                         <td class="kebab-col">
                           <KebabMenu items={profileMenuItems(profile)} />
                         </td>
                       </tr>
-                    )}
+                      );
+                    }}
                   </For>
                 </tbody>
               </table>
@@ -464,7 +644,7 @@ export default function OpenVPN() {
       <AddProfileModal
         open={showAdd()}
         onClose={() => setShowAdd(false)}
-        certs={vpnCerts() ?? []}
+        certs={addableCerts()}
         certsLoading={vpnCerts.loading}
         templates={templates() ?? []}
         prefillCn={prefillCn()}
@@ -477,6 +657,21 @@ export default function OpenVPN() {
         profile={sendTarget()}
         onClose={() => setSendTarget(null)}
         onDone={(vault) => setSuccess(`Sent ${sendTarget()?.title} to vault '${vault}'`)}
+      />
+
+      <BulkConfirmDialog
+        open={!!confirmDelete()}
+        title="Delete VPN Profile"
+        message={
+          confirmDelete() === "bulk"
+            ? `Remove ${sel.selectedItems().length} profile(s) from the list? The stored .ovpn document(s) stay in the vault.`
+            : `Remove the profile for ${(confirmDelete() as OpenVpnProfileItem | null)?.cn ?? "this CN"} from the list? The stored .ovpn document stays in the vault.`
+        }
+        confirmLabel="Delete"
+        actingLabel="Deleting…"
+        danger
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={runConfirmDelete}
       />
 
       {/* ── Feedback ───────────────────────────────────────────── */}

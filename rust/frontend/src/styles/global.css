@@ -561,11 +561,88 @@ input::placeholder {
   color: var(--text-primary);
 }
 
+/* Inline checkbox + label, e.g. a form option toggle. */
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+/* Clickable sortable column header. */
+.th-sort {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.th-sort:hover {
+  color: var(--text-primary);
+}
+
 /* Trailing actions column: just wide enough for the kebab trigger. */
 .kebab-col {
   width: 44px;
   text-align: right;
   white-space: nowrap;
+}
+
+/* Leading multi-select column. */
+.checkbox-col {
+  width: 36px;
+  text-align: center;
+}
+
+.table-checkbox {
+  accent-color: var(--accent, #e97319);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ── Bulk action bar + result summary ─────────────────────────────── */
+.bulk-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.bulk-count {
+  margin-right: auto;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.bulk-summary {
+  margin: 12px 0;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.bulk-summary-error {
+  border-color: var(--status-revoked, #ef4444);
+}
+
+.bulk-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bulk-summary-failures {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
 }
 
 .data-table-row {

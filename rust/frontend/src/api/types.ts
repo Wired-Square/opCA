@@ -159,6 +159,31 @@ export interface RenewRekeyResult {
   pem: string;
 }
 
+/** Outcome of one cert in a bulk operation. `new_serial` is set for a
+ * successful rekey/renew. `ok === false` carries `error`. */
+export interface BulkCertResult {
+  serial: string;
+  ok: boolean;
+  error: string | null;
+  new_serial: string | null;
+}
+
+/** Outcome of generating or deleting one profile in a bulk run. */
+export interface BulkProfileResult {
+  cn: string;
+  title: string | null;
+  ok: boolean;
+  error: string | null;
+}
+
+/** One item in a bulk profile-generation request. */
+export interface BulkGenerateProfileItem {
+  cn: string;
+  serial?: string | null;
+  template_name: string;
+  dest_vault?: string | null;
+}
+
 export interface ExternalCertDetail {
   serial: string | null;
   cn: string | null;
@@ -369,6 +394,9 @@ export interface OpenVpnTemplateDetail {
   updated_date: string | null;
 }
 
+/** Derived lifecycle status of a VPN profile relative to the live CA database. */
+export type VpnProfileStatus = "current" | "needs_regen" | "revoked" | "expired";
+
 export interface OpenVpnProfileItem {
   cn: string;
   title: string;
@@ -378,6 +406,10 @@ export interface OpenVpnProfileItem {
   serial: string | null;
   /** "Client" or "Server", derived from the cert type (list view only). */
   profile_type: string | null;
+  /** Derived lifecycle status (list view only; null for single-profile lookups). */
+  profile_status: VpnProfileStatus | null;
+  /** When needs_regen, the CN's current valid replacement serial. */
+  replacement_serial: string | null;
 }
 
 export interface GenerateProfileRequest {

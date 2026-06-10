@@ -2,8 +2,11 @@ use log::{info, warn, debug};
 use openssl::nid::Nid;
 use openssl::x509::X509;
 use serde::Deserialize;
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
+use opca_core::error::OpcaError;
+use opca_core::op::ShellRunner;
+use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{is_expiring_soon, CertLookup, CertRecord, ExternalCertRecord};
 
@@ -23,8 +26,9 @@ fn external_item_title(record: &ExternalCertRecord) -> Result<String, String> {
 }
 
 use crate::commands::dto::{
-    CertDetail, CertListItem, CreateCertRequest, ExternalCertDetail, ExternalCertListItem,
-    ImportCertRequest, ImportCertResult, InspectCertificateResult, RenewRekeyResult,
+    BulkCertResult, BulkProgress, CertDetail, CertListItem, CreateCertRequest, ExternalCertDetail,
+    ExternalCertListItem, ImportCertRequest, ImportCertResult, InspectCertificateResult,
+    RenewRekeyResult,
 };
 use crate::state::AppState;
 
@@ -502,6 +506,129 @@ pub async fn unignore_cert(
 
     state.log_ok("unignore_cert", Some(format!("Cleared ignore on certificate {serial}")));
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+//
+// Each bulk command takes ONE CA borrow for the whole loop, calling the same
+// `ca.*` core method the single command uses. The frontend wraps the single
+// invocation in one `withLock`, so a batch of N certs costs one vault-lock
+// cycle rather than N. Per-cert failures are collected into the result vec and
+// the loop continues; the command-level `Err` is reserved for the CA being
+// unavailable. Each `ca.*` flushes to 1Password internally, so a batch of N
+// still does N flushes — acceptable for now; batching them is future work.
+
+/// Run a per-cert action across `serials` under one CA borrow, collecting a
+/// `BulkCertResult` each. `action` returns the new serial for rekey/renew (and
+/// is where they cache the fresh PEM), or `None` for revoke/ignore/unignore.
+/// A `bulk-progress` event is emitted before each item ("{verb} {n}/{total}")
+/// so the status indicator climbs through the batch rather than showing the
+/// raw command name.
+fn run_bulk_cert_op<F>(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    serials: Vec<String>,
+    label: &str,
+    verb: &str,
+    mut action: F,
+) -> Result<Vec<BulkCertResult>, String>
+where
+    F: FnMut(&mut CertificateAuthority<ShellRunner>, &str) -> Result<Option<String>, OpcaError>,
+{
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    let total = serials.len();
+    info!("[tauri] {label}: {total} cert(s)");
+    let mut results = Vec::with_capacity(total);
+    let (mut ok, mut fail) = (0usize, 0usize);
+    for (i, serial) in serials.into_iter().enumerate() {
+        BulkProgress::emit(app, verb, i + 1, total);
+        match action(ca, &serial) {
+            Ok(new_serial) => {
+                results.push(BulkCertResult { serial, ok: true, error: None, new_serial });
+                ok += 1;
+            }
+            Err(e) => {
+                warn!("[tauri] {label}: {serial} failed: {e}");
+                results.push(BulkCertResult { serial, ok: false, error: Some(e.to_string()), new_serial: None });
+                fail += 1;
+            }
+        }
+    }
+
+    state.log_ok(label, Some(format!("{ok} succeeded, {fail} failed")));
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn bulk_rekey_certs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    serials: Vec<String>,
+) -> Result<Vec<BulkCertResult>, String> {
+    run_bulk_cert_op(&app, &state, serials, "bulk_rekey", "Rekeying", |ca, serial| {
+        let (new_pem, new_serial, warning) =
+            ca.rekey_certificate_bundle(&CertLookup::Serial(serial.to_string()))?;
+        if let Some(w) = warning {
+            state.log_ok("bulk_rekey", Some(w.message));
+        }
+        state.cache_fresh_pem(new_serial.clone(), new_pem);
+        Ok(Some(new_serial))
+    })
+}
+
+#[tauri::command]
+pub async fn bulk_renew_certs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    serials: Vec<String>,
+) -> Result<Vec<BulkCertResult>, String> {
+    run_bulk_cert_op(&app, &state, serials, "bulk_renew", "Renewing", |ca, serial| {
+        let (new_pem, new_serial, warning) =
+            ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()))?;
+        if let Some(w) = warning {
+            state.log_ok("bulk_renew", Some(w.message));
+        }
+        state.cache_fresh_pem(new_serial.clone(), new_pem);
+        Ok(Some(new_serial))
+    })
+}
+
+#[tauri::command]
+pub async fn bulk_revoke_certs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    serials: Vec<String>,
+) -> Result<Vec<BulkCertResult>, String> {
+    run_bulk_cert_op(&app, &state, serials, "bulk_revoke", "Revoking", |ca, serial| {
+        ca.revoke_certificate(&CertLookup::Serial(serial.to_string())).map(|_| None)
+    })
+}
+
+#[tauri::command]
+pub async fn bulk_ignore_certs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    serials: Vec<String>,
+    note: Option<String>,
+) -> Result<Vec<BulkCertResult>, String> {
+    run_bulk_cert_op(&app, &state, serials, "bulk_ignore", "Ignoring", |ca, serial| {
+        ca.ignore_certificate(serial, note.as_deref()).map(|_| None)
+    })
+}
+
+#[tauri::command]
+pub async fn bulk_unignore_certs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    serials: Vec<String>,
+) -> Result<Vec<BulkCertResult>, String> {
+    run_bulk_cert_op(&app, &state, serials, "bulk_unignore", "Clearing ignore on", |ca, serial| {
+        ca.unignore_certificate(serial).map(|_| None)
+    })
 }
 
 #[tauri::command]

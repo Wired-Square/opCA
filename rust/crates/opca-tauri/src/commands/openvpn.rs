@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use log::info;
-use tauri::State;
+use log::{info, warn};
+use tauri::{AppHandle, State};
 
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::crypto::utils::{generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key};
@@ -13,8 +13,9 @@ use opca_core::services::database::CertLookup;
 
 use crate::commands::cert::cert_list_item;
 use crate::commands::dto::{
-    CertListItem, GenerateProfileRequest, OpenVpnProfileItem, OpenVpnServerParams,
-    OpenVpnTemplateDetail, OpenVpnTemplateItem, ServerSetupRequest,
+    BulkGenerateProfileItem, BulkProgress, BulkProfileResult, CertListItem, GenerateProfileRequest,
+    OpenVpnProfileItem, OpenVpnServerParams, OpenVpnTemplateDetail, OpenVpnTemplateItem,
+    ServerSetupRequest,
 };
 use crate::state::AppState;
 
@@ -611,22 +612,36 @@ pub async fn get_vpn_profile_for_cn(
             template: p.template,
             serial: p.serial,
             profile_type: None,
+            profile_status: None,
+            replacement_serial: None,
         });
 
     Ok(profile)
 }
 
-/// Generate a VPN profile for a client CN using a template.
-#[tauri::command]
-pub async fn generate_openvpn_profile(
-    state: State<'_, AppState>,
-    request: GenerateProfileRequest,
-) -> Result<OpenVpnProfileItem, String> {
-    let cn = request.cn;
-    let template_name = request.template_name;
-    let dest_vault = request.dest_vault;
-    let serial = request.serial.filter(|s| !s.is_empty());
+/// Document/registry title for a profile — `VPN_{serial}_{cn}`, mirroring the
+/// cert's own `CRT_{serial}_{cn}` item so a renewed cert (new serial) yields a
+/// distinct profile. Falls back to `VPN_{cn}` when no serial is supplied.
+fn profile_title(cn: &str, serial: Option<&str>) -> String {
+    match serial.filter(|s| !s.is_empty()) {
+        Some(s) => format!("VPN_{s}_{cn}"),
+        None => format!("VPN_{cn}"),
+    }
+}
 
+/// Core of a single profile generation: resolve the cert item, inject the
+/// template, store the `.ovpn` document, and upsert + persist the profile row.
+/// Returns the stored `OpenVpnProfile` (without classification context). Assumes
+/// the caller holds the vault lock — both the single command and the bulk
+/// command call this, so a bulk run is one lock cycle around the whole loop.
+fn do_generate_openvpn_profile(
+    state: &State<'_, AppState>,
+    cn: &str,
+    serial: Option<&str>,
+    template_name: &str,
+    dest_vault: Option<&str>,
+) -> Result<OpenVpnProfile, String> {
+    let serial = serial.filter(|s| !s.is_empty());
     let created_date = Utc::now().format("%Y-%m-%d").to_string();
 
     // Resolve which 1Password item to pull the cert/key from. The DB `title` is
@@ -635,16 +650,16 @@ pub async fn generate_openvpn_profile(
     // one by its serial's title; otherwise `op://.../$OPCA_USER/...` resolves the
     // CN to whichever item matches first (often the older, legacy-named cert).
     // Falls back to the CN when no serial is supplied.
-    let opca_user = match serial.as_deref() {
+    let opca_user = match serial {
         Some(serial) => {
             let conn = state.ensure_ca()?;
             conn.db()?
                 .query_cert(&CertLookup::Serial(serial.to_string()), false)
                 .map_err(|e| e.to_string())?
                 .and_then(|r| r.title)
-                .unwrap_or_else(|| cn.clone())
+                .unwrap_or_else(|| cn.to_string())
         }
-        None => cn.clone(),
+        None => cn.to_string(),
     };
 
     info!(
@@ -652,22 +667,14 @@ pub async fn generate_openvpn_profile(
         cn, serial, template_name, opca_user
     );
 
-    // Document title carries the cert serial — `VPN_{serial}_{cn}`, mirroring the
-    // cert's own `CRT_{serial}_{cn}` item — so a renewed cert (new serial) yields
-    // a distinct profile rather than clobbering the previous one. Regenerating
-    // the same cert (same serial) reuses the title and overwrites. Falls back to
-    // `VPN_{cn}` when no serial is supplied.
-    let title = match serial.as_deref() {
-        Some(s) => format!("VPN_{s}_{cn}"),
-        None => format!("VPN_{cn}"),
-    };
+    let title = profile_title(cn, serial);
 
     // Template content comes from the local DB mirror (no `op` round-trip);
     // fall back to 1Password for templates not yet synced into the DB.
     let db_template_content: Option<String> = {
         let conn = state.ensure_ca()?;
         conn.db()?
-            .get_openvpn_template(&template_name)
+            .get_openvpn_template(template_name)
             .map_err(|e| e.to_string())?
             .map(|t| t.content)
     };
@@ -700,7 +707,7 @@ pub async fn generate_openvpn_profile(
             &format!("{cn}-{template_name}.ovpn"),
             &profile_content,
             StoreAction::Auto,
-            dest_vault.as_deref(),
+            dest_vault,
         )
         .map_err(|e| format!("Failed to store VPN profile: {e}"))?;
 
@@ -714,40 +721,154 @@ pub async fn generate_openvpn_profile(
     // `.ovpn` document is already stored, so a persist failure here is
     // recoverable; we surface it rather than silently dropping the row (the
     // silent drop was the original "profiles vanish on restart" bug).
+    let profile = OpenVpnProfile {
+        id: None,
+        cn: cn.to_string(),
+        title: title.clone(),
+        created_date: Some(created_date),
+        template: Some(template_name.to_string()),
+        serial: serial.map(str::to_string),
+        generated: true,
+    };
     {
         let mut conn = state.ensure_ca()?;
         let ca = conn.ca.as_mut().ok_or("CA not available")?;
         let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
         db.delete_openvpn_profile(&title).map_err(|e| e.to_string())?;
-        db.add_openvpn_profile(&OpenVpnProfile {
-            id: None,
-            cn: cn.clone(),
-            title: title.clone(),
-            created_date: Some(created_date.clone()),
-            template: Some(template_name.clone()),
-            serial: serial.clone(),
-        })
-        .map_err(|e| e.to_string())?;
+        db.add_openvpn_profile(&profile).map_err(|e| e.to_string())?;
         ca.store_ca_database().map_err(|e| {
             state.log_err("generate_profile", Some(e.to_string()));
             e.to_string()
         })?;
     }
 
-    let profile_item = OpenVpnProfileItem {
-        cn: cn.clone(),
-        title: title.clone(),
-        created_date: Some(created_date),
-        template: Some(template_name.clone()),
-        serial: serial.clone(),
-        profile_type: None,
-    };
+    Ok(profile)
+}
+
+/// Generate a VPN profile for a client CN using a template.
+#[tauri::command]
+pub async fn generate_openvpn_profile(
+    state: State<'_, AppState>,
+    request: GenerateProfileRequest,
+) -> Result<OpenVpnProfileItem, String> {
+    let cn = request.cn;
+    let template_name = request.template_name;
+
+    let profile = do_generate_openvpn_profile(
+        &state,
+        &cn,
+        request.serial.as_deref(),
+        &template_name,
+        request.dest_vault.as_deref(),
+    )?;
 
     state.log_ok(
         "generate_profile",
         Some(format!("Generated VPN profile for '{cn}' with template '{template_name}'")),
     );
-    Ok(profile_item)
+    Ok(OpenVpnProfileItem {
+        cn: profile.cn,
+        title: profile.title,
+        created_date: profile.created_date,
+        template: profile.template,
+        serial: profile.serial,
+        profile_type: None,
+        profile_status: None,
+        replacement_serial: None,
+    })
+}
+
+/// Generate VPN profiles for many certs in one vault-lock cycle (the frontend
+/// wraps this in a single `withLock`). Each item is generated independently;
+/// per-item failures are collected and the loop continues. Typically called to
+/// regenerate "needs regen" profiles against their replacement cert serials.
+#[tauri::command]
+pub async fn bulk_generate_openvpn_profiles(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    items: Vec<BulkGenerateProfileItem>,
+) -> Result<Vec<BulkProfileResult>, String> {
+    let total = items.len();
+    info!("[tauri] bulk_generate_openvpn_profiles: {total} profile(s)");
+    let mut results = Vec::with_capacity(total);
+    let (mut ok, mut fail) = (0usize, 0usize);
+    for (i, it) in items.into_iter().enumerate() {
+        BulkProgress::emit(&app, "Regenerating", i + 1, total);
+        match do_generate_openvpn_profile(
+            &state,
+            &it.cn,
+            it.serial.as_deref(),
+            &it.template_name,
+            it.dest_vault.as_deref(),
+        ) {
+            Ok(profile) => {
+                results.push(BulkProfileResult { cn: it.cn, title: Some(profile.title), ok: true, error: None });
+                ok += 1;
+            }
+            Err(e) => {
+                warn!("[tauri] bulk_generate_openvpn_profiles: {} failed: {e}", it.cn);
+                results.push(BulkProfileResult { cn: it.cn, title: None, ok: false, error: Some(e) });
+                fail += 1;
+            }
+        }
+    }
+
+    state.log_ok("bulk_generate_profile", Some(format!("Bulk regenerate: {ok} ok, {fail} failed")));
+    Ok(results)
+}
+
+/// Register one or more VPN profiles WITHOUT generating their `.ovpn` documents
+/// (Add with "Generate Profile" unticked). Each row is recorded as not-generated
+/// so the Profiles list flags it for generation; one DB persist covers the
+/// batch (no `op` document writes). The user generates later via Regenerate.
+#[tauri::command]
+pub async fn add_openvpn_profile_entries(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    items: Vec<BulkGenerateProfileItem>,
+) -> Result<Vec<BulkProfileResult>, String> {
+    let total = items.len();
+    info!("[tauri] add_openvpn_profile_entries: {total} profile(s)");
+    let created_date = Utc::now().format("%Y-%m-%d").to_string();
+
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
+
+    let mut results = Vec::with_capacity(total);
+    let (mut ok, mut fail) = (0usize, 0usize);
+    for (i, it) in items.into_iter().enumerate() {
+        BulkProgress::emit(&app, "Adding", i + 1, total);
+        let serial = it.serial.filter(|s| !s.is_empty());
+        let title = profile_title(&it.cn, serial.as_deref());
+        // Upsert by title so re-adding replaces rather than duplicating.
+        let res = db.delete_openvpn_profile(&title).and_then(|_| {
+            db.add_openvpn_profile(&OpenVpnProfile {
+                id: None,
+                cn: it.cn.clone(),
+                title: title.clone(),
+                created_date: Some(created_date.clone()),
+                template: Some(it.template_name.clone()),
+                serial,
+                generated: false,
+            })
+        });
+        match res {
+            Ok(_) => { results.push(BulkProfileResult { cn: it.cn, title: Some(title), ok: true, error: None }); ok += 1; }
+            Err(e) => {
+                warn!("[tauri] add_openvpn_profile_entries: {} failed: {e}", it.cn);
+                results.push(BulkProfileResult { cn: it.cn, title: None, ok: false, error: Some(e.to_string()) });
+                fail += 1;
+            }
+        }
+    }
+
+    ca.store_ca_database().map_err(|e| {
+        state.log_err("add_profile_entry", Some(e.to_string()));
+        e.to_string()
+    })?;
+    state.log_ok("add_profile_entry", Some(format!("Added {ok} profile entr(y/ies), {fail} failed")));
+    Ok(results)
 }
 
 /// Friendly "Client"/"Server" label from a cert's type, for the profiles list.
@@ -763,13 +884,21 @@ fn vpn_profile_type_label(cert_type: Option<&str>) -> Option<String> {
 
 /// List VPN profiles from the local database (no 1Password round-trip). Each
 /// profile's type is derived from the cert it was generated from — preferring
-/// the recorded serial, falling back to the CN for pre-v11 rows.
+/// the recorded serial, falling back to the CN for pre-v11 rows — and each
+/// carries a derived lifecycle status (current / needs_regen / revoked /
+/// expired) computed against the live CA classification, so the Profiles view
+/// can flag profiles whose cert was rekeyed/renewed/revoked/expired.
 #[tauri::command]
 pub async fn list_openvpn_profiles(
     state: State<'_, AppState>,
 ) -> Result<Vec<OpenVpnProfileItem>, String> {
-    let conn = state.ensure_ca()?;
-    let db = conn.db()?;
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
+
+    // Refresh the classification sets so status derivation reflects the current
+    // state of every cert (same as `list_vpn_certs`).
+    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
 
     let profiles = db.query_all_openvpn_profiles().map_err(|e| e.to_string())?;
 
@@ -796,6 +925,8 @@ pub async fn list_openvpn_profiles(
                 .and_then(|s| type_by_serial.get(s).copied())
                 .or_else(|| type_by_cn.get(p.cn.as_str()).copied());
             let profile_type = vpn_profile_type_label(cert_type);
+            let (status, replacement_serial) =
+                db.derive_vpn_profile_status(p.serial.as_deref(), &p.cn, p.generated);
             OpenVpnProfileItem {
                 cn: p.cn,
                 title: p.title,
@@ -803,9 +934,70 @@ pub async fn list_openvpn_profiles(
                 template: p.template,
                 serial: p.serial,
                 profile_type,
+                profile_status: Some(status.as_str().to_string()),
+                replacement_serial,
             }
         })
         .collect())
+}
+
+/// Remove a VPN profile from the registry (DB row + persist). This deletes the
+/// list entry only — the generated `.ovpn` document is left in the vault.
+#[tauri::command]
+pub async fn delete_openvpn_profile(
+    state: State<'_, AppState>,
+    title: String,
+) -> Result<bool, String> {
+    info!("[tauri] delete_openvpn_profile: title='{title}'");
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
+    let removed = db.delete_openvpn_profile(&title).map_err(|e| e.to_string())?;
+    ca.store_ca_database().map_err(|e| {
+        state.log_err("delete_profile", Some(e.to_string()));
+        e.to_string()
+    })?;
+
+    state.log_ok("delete_profile", Some(format!("Deleted VPN profile {title}")));
+    Ok(removed)
+}
+
+/// Remove many VPN profiles from the registry in one persist (the frontend
+/// wraps this in a single `withLock`). Row-only, like the single delete; only
+/// the final `store_ca_database` touches `op`.
+#[tauri::command]
+pub async fn bulk_delete_openvpn_profiles(
+    state: State<'_, AppState>,
+    titles: Vec<String>,
+) -> Result<Vec<BulkProfileResult>, String> {
+    info!("[tauri] bulk_delete_openvpn_profiles: {} profile(s)", titles.len());
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
+
+    let mut results = Vec::with_capacity(titles.len());
+    let (mut ok, mut fail) = (0usize, 0usize);
+    for title in &titles {
+        match db.delete_openvpn_profile(title) {
+            Ok(_) => {
+                results.push(BulkProfileResult { cn: String::new(), title: Some(title.clone()), ok: true, error: None });
+                ok += 1;
+            }
+            Err(e) => {
+                warn!("[tauri] bulk_delete_openvpn_profiles: {title} failed: {e}");
+                results.push(BulkProfileResult { cn: String::new(), title: Some(title.clone()), ok: false, error: Some(e.to_string()) });
+                fail += 1;
+            }
+        }
+    }
+
+    ca.store_ca_database().map_err(|e| {
+        state.log_err("bulk_delete_profile", Some(e.to_string()));
+        e.to_string()
+    })?;
+
+    state.log_ok("bulk_delete_profile", Some(format!("Bulk delete profiles: {ok} ok, {fail} failed")));
+    Ok(results)
 }
 
 /// Send a VPN profile document to another vault.

@@ -203,6 +203,10 @@ pub struct OpenVpnProfile {
     /// Serial of the cert this profile was generated from. None for rows
     /// recorded before v11, or when generated without a serial.
     pub serial: Option<String>,
+    /// Whether the `.ovpn` document has been generated. A registry entry added
+    /// without generating (Add with "Generate Profile" unticked) is `false`
+    /// until generated. Rows recorded before v12 are treated as generated.
+    pub generated: bool,
 }
 
 /// Schema migration report.

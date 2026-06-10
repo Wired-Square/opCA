@@ -33,6 +33,35 @@ pub fn is_expiring_soon(expiry_date: &str) -> bool {
     now <= expiry && expiry < now + chrono::Duration::days(EXPIRY_WARNING_DAYS)
 }
 
+/// Lifecycle status of a stored OpenVPN profile relative to the live CA
+/// database, derived (never stored) by comparing the profile's pinned cert
+/// serial against the latest `process_ca_database` classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VpnProfileStatus {
+    /// The profile's cert is the CN's current valid certificate.
+    Current,
+    /// The profile's cert has been superseded by a newer valid cert (rekey /
+    /// renew), or expired-but-replaced — the profile should be regenerated
+    /// against the replacement serial.
+    NeedsRegen,
+    /// The profile's cert has been revoked.
+    Revoked,
+    /// The profile's cert has expired with no valid replacement for the CN.
+    Expired,
+}
+
+impl VpnProfileStatus {
+    /// Stable string used in the Tauri DTO / frontend.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VpnProfileStatus::Current => "current",
+            VpnProfileStatus::NeedsRegen => "needs_regen",
+            VpnProfileStatus::Revoked => "revoked",
+            VpnProfileStatus::Expired => "expired",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main struct
 // ---------------------------------------------------------------------------
@@ -65,6 +94,11 @@ pub struct CertificateAuthorityDB {
     /// Map from a superseded expired serial to the serial of the valid
     /// replacement (same CN, highest serial).
     pub replacements: HashMap<String, String>,
+    /// Map from a CN to the serial of its current valid cert (not expired, not
+    /// revoked, not ignored; highest serial wins). Lets consumers detect a VPN
+    /// profile whose pinned cert has been superseded by a rekey/renew even
+    /// before the old cert's calendar expiry. Populated by `process_ca_database`.
+    pub valid_cn_to_serial: HashMap<String, String>,
     pub ext_certs_expired: HashSet<String>,
     pub ext_certs_expires_soon: HashSet<String>,
     pub ext_certs_expires_warning: HashSet<String>,
@@ -103,6 +137,7 @@ impl CertificateAuthorityDB {
             certs_ignored: HashSet::new(),
             certs_superseded: HashSet::new(),
             replacements: HashMap::new(),
+            valid_cn_to_serial: HashMap::new(),
             ext_certs_expired: HashSet::new(),
             ext_certs_expires_soon: HashSet::new(),
             ext_certs_expires_warning: HashSet::new(),
@@ -139,6 +174,7 @@ impl CertificateAuthorityDB {
             certs_ignored: HashSet::new(),
             certs_superseded: HashSet::new(),
             replacements: HashMap::new(),
+            valid_cn_to_serial: HashMap::new(),
             ext_certs_expired: HashSet::new(),
             ext_certs_expires_soon: HashSet::new(),
             ext_certs_expires_warning: HashSet::new(),
@@ -1064,14 +1100,15 @@ impl CertificateAuthorityDB {
     /// Add an OpenVPN profile registry entry.
     pub fn add_openvpn_profile(&self, profile: &OpenVpnProfile) -> Result<(), OpcaError> {
         self.conn.execute(
-            "INSERT INTO openvpn_profile (cn, title, created_date, template, serial)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO openvpn_profile (cn, title, created_date, template, serial, generated)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
                 profile.cn,
                 profile.title,
                 profile.created_date,
                 profile.template,
                 profile.serial,
+                profile.generated,
             ],
         )?;
         Ok(())
@@ -1080,7 +1117,7 @@ impl CertificateAuthorityDB {
     /// Return all OpenVPN profiles ordered by CN.
     pub fn query_all_openvpn_profiles(&self) -> Result<Vec<OpenVpnProfile>, OpcaError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, cn, title, created_date, template, serial
+            "SELECT id, cn, title, created_date, template, serial, generated
              FROM openvpn_profile ORDER BY cn",
         )?;
 
@@ -1092,6 +1129,7 @@ impl CertificateAuthorityDB {
                 created_date: row.get(3)?,
                 template: row.get(4)?,
                 serial: row.get(5)?,
+                generated: row.get(6)?,
             })
         })?;
 
@@ -1109,7 +1147,7 @@ impl CertificateAuthorityDB {
         cn: &str,
     ) -> Result<Option<OpenVpnProfile>, OpcaError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, cn, title, created_date, template, serial
+            "SELECT id, cn, title, created_date, template, serial, generated
              FROM openvpn_profile
              WHERE cn = ?1 COLLATE NOCASE
              ORDER BY id DESC LIMIT 1",
@@ -1123,6 +1161,7 @@ impl CertificateAuthorityDB {
                 created_date: row.get(3)?,
                 template: row.get(4)?,
                 serial: row.get(5)?,
+                generated: row.get(6)?,
             })
         })?;
 
@@ -1272,6 +1311,7 @@ impl CertificateAuthorityDB {
         self.certs_ignored.clear();
         self.certs_superseded.clear();
         self.replacements.clear();
+        self.valid_cn_to_serial.clear();
         self.ext_certs_expired.clear();
         self.ext_certs_expires_soon.clear();
         self.ext_certs_expires_warning.clear();
@@ -1336,6 +1376,10 @@ impl CertificateAuthorityDB {
                 valid_cn_to_serial.insert(cn.to_string(), cert.serial.clone());
             }
         }
+
+        // Expose the CN→current-valid-serial map so consumers (e.g. VPN profile
+        // status derivation) can detect a profile pinned to a superseded cert.
+        self.valid_cn_to_serial = valid_cn_to_serial.clone();
 
         for mut cert in certs {
             let mut cert_changed = false;
@@ -1457,6 +1501,67 @@ impl CertificateAuthorityDB {
 
         self.dirty = false;
         Ok(db_changed)
+    }
+
+    /// Derive an OpenVPN profile's lifecycle status from its pinned cert serial
+    /// (and CN, for legacy rows with no serial) versus the live classification
+    /// produced by the most recent [`process_ca_database`]. Returns the status
+    /// and, for `NeedsRegen`, the replacement serial to regenerate against.
+    ///
+    /// Precedence: **revoked > needs_regen > expired > current**.
+    ///
+    /// A rekey/renew auto-ignores the old cert, so `valid_cn_to_serial[cn]` is
+    /// already the *new* serial while a profile still pins the old one — this
+    /// reports `NeedsRegen` immediately, before the old cert's calendar expiry.
+    ///
+    /// A not-yet-`generated` entry (registered via Add without generating) also
+    /// reports `NeedsRegen`, against the CN's current valid serial (or its own).
+    pub fn derive_vpn_profile_status(
+        &self,
+        profile_serial: Option<&str>,
+        profile_cn: &str,
+        generated: bool,
+    ) -> (VpnProfileStatus, Option<String>) {
+        let current_valid = self.valid_cn_to_serial.get(profile_cn).map(String::as_str);
+
+        if !generated {
+            let target = current_valid
+                .or_else(|| profile_serial.filter(|s| !s.is_empty()))
+                .map(str::to_string);
+            return (VpnProfileStatus::NeedsRegen, target);
+        }
+
+        let serial = match profile_serial {
+            Some(s) if !s.is_empty() => s,
+            // Legacy `VPN_<cn>` row with no pinned serial: lean on the CN's
+            // current valid cert (present → current, absent → nothing live).
+            _ => {
+                return match current_valid {
+                    Some(_) => (VpnProfileStatus::Current, None),
+                    None => (VpnProfileStatus::Expired, None),
+                };
+            }
+        };
+
+        if self.certs_revoked.contains(serial) {
+            return (VpnProfileStatus::Revoked, None);
+        }
+
+        if let Some(cur) = current_valid {
+            if cur != serial {
+                return (VpnProfileStatus::NeedsRegen, Some(cur.to_string()));
+            }
+            return (VpnProfileStatus::Current, None);
+        }
+
+        // No valid cert for the CN at all — the pinned cert is expired/gone.
+        if let Some(replacement) = self.replacements.get(serial) {
+            return (VpnProfileStatus::NeedsRegen, Some(replacement.clone()));
+        }
+        if self.certs_expired.contains(serial) {
+            return (VpnProfileStatus::Expired, None);
+        }
+        (VpnProfileStatus::Current, None)
     }
 
     /// Fetch all rows from `certificate_authority` (internal helper).

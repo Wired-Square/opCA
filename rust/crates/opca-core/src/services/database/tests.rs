@@ -555,6 +555,7 @@ fn test_openvpn_profile_crud() {
         created_date: Some("20250101000000Z".to_string()),
         template: Some("default".to_string()),
         serial: Some("42".to_string()),
+        generated: true,
     })
     .unwrap();
 
@@ -562,6 +563,7 @@ fn test_openvpn_profile_crud() {
     assert_eq!(profiles.len(), 1);
     assert_eq!(profiles[0].cn, "server.example.com");
     assert_eq!(profiles[0].serial.as_deref(), Some("42"));
+    assert!(profiles[0].generated);
 
     assert!(db
         .delete_openvpn_profile("server.example.com_default")
@@ -580,6 +582,7 @@ fn test_openvpn_profile_regenerate_is_idempotent() {
         created_date: Some("20250101000000Z".to_string()),
         template: Some(template.to_string()),
         serial: None,
+        generated: true,
     };
 
     db.add_openvpn_profile(&make("default")).unwrap();
@@ -610,6 +613,7 @@ fn test_query_openvpn_profile_for_cn() {
         created_date: Some("20250101000000Z".to_string()),
         template: Some("default".to_string()),
         serial: None,
+        generated: true,
     })
     .unwrap();
 
@@ -1086,7 +1090,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 6); // v5→v6, v6→v7, v7→v8, v8→v9, v9→v10, v10→v11
+    assert_eq!(info.steps.len(), 7); // v5→v6 … v10→v11, v11→v12
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1219,4 +1223,109 @@ fn test_iterdump_single_quote_escaping() {
 
     let sql = String::from_utf8(db.export_database().unwrap()).unwrap();
     assert!(sql.contains("'it''s a test'"));
+}
+
+// -----------------------------------------------------------------------
+// derive_vpn_profile_status
+// -----------------------------------------------------------------------
+
+/// Make a vpnclient cert (the type the OpenVPN feature pins profiles to).
+fn make_vpn_cert(serial: &str, cn: &str, expiry: &str) -> CertRecord {
+    CertRecord {
+        cert_type: Some("vpnclient".to_string()),
+        ..make_cert(serial, cn, expiry)
+    }
+}
+
+#[test]
+fn test_derive_profile_status_current() {
+    let mut db = test_db();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", "20501231235959Z"))
+        .unwrap();
+    db.process_ca_database(None, false).unwrap();
+
+    let (status, replacement) = db.derive_vpn_profile_status(Some("100"), "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::Current);
+    assert_eq!(replacement, None);
+}
+
+#[test]
+fn test_derive_profile_status_revoked() {
+    let mut db = test_db();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", "20501231235959Z"))
+        .unwrap();
+    // Revoke serial 100 in this pass.
+    db.process_ca_database(Some("100"), false).unwrap();
+
+    let (status, replacement) = db.derive_vpn_profile_status(Some("100"), "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::Revoked);
+    assert_eq!(replacement, None);
+}
+
+#[test]
+fn test_derive_profile_status_needs_regen_after_renew() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    // Old cert 100 and its replacement 101 (same CN), both with future expiry.
+    db.add_cert(&make_vpn_cert("100", "user.vpn", "20501231235959Z"))
+        .unwrap();
+    db.add_cert(&make_vpn_cert("101", "user.vpn", "20501231235959Z"))
+        .unwrap();
+    // Renew auto-ignores the old cert.
+    db.ignore_cert("100", IgnoreReason::Renewed, "tester", Some("replaced by 101"))
+        .unwrap();
+    db.process_ca_database(None, false).unwrap();
+
+    // The current valid cert for the CN is 101.
+    let (status, replacement) = db.derive_vpn_profile_status(Some("100"), "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::NeedsRegen);
+    assert_eq!(replacement.as_deref(), Some("101"));
+
+    // A profile already pinned to 101 is current.
+    let (status, replacement) = db.derive_vpn_profile_status(Some("101"), "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::Current);
+    assert_eq!(replacement, None);
+}
+
+#[test]
+fn test_derive_profile_status_expired_no_replacement() {
+    let mut db = test_db();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", "20200101000000Z"))
+        .unwrap();
+    db.process_ca_database(None, false).unwrap();
+
+    let (status, replacement) = db.derive_vpn_profile_status(Some("100"), "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::Expired);
+    assert_eq!(replacement, None);
+}
+
+#[test]
+fn test_derive_profile_status_legacy_null_serial() {
+    let mut db = test_db();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", "20501231235959Z"))
+        .unwrap();
+    db.process_ca_database(None, false).unwrap();
+
+    // Legacy row with no pinned serial but a live cert for the CN → current.
+    let (status, _) = db.derive_vpn_profile_status(None, "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::Current);
+
+    // No live cert for the CN → nothing to regenerate against.
+    let (status, _) = db.derive_vpn_profile_status(None, "ghost.vpn", true);
+    assert_eq!(status, VpnProfileStatus::Expired);
+}
+
+#[test]
+fn test_derive_profile_status_not_generated() {
+    let mut db = test_db();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", "20501231235959Z"))
+        .unwrap();
+    db.process_ca_database(None, false).unwrap();
+
+    // A registered-but-not-generated entry flags for generation against the
+    // CN's current valid serial, even though its pinned cert is current.
+    let (status, replacement) = db.derive_vpn_profile_status(Some("100"), "user.vpn", false);
+    assert_eq!(status, VpnProfileStatus::NeedsRegen);
+    assert_eq!(replacement.as_deref(), Some("100"));
 }

@@ -34,6 +34,13 @@ const operationLabels: Record<string, string> = {
   ignore_cert: "Marking certificate ignored\u2026",
   unignore_cert: "Clearing certificate ignore\u2026",
   import_cert: "Importing certificate\u2026",
+  // Bulk operations \u2014 these are the base labels; once the batch starts, a
+  // `bulk-progress` event overrides them with a live "{verb} {n}/{total}".
+  bulk_rekey_certs: "Rekeying certificates\u2026",
+  bulk_renew_certs: "Renewing certificates\u2026",
+  bulk_revoke_certs: "Revoking certificates\u2026",
+  bulk_ignore_certs: "Ignoring certificates\u2026",
+  bulk_unignore_certs: "Clearing ignores\u2026",
 
   // CRL
   get_crl_info: "Loading CRL\u2026",
@@ -67,7 +74,11 @@ const operationLabels: Record<string, string> = {
   save_openvpn_template: "Saving template\u2026",
   list_vpn_certs: "Loading VPN certificates\u2026",
   generate_openvpn_profile: "Generating VPN profile\u2026",
+  bulk_generate_openvpn_profiles: "Regenerating VPN profiles\u2026",
+  add_openvpn_profile_entries: "Adding VPN profiles\u2026",
   list_openvpn_profiles: "Loading VPN profiles\u2026",
+  delete_openvpn_profile: "Deleting VPN profile\u2026",
+  bulk_delete_openvpn_profiles: "Deleting VPN profiles\u2026",
   send_profile_to_vault: "Sending profile to vault\u2026",
 
   // Database
@@ -107,6 +118,12 @@ const hiddenOps = new Set([
 const stack: string[] = [];
 const [activeOperation, setActiveOperation] = createSignal<string | null>(null);
 
+// Live per-item progress for a bulk command (e.g. "Rekeying 3/7…"). It overrides
+// the static label, but only while its originating command is the active op — so
+// it can't bleed into the trailing release_lock / sync once the batch finishes.
+const [progressDetail, setProgressDetail] = createSignal<string | null>(null);
+let progressFor: string | null = null;
+
 function refresh() {
   setActiveOperation(stack.length > 0 ? stack[stack.length - 1] : null);
 }
@@ -121,6 +138,10 @@ export function beginOp(cmd: string): void {
 export function endOp(cmd: string): void {
   const i = stack.lastIndexOf(cmd);
   if (i !== -1) stack.splice(i, 1);
+  if (cmd === progressFor) {
+    progressFor = null;
+    setProgressDetail(null);
+  }
   refresh();
 }
 
@@ -128,6 +149,7 @@ export function endOp(cmd: string): void {
 export function operationLabel(): string | null {
   const op = activeOperation();
   if (!op) return null;
+  if (progressFor === op && progressDetail()) return progressDetail();
   return operationLabels[op] ?? op;
 }
 
@@ -149,6 +171,14 @@ export async function initOperationListener(): Promise<void> {
       const op = bgStack.pop();
       if (op) endOp(op);
     }
+  });
+
+  // Live progress for bulk commands: attach the "{verb} {n}/{total}" detail to
+  // whichever command is currently running (it's cleared when that op ends).
+  await listen<{ verb: string; current: number; total: number }>("bulk-progress", (event) => {
+    const { verb, current, total } = event.payload;
+    progressFor = activeOperation();
+    setProgressDetail(`${verb} ${current}/${total}…`);
   });
 }
 

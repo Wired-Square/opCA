@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Bulk certificate operations.** The **Certificates → Local** list now has
+  multi-select checkboxes (plus a select-all-visible header) and a bulk action
+  bar to **Rekey / Renew / Revoke / Ignore** many certificates in a single
+  vault-lock cycle. Buttons are gated to the selection (Renew/Revoke only when
+  every selected cert is valid; Ignore only for expired/expiring, not-ignored
+  certs), and the run reports a per-certificate success/failure summary. The
+  status indicator shows live per-item progress (e.g. "Rekeying 3/7…").
+- **OpenVPN profile lifecycle status.** The **OpenVPN → Profiles** list now
+  shows a derived **Status** column — **Current**, **Needs Regen** (with the
+  replacement cert serial), **Revoked**, or **Expired** — computed by comparing
+  each profile's pinned cert serial against the live CA database. So after a
+  bulk rekey/renew, the affected profiles flag themselves for regeneration, a
+  revoked or expired cert's profile is obvious, and you can **multi-select and
+  bulk Regenerate** (against the CN's current valid cert). A **Delete** action
+  (kebab + bulk) removes a profile from the list (the `.ovpn` document stays in
+  the vault). The Created column is now date-only.
+- **Add VPN Profile** now takes **multiple certificates at once** — the picker is
+  a searchable multi-select that only offers the current cert per CN (replaced
+  and already-profiled CNs are filtered out), and one profile is recorded per
+  selected cert (with a per-cert summary). The picker dropdown is portalled so a
+  long fleet is no longer clipped by the dialog. A **Generate Profile** tickbox
+  (on by default) controls whether the `.ovpn` document is produced now or the
+  entry is just registered for later generation (it shows as Needs Regen until
+  generated). The action button is now **Add**.
+- The **OpenVPN → Profiles** table is **sortable** — click any column header to
+  sort (Serial and Created default to newest-first), defaulting to CN ascending.
 - The **Certificates → Local** list now has a per-row **⋮ actions menu** with
   Rekey, Renew, Revoke and Ignore/Unignore, so certificates can be actioned
   without opening them first. The menu's items mirror each cert's state (Renew

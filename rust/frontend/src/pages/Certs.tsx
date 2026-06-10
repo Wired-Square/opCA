@@ -1,6 +1,9 @@
 import { Show, For, createSignal, createResource } from "solid-js";
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { listCerts, listExternalCerts, inspectCertificate, unignoreCert, backfillCert } from "../api/certs";
+import {
+  listCerts, listExternalCerts, inspectCertificate, unignoreCert, backfillCert,
+  bulkRekeyCerts, bulkRenewCerts, bulkRevokeCerts, bulkIgnoreCerts,
+} from "../api/certs";
 import { rekeyAndGo, renewAndGo, certKebabItems } from "../api/certActions";
 import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
@@ -12,8 +15,14 @@ import CertStatusBadge from "../components/CertStatusBadge";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
-import type { CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
+import BulkConfirmDialog from "../components/BulkConfirmDialog";
+import BulkResultBanner from "../components/BulkResultBanner";
+import SelectAllCheckbox from "../components/SelectAllCheckbox";
+import { createSelection } from "../utils/selection";
+import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
 import "../styles/pages/certs.css";
+
+type BulkAction = "rekey" | "renew" | "revoke" | "ignore";
 
 type Tab = "local" | "external" | "inspect";
 
@@ -114,6 +123,57 @@ export default function Certs() {
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
+
+  // --- Bulk multi-select (Local tab) ---------------------------------------
+  // Selection is keyed by serial and auto-clears on every list reload (old
+  // serials vanish after rekey/renew).
+  const sel = createSelection(filteredLocal, (c) => c.serial, localCerts);
+  const [bulkAction, setBulkAction] = createSignal<BulkAction | null>(null);
+  const [bulkResults, setBulkResults] = createSignal<BulkCertResult[] | null>(null);
+
+  const selectedSerials = () =>
+    sel.selectedItems().map((c) => c.serial).filter((s): s is string => !!s);
+
+  // Gating mirrors the single-row kebab rules (certKebabItems).
+  const canRekey = () => sel.selectedItems().length > 0;
+  const canRenewOrRevoke = () =>
+    sel.selectedItems().length > 0 &&
+    sel.selectedItems().every((c) => c.status?.toLowerCase() === "valid");
+  const canIgnore = () =>
+    sel.selectedItems().length > 0 &&
+    sel.selectedItems().every(
+      (c) =>
+        (c.status?.toLowerCase() === "expired" || c.expiring_soon) &&
+        !c.ignored_at && !c.superseded_by,
+    );
+
+  async function runBulk(reason: string) {
+    const serials = selectedSerials();
+    if (serials.length === 0) return;
+    let results: BulkCertResult[];
+    switch (bulkAction()) {
+      case "rekey": results = await bulkRekeyCerts(serials); break;
+      case "renew": results = await bulkRenewCerts(serials); break;
+      case "revoke": results = await bulkRevokeCerts(serials); break;
+      case "ignore": results = await bulkIgnoreCerts(serials, reason); break;
+      default: return;
+    }
+    setBulkResults(results);
+    sel.clear();
+    refetchLocal();
+  }
+
+  // Per-action copy for the shared confirm dialog.
+  const bulkDialogConfig = () => {
+    const n = selectedSerials().length;
+    switch (bulkAction()) {
+      case "rekey": return { title: "Rekey Certificates", message: `Rekey ${n} certificate(s)? Each gets a fresh key and a new serial.`, confirmLabel: "Rekey", actingLabel: "Rekeying…", danger: false, requireReason: false };
+      case "renew": return { title: "Renew Certificates", message: `Renew ${n} certificate(s)? Each is reissued at a new serial.`, confirmLabel: "Renew", actingLabel: "Renewing…", danger: false, requireReason: false };
+      case "revoke": return { title: "Revoke Certificates", message: `Revoke ${n} certificate(s)? This cannot be undone.`, confirmLabel: "Revoke", actingLabel: "Revoking…", danger: true, requireReason: false };
+      case "ignore": return { title: "Ignore Certificates", message: `Stop counting ${n} certificate(s) toward expiry alerts. Provide a reason for the audit trail.`, confirmLabel: "Confirm Ignore", actingLabel: "Ignoring…", danger: false, requireReason: true };
+      default: return { title: "", message: "", confirmLabel: "", actingLabel: "", danger: false, requireReason: false };
+    }
+  };
 
   // Run a per-row action, surfacing any failure in the list-level error banner.
   async function run(fn: () => Promise<unknown>) {
@@ -253,13 +313,13 @@ export default function Certs() {
         </button>
         <button
           class={`tab-btn ${tab() === "external" ? "tab-active" : ""}`}
-          onClick={() => setTab("external")}
+          onClick={() => { setTab("external"); sel.clear(); }}
         >
           External
         </button>
         <button
           class={`tab-btn ${tab() === "inspect" ? "tab-active" : ""}`}
-          onClick={() => { setTab("inspect"); setInspectError(null); }}
+          onClick={() => { setTab("inspect"); setInspectError(null); sel.clear(); }}
         >
           Inspect
         </button>
@@ -279,6 +339,41 @@ export default function Certs() {
           <p class="page-error" role="alert">{actionError()}</p>
         </Show>
 
+        <Show when={bulkResults()}>
+          {(results) => (
+            <BulkResultBanner
+              results={results().map((r) => ({ id: r.serial, ok: r.ok, error: r.error }))}
+              onDismiss={() => setBulkResults(null)}
+            />
+          )}
+        </Show>
+
+        <Show when={sel.selected().size > 0}>
+          <div class="bulk-action-bar">
+            <span class="bulk-count">{sel.selected().size} selected</span>
+            <button class="btn-secondary btn-sm" disabled={!canRekey()} onClick={() => setBulkAction("rekey")}>Rekey</button>
+            <button
+              class="btn-secondary btn-sm"
+              disabled={!canRenewOrRevoke()}
+              title={canRenewOrRevoke() ? undefined : "All selected certs must be Valid"}
+              onClick={() => setBulkAction("renew")}
+            >Renew</button>
+            <button
+              class="btn-danger btn-sm"
+              disabled={!canRenewOrRevoke()}
+              title={canRenewOrRevoke() ? undefined : "All selected certs must be Valid"}
+              onClick={() => setBulkAction("revoke")}
+            >Revoke</button>
+            <button
+              class="btn-secondary btn-sm"
+              disabled={!canIgnore()}
+              title={canIgnore() ? undefined : "All selected certs must be Expired or Expiring and not already ignored"}
+              onClick={() => setBulkAction("ignore")}
+            >Ignore</button>
+            <button class="btn-ghost btn-sm" onClick={sel.clear}>Clear</button>
+          </div>
+        </Show>
+
         <Show when={!localCerts.loading && filteredLocal().length === 0}>
           <p class="text-muted mt-3">
             No local certificates found.
@@ -290,6 +385,9 @@ export default function Certs() {
             <table class="data-table">
               <thead>
                 <tr>
+                  <th class="checkbox-col">
+                    <SelectAllCheckbox all={sel.allSelected()} some={sel.someSelected()} onToggle={sel.toggleAll} />
+                  </th>
                   <th>Serial</th>
                   <th>Common Name</th>
                   <th>Type</th>
@@ -306,9 +404,21 @@ export default function Certs() {
                       classList={{
                         "data-table-row-ignored":
                           !!cert.ignored_at || !!cert.superseded_by,
+                        "data-table-row-selected":
+                          !!cert.serial && sel.isSelected(cert.serial),
                       }}
                       onClick={() => cert.serial && navigate(`/certs/${cert.serial}`)}
                     >
+                      <td class="checkbox-col" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          class="table-checkbox"
+                          checked={!!cert.serial && sel.isSelected(cert.serial)}
+                          disabled={!cert.serial}
+                          onChange={() => cert.serial && sel.toggle(cert.serial)}
+                          aria-label={`Select ${cert.cn ?? cert.serial ?? "certificate"}`}
+                        />
+                      </td>
                       <td class="mono">{cert.serial ?? "\u2014"}</td>
                       <td>{cert.cn ?? "\u2014"}</td>
                       <td>{cert.cert_type ?? "\u2014"}</td>
@@ -517,6 +627,18 @@ export default function Certs() {
         cn={revokeTarget()?.cn ?? null}
         onClose={() => setRevokeTarget(null)}
         onDone={() => { const c = revokeTarget(); if (c) void finishListAction(c); }}
+      />
+
+      <BulkConfirmDialog
+        open={!!bulkAction()}
+        title={bulkDialogConfig().title}
+        message={bulkDialogConfig().message}
+        confirmLabel={bulkDialogConfig().confirmLabel}
+        actingLabel={bulkDialogConfig().actingLabel}
+        danger={bulkDialogConfig().danger}
+        requireReason={bulkDialogConfig().requireReason}
+        onClose={() => setBulkAction(null)}
+        onConfirm={runBulk}
       />
 
     </div>
