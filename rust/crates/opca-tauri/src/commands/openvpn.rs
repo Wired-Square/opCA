@@ -885,9 +885,10 @@ fn vpn_profile_type_label(cert_type: Option<&str>) -> Option<String> {
 /// List VPN profiles from the local database (no 1Password round-trip). Each
 /// profile's type is derived from the cert it was generated from — preferring
 /// the recorded serial, falling back to the CN for pre-v11 rows — and each
-/// carries a derived lifecycle status (current / needs_regen / revoked /
-/// expired) computed against the live CA classification, so the Profiles view
-/// can flag profiles whose cert was rekeyed/renewed/revoked/expired.
+/// carries a derived lifecycle status (current / expiring_soon / needs_regen /
+/// revoked / expired) computed against the live CA classification, so the
+/// Profiles view can flag profiles whose cert was rekeyed/renewed/revoked/
+/// expired or is nearing expiry.
 #[tauri::command]
 pub async fn list_openvpn_profiles(
     state: State<'_, AppState>,

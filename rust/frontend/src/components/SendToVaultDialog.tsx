@@ -1,84 +1,46 @@
-import { Show, createSignal, createEffect } from "solid-js";
-import { sendProfileToVault } from "../api/openvpn";
-import type { OpenVpnProfileItem } from "../api/types";
+import { Show } from "solid-js";
+import type { ProfileRef } from "../api/types";
 import Modal from "./Modal";
-import VaultPicker from "./VaultPicker";
+import SendToVault from "./SendToVault";
 
 interface SendToVaultDialogProps {
   open: boolean;
-  profile: OpenVpnProfileItem | null;
+  /** One profile (kebab) or many (bulk select); all go to the same vault. */
+  profiles: ProfileRef[];
   onClose: () => void;
-  /** Called after a successful send with the destination vault name. */
-  onDone: (vault: string) => void;
+  /** Called once every profile sent successfully, with the vault and the sent profiles. */
+  onDone: (vault: string, sent: ProfileRef[]) => void;
 }
 
-// Remembered across the session so the dialog pre-fills the last vault a profile
-// was successfully sent to. Cleared via the Remove button.
-let lastSentVault = "";
-
-/** Send a generated VPN profile to another 1Password vault. */
+/** Send one or many generated VPN profiles to another 1Password vault. */
 export default function SendToVaultDialog(props: SendToVaultDialogProps) {
-  const [vault, setVault] = createSignal("");
-  const [acting, setActing] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
-
-  // Pre-fill with the remembered vault each time the dialog opens.
-  createEffect(() => {
-    if (props.open) {
-      setVault(lastSentVault);
-      setError(null);
-    }
-  });
-
-  function removeVault() {
-    setVault("");
-    lastSentVault = "";
-  }
-
-  async function handleSend() {
-    const profile = props.profile;
-    const dest = vault().trim();
-    if (!profile || !dest) return;
-    setActing(true);
-    setError(null);
-    try {
-      await sendProfileToVault(profile.title, profile.cn, dest);
-      lastSentVault = dest;
-      props.onDone(dest);
-      props.onClose();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setActing(false);
-    }
-  }
-
+  const multi = () => props.profiles.length > 1;
   return (
-    <Modal open={props.open} onClose={props.onClose} title="Send Profile to Vault">
+    <Modal
+      open={props.open}
+      onClose={props.onClose}
+      title={multi() ? "Send Profiles to Vault" : "Send Profile to Vault"}
+    >
       <p class="confirm-message">
-        Copy <span class="mono">{props.profile?.title ?? props.profile?.cn}</span>{" "}
+        Copy{" "}
+        <Show when={multi()} fallback={<span class="mono">{props.profiles[0]?.title ?? props.profiles[0]?.cn}</span>}>
+          {props.profiles.length} profiles
+        </Show>{" "}
         to another 1Password vault.
       </p>
-      <div class="form-group">
-        <div class="form-label-row">
-          <label class="form-label">Destination vault</label>
-          <Show when={vault().trim()}>
-            <button type="button" class="btn-ghost btn-sm" onClick={removeVault}>Remove</button>
-          </Show>
-        </div>
-        <VaultPicker value={vault()} onChange={setVault} />
-      </div>
-      <Show when={error()}>
-        <p class="page-error" role="alert">{error()}</p>
-      </Show>
-      <div class="form-actions">
-        <button class="btn-primary" onClick={handleSend} disabled={acting() || !vault().trim()}>
-          {acting() ? "Sending…" : "Send to Vault"}
-        </button>
-        <button class="btn-ghost" onClick={props.onClose} disabled={acting()}>
-          Cancel
-        </button>
-      </div>
+      <SendToVault
+        profiles={props.profiles}
+        label="Destination vault"
+        onDone={(vault, { sent, failed }) => {
+          // Keep the dialog open on partial failure so the per-profile list shows.
+          if (failed.length === 0) {
+            props.onDone(vault, sent);
+            props.onClose();
+          }
+        }}
+      >
+        <button class="btn-ghost" onClick={props.onClose}>Cancel</button>
+      </SendToVault>
     </Modal>
   );
 }

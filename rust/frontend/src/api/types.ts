@@ -394,8 +394,19 @@ export interface OpenVpnTemplateDetail {
   updated_date: string | null;
 }
 
+/** Minimal handle for a stored VPN profile — enough to send it to a vault. */
+export interface ProfileRef {
+  title: string;
+  cn: string;
+}
+
 /** Derived lifecycle status of a VPN profile relative to the live CA database. */
-export type VpnProfileStatus = "current" | "needs_regen" | "revoked" | "expired";
+export type VpnProfileStatus =
+  | "current"
+  | "expiring_soon"
+  | "needs_regen"
+  | "revoked"
+  | "expired";
 
 export interface OpenVpnProfileItem {
   cn: string;

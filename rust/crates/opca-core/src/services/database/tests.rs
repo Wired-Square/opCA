@@ -1250,6 +1250,57 @@ fn test_derive_profile_status_current() {
 }
 
 #[test]
+fn test_derive_profile_status_expiring_soon() {
+    let mut db = test_db();
+    // The CN's current valid cert is inside the 30-day expiry-warning window.
+    let soon = (chrono::Utc::now() + chrono::Duration::days(10))
+        .format("%Y%m%d%H%M%SZ")
+        .to_string();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", &soon)).unwrap();
+    db.process_ca_database(None, false).unwrap();
+    assert!(db.certs_expires_soon.contains("100"));
+
+    // A profile pinned to the current-but-expiring-soon cert reports ExpiringSoon.
+    let (status, replacement) = db.derive_vpn_profile_status(Some("100"), "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::ExpiringSoon);
+    assert_eq!(replacement, None);
+
+    // A far-from-expiry current cert stays Current.
+    let mut db2 = test_db();
+    db2.add_cert(&make_vpn_cert("200", "other.vpn", "20501231235959Z"))
+        .unwrap();
+    db2.process_ca_database(None, false).unwrap();
+    let (status, _) = db2.derive_vpn_profile_status(Some("200"), "other.vpn", true);
+    assert_eq!(status, VpnProfileStatus::Current);
+}
+
+#[test]
+fn test_derive_profile_status_expiring_soon_ignored() {
+    use crate::services::database::models::IgnoreReason;
+
+    let mut db = test_db();
+    // The CN's only cert is expiring soon AND ignored. Ignoring holds it out of
+    // valid_cn_to_serial but is only an alert overlay — the profile must still
+    // reflect the cert's true Expiring Soon status (matching the cert list).
+    let soon = (chrono::Utc::now() + chrono::Duration::days(10))
+        .format("%Y%m%d%H%M%SZ")
+        .to_string();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", &soon)).unwrap();
+    db.ignore_cert("100", IgnoreReason::Manual, "tester", None)
+        .unwrap();
+    db.process_ca_database(None, false).unwrap();
+    assert!(db.certs_expires_soon.contains("100"));
+    assert!(db.certs_ignored.contains("100"));
+    // Ignored ⇒ no entry in valid_cn_to_serial, so this exercises the
+    // current_valid == None path.
+    assert!(!db.valid_cn_to_serial.contains_key("user.vpn"));
+
+    let (status, replacement) = db.derive_vpn_profile_status(Some("100"), "user.vpn", true);
+    assert_eq!(status, VpnProfileStatus::ExpiringSoon);
+    assert_eq!(replacement, None);
+}
+
+#[test]
 fn test_derive_profile_status_revoked() {
     let mut db = test_db();
     db.add_cert(&make_vpn_cert("100", "user.vpn", "20501231235959Z"))

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Send to Vault** is unified across every entry point — the per-row **⋮** menu,
+  the **multi-select** bulk-action bar, the single-generate result, and the
+  bulk-generate result — into one shared block that **remembers the destination
+  vault** for the session. Sending one or many profiles copies them all to one
+  vault and reports any per-profile failures inline (the dialog stays open on a
+  partial failure so the list is visible).
+- **OpenVPN → Profiles** now shows an **Expiring Soon** status (orange) for a
+  profile whose pinned cert is still valid but within 30 days of expiry —
+  previously such a profile showed a green **Current** badge with no warning.
+  This holds even when the cert has been **ignored** (ignore suppresses the
+  alert, not the displayed status), matching the certificate list.
+
 - **Bulk certificate operations.** The **Certificates → Local** list now has
   multi-select checkboxes (plus a select-all-visible header) and a bulk action
   bar to **Rekey / Renew / Revoke / Ignore** many certificates in a single

@@ -488,8 +488,9 @@ pub struct OpenVpnProfileItem {
     /// None for single-profile lookups that don't resolve it.
     pub profile_type: Option<String>,
     /// Derived lifecycle status of the profile relative to the live CA database:
-    /// "current" | "needs_regen" | "revoked" | "expired". None for single-profile
-    /// lookups that lack classification context (the list view is the source of truth).
+    /// "current" | "expiring_soon" | "needs_regen" | "revoked" | "expired". None for
+    /// single-profile lookups that lack classification context (the list view is the
+    /// source of truth).
     pub profile_status: Option<String>,
     /// When `profile_status == "needs_regen"`, the CN's current valid replacement
     /// serial to regenerate the profile against. None for the other statuses.

@@ -154,11 +154,15 @@ modified. The first pass also exposes its result as `valid_cn_to_serial`
 **VPN profile status (derived, never stored)** — `list_openvpn_profiles` runs
 `process_ca_database` then calls `derive_vpn_profile_status` for each profile,
 comparing the profile's pinned cert serial against `certs_revoked` /
-`certs_expired` / `replacements` / `valid_cn_to_serial`. It returns one of
-`current` / `needs_regen` (with the replacement serial) / `revoked` / `expired`
-(precedence in that order). Because a rekey/renew auto-ignores the old cert, the
-CN's current valid serial is already the new one while the profile still pins
-the old — so `needs_regen` fires immediately, before calendar expiry. A row with
+`certs_expired` / `replacements` / `valid_cn_to_serial` / `certs_expires_soon`.
+It returns one of `revoked` / `needs_regen` (with the replacement serial) /
+`expired` / `expiring_soon` / `current` (precedence in that order). Because a
+rekey/renew auto-ignores the old cert, the CN's current valid serial is already
+the new one while the profile still pins the old — so `needs_regen` fires
+immediately, before calendar expiry. `expiring_soon` is tested against the
+pinned serial directly (the same `certs_expires_soon` set the certificate list
+uses), so it surfaces even for an **ignored** cert — which `valid_cn_to_serial`
+omits — matching how the cert list shows ignored-but-expiring certs. A row with
 `generated = 0` (registered but not yet produced) also reports `needs_regen`,
 against the CN's current valid serial. There is no cert→profile write coupling:
 the status is computed fresh on every list load, so any cert change (revoke,

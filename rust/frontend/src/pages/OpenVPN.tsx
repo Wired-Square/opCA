@@ -31,6 +31,7 @@ import type {
   CertListItem,
   OpenVpnTemplateItem,
   OpenVpnProfileItem,
+  ProfileRef,
   VpnProfileStatus,
 } from "../api/types";
 import "../styles/pages/openvpn.css";
@@ -46,6 +47,7 @@ function profileStatusBadge(p: OpenVpnProfileItem): { cls: string; label: string
       };
     case "revoked": return { cls: "status-revoked", label: "Revoked" };
     case "expired": return { cls: "status-expired", label: "Expired" };
+    case "expiring_soon": return { cls: "status-expiring", label: "Expiring Soon" };
     case "current": return { cls: "status-valid", label: "Current" };
     default: return { cls: "status-ignored", label: "—" };
   }
@@ -87,7 +89,8 @@ export default function OpenVPN() {
     createResource<OpenVpnProfileItem[]>(listOpenVpnProfiles);
   const [profileSearch, setProfileSearch] = createSignal("");
   const [profileFilter, setProfileFilter] = createSignal<ProfileFilter>("all");
-  const [sendTarget, setSendTarget] = createSignal<OpenVpnProfileItem | null>(null);
+  // Profiles queued for the Send-to-Vault dialog: one (kebab) or many (bulk).
+  const [sendProfiles, setSendProfiles] = createSignal<ProfileRef[] | null>(null);
 
   // ── Add-profile modal ─────────────────────────────────────────
   const [showAdd, setShowAdd] = createSignal(false);
@@ -371,7 +374,7 @@ export default function OpenVPN() {
 
   function profileMenuItems(profile: OpenVpnProfileItem): KebabItem[] {
     return [
-      { label: "Send to Vault", onSelect: () => setSendTarget(profile) },
+      { label: "Send to Vault", onSelect: () => setSendProfiles([{ title: profile.title, cn: profile.cn }]) },
       { label: "Regenerate", disabled: !profile.template, onSelect: () => void handleRegenerate(profile) },
       { label: "Delete", danger: true, onSelect: () => setConfirmDelete(profile) },
     ];
@@ -448,6 +451,12 @@ export default function OpenVPN() {
                 onClick={handleBulkRegenerate}
               >
                 {bulkActing() ? "Regenerating…" : "Regenerate"}
+              </button>
+              <button
+                class="btn-secondary btn-sm"
+                onClick={() => setSendProfiles(sel.selectedItems().map((p) => ({ title: p.title, cn: p.cn })))}
+              >
+                Send to Vault
               </button>
               <button class="btn-danger btn-sm" onClick={() => setConfirmDelete("bulk")}>Delete</button>
               <button class="btn-ghost btn-sm" onClick={sel.clear}>Clear</button>
@@ -653,10 +662,14 @@ export default function OpenVPN() {
       />
 
       <SendToVaultDialog
-        open={!!sendTarget()}
-        profile={sendTarget()}
-        onClose={() => setSendTarget(null)}
-        onDone={(vault) => setSuccess(`Sent ${sendTarget()?.title} to vault '${vault}'`)}
+        open={!!sendProfiles()}
+        profiles={sendProfiles() ?? []}
+        onClose={() => setSendProfiles(null)}
+        onDone={(vault, sent) => {
+          const what = sent.length === 1 ? sent[0].title : `${sent.length} profiles`;
+          setSuccess(`Sent ${what} to vault '${vault}'`);
+          sel.clear();
+        }}
       />
 
       <BulkConfirmDialog

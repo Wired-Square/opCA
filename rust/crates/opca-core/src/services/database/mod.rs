@@ -40,6 +40,9 @@ pub fn is_expiring_soon(expiry_date: &str) -> bool {
 pub enum VpnProfileStatus {
     /// The profile's cert is the CN's current valid certificate.
     Current,
+    /// The profile's cert is still the CN's current valid certificate, but it is
+    /// inside the 30-day expiry-warning window — renew/regenerate soon.
+    ExpiringSoon,
     /// The profile's cert has been superseded by a newer valid cert (rekey /
     /// renew), or expired-but-replaced — the profile should be regenerated
     /// against the replacement serial.
@@ -55,6 +58,7 @@ impl VpnProfileStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             VpnProfileStatus::Current => "current",
+            VpnProfileStatus::ExpiringSoon => "expiring_soon",
             VpnProfileStatus::NeedsRegen => "needs_regen",
             VpnProfileStatus::Revoked => "revoked",
             VpnProfileStatus::Expired => "expired",
@@ -1508,7 +1512,7 @@ impl CertificateAuthorityDB {
     /// produced by the most recent [`process_ca_database`]. Returns the status
     /// and, for `NeedsRegen`, the replacement serial to regenerate against.
     ///
-    /// Precedence: **revoked > needs_regen > expired > current**.
+    /// Precedence: **revoked > needs_regen > expired > expiring_soon > current**.
     ///
     /// A rekey/renew auto-ignores the old cert, so `valid_cn_to_serial[cn]` is
     /// already the *new* serial while a profile still pins the old one — this
@@ -1534,9 +1538,13 @@ impl CertificateAuthorityDB {
         let serial = match profile_serial {
             Some(s) if !s.is_empty() => s,
             // Legacy `VPN_<cn>` row with no pinned serial: lean on the CN's
-            // current valid cert (present → current, absent → nothing live).
+            // current valid cert (present → current/expiring-soon, absent →
+            // nothing live).
             _ => {
                 return match current_valid {
+                    Some(cur) if self.certs_expires_soon.contains(cur) => {
+                        (VpnProfileStatus::ExpiringSoon, None)
+                    }
                     Some(_) => (VpnProfileStatus::Current, None),
                     None => (VpnProfileStatus::Expired, None),
                 };
@@ -1547,20 +1555,32 @@ impl CertificateAuthorityDB {
             return (VpnProfileStatus::Revoked, None);
         }
 
+        // Superseded by a newer valid cert for the CN (rekey/renew) → regenerate
+        // against it. `valid_cn_to_serial` omits ignored certs, so this only
+        // fires when a genuine replacement exists.
         if let Some(cur) = current_valid {
             if cur != serial {
                 return (VpnProfileStatus::NeedsRegen, Some(cur.to_string()));
             }
-            return (VpnProfileStatus::Current, None);
         }
 
-        // No valid cert for the CN at all — the pinned cert is expired/gone.
+        // Expired-but-replaced → regen against the replacement; expired with no
+        // replacement → expired.
         if let Some(replacement) = self.replacements.get(serial) {
             return (VpnProfileStatus::NeedsRegen, Some(replacement.clone()));
         }
         if self.certs_expired.contains(serial) {
             return (VpnProfileStatus::Expired, None);
         }
+
+        // Still valid but inside the 30-day expiry-warning window. Checked on the
+        // pinned serial directly so it surfaces even for an *ignored* cert (which
+        // is held out of `valid_cn_to_serial`) — ignore suppresses alerts, not the
+        // displayed status, matching the certificate list.
+        if self.certs_expires_soon.contains(serial) {
+            return (VpnProfileStatus::ExpiringSoon, None);
+        }
+
         (VpnProfileStatus::Current, None)
     }
 

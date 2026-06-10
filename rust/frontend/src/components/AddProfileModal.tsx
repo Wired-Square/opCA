@@ -1,13 +1,12 @@
 import { Show, For, createSignal, createMemo, createEffect } from "solid-js";
 import Modal from "./Modal";
 import VpnClientPicker from "./VpnClientPicker";
-import VaultPicker from "./VaultPicker";
+import SendToVault from "./SendToVault";
 import {
   getVpnProfileForCn,
   generateOpenVpnProfile,
   bulkGenerateOpenVpnProfiles,
   addOpenVpnProfileEntries,
-  sendProfileToVault,
 } from "../api/openvpn";
 import type {
   BulkProfileResult,
@@ -49,12 +48,10 @@ export default function AddProfileModal(props: AddProfileModalProps) {
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [template, setTemplate] = createSignal("");
   const [genNow, setGenNow] = createSignal(true);
-  const [destVault, setDestVault] = createSignal("");
   const [generated, setGenerated] = createSignal<OpenVpnProfileItem | null>(null);
   const [bulkResults, setBulkResults] = createSignal<BulkProfileResult[] | null>(null);
   const [resultVerb, setResultVerb] = createSignal<"generated" | "added">("generated");
   const [acting, setActing] = createSignal(false);
-  const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
   const selectedCerts = createMemo(() =>
@@ -96,7 +93,6 @@ export default function AddProfileModal(props: AddProfileModalProps) {
       setGenerated(null);
       setBulkResults(null);
       setGenNow(true);
-      setDestVault("");
       setTemplate("");
       setSelected(props.prefillSerial ? new Set([props.prefillSerial]) : new Set<string>());
       if (props.prefillCn) void preselectTemplate(props.prefillCn);
@@ -150,23 +146,6 @@ export default function AddProfileModal(props: AddProfileModalProps) {
     }
   }
 
-  async function handleSend() {
-    const profile = generated();
-    const vault = destVault().trim();
-    if (!profile || !vault) return;
-    setSending(true);
-    setError(null);
-    try {
-      await sendProfileToVault(profile.title, profile.cn, vault);
-      setDestVault("");
-      props.onClose();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSending(false);
-    }
-  }
-
   const isForm = () => !generated() && !bulkResults();
 
   return (
@@ -178,20 +157,13 @@ export default function AddProfileModal(props: AddProfileModalProps) {
             <p class="page-success">
               Profile generated for '{profile().cn}' (stored as {profile().title}).
             </p>
-            <div class="form-group">
-              <label class="form-label">Send to vault (optional)</label>
-              <VaultPicker value={destVault()} onChange={setDestVault} />
-            </div>
-            <div class="form-actions">
-              <button
-                class="btn-primary"
-                onClick={handleSend}
-                disabled={sending() || !destVault().trim()}
-              >
-                {sending() ? "Sending..." : "Send to Vault"}
-              </button>
+            <SendToVault
+              profiles={[{ title: profile().title, cn: profile().cn }]}
+              label="Send to vault (optional)"
+              onDone={(_v, { sent }) => { if (sent.length > 0) props.onClose(); }}
+            >
               <button class="btn-ghost" onClick={props.onClose}>Done</button>
-            </div>
+            </SendToVault>
           </div>
         )}
       </Show>
@@ -199,12 +171,15 @@ export default function AddProfileModal(props: AddProfileModalProps) {
       {/* Multiple results — per-cert summary. */}
       <Show when={bulkResults()}>
         {(results) => {
-          const ok = () => results().filter((r) => r.ok).length;
+          const succeeded = () => results().filter((r) => r.ok);
           const failed = () => results().filter((r) => !r.ok);
+          // Sending only applies to generated documents, not not-yet-generated rows.
+          const canSend = () => resultVerb() === "generated" && succeeded().length > 0;
+          const doneButton = <button class="btn-ghost" onClick={props.onClose}>Done</button>;
           return (
             <div class="add-profile-done">
               <p class="page-success">
-                {ok()} profile(s) {resultVerb()}
+                {succeeded().length} profile(s) {resultVerb()}
                 <Show when={failed().length > 0}>, {failed().length} failed</Show>.
               </p>
               <Show when={failed().length > 0}>
@@ -214,9 +189,14 @@ export default function AddProfileModal(props: AddProfileModalProps) {
                   </For>
                 </ul>
               </Show>
-              <div class="form-actions">
-                <button class="btn-ghost" onClick={props.onClose}>Done</button>
-              </div>
+              <Show when={canSend()} fallback={<div class="form-actions">{doneButton}</div>}>
+                <SendToVault
+                  profiles={succeeded().map((r) => ({ title: r.title ?? "", cn: r.cn }))}
+                  label="Send all to vault (optional)"
+                >
+                  {doneButton}
+                </SendToVault>
+              </Show>
             </div>
           );
         }}
