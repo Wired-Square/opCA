@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Per-user AWS credentials.** The 1Password item holding your AWS access key
+  is now chosen in **CA → Stores** and stored locally on your machine, keyed by
+  1Password account. Operators who share a CA each select their own key, and
+  those working across several tenants keep a separate selection per tenant.
+  The CLI equivalent is `opca aws list|show|use|clear`.
+- **AWS region** is now configurable per CA (`ca_aws_region`, schema v13),
+  settable in **CA → Stores** or via `opca database config-set ca_aws_region`.
+  It applies to both `s3://` stores and Route53. Previously the region was
+  hard-coded to `ap-southeast-2`, which remains the fallback.
+- **Actions that change the vault now report a final status.** The sidebar
+  indicator only shows work in flight, so these previously left no trace at all
+  on success. A result banner — green and self-clearing, or red and persistent
+  so the error stays readable — now covers CRL generate and upload, the
+  Dashboard's regenerate/upload CRL, revoke, ignore and unignore (from both the
+  certificate list and its detail page), DKIM key deletion, and the CA's Save
+  Configuration and Save Stores, which changed nothing on screen at all.
+
+### Changed
+
+- OPCA no longer reads `~/.config/op/plugins/aws.json`, so `op plugin init aws`
+  is no longer a prerequisite. That file holds one machine-global default and
+  OPCA always took its first entry, which failed outright when that entry
+  belonged to a different 1Password account than the one OPCA was signed in to.
+  Items created by the shell plugin still work — the field labels are the same.
+
+### Removed
+
+- The unused `aws-config` dependency, which was the only thing pulling
+  `aws-sdk-sts`, `aws-sdk-sso` and `aws-sdk-ssooidc` into the build — the AWS
+  CLI-style credential chain (shared-config profiles, SSO, assume-role). OPCA
+  builds its SDK clients from explicit credentials, so none of it was reachable;
+  dropping it makes an accidental fallback to `~/.aws` impossible.
+- The last AWS CLI dependency. `notification/aws_lambda_test.py` no longer
+  shells out to `op plugin run -- aws configure export-credentials`; it reads
+  the credential selected in OPCA with `op item get`, matching the app. The
+  deployed Lambda is unaffected — it uses its execution role. `op` is now the
+  only external CLI the project requires.
+
+### Fixed
+
+- The Dashboard's **Regenerate & Upload CRL** left a stale "CRL expired" row on
+  screen when the generate succeeded but the upload failed, giving no hint that
+  a new CRL had already been written to the vault. It now refreshes either way
+  and says which half succeeded.
+- The **Add VPN Profile** dialog reported its result twice, and the page's copy
+  was hardcoded to "VPN profile generated" — wrong for several profiles at once,
+  and wrong again when profiles were registered without being generated.
+- Screen readers were not told about the Dashboard's action errors or the vault
+  backup's partial-failure warning (the case where a generated password fails
+  to store), as neither carried `role="alert"`.
+- `op` calls returning more than about 64 KiB (e.g. `op item list` on a large
+  account) deadlocked and failed with a 30-second timeout. The runner polled
+  for exit without draining the child's stdout, so the pipe buffer filled and
+  `op` blocked writing; both pipes are now drained concurrently.
+
 ## [0.100.0] - 2026-06-10
 
 ### Added

@@ -1,6 +1,7 @@
 import { Show, createSignal, createEffect } from "solid-js";
 import { ignoreCert } from "../api/certs";
 import Modal from "./Modal";
+import { certLabel } from "../api/certActions";
 
 interface IgnoreCertDialogProps {
   open: boolean;
@@ -50,7 +51,7 @@ export default function IgnoreCertDialog(props: IgnoreCertDialogProps) {
     <Modal open={props.open} onClose={props.onClose} title="Ignore Certificate">
       <p class="confirm-message">
         Stop counting{" "}
-        <span class="mono">{props.cn ?? props.serial ?? "this certificate"}</span>{" "}
+        <span class="mono">{certLabel(props)}</span>{" "}
         toward expiry alerts. Provide a reason for the audit trail.
       </p>
       <div class="form-group">

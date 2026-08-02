@@ -23,7 +23,7 @@ import AddProfileModal from "../components/AddProfileModal";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
 import BulkConfirmDialog from "../components/BulkConfirmDialog";
-import BulkResultBanner from "../components/BulkResultBanner";
+import ResultBanner from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
 import { createSelection } from "../utils/selection";
 import type {
@@ -434,7 +434,7 @@ export default function OpenVPN() {
 
           <Show when={bulkResults()}>
             {(results) => (
-              <BulkResultBanner
+              <ResultBanner
                 results={results().map((r) => ({ id: r.title ?? r.cn, ok: r.ok, error: r.error }))}
                 onDismiss={() => setBulkResults(null)}
               />
@@ -658,7 +658,9 @@ export default function OpenVPN() {
         templates={templates() ?? []}
         prefillCn={prefillCn()}
         prefillSerial={prefillSerial()}
-        onGenerated={() => { refetchProfiles(); setSuccess("VPN profile generated"); }}
+        // The modal stays open and reports the outcome itself (count and
+        // verb aware), so the page must not announce it a second time.
+        onGenerated={() => refetchProfiles()}
       />
 
       <SendToVaultDialog

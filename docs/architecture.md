@@ -78,8 +78,9 @@ Organised by concern under [src/](../rust/crates/opca-core/src):
     contain secret material.
   - [storage/](../rust/crates/opca-core/src/services/storage) — publishing
     backends behind a `StorageBackend` trait: `rsync://`, `sftp://`/`scp://`,
-    and `s3://` (AWS credentials sourced via the `op` CLI plugin). A URI
-    factory picks the right backend per upload.
+    and `s3://`. A URI factory picks the right backend per upload. AWS
+    credentials are read straight from a 1Password item with `op item get`
+    (see [AWS credentials](#aws-credentials)).
   - [route53.rs](../rust/crates/opca-core/src/services/route53.rs) — AWS SDK
     calls for DKIM TXT record deployment and verification.
   - [backup.rs](../rust/crates/opca-core/src/services/backup.rs) — encrypted
@@ -200,6 +201,41 @@ not. There are dedicated `Expiring Soon`, `Ignored`, and `Superseded` filters;
 the `Expiring Soon` filter excludes ignored certs so it matches the dashboard's
 expiring count. The same `Valid`/`Expiring Soon`/`Expired` rendering is shared
 between the list and the cert detail page via the `CertStatusBadge` component.
+
+### AWS credentials
+
+`s3://` stores and Route53 DKIM deployment need AWS credentials. These are
+split across two homes, because the two halves have different owners:
+
+| Setting | Home | Scope |
+| --- | --- | --- |
+| Store URIs, `ca_aws_region` | `config` table in the CA database | Shared — every operator of the CA |
+| Which 1Password item holds the access key | `settings.json` (see below) | Personal — one operator, one machine |
+
+The CA database lives in the shared vault, so anything stored there applies to
+everyone. Several operators typically share one CA while each holds their own
+AWS access key, so the credential *choice* cannot live there. It is instead
+kept locally by [settings.rs](../rust/crates/opca-core/src/settings.rs) at the
+platform config directory (macOS: `~/Library/Application Support/opca/
+settings.json`), keyed by 1Password account shorthand so an operator working
+across tenants keeps a separate selection per tenant.
+
+Resolution is a plain `op item get <item_id> [--account <acct>]`, reading the
+fields `access key id`, `secret access key`, and optionally `session token` and
+`default region`. Items created by the 1Password AWS shell plugin (`op plugin
+init aws`) use exactly these labels, so they work unchanged — but OPCA no
+longer reads `~/.config/op/plugins/aws.json`. That file records a single
+machine-global default with no notion of which tenant OPCA is connected to,
+which broke outright when the first entry belonged to a different account than
+the one OPCA was signed in to.
+
+Region precedence is `ca_aws_region` → the item's `default region` field →
+`ap-southeast-2`.
+
+Surfaces: **CA → Stores** in the GUI (region field plus a per-user item
+picker), and `opca aws list|show|use|clear` in the CLI. Selecting an item
+validates it by reading it, so a mis-pick fails at selection rather than at the
+next upload.
 
 ### Concurrent-writer safety
 
@@ -323,6 +359,35 @@ A single-page SolidJS app. Key conventions:
   per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
   `Modal` dialogs reused across those pages.
 
+### Reporting the outcome of an action
+
+The operation indicator above is strictly *in-flight* — it clears the moment a
+command returns and carries no terminal state. Actions that change the vault
+therefore report their own outcome through
+[utils/actionResult.ts](../rust/frontend/src/utils/actionResult.ts):
+`createActionResult()` holds one `{summary, error}` result, auto-clears a
+success after a few seconds, and keeps a failure until dismissed so the error
+stays readable. It owns state only; three renderers in
+[components/ResultBanner.tsx](../rust/frontend/src/components/ResultBanner.tsx)
+share one `BannerShell`:
+
+| Renderer | Used for |
+| --- | --- |
+| `ActionResultBanner` | one action — green, or red with the error beneath |
+| `ActionResultLine` | the CA tabs, whose established idiom is a line under the form |
+| `ResultBanner` | bulk runs — a neutral `n succeeded` count plus per-item failures |
+
+A bulk count is reported neutrally rather than green: a partially-failed run
+should not read as simply "good".
+
+Two cases deliberately do **not** use this. Rekey and renew navigate to the new
+serial, where `CertInfo`'s `.fresh-banner` reports the outcome from
+`?freshFrom=&op=` search params — deliberately URL-derived so it survives a
+reload. `CertInfo`'s `.ignored-banner` and `.superseded-banner` describe
+persistent server state, not an action result, so they are not dismissable. A
+result that must cross a route change (deleting a DKIM key navigates to the
+list) is handed over in router `state`, which is transient by design.
+
 ---
 
 ## Lifecycle of a typical operation
@@ -417,6 +482,12 @@ for the canonical list. Key ones:
 | `PRIVATE_BUCKET`, `DB_KEY`, `LOCAL_DB_PATH` | Where the CA database dump lives in S3 and where to stage it |
 | `PUBLIC_BUCKET`, `CA_CERT_KEY`, `CRL_KEY` | Where the published CA cert and CRL live |
 | `SLACK_USER`, `SLACK_URL` | Slack bot identity and webhook |
+
+The deployed Lambda authenticates with its execution role. For local runs,
+[notification/aws_lambda_test.py](../notification/aws_lambda_test.py) sources
+credentials the same way OPCA does — `op item get` against the item selected in
+**CA → Stores** — so no AWS CLI is needed. Source `environment.sh` first: the
+handler reads its configuration from the environment at import time.
 
 The Lambda stays in Python because it is a tiny, infrequent cron job with no
 1Password dependency — keeping it separate from the desktop app means the

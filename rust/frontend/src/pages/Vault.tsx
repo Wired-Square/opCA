@@ -401,7 +401,7 @@ export default function Vault() {
               <p class="page-error" role="alert">{backupError()}</p>
             </Show>
             <Show when={storeWarning()}>
-              <p class="page-warning">{storeWarning()}</p>
+              <p class="page-warning" role="alert">{storeWarning()}</p>
             </Show>
             <Show when={backupSuccess()}>
               <p class="page-success">{backupSuccess()}</p>

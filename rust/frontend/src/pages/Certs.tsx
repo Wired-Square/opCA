@@ -4,7 +4,7 @@ import {
   listCerts, listExternalCerts, inspectCertificate, unignoreCert, backfillCert,
   bulkRekeyCerts, bulkRenewCerts, bulkRevokeCerts, bulkIgnoreCerts,
 } from "../api/certs";
-import { rekeyAndGo, renewAndGo, certKebabItems } from "../api/certActions";
+import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
@@ -16,9 +16,10 @@ import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
 import BulkConfirmDialog from "../components/BulkConfirmDialog";
-import BulkResultBanner from "../components/BulkResultBanner";
+import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
 import { createSelection } from "../utils/selection";
+import { createActionResult } from "../utils/actionResult";
 import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
 import "../styles/pages/certs.css";
 
@@ -120,7 +121,7 @@ export default function Certs() {
 
   // Per-row certificate actions (kebab menu). Rekey/Renew navigate away to the
   // new cert; Revoke/Ignore use shared dialogs; Unignore acts immediately.
-  const [actionError, setActionError] = createSignal<string | null>(null);
+  const outcome = createActionResult();
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
 
@@ -175,13 +176,18 @@ export default function Certs() {
     }
   };
 
-  // Run a per-row action, surfacing any failure in the list-level error banner.
-  async function run(fn: () => Promise<unknown>) {
-    setActionError(null);
+  /** Messages for a per-row action. `ok` is omitted for rekey/renew, which
+   * navigate away to a page that reports the outcome via its fresh-banner. */
+  interface RowMessages { fail: string; ok?: string }
+
+  // Run a per-row action, reporting the outcome in the list-level banner.
+  async function run(msg: RowMessages, fn: () => Promise<unknown>) {
+    outcome.clear();
     try {
       await fn();
+      if (msg.ok) outcome.report(msg.ok);
     } catch (e) {
-      setActionError(String(e));
+      outcome.report(msg.fail, e);
     }
   }
 
@@ -202,14 +208,20 @@ export default function Certs() {
 
   function certMenuItems(cert: CertListItem): KebabItem[] {
     const serial = cert.serial;
+    const label = certLabel(cert);
     // Wrap a row action: no-op without a serial, otherwise run via run().
-    const act = (fn: () => Promise<unknown>) => () => { if (serial) void run(fn); };
+    const act = (msg: RowMessages, fn: () => Promise<unknown>) => () => {
+      if (serial) void run(msg, fn);
+    };
     return certKebabItems(cert, {
-      onRekey: act(async () => { await backfillTypeIfMissing(cert); await rekeyAndGo(navigate, serial!); }),
-      onRenew: act(async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
+      onRekey: act({ fail: "Rekey failed" }, async () => { await backfillTypeIfMissing(cert); await rekeyAndGo(navigate, serial!); }),
+      onRenew: act({ fail: "Renew failed" }, async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
       onRevoke: () => setRevokeTarget(cert),
       onIgnore: () => setIgnoreTarget(cert),
-      onUnignore: act(async () => { await unignoreCert(serial!); await finishListAction(cert); }),
+      onUnignore: act({ fail: "Unignore failed", ok: `Unignored ${label}` }, async () => {
+        await unignoreCert(serial!);
+        await finishListAction(cert);
+      }),
     });
   }
 
@@ -335,13 +347,11 @@ export default function Certs() {
 
       {/* Local certificates tab */}
       <Show when={tab() === "local"}>
-        <Show when={actionError()}>
-          <p class="page-error" role="alert">{actionError()}</p>
-        </Show>
+        <ActionResultBanner outcome={outcome} />
 
         <Show when={bulkResults()}>
           {(results) => (
-            <BulkResultBanner
+            <ResultBanner
               results={results().map((r) => ({ id: r.serial, ok: r.ok, error: r.error }))}
               onDismiss={() => setBulkResults(null)}
             />
@@ -618,7 +628,7 @@ export default function Certs() {
         serial={ignoreTarget()?.serial ?? null}
         cn={ignoreTarget()?.cn ?? null}
         onClose={() => setIgnoreTarget(null)}
-        onDone={() => { const c = ignoreTarget(); if (c) void finishListAction(c); }}
+        onDone={() => { const c = ignoreTarget(); if (c) { outcome.report(`Ignored ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
       <RevokeCertDialog
@@ -626,7 +636,7 @@ export default function Certs() {
         serial={revokeTarget()?.serial ?? null}
         cn={revokeTarget()?.cn ?? null}
         onClose={() => setRevokeTarget(null)}
-        onDone={() => { const c = revokeTarget(); if (c) void finishListAction(c); }}
+        onDone={() => { const c = revokeTarget(); if (c) { outcome.report(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
       <BulkConfirmDialog

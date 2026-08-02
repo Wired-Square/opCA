@@ -2,15 +2,19 @@ import { Show, For, createSignal, createResource, onMount, onCleanup } from "sol
 import { useNavigate } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
 import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, resignCa, recordCaCertCopy } from "../api/ca";
+import { listAwsCredentials, getAwsCredential, setAwsCredential } from "../api/aws";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
+import SearchInput from "../components/SearchInput";
 import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { CaInfo, CaConfig, RestoreResult, BackupInfoResult, StoreTestResults } from "../api/types";
+import type { CaInfo, CaConfig, RestoreResult, BackupInfoResult, StoreTestResults, AwsItemRef } from "../api/types";
+import { ActionResultLine } from "../components/ResultBanner";
+import { createActionResult } from "../utils/actionResult";
 import "../styles/pages/ca.css";
 
 type Tab = "certificate" | "config" | "stores" | "init" | "restore" | "info";
@@ -85,15 +89,11 @@ function CertificateTab(props: {
 }) {
   const [copied, markCopied] = createCopiedSignal();
   const [uploading, setUploading] = createSignal(false);
-  const [uploadResult, setUploadResult] = createSignal<string | null>(null);
   const [showResign, setShowResign] = createSignal(false);
   const [resignDays, setResignDays] = createSignal("3650");
   const [resigning, setResigning] = createSignal(false);
-  const [resignResult, setResignResult] = createSignal<string | null>(null);
-
-  let uploadTimer: number | undefined;
-  let resignTimer: number | undefined;
-  onCleanup(() => { clearTimeout(uploadTimer); clearTimeout(resignTimer); });
+  const upload = createActionResult(3000);
+  const resign = createActionResult(5000);
 
   const hasPublicStore = () => !!props.config()?.ca_public_store;
 
@@ -108,14 +108,12 @@ function CertificateTab(props: {
 
   async function handleUpload() {
     setUploading(true);
-    setUploadResult(null);
+    upload.clear();
     try {
       await uploadCaCert();
-      setUploadResult("ok");
-      clearTimeout(uploadTimer);
-      uploadTimer = window.setTimeout(() => setUploadResult(null), 3000);
+      upload.report("Certificate uploaded to public store.");
     } catch (e) {
-      setUploadResult(String(e));
+      upload.report("Upload failed", e);
     } finally {
       setUploading(false);
     }
@@ -124,20 +122,18 @@ function CertificateTab(props: {
   async function handleResign() {
     const days = parseInt(resignDays());
     if (!days || days <= 0) {
-      setResignResult("Please enter a valid number of days.");
+      resign.report("Invalid input", "Please enter a valid number of days.");
       return;
     }
     setResigning(true);
-    setResignResult(null);
+    resign.clear();
     try {
       await resignCa(days);
-      setResignResult("ok");
       setShowResign(false);
       props.onResign();
-      clearTimeout(resignTimer);
-      resignTimer = window.setTimeout(() => setResignResult(null), 5000);
+      resign.report("CA certificate re-signed successfully.");
     } catch (e) {
-      setResignResult(String(e));
+      resign.report("Re-sign failed", e);
     } finally {
       setResigning(false);
     }
@@ -192,9 +188,7 @@ function CertificateTab(props: {
               </Show>
             </div>
 
-            <Show when={resignResult() === "ok"}>
-              <p class="form-success">CA certificate re-signed successfully.</p>
-            </Show>
+            <ActionResultLine outcome={resign} />
 
             <Show when={showResign()}>
               <div class="resign-section">
@@ -219,19 +213,11 @@ function CertificateTab(props: {
                     </button>
                   </div>
                 </div>
-                <Show when={resignResult() && resignResult() !== "ok"}>
-                  <p class="form-error" role="alert">{resignResult()}</p>
-                </Show>
               </div>
             </Show>
 
             <Show when={hasPublicStore()}>
-              <Show when={uploadResult() === "ok"}>
-                <p class="form-success">Certificate uploaded to public store.</p>
-              </Show>
-              <Show when={uploadResult() && uploadResult() !== "ok"}>
-                <p class="form-error" role="alert">{uploadResult()}</p>
-              </Show>
+              <ActionResultLine outcome={upload} />
             </Show>
 
             <Show when={info().cert_pem}>
@@ -251,7 +237,7 @@ function CertificateTab(props: {
 
 function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => void }) {
   const [saving, setSaving] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
+  const outcome = createActionResult();
   const [form, setForm] = createSignal<Partial<CaConfig>>({});
 
   const merged = () => ({ ...props.config(), ...form() } as CaConfig);
@@ -260,13 +246,14 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
 
   async function handleSave() {
     setSaving(true);
-    setError(null);
+    outcome.clear();
     try {
       await updateCaConfig(merged());
       setForm({});
       props.onSave();
+      outcome.report("Configuration saved.");
     } catch (e) {
-      setError(String(e));
+      outcome.report("Save failed", e);
     } finally {
       setSaving(false);
     }
@@ -292,9 +279,7 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <FormField label="CRL URL" value={merged().crl_url} onChange={(v) => set("crl_url", v)} />
             </div>
 
-            <Show when={error()}>
-              <p class="form-error" role="alert">{error()}</p>
-            </Show>
+            <ActionResultLine outcome={outcome} />
 
             <div class="form-actions">
               <button class="btn-primary" onClick={handleSave} disabled={saving()}>
@@ -311,7 +296,7 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
 function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => void }) {
   const [saving, setSaving] = createSignal(false);
   const [testing, setTesting] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
+  const outcome = createActionResult();
   const [testResults, setTestResults] = createSignal<StoreTestResults | null>(null);
   const [testError, setTestError] = createSignal<string | null>(null);
   const [form, setForm] = createSignal<Partial<CaConfig>>({});
@@ -319,16 +304,21 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
   const merged = () => ({ ...props.config(), ...form() } as CaConfig);
   const set = (key: keyof CaConfig, value: string | null) =>
     setForm((f) => ({ ...f, [key]: value || null }));
+  const usesS3 = () =>
+    [merged().ca_public_store, merged().ca_private_store, merged().ca_backup_store].some(
+      (uri) => uri?.startsWith("s3://"),
+    );
 
   async function handleSave() {
     setSaving(true);
-    setError(null);
+    outcome.clear();
     try {
       await updateCaConfig(merged());
       setForm({});
       props.onSave();
+      outcome.report("Store settings saved.");
     } catch (e) {
-      setError(String(e));
+      outcome.report("Save failed", e);
     } finally {
       setSaving(false);
     }
@@ -360,11 +350,11 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
                 onChange={(v) => set("ca_private_store", v)} />
               <FormField label="Backup Store" value={merged().ca_backup_store}
                 onChange={(v) => set("ca_backup_store", v)} />
+              <FormField label="AWS Region" value={merged().ca_aws_region}
+                onChange={(v) => set("ca_aws_region", v)} />
             </div>
 
-            <Show when={error()}>
-              <p class="form-error" role="alert">{error()}</p>
-            </Show>
+            <ActionResultLine outcome={outcome} />
 
             <div class="form-actions">
               <button class="btn-primary" onClick={handleSave} disabled={saving()}>
@@ -374,6 +364,12 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
                 {testing() ? "Testing…" : "Test Stores"}
               </button>
             </div>
+
+            {/* Only S3 stores need AWS credentials — don't make an rsync/sftp
+                CA pay for listing 1Password items. */}
+            <Show when={usesS3()}>
+              <AwsCredentialSection />
+            </Show>
 
             <Show when={testing()}>
               <Spinner message="Testing store connections…" />
@@ -401,6 +397,115 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
             </Show>
           </div>
         )}
+      </Show>
+    </div>
+  );
+}
+
+/** Cached across mounts: the Stores tab is inside a `Show`, so Solid disposes
+ * this section on every tab switch and would otherwise repeat the
+ * multi-second `op item list` each time. Refresh clears it. */
+let awsItemCache: AwsItemRef[] | undefined;
+
+async function loadAwsItems(): Promise<AwsItemRef[]> {
+  awsItemCache ??= await listAwsCredentials();
+  return awsItemCache;
+}
+
+/** Picker for this user's AWS credential.
+ *
+ * Deliberately separate from the store URIs above: those are shared CA config,
+ * but the AWS access key is personal — several operators share one CA and each
+ * has their own. The selection is stored locally by the backend, keyed by
+ * 1Password account. */
+function AwsCredentialSection() {
+  const [items, { refetch: refetchItems }] = createResource(loadAwsItems);
+  const [selection, { refetch: refetchSelection }] = createResource(getAwsCredential);
+  const [saving, setSaving] = createSignal(false);
+  const [result, setResult] = createSignal<string | null>(null);
+  // An account can hold hundreds of logins; default to the ones that look
+  // like AWS keys, but let the filter be cleared to reach anything.
+  const [filter, setFilter] = createSignal("aws");
+
+  // Keeps the current selection visible even when the filter excludes it.
+  const filtered = () => {
+    const needle = filter().toLowerCase();
+    const selected = selection()?.item_id;
+    return (items() ?? []).filter(
+      (i) => i.id === selected || i.title.toLowerCase().includes(needle),
+    );
+  };
+
+  async function handleSelect(itemId: string) {
+    setSaving(true);
+    setResult(null);
+    try {
+      await setAwsCredential(itemId || null);
+      await refetchSelection();
+      setResult("ok");
+    } catch (e) {
+      setResult(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleRefresh() {
+    awsItemCache = undefined;
+    refetchItems();
+  }
+
+  return (
+    <div class="aws-credential-section">
+      <div class="form-label-row">
+        <h3>Your AWS Credential</h3>
+        <button class="btn-ghost" onClick={handleRefresh} disabled={items.loading}>
+          Refresh
+        </button>
+      </div>
+      <p class="aws-credential-hint">
+        Stored on this machine only, for{" "}
+        <strong>{selection()?.account ?? "the connected account"}</strong>. Other
+        operators of this CA choose their own.
+      </p>
+
+      <Show when={!items.loading} fallback={<Spinner message="Loading 1Password items…" />}>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Filter</label>
+            <SearchInput value={filter()} onInput={setFilter} placeholder="Filter items…" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">
+              1Password Item ({filtered().length} of {items()?.length ?? 0})
+            </label>
+            <select
+              class="form-select"
+              disabled={saving()}
+              value={selection()?.item_id ?? ""}
+              onChange={(e) => handleSelect(e.currentTarget.value)}
+            >
+              <option value="">— none selected —</option>
+              <For each={filtered()}>
+                {(item) => (
+                  <option value={item.id}>
+                    {item.title} ({item.vault})
+                  </option>
+                )}
+              </For>
+            </select>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={items.error}>
+        <p class="form-error" role="alert">{String(items.error)}</p>
+      </Show>
+      <Show when={result() && result() !== "ok"}>
+        <p class="form-error" role="alert">{result()}</p>
+      </Show>
+      <Show when={result() === "ok"}>
+        <p class="form-success">AWS credential saved.</p>
       </Show>
     </div>
   );

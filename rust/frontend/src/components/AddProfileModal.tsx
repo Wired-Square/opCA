@@ -183,7 +183,7 @@ export default function AddProfileModal(props: AddProfileModalProps) {
                 <Show when={failed().length > 0}>, {failed().length} failed</Show>.
               </p>
               <Show when={failed().length > 0}>
-                <ul class="bulk-summary-failures">
+                <ul class="failure-list">
                   <For each={failed()}>
                     {(f) => <li><span class="mono">{f.cn}</span> — {f.error ?? "failed"}</li>}
                   </For>

@@ -80,7 +80,7 @@ export default function SendToVault(props: SendToVaultProps) {
       </div>
       <VaultPicker value={vault()} onChange={setVault} />
       <Show when={failures().length > 0}>
-        <ul class="bulk-summary-failures">
+        <ul class="failure-list">
           <For each={failures()}>
             {(f) => <li><span class="mono">{f.cn}</span> — {f.error}</li>}
           </For>

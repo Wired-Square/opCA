@@ -3,6 +3,13 @@ import { rekeyCert, renewCert } from "./certs";
 import type { CertListItem } from "./types";
 import type { KebabItem } from "../components/KebabMenu";
 
+/** How a certificate is named in confirmations and result messages. Shared so
+ * the list, the detail page and the confirm dialogs cannot drift apart. */
+export function certLabel(cert: { cn?: string | null; serial?: string | null }): string {
+  return cert.cn ?? cert.serial ?? "this certificate";
+}
+
+
 type Navigate = ReturnType<typeof useNavigate>;
 
 export interface CertActionHandlers {

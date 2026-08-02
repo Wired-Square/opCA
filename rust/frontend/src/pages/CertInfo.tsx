@@ -1,7 +1,7 @@
 import { Show, For, createSignal, createResource, createEffect } from "solid-js";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
 import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy } from "../api/certs";
-import { rekeyAndGo, renewAndGo, certKebabItems } from "../api/certActions";
+import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { getVpnProfileForCn, generateOpenVpnProfile } from "../api/openvpn";
 import type { CertDetail } from "../api/types";
 import { formatDate } from "../utils/dates";
@@ -15,6 +15,8 @@ import CertStatusBadge from "../components/CertStatusBadge";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import { ActionResultBanner } from "../components/ResultBanner";
+import { createActionResult } from "../utils/actionResult";
 import "../styles/pages/cert-info.css";
 
 export default function CertInfo() {
@@ -30,7 +32,8 @@ export default function CertInfo() {
   );
   const [showRevoke, setShowRevoke] = createSignal(false);
   const [acting, setActing] = createSignal<string | false>(false);
-  const [error, setError] = createSignal<string | null>(null);
+  const outcome = createActionResult();
+  const label = () => certLabel({ cn: detail()?.cn, serial: params.serial as string });
   const [copied, markCopied] = createCopiedSignal();
   const [copiedKey, markKeyCopied] = createCopiedSignal();
   const [copiedChain, markChainCopied] = createCopiedSignal();
@@ -39,7 +42,6 @@ export default function CertInfo() {
   const [backfilling, setBackfilling] = createSignal(false);
   const [showIgnore, setShowIgnore] = createSignal(false);
   const [regenerating, setRegenerating] = createSignal(false);
-  const [regenMsg, setRegenMsg] = createSignal<string | null>(null);
 
   // Slow: once the fast detail renders, fetch from 1Password in the background.
   // Track which serial we enriched (not a plain boolean) so navigating to the
@@ -71,17 +73,16 @@ export default function CertInfo() {
 
   async function handleRegenerateVpn(cn: string, template: string) {
     setRegenerating(true);
-    setRegenMsg(null);
-    setError(null);
+    outcome.clear();
     try {
       const profile = await generateOpenVpnProfile({
         cn,
         serial: params.serial as string,
         template_name: template,
       });
-      setRegenMsg(`Regenerated VPN profile for ${cn} (stored as ${profile.title}).`);
+      outcome.report(`Regenerated VPN profile for ${cn} (stored as ${profile.title})`);
     } catch (e) {
-      setError(String(e));
+      outcome.report("VPN profile regeneration failed", e);
     } finally {
       setRegenerating(false);
     }
@@ -91,14 +92,14 @@ export default function CertInfo() {
     const serial = params.serial as string;
     if (!serial) return;
     setActing("rekey");
-    setError(null);
+    outcome.clear();
     try {
       // Navigates to the rekeyed cert's new serial so its fresh key +
       // certificate are surfaced for copy-on-click; the DB sync runs in the
       // background.
       await rekeyAndGo(navigate, serial);
     } catch (e) {
-      setError(String(e));
+      outcome.report("Rekey failed", e);
     } finally {
       setActing(false);
     }
@@ -108,11 +109,11 @@ export default function CertInfo() {
     const serial = params.serial as string;
     if (!serial) return;
     setActing("renew");
-    setError(null);
+    outcome.clear();
     try {
       await renewAndGo(navigate, serial);
     } catch (e) {
-      setError(String(e));
+      outcome.report("Renew failed", e);
     } finally {
       setActing(false);
     }
@@ -122,12 +123,13 @@ export default function CertInfo() {
     const serial = params.serial as string;
     if (!serial) return;
     setActing("unignore");
-    setError(null);
+    outcome.clear();
     try {
       await unignoreCert(serial);
+      outcome.report(`Unignored ${label()}`);
       refetch();
     } catch (e) {
-      setError(String(e));
+      outcome.report("Unignore failed", e);
     } finally {
       setActing(false);
     }
@@ -168,7 +170,7 @@ export default function CertInfo() {
     const serial = params.serial as string;
     if (!serial) return;
     if (!(await confirmPrivateKeyCopy(detail()?.cn ?? serial))) return;
-    setError(null);
+    outcome.clear();
     setExportingKey(true);
     let key = "";
     try {
@@ -178,7 +180,7 @@ export default function CertInfo() {
       // No recordCertCopy() call here: get_cert_private_key already audits
       // server-side via state.log_ok, and refuses CA keys outright.
     } catch (e) {
-      setError(String(e));
+      outcome.report("Could not copy the private key", e);
     } finally {
       key = "";
       setExportingKey(false);
@@ -219,6 +221,8 @@ export default function CertInfo() {
         <Show when={detail.error}>
           <p class="page-error" role="alert">{String(detail.error)}</p>
         </Show>
+
+        <ActionResultBanner outcome={outcome} />
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />
@@ -321,9 +325,6 @@ export default function CertInfo() {
                             {regenerating() ? "Regenerating…" : "Regenerate VPN profile"}
                           </button>
                         </div>
-                        <Show when={regenMsg()}>
-                          <div class="page-success">{regenMsg()}</div>
-                        </Show>
                         <div class="vpn-regen-caveat">
                           Uses the stored template; verify it references the
                           current cert by CN.
@@ -423,16 +424,12 @@ export default function CertInfo() {
                 </div>
               </Show>
 
-              <Show when={error()}>
-                <p class="page-error mt-3" role="alert">{error()}</p>
-              </Show>
-
               <IgnoreCertDialog
                 open={showIgnore()}
                 serial={d().serial}
                 cn={d().cn}
                 onClose={() => setShowIgnore(false)}
-                onDone={() => refetch()}
+                onDone={() => { outcome.report(`Ignored ${label()}`); refetch(); }}
               />
 
               <RevokeCertDialog
@@ -440,7 +437,7 @@ export default function CertInfo() {
                 serial={d().serial}
                 cn={d().cn}
                 onClose={() => setShowRevoke(false)}
-                onDone={() => refetch()}
+                onDone={() => { outcome.report(`Revoked ${label()}`); refetch(); }}
               />
             </>
           )}

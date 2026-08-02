@@ -38,7 +38,6 @@ export default function CSR() {
   const [detail, setDetail] = createSignal<CreateCsrResult | null>(null);
   const [loadingDetail, setLoadingDetail] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [success, setSuccess] = createSignal<string | null>(null);
   const [copied, markCopied] = createCopiedSignal();
 
   // Create form
@@ -82,7 +81,6 @@ export default function CSR() {
     setSelected(csr);
     setDetail(null);
     setError(null);
-    setSuccess(null);
     setImportOpen(false);
     setImportCertPem("");
     setImportChainPem("");
@@ -317,7 +315,7 @@ export default function CSR() {
       <div class="tab-bar">
         <button
           class={`tab-btn ${tab() === "list" ? "tab-active" : ""}`}
-          onClick={() => { setTab("list"); setError(null); setSuccess(null); }}
+          onClick={() => { setTab("list"); setError(null); }}
         >
           List
         </button>
@@ -460,10 +458,6 @@ export default function CSR() {
 
           <Show when={error()}>
             <p class="page-error" role="alert">{error()}</p>
-          </Show>
-
-          <Show when={success()}>
-            <p class="page-success">{success()}</p>
           </Show>
 
           <Show when={loadingDetail()}>

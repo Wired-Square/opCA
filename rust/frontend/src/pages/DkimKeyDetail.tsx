@@ -155,7 +155,9 @@ export default function DkimKeyDetailPage() {
     setError(null);
     try {
       await deleteDkimKey(d.domain, d.selector);
-      navigate("/dkim");
+      // Router state, not a query param: this is a transient message, so it
+      // should not linger in the URL or survive a reload.
+      navigate("/dkim", { state: { deleted: `${d.domain}/${d.selector}` } });
     } catch (e) {
       setError(String(e));
     } finally {

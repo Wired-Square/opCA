@@ -4,6 +4,8 @@ import { uploadCaDatabase } from "../api/ca";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import type { DatabaseInfo, LogEntry } from "../api/types";
+import { ActionResultBanner } from "../components/ResultBanner";
+import { createActionResult } from "../utils/actionResult";
 import "../styles/pages/database.css";
 
 type Tab = "log" | "statistics" | "config";
@@ -14,7 +16,7 @@ export default function Database() {
   const [log, { refetch: refetchLog }] = createResource<LogEntry[]>(getActionLog);
   const [logSearch, setLogSearch] = createSignal("");
   const [uploading, setUploading] = createSignal(false);
-  const [uploadResult, setUploadResult] = createSignal<string | null>(null);
+  const outcome = createActionResult();
 
   const filteredLog = () => {
     const items = log() ?? [];
@@ -34,16 +36,14 @@ export default function Database() {
 
   async function handleUpload() {
     setUploading(true);
-    setUploadResult(null);
+    outcome.clear();
     try {
       await uploadCaDatabase();
-      setUploadResult("ok");
-      refetchLog();
-      setTimeout(() => setUploadResult(null), 3000);
+      outcome.report("Database uploaded to private store.");
     } catch (e) {
-      setUploadResult(String(e));
-      refetchLog();
+      outcome.report("Upload failed", e);
     } finally {
+      refetchLog();
       setUploading(false);
     }
   }
@@ -67,12 +67,7 @@ export default function Database() {
         </div>
       </div>
 
-      <Show when={uploadResult() === "ok"}>
-        <p class="upload-success">Database uploaded to private store.</p>
-      </Show>
-      <Show when={uploadResult() && uploadResult() !== "ok"}>
-        <p class="page-error" role="alert">{uploadResult()}</p>
-      </Show>
+      <ActionResultBanner outcome={outcome} />
 
       <div class="tab-bar">
         <button

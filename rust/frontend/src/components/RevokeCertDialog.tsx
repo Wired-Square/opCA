@@ -1,6 +1,7 @@
 import { Show, createSignal } from "solid-js";
 import { revokeCert } from "../api/certs";
 import Modal from "./Modal";
+import { certLabel } from "../api/certActions";
 
 interface RevokeCertDialogProps {
   open: boolean;
@@ -39,7 +40,7 @@ export default function RevokeCertDialog(props: RevokeCertDialogProps) {
   return (
     <Modal open={props.open} onClose={props.onClose} title="Revoke Certificate">
       <p class="confirm-message">
-        Revoke <span class="mono">{props.cn ?? props.serial}</span>? This cannot
+        Revoke <span class="mono">{certLabel(props)}</span>? This cannot
         be undone.
       </p>
       <Show when={error()}>

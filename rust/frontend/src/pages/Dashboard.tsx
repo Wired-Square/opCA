@@ -4,12 +4,17 @@ import { appState } from "../stores/app";
 import { getDashboard } from "../api/dashboard";
 import { generateCrl, uploadCrl } from "../api/crl";
 import StatusBubble, { type StatusTone } from "../components/StatusBubble";
+import { ActionResultBanner } from "../components/ResultBanner";
+import { createActionResult } from "../utils/actionResult";
 import type {
   ActionItem,
   ActionKind,
+  CrlInfo,
   DashboardData,
 } from "../api/types";
 import "../styles/pages/dashboard.css";
+
+const crlNumber = (crl: CrlInfo) => crl.crl_number ?? "?";
 
 function crlStatusLabel(d: DashboardData): string {
   if (!d.crl_present) return "Not generated";
@@ -37,10 +42,10 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [data, { refetch }] = createResource<DashboardData>(getDashboard);
   const [pending, setPending] = createSignal<string | null>(null);
-  const [actionError, setActionError] = createSignal<string | null>(null);
+  const outcome = createActionResult();
 
   async function runAction(item: ActionItem) {
-    setActionError(null);
+    outcome.clear();
 
     const routeMap: Partial<Record<ActionKind, string>> = {
       view_expired_certs: "/certs?filter=expired",
@@ -55,17 +60,24 @@ export default function Dashboard() {
     }
 
     setPending(item.id);
+    // Generating already wrote the new CRL to the vault, so a failure in the
+    // upload that follows must still refresh the list and say what did land —
+    // otherwise the stale "CRL expired" row sits next to the error.
+    const withUpload = item.action === "regenerate_and_upload_crl";
+    let generated: CrlInfo | undefined;
     try {
-      if (item.action === "regenerate_and_upload_crl") {
-        await generateCrl();
-        await uploadCrl();
-      } else if (item.action === "regenerate_crl") {
-        await generateCrl();
-      }
-      await refetch();
+      generated = await generateCrl();
+      if (withUpload) await uploadCrl();
+      outcome.report(`CRL #${crlNumber(generated)} generated${withUpload ? " and uploaded" : ""}`);
     } catch (e) {
-      setActionError(String(e));
+      outcome.report(
+        generated
+          ? `CRL #${crlNumber(generated)} generated, but the upload failed`
+          : "Generate failed",
+        e,
+      );
     } finally {
+      await refetch();
       setPending(null);
     }
   }
@@ -80,12 +92,10 @@ export default function Dashboard() {
       </div>
 
       <Show when={data.error}>
-        <p class="dashboard-error">{String(data.error)}</p>
+        <p class="dashboard-error" role="alert">{String(data.error)}</p>
       </Show>
 
-      <Show when={actionError()}>
-        <p class="dashboard-error">{actionError()}</p>
-      </Show>
+      <ActionResultBanner outcome={outcome} />
 
       <Show when={appState.vaultState === "empty_vault"}>
         <div class="dashboard-notice">

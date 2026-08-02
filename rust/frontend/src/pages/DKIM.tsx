@@ -1,5 +1,5 @@
-import { Show, For, createSignal, createResource } from "solid-js";
-import { useNavigate } from "@solidjs/router";
+import { Show, For, createSignal, createResource, onMount } from "solid-js";
+import { useLocation, useNavigate } from "@solidjs/router";
 import {
   listDkimKeys,
   syncDkimKeys,
@@ -10,6 +10,8 @@ import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
+import { ActionResultBanner } from "../components/ResultBanner";
+import { createActionResult } from "../utils/actionResult";
 import type { DkimKeyItem } from "../api/types";
 import "../styles/pages/dkim.css";
 
@@ -17,7 +19,15 @@ type Tab = "keys" | "create";
 
 export default function DKIM() {
   const navigate = useNavigate();
+  const location = useLocation<{ deleted?: string }>();
+  const outcome = createActionResult();
   const [tab, setTab] = createSignal<Tab>("keys");
+
+  // A delete happens on the detail page and navigates here with the result.
+  onMount(() => {
+    const deleted = location.state?.deleted;
+    if (deleted) outcome.report(`Deleted DKIM key ${deleted}`);
+  });
   // listDkimKeys self-syncs from 1Password the first time after migration
   // (when the dkim_key table is empty), so a separate onMount sync would
   // duplicate the work and run a vault upload on every page visit.
@@ -63,7 +73,6 @@ export default function DKIM() {
   } | null>(null);
   const [chunked, setChunked] = createSignal(false);
   const [deploying, setDeploying] = createSignal(false);
-  const [success, setSuccess] = createSignal<string | null>(null);
 
   async function handleCreate(e: Event) {
     e.preventDefault();
@@ -105,7 +114,7 @@ export default function DKIM() {
     try {
       const result = await deployDkimRoute53(r.domain, r.selector);
       setCreateResult(null);
-      setSuccess(result.message);
+      outcome.report(result.message);
       setTab("keys");
     } catch (e) {
       setCreateError(String(e));
@@ -158,16 +167,14 @@ export default function DKIM() {
             <Spinner message={syncing() ? "Syncing DKIM keys from vault…" : "Loading DKIM keys…"} />
           </Show>
 
+          <ActionResultBanner outcome={outcome} />
+
           <Show when={syncError()}>
             <p class="page-error" role="alert">{syncError()}</p>
           </Show>
 
           <Show when={keys.error}>
             <p class="page-error" role="alert">{String(keys.error)}</p>
-          </Show>
-
-          <Show when={success()}>
-            <p class="page-success">{success()}</p>
           </Show>
 
           <Show when={!keys.loading && !syncing() && filteredKeys().length === 0}>

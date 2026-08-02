@@ -12,6 +12,8 @@ import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
+import { ActionResultBanner } from "../components/ResultBanner";
+import { createActionResult } from "../utils/actionResult";
 import type { CrlInfo, InspectCrlResult } from "../api/types";
 import "../styles/pages/crl.css";
 
@@ -22,7 +24,7 @@ export default function CRL() {
   const [tab, setTab] = createSignal<Tab>("detail");
   const [generating, setGenerating] = createSignal(false);
   const [uploading, setUploading] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
+  const outcome = createActionResult();
   const [copied, markCopied] = createCopiedSignal();
   const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
   const [backfilling, setBackfilling] = createSignal(false);
@@ -55,16 +57,17 @@ export default function CRL() {
 
   async function handleGenerate() {
     setGenerating(true);
-    setError(null);
+    outcome.clear();
     setShowUploadPrompt(false);
     try {
-      const result = await generateCrl();
-      mutate(result);
-      if (result.crl_pem) setInspectPem(result.crl_pem);
+      const generated = await generateCrl();
+      mutate(generated);
+      if (generated.crl_pem) setInspectPem(generated.crl_pem);
       setInspectResult(null);
-      if (result.has_public_store) setShowUploadPrompt(true);
+      if (generated.has_public_store) setShowUploadPrompt(true);
+      outcome.report(`CRL #${generated.crl_number ?? "?"} generated`);
     } catch (e) {
-      setError(String(e));
+      outcome.report("Generate failed", e);
     } finally {
       setGenerating(false);
     }
@@ -72,12 +75,13 @@ export default function CRL() {
 
   async function handleUpload() {
     setUploading(true);
-    setError(null);
+    outcome.clear();
     try {
       await uploadCrl();
       setShowUploadPrompt(false);
+      outcome.report("CRL uploaded to public store");
     } catch (e) {
-      setError(String(e));
+      outcome.report("Upload failed", e);
     } finally {
       setUploading(false);
     }
@@ -168,12 +172,10 @@ export default function CRL() {
           </div>
         </Show>
 
+        <ActionResultBanner outcome={outcome} />
+
         <Show when={info.error}>
           <p class="page-error" role="alert">{String(info.error)}</p>
-        </Show>
-
-        <Show when={error()}>
-          <p class="page-error" role="alert">{error()}</p>
         </Show>
 
         <Show when={info.loading}>
