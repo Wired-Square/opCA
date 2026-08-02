@@ -18,8 +18,10 @@ import RevokeCertDialog from "../components/RevokeCertDialog";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
+import PageError from "../components/PageError";
 import { createSelection } from "../utils/selection";
 import { createActionResult } from "../utils/actionResult";
+import { createAction, type ActionMessages } from "../utils/action";
 import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
 import "../styles/pages/certs.css";
 
@@ -122,6 +124,7 @@ export default function Certs() {
   // Per-row certificate actions (kebab menu). Rekey/Renew navigate away to the
   // new cert; Revoke/Ignore use shared dialogs; Unignore acts immediately.
   const outcome = createActionResult();
+  const action = createAction(outcome);
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
 
@@ -176,21 +179,6 @@ export default function Certs() {
     }
   };
 
-  /** Messages for a per-row action. `ok` is omitted for rekey/renew, which
-   * navigate away to a page that reports the outcome via its fresh-banner. */
-  interface RowMessages { fail: string; ok?: string }
-
-  // Run a per-row action, reporting the outcome in the list-level banner.
-  async function run(msg: RowMessages, fn: () => Promise<unknown>) {
-    outcome.clear();
-    try {
-      await fn();
-      if (msg.ok) outcome.report(msg.ok);
-    } catch (e) {
-      outcome.report(msg.fail, e);
-    }
-  }
-
   // Enrich a legacy cert whose type is still "—" via the existing backfill
   // (one op read, persists in the background). Returns true if it ran.
   async function backfillTypeIfMissing(cert: CertListItem): Promise<boolean> {
@@ -209,16 +197,18 @@ export default function Certs() {
   function certMenuItems(cert: CertListItem): KebabItem[] {
     const serial = cert.serial;
     const label = certLabel(cert);
-    // Wrap a row action: no-op without a serial, otherwise run via run().
-    const act = (msg: RowMessages, fn: () => Promise<unknown>) => () => {
-      if (serial) void run(msg, fn);
+    // Wrap a row action: no-op without a serial, otherwise run it through the
+    // list-level banner. Rekey and renew report no success — they navigate away
+    // to a page that says so via its fresh-banner.
+    const act = (messages: ActionMessages<void>, fn: () => Promise<void>) => () => {
+      if (serial) void action.run(messages, fn);
     };
     return certKebabItems(cert, {
-      onRekey: act({ fail: "Rekey failed" }, async () => { await backfillTypeIfMissing(cert); await rekeyAndGo(navigate, serial!); }),
-      onRenew: act({ fail: "Renew failed" }, async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
+      onRekey: act({ failure: "Rekey failed" }, async () => { await backfillTypeIfMissing(cert); await rekeyAndGo(navigate, serial!); }),
+      onRenew: act({ failure: "Renew failed" }, async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
       onRevoke: () => setRevokeTarget(cert),
       onIgnore: () => setIgnoreTarget(cert),
-      onUnignore: act({ fail: "Unignore failed", ok: `Unignored ${label}` }, async () => {
+      onUnignore: act({ failure: "Unignore failed", success: `Unignored ${label}` }, async () => {
         await unignoreCert(serial!);
         await finishListAction(cert);
       }),
@@ -337,9 +327,7 @@ export default function Certs() {
         </button>
       </div>
 
-      <Show when={certs().error}>
-        <p class="page-error" role="alert">{String(certs().error)}</p>
-      </Show>
+      <PageError message={certs().error} />
 
       <Show when={loading()}>
         <Spinner message="Loading…" />
@@ -462,9 +450,7 @@ export default function Certs() {
           </p>
         </Show>
 
-        <Show when={generateError()}>
-          <p class="page-error" role="alert">{generateError()}</p>
-        </Show>
+        <PageError message={generateError()} />
 
         <Show when={filteredExternal().length > 0}>
           <div class="data-table-wrap">
@@ -542,9 +528,7 @@ export default function Certs() {
           </button>
         </div>
 
-        <Show when={inspectError()}>
-          <p class="page-error" role="alert">{inspectError()}</p>
-        </Show>
+        <PageError message={inspectError()} />
 
         <Show when={inspectResult()}>
           {(r) => (

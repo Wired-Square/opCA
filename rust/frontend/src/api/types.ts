@@ -552,6 +552,14 @@ export interface VaultInfo {
   name: string;
 }
 
+/** One account configured in the local `op` CLI. */
+export interface AccountInfo {
+  url: string;
+  email: string;
+  account_uuid: string;
+  user_uuid: string;
+}
+
 // ---------------------------------------------------------------------------
 // Connection (existing, centralised here)
 // ---------------------------------------------------------------------------

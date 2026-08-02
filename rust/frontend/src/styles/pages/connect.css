@@ -105,7 +105,7 @@
   opacity: 0.85;
 }
 
-.saved-dropdown {
+.dropdown-menu {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
@@ -118,7 +118,7 @@
   overflow: hidden;
 }
 
-.saved-item {
+.dropdown-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -127,36 +127,39 @@
   transition: background 0.1s;
 }
 
-.saved-item:hover {
+.dropdown-item:hover {
   background: var(--bg-elevated);
 }
 
-.saved-item + .saved-item {
+.dropdown-item + .dropdown-item {
   border-top: 1px solid var(--border);
 }
 
-.saved-item-info {
+.dropdown-item-lines {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.saved-vault {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-primary);
+/* The two lines of a dropdown row — the saved-logins picker shows vault over
+   account, the account picker shows email over sign-in address. */
+.dropdown-item-primary,
+.dropdown-item-secondary {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.saved-account {
+.dropdown-item-primary {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.dropdown-item-secondary {
   font-size: 0.75rem;
   color: var(--text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .saved-forget {

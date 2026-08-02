@@ -341,6 +341,16 @@ A single-page SolidJS app. Key conventions:
   (`valid_ca` / `empty_vault` / `invalid_ca`) returned by `connect`. Empty
   vaults are steered to CA initialisation; broken vaults to the dashboard
   with an error banner.
+- [pages/Connect.tsx](../rust/frontend/src/pages/Connect.tsx) picks the vault
+  from previously-used logins (localStorage) and the account from
+  `list_accounts` — `op account list`, which reads local CLI config and so
+  works signed out. Both dropdowns run before there is a connection, alongside
+  `check_op_cli`; a failure just hides the picker. The account field takes the
+  sign-in address, falling back to that account's UUID when two configured
+  accounts share an address (see `accountValue` in
+  [api/accounts.ts](../rust/frontend/src/api/accounts.ts)) — `op --account`
+  cannot resolve a shared address, and the address is also what keys
+  `settings.json` below.
 - [api/](../rust/frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
   [api/tauri.ts](../rust/frontend/src/api/tauri.ts). `tauriInvoke` normalises
@@ -420,6 +430,25 @@ share one `BannerShell`:
 
 A bulk count is reported neutrally rather than green: a partially-failed run
 should not read as simply "good".
+
+Reporting is one half; running is the other.
+[utils/action.ts](../rust/frontend/src/utils/action.ts)'s
+`createAction(outcome)` owns an action's in-flight flag and the
+clear/try/report dance around its body. Take one per button so `busy()` gates
+just that button, or share one across a group that is enabled and disabled
+together (the certificate detail page's kebab). The success headline is built
+from whatever the body returned, and the failure headline is resolved after the
+body too, so it can say how far a partial failure got — "generated, but the
+upload failed". `run()` never throws, so whatever used to sit in `finally` is
+simply the code after the await. `createPublishFlow` is built on it.
+
+An error that belongs to the page rather than to one action is rendered by
+[components/PageError.tsx](../rust/frontend/src/components/PageError.tsx). It
+coerces whatever it is given and renders nothing for null/undefined, so a
+resource error goes straight in with no `<Show>` and no `String()` around it.
+The `.form-error` line under a form (the CA tabs, the create/import pages) is
+still hand-rolled; folding it in means giving `PageError` the form spacing,
+which is a separate change.
 
 Two cases deliberately do **not** use this. Rekey and renew navigate to the new
 serial, where `CertInfo`'s `.fresh-banner` reports the outcome from

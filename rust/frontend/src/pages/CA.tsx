@@ -17,6 +17,7 @@ import { ActionResultBanner, ActionResultLine } from "../components/ResultBanner
 import ResignCaDialog from "../components/ResignCaDialog";
 import UploadPrompt from "../components/UploadPrompt";
 import { createActionResult } from "../utils/actionResult";
+import { createAction } from "../utils/action";
 import { createPublishFlow } from "../utils/publishFlow";
 import "../styles/pages/ca.css";
 
@@ -207,28 +208,20 @@ function CertificateTab(props: { info: () => CaInfo | undefined }) {
 }
 
 function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => void }) {
-  const [saving, setSaving] = createSignal(false);
   const outcome = createActionResult();
+  const save = createAction(outcome);
   const [form, setForm] = createSignal<Partial<CaConfig>>({});
 
   const merged = () => ({ ...props.config(), ...form() } as CaConfig);
   const set = (key: keyof CaConfig, value: string | number | null) =>
     setForm((f) => ({ ...f, [key]: value || null }));
 
-  async function handleSave() {
-    setSaving(true);
-    outcome.clear();
-    try {
+  const handleSave = () =>
+    save.run({ success: "Configuration saved.", failure: "Save failed" }, async () => {
       await updateCaConfig(merged());
       setForm({});
       props.onSave();
-      outcome.report("Configuration saved.");
-    } catch (e) {
-      outcome.report("Save failed", e);
-    } finally {
-      setSaving(false);
-    }
-  }
+    });
 
   return (
     <div class="tab-content">
@@ -253,8 +246,8 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
             <ActionResultLine outcome={outcome} />
 
             <div class="form-actions">
-              <button class="btn-primary" onClick={handleSave} disabled={saving()}>
-                {saving() ? "Saving…" : "Save Configuration"}
+              <button class="btn-primary" onClick={handleSave} disabled={save.busy()}>
+                {save.busy() ? "Saving…" : "Save Configuration"}
               </button>
             </div>
           </div>
@@ -265,9 +258,9 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
 }
 
 function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => void }) {
-  const [saving, setSaving] = createSignal(false);
   const [testing, setTesting] = createSignal(false);
   const outcome = createActionResult();
+  const save = createAction(outcome);
   const [testResults, setTestResults] = createSignal<StoreTestResults | null>(null);
   const [testError, setTestError] = createSignal<string | null>(null);
   const [form, setForm] = createSignal<Partial<CaConfig>>({});
@@ -280,20 +273,12 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
       (uri) => uri?.startsWith("s3://"),
     );
 
-  async function handleSave() {
-    setSaving(true);
-    outcome.clear();
-    try {
+  const handleSave = () =>
+    save.run({ success: "Store settings saved.", failure: "Save failed" }, async () => {
       await updateCaConfig(merged());
       setForm({});
       props.onSave();
-      outcome.report("Store settings saved.");
-    } catch (e) {
-      outcome.report("Save failed", e);
-    } finally {
-      setSaving(false);
-    }
-  }
+    });
 
   async function handleTest() {
     setTesting(true);
@@ -328,8 +313,8 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
             <ActionResultLine outcome={outcome} />
 
             <div class="form-actions">
-              <button class="btn-primary" onClick={handleSave} disabled={saving()}>
-                {saving() ? "Saving…" : "Save Stores"}
+              <button class="btn-primary" onClick={handleSave} disabled={save.busy()}>
+                {save.busy() ? "Saving…" : "Save Stores"}
               </button>
               <button class="btn-ghost" onClick={handleTest} disabled={testing()}>
                 {testing() ? "Testing…" : "Test Stores"}

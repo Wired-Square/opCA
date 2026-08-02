@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Dashboard's regenerate/upload CRL, revoke, ignore and unignore (from both the
   certificate list and its detail page), DKIM key deletion, and the CA's Save
   Configuration and Save Stores, which changed nothing on screen at all.
+- **The connect screen's Account field now has a picker**, listing the accounts
+  configured in the local `op` CLI by email and sign-in address so the address
+  need not be recalled and typed. Picking one fills in the sign-in address;
+  where two accounts share an address — a personal and a work account both on
+  `my.1password.com`, say — it fills in that account's UUID instead, since `op`
+  cannot resolve the shared address on its own.
 
 ### Changed
 

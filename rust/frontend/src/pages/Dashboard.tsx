@@ -7,6 +7,7 @@ import StatusBubble, { type StatusTone } from "../components/StatusBubble";
 import PageError from "../components/PageError";
 import { ActionResultBanner } from "../components/ResultBanner";
 import { createActionResult } from "../utils/actionResult";
+import { createAction } from "../utils/action";
 import type {
   ActionItem,
   ActionKind,
@@ -44,10 +45,9 @@ export default function Dashboard() {
   const [data, { refetch }] = createResource<DashboardData>(getDashboard);
   const [pending, setPending] = createSignal<string | null>(null);
   const outcome = createActionResult();
+  const action = createAction(outcome);
 
   async function runAction(item: ActionItem) {
-    outcome.clear();
-
     const routeMap: Partial<Record<ActionKind, string>> = {
       view_expired_certs: "/certs?filter=expired",
       view_pending_csrs: "/csr",
@@ -66,21 +66,23 @@ export default function Dashboard() {
     // otherwise the stale "CRL expired" row sits next to the error.
     const withUpload = item.action === "regenerate_and_upload_crl";
     let generated: CrlInfo | undefined;
-    try {
-      generated = await generateCrl();
-      if (withUpload) await uploadCrl();
-      outcome.report(`CRL #${crlNumber(generated)} generated${withUpload ? " and uploaded" : ""}`);
-    } catch (e) {
-      outcome.report(
-        generated
-          ? `CRL #${crlNumber(generated)} generated, but the upload failed`
-          : "Generate failed",
-        e,
-      );
-    } finally {
-      await refetch();
-      setPending(null);
-    }
+    await action.run(
+      {
+        success: (crl) => `CRL #${crlNumber(crl)} generated${withUpload ? " and uploaded" : ""}`,
+        // Only reached once the generate has landed and the upload has not.
+        failure: () =>
+          generated
+            ? `CRL #${crlNumber(generated)} generated, but the upload failed`
+            : "Generate failed",
+      },
+      async () => {
+        generated = await generateCrl();
+        if (withUpload) await uploadCrl();
+        return generated;
+      },
+    );
+    await refetch();
+    setPending(null);
   }
 
   return (

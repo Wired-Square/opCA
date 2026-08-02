@@ -11,6 +11,7 @@ import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import { ActionResultBanner } from "../components/ResultBanner";
+import PageError from "../components/PageError";
 import { createActionResult } from "../utils/actionResult";
 import type { DkimKeyItem } from "../api/types";
 import "../styles/pages/dkim.css";
@@ -169,13 +170,9 @@ export default function DKIM() {
 
           <ActionResultBanner outcome={outcome} />
 
-          <Show when={syncError()}>
-            <p class="page-error" role="alert">{syncError()}</p>
-          </Show>
+          <PageError message={syncError()} />
 
-          <Show when={keys.error}>
-            <p class="page-error" role="alert">{String(keys.error)}</p>
-          </Show>
+          <PageError message={keys.error} />
 
           <Show when={!keys.loading && !syncing() && filteredKeys().length === 0}>
             <p class="text-muted">No DKIM keys found.</p>
@@ -245,9 +242,7 @@ export default function DKIM() {
               />
             </div>
 
-            <Show when={createError()}>
-              <p class="page-error" role="alert">{createError()}</p>
-            </Show>
+            <PageError message={createError()} />
 
             <Show when={createResult()}>
               {(r) => (

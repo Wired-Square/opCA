@@ -176,6 +176,20 @@ pub struct VaultInfo {
     pub name: String,
 }
 
+/// 1Password account metadata returned by `op account list`.
+///
+/// The UUIDs default rather than being required so an older `op` that omits
+/// one still yields a usable list.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct AccountInfo {
+    pub url: String,
+    pub email: String,
+    #[serde(default)]
+    pub account_uuid: String,
+    #[serde(default)]
+    pub user_uuid: String,
+}
+
 /// Action to take when storing an item or document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreAction {
@@ -651,32 +665,37 @@ pub fn check_cli_available() -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Run `op vault list` without an existing `Op` instance.
-///
-/// Used by the connect screen to populate the vault picker before
-/// the user has selected a vault.
-pub fn list_vaults_standalone(account: Option<&str>) -> Result<Vec<VaultInfo>, OpcaError> {
-    let bin = which::which(OP_BIN)
-        .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|_| OpcaError::CliNotFound)?;
+/// Run a read-only `op` listing without an existing `Op` instance, for the
+/// connect screen's pickers — they run before the user has chosen a vault.
+fn list_standalone<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<Vec<T>, OpcaError> {
+    let bin = check_cli_available().ok_or(OpcaError::CliNotFound)?;
 
-    let runner = ShellRunner;
-    let mut args = vec!["vault", "list", "--format=json"];
-    let acct_flag;
-    if let Some(acct) = account {
-        acct_flag = acct.to_string();
-        args.push("--account");
-        args.push(&acct_flag);
-    }
-
-    let out = runner.run(&bin, &args, None, None)?;
+    let out = ShellRunner.run(&bin, args, None, None)?;
     if !out.success {
         return Err(map_cli_error(&out));
     }
 
-    let vaults: Vec<VaultInfo> = serde_json::from_str(&out.stdout)
-        .map_err(|e| OpcaError::CliError(format!("Failed to parse vault list: {e}")))?;
-    Ok(vaults)
+    serde_json::from_str(&out.stdout).map_err(|e| {
+        OpcaError::CliError(format!("Failed to parse `op {}`: {e}", args.join(" ")))
+    })
+}
+
+/// Run `op vault list`, optionally against a specific account.
+pub fn list_vaults_standalone(account: Option<&str>) -> Result<Vec<VaultInfo>, OpcaError> {
+    let mut args = vec!["vault", "list", "--format=json"];
+    if let Some(acct) = account {
+        args.push("--account");
+        args.push(acct);
+    }
+    list_standalone(&args)
+}
+
+/// Run `op account list`.
+///
+/// Unlike `op vault list` this reads the CLI's local configuration, so it
+/// works before the user has signed in.
+pub fn list_accounts_standalone() -> Result<Vec<AccountInfo>, OpcaError> {
+    list_standalone(&["account", "list", "--format=json"])
 }
 
 /// Map stderr/stdout text to a specific `OpcaError` variant.

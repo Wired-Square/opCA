@@ -1,7 +1,9 @@
-import { createSignal, Show, For, onMount } from "solid-js";
+import { createSignal, Show, For, onMount, type JSX } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
+import { listAccounts, accountValue, accountLabel } from "../api/accounts";
+import type { AccountInfo } from "../api/types";
 import { setAppState, type VaultState } from "../stores/app";
 import { themeMode, toggleTheme } from "../stores/theme";
 import { availableUpdate, fetchUpdate } from "../stores/update";
@@ -24,6 +26,9 @@ interface SavedLogin {
   vault: string;
   account: string | null;
 }
+
+/** Which field's dropdown is open — only ever one at a time. */
+type Dropdown = "vault" | "account";
 
 const STORAGE_KEY = "opca_saved_logins";
 
@@ -57,6 +62,85 @@ function removeLogin(vault: string, account: string | null): SavedLogin[] {
   return logins;
 }
 
+/** A labelled text field with an in-field button that drops a list of choices
+ *  below it. Both fields on this page are this shape; `children` are the rows.
+ *  The button is hidden when there is nothing to offer. */
+function PickerField(props: {
+  id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  onInput: (value: string) => void;
+  onFocus?: () => void;
+  autofocus?: boolean;
+  /** Toggle glyph and its accessible name; omit to offer no dropdown. */
+  toggle?: { glyph: string; label: string };
+  open: boolean;
+  onToggle: () => void;
+  children: JSX.Element;
+}) {
+  return (
+    <div class="form-group">
+      <label class="form-label" for={props.id}>{props.label}</label>
+      {/* Clicks inside the field must not reach the page's close-everything handler. */}
+      <div class="input-with-dropdown" onClick={(e) => e.stopPropagation()}>
+        <input
+          id={props.id}
+          type="text"
+          placeholder={props.placeholder}
+          value={props.value}
+          onInput={(e) => props.onInput(e.currentTarget.value)}
+          onFocus={() => props.onFocus?.()}
+          autofocus={props.autofocus}
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck={false}
+        />
+        <Show when={props.toggle}>
+          {(toggle) => (
+            <button
+              type="button"
+              class="dropdown-toggle"
+              aria-label={toggle().label}
+              onClick={props.onToggle}
+              tabIndex={-1}
+            >
+              {toggle().glyph}
+            </button>
+          )}
+        </Show>
+        {/* Gated on `toggle` as well as `open`, so forgetting the last saved
+            login closes the menu instead of leaving an empty box behind. */}
+        <Show when={props.open && props.toggle}>
+          <div class="dropdown-menu">{props.children}</div>
+        </Show>
+      </div>
+    </div>
+  );
+}
+
+/** One row of either dropdown: a primary line with a smaller one beneath, and
+ *  an optional trailing button. */
+function DropdownItem(props: {
+  primary: string;
+  secondary?: string | null;
+  onSelect: () => void;
+  children?: JSX.Element;
+}) {
+  return (
+    <div class="dropdown-item" onClick={props.onSelect}>
+      <div class="dropdown-item-lines">
+        <span class="dropdown-item-primary">{props.primary}</span>
+        <Show when={props.secondary}>
+          <span class="dropdown-item-secondary">{props.secondary}</span>
+        </Show>
+      </div>
+      {props.children}
+    </div>
+  );
+}
+
 export default function Connect() {
   const navigate = useNavigate();
   const [vault, setVault] = createSignal("");
@@ -64,29 +148,41 @@ export default function Connect() {
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [saved, setSaved] = createSignal<SavedLogin[]>([]);
-  const [dropdownOpen, setDropdownOpen] = createSignal(false);
+  const [accounts, setAccounts] = createSignal<AccountInfo[]>([]);
+  const [openDropdown, setOpenDropdown] = createSignal<Dropdown | null>(null);
   const [opCli, setOpCli] = createSignal<OpCliStatus | null>(null);
 
   onMount(async () => {
     setSaved(loadSavedLogins());
-    try {
-      const status = await invoke<OpCliStatus>("check_op_cli");
-      setOpCli(status);
-    } catch {
-      setOpCli({ found: false, path: null });
-    }
     fetchUpdate();
+    // Both are local, sign-in-free lookups; neither gates the other. A failing
+    // account list just leaves the picker hidden — the op CLI status line below
+    // already reports the case where `op` is missing entirely.
+    const [status, configured] = await Promise.all([
+      invoke<OpCliStatus>("check_op_cli").catch(() => ({ found: false, path: null })),
+      listAccounts().catch(() => []),
+    ]);
+    setOpCli(status);
+    setAccounts(configured);
   });
+
+  const toggle = (which: Dropdown) =>
+    setOpenDropdown((current) => (current === which ? null : which));
 
   function selectLogin(login: SavedLogin) {
     setVault(login.vault);
     setAccount(login.account ?? "");
-    setDropdownOpen(false);
+    setOpenDropdown(null);
   }
 
   function forgetLogin(e: Event, login: SavedLogin) {
     e.stopPropagation();
     setSaved(removeLogin(login.vault, login.account));
+  }
+
+  function selectAccount(picked: AccountInfo) {
+    setAccount(accountValue(picked, accounts()));
+    setOpenDropdown(null);
   }
 
   async function handleConnect(e: Event) {
@@ -117,7 +213,7 @@ export default function Connect() {
   }
 
   return (
-    <div class="connect-page" onClick={() => setDropdownOpen(false)}>
+    <div class="connect-page" onClick={() => setOpenDropdown(null)}>
       <div class="connect-card">
         <div class="connect-header">
           <div class="connect-brand-row">
@@ -132,91 +228,69 @@ export default function Connect() {
         </div>
 
         <form class="connect-form" onSubmit={handleConnect}>
-          <div class="form-group">
-            <label class="form-label" for="vault">1Password Vault</label>
-            <div class="input-with-dropdown" onClick={(e) => e.stopPropagation()}>
-              <input
-                id="vault"
-                type="text"
-                placeholder="e.g. Private CA"
-                value={vault()}
-                onInput={(e) => {
-                  setVault(e.currentTarget.value);
-                  setDropdownOpen(false);
-                }}
-                onFocus={() => saved().length > 0 && setDropdownOpen(true)}
-                autofocus
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                spellcheck={false}
-              />
-              <Show when={saved().length > 0}>
-                <button
-                  type="button"
-                  class="dropdown-toggle"
-                  aria-label="Show saved vaults"
-                  onClick={() => setDropdownOpen(!dropdownOpen())}
-                  tabIndex={-1}
+          <PickerField
+            id="vault"
+            label="1Password Vault"
+            placeholder="e.g. Private CA"
+            value={vault()}
+            onInput={(v) => { setVault(v); setOpenDropdown(null); }}
+            onFocus={() => saved().length > 0 && setOpenDropdown("vault")}
+            autofocus
+            toggle={saved().length > 0 ? { glyph: "↻", label: "Show saved vaults" } : undefined}
+            open={openDropdown() === "vault"}
+            onToggle={() => toggle("vault")}
+          >
+            <For each={saved()}>
+              {(login) => (
+                <DropdownItem
+                  primary={login.vault}
+                  secondary={accountLabel(login.account, accounts())}
+                  onSelect={() => selectLogin(login)}
                 >
-{"\u21BB"}
-                </button>
-              </Show>
-              <Show when={dropdownOpen() && saved().length > 0}>
-                <div class="saved-dropdown">
-                  <For each={saved()}>
-                    {(login) => (
-                      <div class="saved-item" onClick={() => selectLogin(login)}>
-                        <div class="saved-item-info">
-                          <span class="saved-vault">{login.vault}</span>
-                          <Show when={login.account}>
-                            <span class="saved-account">{login.account}</span>
-                          </Show>
-                        </div>
-                        <button
-                          type="button"
-                          class="saved-forget"
-                          aria-label="Forget this login"
-                          onClick={(e) => forgetLogin(e, login)}
-                          title="Forget this login"
-                        >
-                          &times;
-                        </button>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
-          </div>
+                  <button
+                    type="button"
+                    class="saved-forget"
+                    aria-label="Forget this login"
+                    onClick={(e) => forgetLogin(e, login)}
+                    title="Forget this login"
+                  >
+                    &times;
+                  </button>
+                </DropdownItem>
+              )}
+            </For>
+          </PickerField>
 
-          <div class="form-group">
-            <label class="form-label" for="account">Account (optional)</label>
-            <input
-              id="account"
-              type="text"
-              placeholder="e.g. my.1password.com"
-              value={account()}
-              onInput={(e) => {
-                setAccount(e.currentTarget.value);
-                setDropdownOpen(false);
-              }}
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              spellcheck={false}
-            />
-          </div>
+          <PickerField
+            id="account"
+            label="Account (optional)"
+            placeholder="e.g. my.1password.com"
+            value={account()}
+            onInput={(v) => { setAccount(v); setOpenDropdown(null); }}
+            toggle={accounts().length > 0 ? { glyph: "▾", label: "Show 1Password accounts" } : undefined}
+            open={openDropdown() === "account"}
+            onToggle={() => toggle("account")}
+          >
+            <For each={accounts()}>
+              {(configured) => (
+                <DropdownItem
+                  primary={configured.email}
+                  secondary={configured.url}
+                  onSelect={() => selectAccount(configured)}
+                />
+              )}
+            </For>
+          </PickerField>
 
           {error() && <p class="connect-error" role="alert">{error()}</p>}
 
           <button class="btn-primary connect-btn" type="submit" disabled={loading() || !vault().trim()}>
-            {loading() ? "Connecting\u2026" : "Connect"}
+            {loading() ? "Connecting…" : "Connect"}
           </button>
         </form>
 
         <button class="btn-ghost theme-toggle-connect" onClick={toggleTheme} title="Toggle theme">
-          {themeMode() === "dark" ? "\u2600 Light mode" : "\u263E Dark mode"}
+          {themeMode() === "dark" ? "☀ Light mode" : "☾ Dark mode"}
         </button>
 
         <Show when={opCli()}>

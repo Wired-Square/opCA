@@ -13,6 +13,7 @@ import type { ExternalCertDetail } from "../api/types";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
+import PageError from "../components/PageError";
 import "../styles/pages/cert-info.css";
 
 export default function ExternalCertInfo() {
@@ -105,9 +106,7 @@ export default function ExternalCertInfo() {
       </div>
 
       <div class="cert-info-scroll">
-        <Show when={detail.error}>
-          <p class="page-error" role="alert">{String(detail.error)}</p>
-        </Show>
+        <PageError message={detail.error} />
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />
@@ -196,9 +195,7 @@ export default function ExternalCertInfo() {
                 </div>
               </Show>
 
-              <Show when={error()}>
-                <p class="page-error mt-3" role="alert">{error()}</p>
-              </Show>
+              <PageError message={error()} class="mt-3" />
             </>
           )}
         </Show>

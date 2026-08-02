@@ -15,6 +15,7 @@ import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
+import PageError from "../components/PageError";
 import type { DkimKeyDetail, DkimVerifyResult } from "../api/types";
 import "../styles/pages/cert-info.css";
 import "../styles/pages/dkim.css";
@@ -187,9 +188,7 @@ export default function DkimKeyDetailPage() {
       </div>
 
       <div class="cert-info-scroll">
-        <Show when={detail.error}>
-          <p class="page-error" role="alert">{String(detail.error)}</p>
-        </Show>
+        <PageError message={detail.error} />
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />
@@ -289,9 +288,7 @@ export default function DkimKeyDetailPage() {
                 </div>
               </Show>
 
-              <Show when={error()}>
-                <p class="page-error mt-3" role="alert">{error()}</p>
-              </Show>
+              <PageError message={error()} class="mt-3" />
 
               <Show when={success()}>
                 <p class="page-success mt-3">{success()}</p>

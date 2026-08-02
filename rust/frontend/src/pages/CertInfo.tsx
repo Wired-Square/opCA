@@ -16,7 +16,9 @@ import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import { ActionResultBanner } from "../components/ResultBanner";
+import PageError from "../components/PageError";
 import { createActionResult } from "../utils/actionResult";
+import { createAction } from "../utils/action";
 import "../styles/pages/cert-info.css";
 
 export default function CertInfo() {
@@ -31,17 +33,19 @@ export default function CertInfo() {
     (serial: string) => getCertInfo(serial),
   );
   const [showRevoke, setShowRevoke] = createSignal(false);
-  const [acting, setActing] = createSignal<string | false>(false);
   const outcome = createActionResult();
+  /** Rekey, renew and unignore share one action: the kebab disables all of its
+   *  items together, so there is nothing to tell their busy states apart. */
+  const headerAction = createAction(outcome);
+  const exportKey = createAction(outcome);
+  const regenerateVpn = createAction(outcome);
   const label = () => certLabel({ cn: detail()?.cn, serial: params.serial as string });
   const [copied, markCopied] = createCopiedSignal();
   const [copiedKey, markKeyCopied] = createCopiedSignal();
   const [copiedChain, markChainCopied] = createCopiedSignal();
   const [copiedSan, markSanCopied] = createCopiedSignal();
-  const [exportingKey, setExportingKey] = createSignal(false);
   const [backfilling, setBackfilling] = createSignal(false);
   const [showIgnore, setShowIgnore] = createSignal(false);
-  const [regenerating, setRegenerating] = createSignal(false);
 
   // Slow: once the fast detail renders, fetch from 1Password in the background.
   // Track which serial we enriched (not a plain boolean) so navigating to the
@@ -71,79 +75,54 @@ export default function CertInfo() {
     (cn: string) => getVpnProfileForCn(cn),
   );
 
-  async function handleRegenerateVpn(cn: string, template: string) {
-    setRegenerating(true);
-    outcome.clear();
-    try {
-      const profile = await generateOpenVpnProfile({
-        cn,
-        serial: params.serial as string,
-        template_name: template,
-      });
-      outcome.report(`Regenerated VPN profile for ${cn} (stored as ${profile.title})`);
-    } catch (e) {
-      outcome.report("VPN profile regeneration failed", e);
-    } finally {
-      setRegenerating(false);
-    }
+  function handleRegenerateVpn(cn: string, template: string) {
+    return regenerateVpn.run(
+      {
+        success: (profile) => `Regenerated VPN profile for ${cn} (stored as ${profile.title})`,
+        failure: "VPN profile regeneration failed",
+      },
+      () => generateOpenVpnProfile({ cn, serial: params.serial as string, template_name: template }),
+    );
   }
 
-  async function handleRekey() {
+  // Rekey and renew report no success — they navigate to the new serial, where
+  // the fresh-banner says what happened.
+  function handleRekey() {
     const serial = params.serial as string;
     if (!serial) return;
-    setActing("rekey");
-    outcome.clear();
-    try {
-      // Navigates to the rekeyed cert's new serial so its fresh key +
-      // certificate are surfaced for copy-on-click; the DB sync runs in the
-      // background.
-      await rekeyAndGo(navigate, serial);
-    } catch (e) {
-      outcome.report("Rekey failed", e);
-    } finally {
-      setActing(false);
-    }
+    // Navigates to the rekeyed cert's new serial so its fresh key +
+    // certificate are surfaced for copy-on-click; the DB sync runs in the
+    // background.
+    void headerAction.run({ failure: "Rekey failed" }, () => rekeyAndGo(navigate, serial));
   }
 
-  async function handleRenew() {
+  function handleRenew() {
     const serial = params.serial as string;
     if (!serial) return;
-    setActing("renew");
-    outcome.clear();
-    try {
-      await renewAndGo(navigate, serial);
-    } catch (e) {
-      outcome.report("Renew failed", e);
-    } finally {
-      setActing(false);
-    }
+    void headerAction.run({ failure: "Renew failed" }, () => renewAndGo(navigate, serial));
   }
 
-  async function handleUnignore() {
+  function handleUnignore() {
     const serial = params.serial as string;
     if (!serial) return;
-    setActing("unignore");
-    outcome.clear();
-    try {
-      await unignoreCert(serial);
-      outcome.report(`Unignored ${label()}`);
-      refetch();
-    } catch (e) {
-      outcome.report("Unignore failed", e);
-    } finally {
-      setActing(false);
-    }
+    void headerAction.run(
+      { success: `Unignored ${label()}`, failure: "Unignore failed" },
+      async () => {
+        await unignoreCert(serial);
+        refetch();
+      },
+    );
   }
 
   // Header actions menu — gating shared with the certificates list kebab.
   function certActions(d: CertDetail): KebabItem[] {
     return certKebabItems(d, {
-      onRekey: () => void handleRekey(),
-      onRenew: () => void handleRenew(),
+      onRekey: handleRekey,
+      onRenew: handleRenew,
       onRevoke: () => setShowRevoke(true),
       onIgnore: () => setShowIgnore(true),
-      onUnignore: () => void handleUnignore(),
-    }, !!acting());
+      onUnignore: handleUnignore,
+    }, headerAction.busy());
   }
 
   function copyPem() {
@@ -170,21 +149,15 @@ export default function CertInfo() {
     const serial = params.serial as string;
     if (!serial) return;
     if (!(await confirmPrivateKeyCopy(detail()?.cn ?? serial))) return;
-    outcome.clear();
-    setExportingKey(true);
-    let key = "";
-    try {
-      key = await getCertPrivateKey(serial);
+    // The key stays scoped to the body, so it is unreachable the moment the
+    // run returns — nothing outside holds a reference to scrub.
+    await exportKey.run({ failure: "Could not copy the private key" }, async () => {
+      const key = await getCertPrivateKey(serial);
       await writeClipboard(key);
       markKeyCopied();
       // No recordCertCopy() call here: get_cert_private_key already audits
       // server-side via state.log_ok, and refuses CA keys outright.
-    } catch (e) {
-      outcome.report("Could not copy the private key", e);
-    } finally {
-      key = "";
-      setExportingKey(false);
-    }
+    });
   }
 
   // Until backfill finishes, we know whether a chain exists (has_chain) but
@@ -218,9 +191,7 @@ export default function CertInfo() {
       </div>
 
       <div class="cert-info-scroll">
-        <Show when={detail.error}>
-          <p class="page-error" role="alert">{String(detail.error)}</p>
-        </Show>
+        <PageError message={detail.error} />
 
         <ActionResultBanner outcome={outcome} />
 
@@ -319,10 +290,10 @@ export default function CertInfo() {
                         <div class="vpn-regen-actions">
                           <button
                             class="btn-primary btn-sm"
-                            disabled={regenerating() || !profile().template}
+                            disabled={regenerateVpn.busy() || !profile().template}
                             onClick={() => handleRegenerateVpn(profile().cn, profile().template!)}
                           >
-                            {regenerating() ? "Regenerating…" : "Regenerate VPN profile"}
+                            {regenerateVpn.busy() ? "Regenerating…" : "Regenerate VPN profile"}
                           </button>
                         </div>
                         <div class="vpn-regen-caveat">
@@ -350,7 +321,7 @@ export default function CertInfo() {
                       label="Private Key"
                       available={d().has_private_key}
                       onCopy={isCaCert(d()) ? undefined : copyPrivateKey}
-                      busy={exportingKey()}
+                      busy={exportKey.busy()}
                       copied={copiedKey()}
                       blocked={isCaCert(d())
                         ? "CA private keys cannot be copied from opCA. Retrieve from 1Password directly if absolutely necessary."

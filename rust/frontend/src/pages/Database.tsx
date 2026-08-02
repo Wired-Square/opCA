@@ -5,6 +5,7 @@ import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import type { DatabaseInfo, LogEntry } from "../api/types";
 import { ActionResultBanner } from "../components/ResultBanner";
+import PageError from "../components/PageError";
 import { createActionResult } from "../utils/actionResult";
 import { createPublishFlow } from "../utils/publishFlow";
 import "../styles/pages/database.css";
@@ -126,9 +127,7 @@ function LogTab(props: { entries: () => LogEntry[]; loading: boolean }) {
 function StatisticsTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
-      <Show when={props.info.error}>
-        <p class="page-error" role="alert">{String(props.info.error)}</p>
-      </Show>
+      <PageError message={props.info.error} />
 
       <Show when={props.info()} fallback={<Spinner message="Loading…" />}>
         {(d) => (
@@ -146,9 +145,7 @@ function StatisticsTab(props: { info: Resource<DatabaseInfo> }) {
 function ConfigTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
-      <Show when={props.info.error}>
-        <p class="page-error" role="alert">{String(props.info.error)}</p>
-      </Show>
+      <PageError message={props.info.error} />
 
       <Show when={props.info()} fallback={<Spinner message="Loading…" />}>
         {(d) => (

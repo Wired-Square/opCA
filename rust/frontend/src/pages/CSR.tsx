@@ -12,6 +12,7 @@ import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
+import PageError from "../components/PageError";
 import { CERT_TYPES } from "../api/types";
 import type {
   CsrListItem,
@@ -346,9 +347,7 @@ export default function CSR() {
             <Spinner message="Loading CSRs..." />
           </Show>
 
-          <Show when={csrs.error}>
-            <p class="page-error" role="alert">{String(csrs.error)}</p>
-          </Show>
+          <PageError message={csrs.error} />
 
           <Show when={!csrs.loading && filteredCsrs().length === 0}>
             <p class="text-muted">No CSRs found.</p>
@@ -430,9 +429,7 @@ export default function CSR() {
                 rows={6}
               />
 
-              <Show when={importError()}>
-                <p class="page-error" role="alert">{importError()}</p>
-              </Show>
+              <PageError message={importError()} />
 
               <div class="form-actions">
                 <button
@@ -456,9 +453,7 @@ export default function CSR() {
             )}
           </Show>
 
-          <Show when={error()}>
-            <p class="page-error" role="alert">{error()}</p>
-          </Show>
+          <PageError message={error()} />
 
           <Show when={loadingDetail()}>
             <Spinner message="Fetching CSR details..." />
@@ -567,9 +562,7 @@ export default function CSR() {
               </Show>
             </div>
 
-            <Show when={createError()}>
-              <p class="page-error" role="alert">{createError()}</p>
-            </Show>
+            <PageError message={createError()} />
 
             <Show when={createResult()}>
               {(r) => (
@@ -635,9 +628,7 @@ export default function CSR() {
               </div>
             </Show>
 
-            <Show when={signError()}>
-              <p class="page-error" role="alert">{signError()}</p>
-            </Show>
+            <PageError message={signError()} />
 
             <Show when={!signResult() ? decoded() : null}>
               {(d) => (
@@ -775,9 +766,7 @@ export default function CSR() {
             </button>
           </div>
 
-          <Show when={inspectError()}>
-            <p class="page-error" role="alert">{inspectError()}</p>
-          </Show>
+          <PageError message={inspectError()} />
 
           <Show when={inspectResult()}>
             {(r) => (

@@ -25,6 +25,7 @@ import SendToVaultDialog from "../components/SendToVaultDialog";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
+import PageError from "../components/PageError";
 import { createSelection } from "../utils/selection";
 import type {
   BulkProfileResult,
@@ -690,9 +691,7 @@ export default function OpenVPN() {
       />
 
       {/* ── Feedback ───────────────────────────────────────────── */}
-      <Show when={error()}>
-        <p class="page-error" role="alert">{error()}</p>
-      </Show>
+      <PageError message={error()} />
       <Show when={success()}>
         <p class="page-success">{success()}</p>
       </Show>

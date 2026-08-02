@@ -14,7 +14,9 @@ import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import { ActionResultBanner } from "../components/ResultBanner";
 import UploadPrompt from "../components/UploadPrompt";
+import PageError from "../components/PageError";
 import { createActionResult } from "../utils/actionResult";
+import { createAction } from "../utils/action";
 import { createPublishFlow } from "../utils/publishFlow";
 import type { CrlInfo, InspectCrlResult } from "../api/types";
 import "../styles/pages/crl.css";
@@ -24,8 +26,8 @@ type Tab = "detail" | "inspect";
 export default function CRL() {
   const [info, { refetch, mutate }] = createResource<CrlInfo>(getCrlInfo);
   const [tab, setTab] = createSignal<Tab>("detail");
-  const [generating, setGenerating] = createSignal(false);
   const outcome = createActionResult();
+  const generate = createAction(outcome);
   const publish = createPublishFlow({
     upload: uploadCrl,
     success: "CRL uploaded to public store",
@@ -60,22 +62,19 @@ export default function CRL() {
     }
   });
 
-  async function handleGenerate() {
-    setGenerating(true);
-    outcome.clear();
+  function handleGenerate() {
     publish.dismiss();
-    try {
-      const generated = await generateCrl();
-      mutate(generated);
-      if (generated.crl_pem) setInspectPem(generated.crl_pem);
-      setInspectResult(null);
-      if (generated.has_public_store) publish.offer();
-      outcome.report(`CRL #${generated.crl_number ?? "?"} generated`);
-    } catch (e) {
-      outcome.report("Generate failed", e);
-    } finally {
-      setGenerating(false);
-    }
+    return generate.run(
+      { success: (crl) => `CRL #${crl.crl_number ?? "?"} generated`, failure: "Generate failed" },
+      async () => {
+        const generated = await generateCrl();
+        mutate(generated);
+        if (generated.crl_pem) setInspectPem(generated.crl_pem);
+        setInspectResult(null);
+        if (generated.has_public_store) publish.offer();
+        return generated;
+      },
+    );
   }
 
   function copyPem() {
@@ -127,8 +126,8 @@ export default function CRL() {
               {publish.uploading() ? "Uploading…" : "Upload CRL"}
             </button>
           </Show>
-          <button class="btn-primary" onClick={handleGenerate} disabled={generating()}>
-            {generating() ? "Generating…" : "Generate CRL"}
+          <button class="btn-primary" onClick={handleGenerate} disabled={generate.busy()}>
+            {generate.busy() ? "Generating…" : "Generate CRL"}
           </button>
         </div>
       </div>
@@ -153,9 +152,7 @@ export default function CRL() {
 
         <ActionResultBanner outcome={outcome} />
 
-        <Show when={info.error}>
-          <p class="page-error" role="alert">{String(info.error)}</p>
-        </Show>
+        <PageError message={info.error} />
 
         <Show when={info.loading}>
           <Spinner message="Loading…" />
@@ -244,9 +241,7 @@ export default function CRL() {
             </button>
           </div>
 
-          <Show when={inspectError()}>
-            <p class="page-error" role="alert">{inspectError()}</p>
-          </Show>
+          <PageError message={inspectError()} />
 
           <Show when={inspectResult()}>
             {(r) => (

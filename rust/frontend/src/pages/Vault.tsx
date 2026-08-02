@@ -11,6 +11,7 @@ import {
 import { getCaConfig } from "../api/ca";
 import Spinner from "../components/Spinner";
 import VaultPicker from "../components/VaultPicker";
+import PageError from "../components/PageError";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
@@ -397,9 +398,7 @@ export default function Vault() {
             <Show when={backingUp() && progressMsg()}>
               <Spinner message={progressMsg()!} />
             </Show>
-            <Show when={backupError()}>
-              <p class="page-error" role="alert">{backupError()}</p>
-            </Show>
+            <PageError message={backupError()} />
             <Show when={storeWarning()}>
               <p class="page-warning" role="alert">{storeWarning()}</p>
             </Show>
@@ -467,9 +466,7 @@ export default function Vault() {
             <Show when={restoring() && progressMsg()}>
               <Spinner message={progressMsg()!} />
             </Show>
-            <Show when={restoreError()}>
-              <p class="page-error" role="alert">{restoreError()}</p>
-            </Show>
+            <PageError message={restoreError()} />
             <Show when={restoreResult()}>
               {(r) => (
                 <div class="result-section">
@@ -534,9 +531,7 @@ export default function Vault() {
               </button>
             </div>
 
-            <Show when={infoError()}>
-              <p class="page-error" role="alert">{infoError()}</p>
-            </Show>
+            <PageError message={infoError()} />
 
             <Show when={loadingInfo()}>
               <Spinner message="Decrypting backup\u2026" />

@@ -3,7 +3,7 @@ use serde::Serialize;
 use tauri::State;
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::{self, Op, VaultInfo};
+use opca_core::op::{self, AccountInfo, Op, VaultInfo};
 
 use crate::state::AppState;
 
@@ -94,6 +94,13 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub async fn list_vaults(account: Option<String>) -> Result<Vec<VaultInfo>, String> {
     op::list_vaults_standalone(account.as_deref()).map_err(|e| e.to_string())
+}
+
+/// The accounts configured in the local `op` CLI, for the connect screen's
+/// account picker. Works signed out.
+#[tauri::command]
+pub async fn list_accounts() -> Result<Vec<AccountInfo>, String> {
+    op::list_accounts_standalone().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

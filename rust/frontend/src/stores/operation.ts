@@ -7,6 +7,7 @@ const operationLabels: Record<string, string> = {
   connect: "Connecting to vault\u2026",
   disconnect: "Disconnecting\u2026",
   list_vaults: "Listing vaults\u2026",
+  list_accounts: "Listing accounts\u2026",
   create_vault: "Creating vault\u2026",
   check_vault_state: "Checking vault\u2026",
 

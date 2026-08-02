@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { ActionResultController } from "./actionResult";
+import { createAction } from "./action";
 
 export interface PublishFlow {
   /** True while the upload is in flight — for the button label. */
@@ -32,28 +33,19 @@ interface PublishFlowOptions {
  * Holds state only — render the prompt with `components/UploadPrompt`.
  */
 export function createPublishFlow(options: PublishFlowOptions): PublishFlow {
-  const [uploading, setUploading] = createSignal(false);
   const [showPrompt, setShowPrompt] = createSignal(false);
-
-  async function handleUpload() {
-    setUploading(true);
-    options.outcome.clear();
-    try {
-      await options.upload();
-      setShowPrompt(false);
-      options.outcome.report(options.success);
-    } catch (e) {
-      options.outcome.report("Upload failed", e);
-    } finally {
-      setUploading(false);
-    }
-  }
+  const action = createAction(options.outcome);
 
   return {
-    uploading,
+    uploading: action.busy,
     showPrompt,
     offer: () => setShowPrompt(true),
     dismiss: () => setShowPrompt(false),
-    handleUpload,
+    // The prompt stays up on failure so the user can retry from it.
+    handleUpload: () =>
+      action.run({ success: options.success, failure: "Upload failed" }, async () => {
+        await options.upload();
+        setShowPrompt(false);
+      }),
   };
 }
