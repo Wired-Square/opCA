@@ -8,7 +8,6 @@ export interface AppStore {
   vault: string;
   account: string | null;
   loading: boolean;
-  error: string | null;
 }
 
 const [appState, setAppState] = createStore<AppStore>({
@@ -17,7 +16,6 @@ const [appState, setAppState] = createStore<AppStore>({
   vault: "",
   account: null,
   loading: false,
-  error: null,
 });
 
 /** Convenience: true when the vault contains a valid CA. */

@@ -6,10 +6,6 @@
   box-sizing: border-box;
 }
 
-.page-openvpn .page-header {
-  margin-bottom: 16px;
-}
-
 .page-openvpn .page-error,
 .page-openvpn .page-success {
   margin-top: 12px;

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { tauriInvoke } from "../api/tauri";
-import { appState } from "../stores/app";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -28,19 +27,15 @@ describe("tauriInvoke", () => {
     });
   });
 
-  it("sets app error state and throws on failure", async () => {
+  it("normalises a string rejection into an Error", async () => {
     mockInvoke.mockRejectedValueOnce("Vault not found");
 
     await expect(tauriInvoke("get_ca_info")).rejects.toThrow("Vault not found");
-    expect(appState.error).toBe("Vault not found");
   });
 
-  it("clears previous error on new invocation", async () => {
-    mockInvoke.mockRejectedValueOnce("first error");
-    await expect(tauriInvoke("get_ca_info")).rejects.toThrow();
+  it("normalises a non-string rejection too", async () => {
+    mockInvoke.mockRejectedValueOnce({ code: 42 });
 
-    mockInvoke.mockResolvedValueOnce("ok");
-    await tauriInvoke("get_ca_info");
-    expect(appState.error).toBeNull();
+    await expect(tauriInvoke("get_ca_info")).rejects.toThrow("[object Object]");
   });
 });

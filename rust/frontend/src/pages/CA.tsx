@@ -15,7 +15,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { CaInfo, CaConfig, RestoreResult, BackupInfoResult, StoreTestResults, AwsItemRef } from "../api/types";
 import { ActionResultBanner, ActionResultLine } from "../components/ResultBanner";
 import ResignCaDialog from "../components/ResignCaDialog";
+import UploadPrompt from "../components/UploadPrompt";
 import { createActionResult } from "../utils/actionResult";
+import { createPublishFlow } from "../utils/publishFlow";
 import "../styles/pages/ca.css";
 
 type Tab = "certificate" | "config" | "stores" | "init" | "restore" | "info";
@@ -27,10 +29,13 @@ export default function CA() {
 
   // Certificate-tab actions live up here so they can sit in the page header
   // beside the title, the way the CRL page does it.
-  const [uploading, setUploading] = createSignal(false);
   const [showResignDialog, setShowResignDialog] = createSignal(false);
-  const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
   const outcome = createActionResult();
+  const publish = createPublishFlow({
+    upload: uploadCaCert,
+    success: "Certificate uploaded to public store",
+    outcome,
+  });
 
   // Reading `.error` first: a resource getter rethrows, and the header reads
   // this before the tab body has gated on a loaded resource.
@@ -40,22 +45,8 @@ export default function CA() {
    * outlive the tab it belongs to. */
   function selectTab(next: Tab) {
     setTab(next);
-    setShowUploadPrompt(false);
+    publish.dismiss();
     outcome.clear();
-  }
-
-  async function handleUpload() {
-    setUploading(true);
-    outcome.clear();
-    try {
-      await uploadCaCert();
-      setShowUploadPrompt(false);
-      outcome.report("Certificate uploaded to public store");
-    } catch (e) {
-      outcome.report("Upload failed", e);
-    } finally {
-      setUploading(false);
-    }
   }
 
   function handleResigned(days: number) {
@@ -63,7 +54,7 @@ export default function CA() {
     outcome.report(`CA certificate re-signed for ${days} days`);
     // Re-signing does not publish, so the store still holds the old
     // certificate — same gap the CRL page closes after Generate.
-    if (hasPublicStore()) setShowUploadPrompt(true);
+    if (hasPublicStore()) publish.offer();
   }
 
   return (
@@ -76,8 +67,8 @@ export default function CA() {
               Re-sign Certificate
             </button>
             <Show when={hasPublicStore()}>
-              <button class="btn-ghost" onClick={handleUpload} disabled={uploading()}>
-                {uploading() ? "Uploading…" : "Upload Certificate"}
+              <button class="btn-ghost" onClick={publish.handleUpload} disabled={publish.uploading()}>
+                {publish.uploading() ? "Uploading…" : "Upload Certificate"}
               </button>
             </Show>
           </div>
@@ -116,19 +107,10 @@ export default function CA() {
       </div>
 
       <Show when={tab() === "certificate"}>
-        <Show when={showUploadPrompt()}>
-          <div class="upload-prompt">
-            <span>Upload the re-signed certificate to the public store?</span>
-            <div class="upload-actions">
-              <button class="btn-primary btn-sm" onClick={handleUpload} disabled={uploading()}>
-                {uploading() ? "Uploading…" : "Upload"}
-              </button>
-              <button class="btn-ghost btn-sm" onClick={() => setShowUploadPrompt(false)}>
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </Show>
+        <UploadPrompt
+          flow={publish}
+          message="Upload the re-signed certificate to the public store?"
+        />
 
         <ActionResultBanner outcome={outcome} />
 

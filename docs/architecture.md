@@ -343,8 +343,8 @@ A single-page SolidJS app. Key conventions:
   with an error banner.
 - [api/](../rust/frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
-  [api/tauri.ts](../rust/frontend/src/api/tauri.ts). `tauriInvoke`
-  centralises error surfacing and the in-flight-operation indicator — tracked
+  [api/tauri.ts](../rust/frontend/src/api/tauri.ts). `tauriInvoke` normalises
+  the rejection to an `Error` and tracks the in-flight operation — kept
   as a stack in [stores/operation.ts](../rust/frontend/src/stores/operation.ts)
   (the side-nav shows the most recent op and never blanks mid-flight, and a
   finishing background task can't clear a running foreground one). `withLock()`
@@ -359,14 +359,39 @@ A single-page SolidJS app. Key conventions:
   per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
   `Modal` dialogs reused across those pages.
 
+### Publishing to a store
+
+Generating a CRL, re-signing the CA and mutating the database all leave the
+copy in the store stale — the backend does not upload as a side effect. That
+follow-up is one mechanism, not three:
+[utils/publishFlow.ts](../rust/frontend/src/utils/publishFlow.ts)'s
+`createPublishFlow({ upload, success, outcome })` owns the in-flight flag and
+the offer-to-upload state, and reports through the page's existing banner
+controller rather than a second one — the CRL page narrates generate *and*
+upload in one place. [components/UploadPrompt.tsx](../rust/frontend/src/components/UploadPrompt.tsx)
+renders the amber prompt from it. Same state-here / rendering-there split as
+`createActionResult` and `ResultBanner`.
+
+### When a page throws
+
+Resource getters rethrow on read, so a failed load would otherwise blank the
+window. [components/RouteErrorBoundary.tsx](../rust/frontend/src/components/RouteErrorBoundary.tsx)
+wraps the route outlet *inside* the layout, so the sidebar and header stay
+usable and the user can navigate away — which recovers on its own, because the
+router rebuilds the outlet. "Try again" is for retrying in place. This catches
+render-time throws only; failures inside async event handlers, which is where
+nearly every command lives, are reported by the page through its result banner.
+
 ### Confirming destructive actions
 
 Anything irreversible goes through a `Modal`, never a bare button. `ConfirmDialog`
 is the generic gate: it owns the acting/error state, renders a `danger` confirm,
 closes only on success, and takes a `children` slot plus a `canConfirm` predicate
 for callers that need their own field. Bulk cert and OpenVPN actions use it with
-a reason field; `ResignCaDialog` uses it with a validity-days field. `RevokeCertDialog`
-and `IgnoreCertDialog` predate it and still hand-roll the same shape.
+a reason field; `ResignCaDialog` uses it with a validity-days field;
+`RevokeCertDialog` and `IgnoreCertDialog` wrap it with a `certLabel` message.
+Every wrapper is prop-passing only, so `ConfirmDialog`'s own test owns the
+shared behaviour and each wrapper's test asserts just its wiring.
 
 Re-signing the CA earns a confirmation despite keeping the key, subject and
 serial (so issued certificates still chain): `re_sign_ca` overwrites the vault

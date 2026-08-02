@@ -13,7 +13,9 @@ import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import { ActionResultBanner } from "../components/ResultBanner";
+import UploadPrompt from "../components/UploadPrompt";
 import { createActionResult } from "../utils/actionResult";
+import { createPublishFlow } from "../utils/publishFlow";
 import type { CrlInfo, InspectCrlResult } from "../api/types";
 import "../styles/pages/crl.css";
 
@@ -23,10 +25,13 @@ export default function CRL() {
   const [info, { refetch, mutate }] = createResource<CrlInfo>(getCrlInfo);
   const [tab, setTab] = createSignal<Tab>("detail");
   const [generating, setGenerating] = createSignal(false);
-  const [uploading, setUploading] = createSignal(false);
   const outcome = createActionResult();
+  const publish = createPublishFlow({
+    upload: uploadCrl,
+    success: "CRL uploaded to public store",
+    outcome,
+  });
   const [copied, markCopied] = createCopiedSignal();
-  const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
   const [backfilling, setBackfilling] = createSignal(false);
 
   const [inspectPem, setInspectPem] = createSignal("");
@@ -58,32 +63,18 @@ export default function CRL() {
   async function handleGenerate() {
     setGenerating(true);
     outcome.clear();
-    setShowUploadPrompt(false);
+    publish.dismiss();
     try {
       const generated = await generateCrl();
       mutate(generated);
       if (generated.crl_pem) setInspectPem(generated.crl_pem);
       setInspectResult(null);
-      if (generated.has_public_store) setShowUploadPrompt(true);
+      if (generated.has_public_store) publish.offer();
       outcome.report(`CRL #${generated.crl_number ?? "?"} generated`);
     } catch (e) {
       outcome.report("Generate failed", e);
     } finally {
       setGenerating(false);
-    }
-  }
-
-  async function handleUpload() {
-    setUploading(true);
-    outcome.clear();
-    try {
-      await uploadCrl();
-      setShowUploadPrompt(false);
-      outcome.report("CRL uploaded to public store");
-    } catch (e) {
-      outcome.report("Upload failed", e);
-    } finally {
-      setUploading(false);
     }
   }
 
@@ -132,8 +123,8 @@ export default function CRL() {
             {info.loading ? "Loading…" : "Refresh"}
           </button>
           <Show when={info()?.has_public_store}>
-            <button class="btn-ghost" onClick={handleUpload} disabled={uploading()}>
-              {uploading() ? "Uploading…" : "Upload CRL"}
+            <button class="btn-ghost" onClick={publish.handleUpload} disabled={publish.uploading()}>
+              {publish.uploading() ? "Uploading…" : "Upload CRL"}
             </button>
           </Show>
           <button class="btn-primary" onClick={handleGenerate} disabled={generating()}>
@@ -158,19 +149,7 @@ export default function CRL() {
       </div>
 
       <div class="crl-scroll">
-        <Show when={showUploadPrompt()}>
-          <div class="upload-prompt">
-            <span>Upload CRL to public store?</span>
-            <div class="upload-actions">
-              <button class="btn-primary btn-sm" onClick={handleUpload} disabled={uploading()}>
-                {uploading() ? "Uploading…" : "Upload"}
-              </button>
-              <button class="btn-ghost btn-sm" onClick={() => setShowUploadPrompt(false)}>
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </Show>
+        <UploadPrompt flow={publish} message="Upload CRL to public store?" />
 
         <ActionResultBanner outcome={outcome} />
 

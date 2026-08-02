@@ -6,10 +6,6 @@
   box-sizing: border-box;
 }
 
-.page-certs .page-header {
-  margin-bottom: 16px;
-}
-
 .status-filter {
   padding: 6px 10px;
   background: var(--bg-elevated);

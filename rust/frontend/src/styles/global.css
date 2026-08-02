@@ -181,7 +181,7 @@ input::placeholder {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   flex-shrink: 0;
 }
 

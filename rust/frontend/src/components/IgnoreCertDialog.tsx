@@ -1,6 +1,5 @@
-import { Show, createSignal, createEffect } from "solid-js";
 import { ignoreCert } from "../api/certs";
-import Modal from "./Modal";
+import ConfirmDialog from "./ConfirmDialog";
 import { certLabel } from "../api/certActions";
 
 interface IgnoreCertDialogProps {
@@ -18,69 +17,28 @@ interface IgnoreCertDialogProps {
  * until the field is non-empty.
  */
 export default function IgnoreCertDialog(props: IgnoreCertDialogProps) {
-  const [reason, setReason] = createSignal("");
-  const [acting, setActing] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
-
-  // Reset the form whenever the dialog (re)opens.
-  createEffect(() => {
-    if (props.open) {
-      setReason("");
-      setError(null);
-    }
-  });
-
-  async function handleConfirm() {
-    const serial = props.serial;
-    const trimmed = reason().trim();
-    if (!serial || !trimmed) return;
-    setActing(true);
-    setError(null);
-    try {
-      await ignoreCert(serial, trimmed);
-      props.onDone();
-      props.onClose();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setActing(false);
-    }
-  }
-
   return (
-    <Modal open={props.open} onClose={props.onClose} title="Ignore Certificate">
-      <p class="confirm-message">
-        Stop counting{" "}
-        <span class="mono">{certLabel(props)}</span>{" "}
-        toward expiry alerts. Provide a reason for the audit trail.
-      </p>
-      <div class="form-group">
-        <label class="form-label">Reason</label>
-        <input
-          type="text"
-          class="form-input"
-          value={reason()}
-          onInput={(e) => setReason(e.currentTarget.value)}
-          placeholder="Why is this being ignored?"
-          disabled={acting()}
-          autofocus
-        />
-      </div>
-      <Show when={error()}>
-        <p class="page-error" role="alert">{error()}</p>
-      </Show>
-      <div class="form-actions">
-        <button
-          class="btn-primary"
-          onClick={handleConfirm}
-          disabled={acting() || !reason().trim()}
-        >
-          {acting() ? "Ignoring…" : "Confirm Ignore"}
-        </button>
-        <button class="btn-ghost" onClick={props.onClose} disabled={acting()}>
-          Cancel
-        </button>
-      </div>
-    </Modal>
+    <ConfirmDialog
+      open={props.open}
+      title="Ignore Certificate"
+      message={
+        <>
+          Stop counting <span class="mono">{certLabel(props)}</span> toward
+          expiry alerts. Provide a reason for the audit trail.
+        </>
+      }
+      confirmLabel="Confirm Ignore"
+      actingLabel="Ignoring…"
+      requireReason
+      reasonPlaceholder="Why is this being ignored?"
+      canConfirm={() => !!props.serial}
+      onClose={props.onClose}
+      onConfirm={async (reason) => {
+        const serial = props.serial;
+        if (!serial) return;
+        await ignoreCert(serial, reason);
+        props.onDone();
+      }}
+    />
   );
 }

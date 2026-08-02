@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A page whose data fails to load no longer blanks the window. The failure is
+  caught and shown in the content area with a **Try again**, leaving the sidebar
+  and header usable so you can navigate elsewhere. Several pages — OpenVPN, the
+  Database activity log, Log — rendered nothing at all on a failed load.
+- Re-opening the **Revoke Certificate** dialog after a failed revoke no longer
+  shows the previous error.
 - The Dashboard's **Regenerate & Upload CRL** left a stale "CRL expired" row on
   screen when the generate succeeded but the upload failed, giving no hint that
   a new CRL had already been written to the vault. It now refreshes either way

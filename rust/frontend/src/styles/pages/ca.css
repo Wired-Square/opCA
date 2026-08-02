@@ -6,10 +6,6 @@
   box-sizing: border-box;
 }
 
-.page-ca .page-header {
-  margin-bottom: 16px;
-}
-
 .store-test-results {
   margin-top: 16px;
   display: grid;

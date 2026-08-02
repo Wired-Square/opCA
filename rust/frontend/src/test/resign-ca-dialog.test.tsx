@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { createSignal } from "solid-js";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import ResignCaDialog from "../components/ResignCaDialog";
+
+/** A thin wrapper over ConfirmDialog — the acting/error/reset behaviour is
+ * covered in confirm-dialog.test. What is specific here is the days field. */
 
 const resignCa = vi.hoisted(() => vi.fn());
 vi.mock("../api/ca", async (actual) => ({
@@ -11,12 +14,7 @@ vi.mock("../api/ca", async (actual) => ({
 
 const confirmButton = () => screen.getByRole("button", { name: /Re-sign CA/ });
 const daysInput = () => screen.getByLabelText("New validity (days)") as HTMLInputElement;
-
-const setDays = (value: string) => {
-  const input = daysInput();
-  input.value = value;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-};
+const setDays = (value: string) => fireEvent.input(daysInput(), { target: { value } });
 
 function mount() {
   const onClose = vi.fn();
@@ -54,19 +52,7 @@ describe("ResignCaDialog", () => {
     expect(confirmButton()).not.toBeDisabled();
   });
 
-  it("keeps the dialog open and shows the error when re-sign fails", async () => {
-    // The Tauri layer rejects with a plain string, not an Error.
-    resignCa.mockImplementation(() => Promise.reject("vault locked"));
-    const { onDone, onClose } = mount();
-
-    confirmButton().click();
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("vault locked");
-    expect(onDone).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it("resets the days field and any error when reopened", async () => {
+  it("resets the days field when reopened", async () => {
     resignCa.mockImplementation(() => Promise.reject("vault locked"));
     const [open, setOpen] = createSignal(true);
     render(() => <ResignCaDialog open={open()} onClose={() => setOpen(false)} onDone={() => {}} />);
@@ -79,6 +65,5 @@ describe("ResignCaDialog", () => {
     setOpen(true);
 
     expect(daysInput().value).toBe("3650");
-    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

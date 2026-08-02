@@ -1,5 +1,6 @@
 import { Show, For, createSignal, createMemo, createEffect } from "solid-js";
 import Modal from "./Modal";
+import PageError from "./PageError";
 import VpnClientPicker from "./VpnClientPicker";
 import SendToVault from "./SendToVault";
 import {
@@ -239,9 +240,7 @@ export default function AddProfileModal(props: AddProfileModalProps) {
           <span>Generate Profile</span>
         </label>
 
-        <Show when={error()}>
-          <p class="page-error" role="alert">{error()}</p>
-        </Show>
+        <PageError message={error()} />
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleAdd} disabled={acting()}>

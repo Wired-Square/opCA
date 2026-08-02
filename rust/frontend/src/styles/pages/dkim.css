@@ -6,10 +6,6 @@
   box-sizing: border-box;
 }
 
-.page-dkim .page-header {
-  margin-bottom: 16px;
-}
-
 .page-dkim .page-error,
 .page-dkim .page-success {
   margin-top: 12px;

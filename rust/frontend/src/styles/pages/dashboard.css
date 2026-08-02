@@ -13,15 +13,6 @@
   margin: 0;
 }
 
-.dashboard-error {
-  color: var(--error);
-  font-size: 0.875rem;
-  padding: 8px 12px;
-  background: rgba(255, 69, 58, 0.1);
-  border-radius: 6px;
-  margin-bottom: 16px;
-}
-
 .dashboard-notice {
   padding: 16px 20px;
   background: var(--bg-elevated);

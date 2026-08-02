@@ -4,6 +4,7 @@ import { appState } from "./stores/app";
 import { initOperationListener } from "./stores/operation";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import "./styles/pages/app.css";
 
 /** Routes accessible when the vault is empty (no CA). */
@@ -48,15 +49,15 @@ export default function App(props: ParentProps) {
     }
   });
 
+  // Inside the layout, so a page crash leaves the sidebar and header usable.
+  const outlet = () => <RouteErrorBoundary>{props.children}</RouteErrorBoundary>;
+
   return (
-    <Show
-      when={!isConnectPage()}
-      fallback={<>{props.children}</>}
-    >
+    <Show when={!isConnectPage()} fallback={outlet()}>
       <Sidebar />
       <div class="main-area">
         <Header />
-        <main class="content">{props.children}</main>
+        <main class="content">{outlet()}</main>
       </div>
 
     </Show>

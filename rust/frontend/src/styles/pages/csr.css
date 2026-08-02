@@ -6,10 +6,6 @@
   box-sizing: border-box;
 }
 
-.page-csr .page-header {
-  margin-bottom: 16px;
-}
-
 .page-csr .page-error,
 .page-csr .page-success {
   margin-top: 12px;

@@ -6,10 +6,6 @@
   overflow: hidden;
 }
 
-.page-log .page-header {
-  flex-shrink: 0;
-}
-
 .log-path {
   font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
   font-size: 0.75rem;

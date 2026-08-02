@@ -4,6 +4,7 @@ import { appState } from "../stores/app";
 import { getDashboard } from "../api/dashboard";
 import { generateCrl, uploadCrl } from "../api/crl";
 import StatusBubble, { type StatusTone } from "../components/StatusBubble";
+import PageError from "../components/PageError";
 import { ActionResultBanner } from "../components/ResultBanner";
 import { createActionResult } from "../utils/actionResult";
 import type {
@@ -91,9 +92,7 @@ export default function Dashboard() {
         </button>
       </div>
 
-      <Show when={data.error}>
-        <p class="dashboard-error" role="alert">{String(data.error)}</p>
-      </Show>
+      <PageError message={data.error} />
 
       <ActionResultBanner outcome={outcome} />
 

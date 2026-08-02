@@ -6,6 +6,7 @@ import SearchInput from "../components/SearchInput";
 import type { DatabaseInfo, LogEntry } from "../api/types";
 import { ActionResultBanner } from "../components/ResultBanner";
 import { createActionResult } from "../utils/actionResult";
+import { createPublishFlow } from "../utils/publishFlow";
 import "../styles/pages/database.css";
 
 type Tab = "log" | "statistics" | "config";
@@ -15,8 +16,12 @@ export default function Database() {
   const [info, { refetch }] = createResource<DatabaseInfo>(getDatabaseInfo);
   const [log, { refetch: refetchLog }] = createResource<LogEntry[]>(getActionLog);
   const [logSearch, setLogSearch] = createSignal("");
-  const [uploading, setUploading] = createSignal(false);
   const outcome = createActionResult();
+  const publish = createPublishFlow({
+    upload: uploadCaDatabase,
+    success: "Database uploaded to private store.",
+    outcome,
+  });
 
   const filteredLog = () => {
     const items = log() ?? [];
@@ -34,18 +39,11 @@ export default function Database() {
     refetchLog();
   }
 
-  async function handleUpload() {
-    setUploading(true);
-    outcome.clear();
-    try {
-      await uploadCaDatabase();
-      outcome.report("Database uploaded to private store.");
-    } catch (e) {
-      outcome.report("Upload failed", e);
-    } finally {
-      refetchLog();
-      setUploading(false);
-    }
+  // The upload writes an audit entry either way, so refresh the log once it
+  // settles. `publish.handleUpload` reports failures itself and never throws.
+  async function uploadAndRefreshLog() {
+    await publish.handleUpload();
+    refetchLog();
   }
 
   return (
@@ -60,8 +58,8 @@ export default function Database() {
             {info.loading ? "Loading\u2026" : "Refresh"}
           </button>
           <Show when={hasPrivateStore()}>
-            <button class="btn-ghost" onClick={handleUpload} disabled={uploading()}>
-              {uploading() ? "Uploading\u2026" : "Upload Database"}
+            <button class="btn-ghost" onClick={uploadAndRefreshLog} disabled={publish.uploading()}>
+              {publish.uploading() ? "Uploading\u2026" : "Upload Database"}
             </button>
           </Show>
         </div>

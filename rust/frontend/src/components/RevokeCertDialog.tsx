@@ -1,6 +1,5 @@
-import { Show, createSignal } from "solid-js";
 import { revokeCert } from "../api/certs";
-import Modal from "./Modal";
+import ConfirmDialog from "./ConfirmDialog";
 import { certLabel } from "../api/certActions";
 
 interface RevokeCertDialogProps {
@@ -18,42 +17,27 @@ interface RevokeCertDialogProps {
  * single element.
  */
 export default function RevokeCertDialog(props: RevokeCertDialogProps) {
-  const [acting, setActing] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
-
-  async function handleConfirm() {
-    const serial = props.serial;
-    if (!serial) return;
-    setActing(true);
-    setError(null);
-    try {
-      await revokeCert(serial);
-      props.onDone();
-      props.onClose();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setActing(false);
-    }
-  }
-
   return (
-    <Modal open={props.open} onClose={props.onClose} title="Revoke Certificate">
-      <p class="confirm-message">
-        Revoke <span class="mono">{certLabel(props)}</span>? This cannot
-        be undone.
-      </p>
-      <Show when={error()}>
-        <p class="page-error" role="alert">{error()}</p>
-      </Show>
-      <div class="form-actions">
-        <button class="btn-danger" onClick={handleConfirm} disabled={acting()}>
-          {acting() ? "Revoking…" : "Revoke"}
-        </button>
-        <button class="btn-ghost" onClick={props.onClose} disabled={acting()}>
-          Cancel
-        </button>
-      </div>
-    </Modal>
+    <ConfirmDialog
+      open={props.open}
+      title="Revoke Certificate"
+      message={
+        <>
+          Revoke <span class="mono">{certLabel(props)}</span>? This cannot be
+          undone.
+        </>
+      }
+      confirmLabel="Revoke"
+      actingLabel="Revoking…"
+      danger
+      canConfirm={() => !!props.serial}
+      onClose={props.onClose}
+      onConfirm={async () => {
+        const serial = props.serial;
+        if (!serial) return;
+        await revokeCert(serial);
+        props.onDone();
+      }}
+    />
   );
 }

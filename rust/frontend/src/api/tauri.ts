@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { setAppState } from "../stores/app";
 import { beginOp, endOp, isVisibleOp } from "../stores/operation";
 
 /**
  * Typed wrapper around Tauri's invoke.
- * Sets app-level error state on failure and tracks the active operation
- * in the sidebar status indicator.
+ * Normalises the rejection to an `Error` with a clean message and tracks the
+ * active operation in the sidebar status indicator. Callers surface the
+ * failure themselves — through a result banner or a page-error line.
  */
 export async function tauriInvoke<T>(
   cmd: string,
@@ -13,13 +13,10 @@ export async function tauriInvoke<T>(
 ): Promise<T> {
   const visible = isVisibleOp(cmd);
   try {
-    setAppState("error", null);
     if (visible) beginOp(cmd);
     return await invoke<T>(cmd, args);
   } catch (err) {
-    const message = typeof err === "string" ? err : String(err);
-    setAppState("error", message);
-    throw new Error(message);
+    throw new Error(typeof err === "string" ? err : String(err));
   } finally {
     if (visible) endOp(cmd);
   }

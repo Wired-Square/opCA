@@ -1,6 +1,7 @@
 import { Show, createSignal, createEffect } from "solid-js";
 import type { JSX } from "solid-js";
 import Modal from "./Modal";
+import PageError from "./PageError";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -75,9 +76,7 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
         </div>
       </Show>
       {props.children}
-      <Show when={error()}>
-        <p class="page-error" role="alert">{error()}</p>
-      </Show>
+      <PageError message={error()} />
       <div class="form-actions">
         <button
           class={props.danger ? "btn-danger" : "btn-primary"}

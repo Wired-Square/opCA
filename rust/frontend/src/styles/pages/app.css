@@ -11,3 +11,9 @@
   overflow-y: auto;
   background: var(--bg-primary);
 }
+
+/* Shown by RouteErrorBoundary when a page throws; padding/spacing come from
+   the .p-4 and .mb-3 utilities. */
+.page-crash {
+  max-width: 640px;
+}
