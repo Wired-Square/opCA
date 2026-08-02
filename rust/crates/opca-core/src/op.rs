@@ -101,12 +101,19 @@ impl CommandRunner for ShellRunner {
             }
         }
 
+        // Drain both pipes on their own threads. Polling `try_wait` without
+        // reading would deadlock as soon as a response exceeds the OS pipe
+        // buffer (~64 KiB) — `op item list` on a large account is well past
+        // that — because the child blocks writing and so never exits.
+        let stdout_reader = drain(child.stdout.take());
+        let stderr_reader = drain(child.stderr.take());
+
         let timeout = Duration::from_secs(OP_TIMEOUT_SECS);
         let start = Instant::now();
 
-        loop {
+        let status = loop {
             match child.try_wait() {
-                Ok(Some(_status)) => break,
+                Ok(Some(status)) => break status,
                 Ok(None) => {
                     if start.elapsed() > timeout {
                         let _ = child.kill();
@@ -120,20 +127,22 @@ impl CommandRunner for ShellRunner {
                 }
                 Err(e) => return Err(OpcaError::from(e)),
             }
-        }
+        };
 
-        let output = child.wait_with_output().map_err(OpcaError::from)?;
+        // The readers finish as soon as the child's pipes close on exit.
+        let stdout = stdout_reader.join().unwrap_or_default();
+        let stderr = stderr_reader.join().unwrap_or_default();
 
         let result = CommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&stdout).to_string(),
+            stderr: String::from_utf8_lossy(&stderr).to_string(),
+            success: status.success(),
         };
 
         if result.success {
             debug!("[op] command succeeded in {:.1}s", start.elapsed().as_secs_f64());
         } else {
-            error!("[op] command failed (exit {:?}): {} {}", output.status.code(), bin, redacted.join(" "));
+            error!("[op] command failed (exit {:?}): {} {}", status.code(), bin, redacted.join(" "));
             if !result.stderr.is_empty() {
                 error!("[op] stderr: {}", result.stderr.trim());
             }
@@ -141,6 +150,19 @@ impl CommandRunner for ShellRunner {
 
         Ok(result)
     }
+}
+
+/// Read a child pipe to EOF on its own thread.
+fn drain<P: std::io::Read + Send + 'static>(
+    pipe: Option<P>,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    })
 }
 
 // ------------------------------------------------------------------
