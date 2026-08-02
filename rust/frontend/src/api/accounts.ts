@@ -8,11 +8,11 @@ export async function listAccounts(): Promise<AccountInfo[]> {
 /**
  * What to put in the Account field when the user picks `account`.
  *
- * `op --account` takes the sign-in address, which is what an operator
- * recognises — but it rejects one shared by two configured accounts, so only
- * those fall back to the unambiguous UUID. Preferring the address also keeps
- * `settings.json`'s per-account AWS credential key stable, since that map is
- * keyed by whatever ends up in this field.
+ * Purely about what `op --account` can resolve: it takes the sign-in address,
+ * which is what an operator recognises, but rejects one shared by two
+ * configured accounts — so only those fall back to the unambiguous UUID.
+ * Which form ends up here no longer affects local settings; `settings.rs`
+ * resolves all of them to one account (see its `account_key`).
  */
 export function accountValue(account: AccountInfo, all: AccountInfo[]): string {
   const shared = all.filter((a) => a.url === account.url).length > 1;

@@ -63,6 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The GUI and the CLI now agree on which AWS credential you have selected.**
+  The selection is stored per 1Password account, but the account was identified
+  by whichever string was passed to `op --account` — a shorthand, a sign-in
+  address and a UUID all naming one account gave three separate entries, and the
+  GUI and CLI do not pass the same one. So an item picked in **CA → Stores**
+  could be invisible to `opca aws show`, and vice versa. Every form now resolves
+  to one account, and existing entries merge the first time the settings file is
+  read — no need to re-pick. `opca aws show` also names the account by email and
+  sign-in address rather than echoing back whatever you typed.
 - A page whose data fails to load no longer blanks the window. The failure is
   caught and shown in the content area with a **Try again**, leaving the sidebar
   and header usable so you can navigate elsewhere. Several pages — OpenVPN, the

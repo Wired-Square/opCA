@@ -217,8 +217,28 @@ everyone. Several operators typically share one CA while each holds their own
 AWS access key, so the credential *choice* cannot live there. It is instead
 kept locally by [settings.rs](../rust/crates/opca-core/src/settings.rs) at the
 platform config directory (macOS: `~/Library/Application Support/opca/
-settings.json`), keyed by 1Password account shorthand so an operator working
-across tenants keeps a separate selection per tenant.
+settings.json`), keyed per account so an operator working across tenants keeps
+a separate selection per tenant.
+
+The key is the account's **`user_uuid`**, not the identifier the user supplied.
+`op --account` accepts a shorthand, a sign-in address, an account UUID or a user
+UUID for the same account, and the GUI and CLI pass different ones — keying on
+the raw string gave one operator several entries, so a selection made in the GUI
+was invisible to `opca aws show`. `account_key` resolves in two steps: match the
+identifier against `op account list` (local, no sign-in, memoised), and failing
+that ask `op account get --account <identifier>`, which resolves anything `op`
+itself accepts — notably a shorthand, which `op account list` does not report.
+When no account was given at all, `op whoami` says which one is signed in.
+Anything that still resolves to nothing falls back to the lowercased string, so
+resolution never fails, it only stops converging; an address shared by two
+accounts is deliberately in that group, since `op --account` rejects it too.
+
+Entries written under an older identifier are rekeyed when the file is read
+(`migrate`, which puts every existing key back through the same resolution), so
+nobody has to re-pick; the file itself is rewritten on the next save. Keying on
+`user_uuid` rather than the tenant because the chosen item lives in a vault only
+that user can read, and not on the address because a shared one names two
+accounts.
 
 Resolution is a plain `op item get <item_id> [--account <acct>]`, reading the
 fields `access key id`, `secret access key`, and optionally `session token` and
@@ -349,8 +369,8 @@ A single-page SolidJS app. Key conventions:
   sign-in address, falling back to that account's UUID when two configured
   accounts share an address (see `accountValue` in
   [api/accounts.ts](../rust/frontend/src/api/accounts.ts)) — `op --account`
-  cannot resolve a shared address, and the address is also what keys
-  `settings.json` below.
+  cannot resolve a shared address. Which form it sends is purely an `op`
+  concern; `settings.rs` canonicalises them all (see AWS credentials above).
 - [api/](../rust/frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
   [api/tauri.ts](../rust/frontend/src/api/tauri.ts). `tauriInvoke` normalises

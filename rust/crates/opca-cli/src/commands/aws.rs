@@ -61,10 +61,14 @@ fn list(app: &AppContext<ShellRunner>, pattern: Option<String>) -> Result<(), Op
 
 fn show(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
     let op = app.op()?;
-    let account = op.account().unwrap_or("(default)");
+    // Name the account as the operator would recognise it: this line is where
+    // someone works out why the GUI's selection isn't showing up here.
+    let account = settings::account_label(op.account())
+        .or_else(|| op.account().map(String::from))
+        .unwrap_or_else(|| "(default)".to_string());
 
     output::title("Selected AWS credential");
-    output::info("Account", account);
+    output::info("Account", &account);
 
     match settings::aws_credential_item(op.account()) {
         Some(item_id) => {

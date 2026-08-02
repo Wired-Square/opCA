@@ -190,6 +190,38 @@ pub struct AccountInfo {
     pub user_uuid: String,
 }
 
+/// One account, from `op account get`.
+///
+/// `id` is the account UUID. Worth having alongside [`AccountInfo`] because
+/// `op` resolves the `--account` filter itself, so this accepts identifiers
+/// `op account list` gives no way to match — a shorthand above all, which it
+/// does not report. It errors when the filter names no account, or several.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct AccountRef {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub domain: String,
+}
+
+/// The account `op` is currently signed in to, from `op whoami`.
+///
+/// Every field defaults: the payload varies by `op` version and integration
+/// type, and callers need only `user_uuid` — an empty one reads as "could not
+/// tell", which is a recoverable answer everywhere this is used.
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
+pub struct WhoAmI {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub account_uuid: String,
+    #[serde(default)]
+    pub user_uuid: String,
+}
+
 /// Action to take when storing an item or document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreAction {
@@ -665,9 +697,10 @@ pub fn check_cli_available() -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Run a read-only `op` listing without an existing `Op` instance, for the
-/// connect screen's pickers — they run before the user has chosen a vault.
-fn list_standalone<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<Vec<T>, OpcaError> {
+/// Run a read-only `op` command without an existing `Op` instance and parse its
+/// JSON — for callers that have no vault to scope to, such as the connect
+/// screen's pickers and the settings account resolver.
+fn op_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<T, OpcaError> {
     let bin = check_cli_available().ok_or(OpcaError::CliNotFound)?;
 
     let out = ShellRunner.run(&bin, args, None, None)?;
@@ -687,7 +720,7 @@ pub fn list_vaults_standalone(account: Option<&str>) -> Result<Vec<VaultInfo>, O
         args.push("--account");
         args.push(acct);
     }
-    list_standalone(&args)
+    op_json(&args)
 }
 
 /// Run `op account list`.
@@ -695,7 +728,24 @@ pub fn list_vaults_standalone(account: Option<&str>) -> Result<Vec<VaultInfo>, O
 /// Unlike `op vault list` this reads the CLI's local configuration, so it
 /// works before the user has signed in.
 pub fn list_accounts_standalone() -> Result<Vec<AccountInfo>, OpcaError> {
-    list_standalone(&["account", "list", "--format=json"])
+    op_json(&["account", "list", "--format=json"])
+}
+
+/// Run `op account get`, letting `op` resolve the identifier.
+///
+/// Errors when `identifier` names no configured account or more than one, so
+/// an ambiguous sign-in address fails here exactly as it would on any other
+/// `--account` flag.
+pub fn get_account_standalone(identifier: &str) -> Result<AccountRef, OpcaError> {
+    op_json(&["account", "get", "--account", identifier, "--format=json"])
+}
+
+/// Run `op whoami`, reporting which account the CLI is currently signed in to.
+///
+/// Used to identify the account when none was given explicitly. Requires a
+/// live session, unlike [`list_accounts_standalone`].
+pub fn whoami_standalone() -> Result<WhoAmI, OpcaError> {
+    op_json(&["whoami", "--format=json"])
 }
 
 /// Map stderr/stdout text to a specific `OpcaError` variant.

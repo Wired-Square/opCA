@@ -26,7 +26,8 @@ use crate::state::AppState;
 pub struct AwsCredentialSelection {
     /// Selected item ID, or `None` when the user has not chosen one yet.
     pub item_id: Option<String>,
-    /// The 1Password account the selection applies to.
+    /// The 1Password account the selection applies to, named as the operator
+    /// would recognise it — the connection may carry an opaque UUID.
     pub account: Option<String>,
 }
 
@@ -55,7 +56,8 @@ pub async fn get_aws_credential(
     state.with_op(|op| {
         Ok(AwsCredentialSelection {
             item_id: settings::aws_credential_item(op.account()),
-            account: op.account().map(String::from),
+            account: settings::account_label(op.account())
+                .or_else(|| op.account().map(String::from)),
         })
     })
 }

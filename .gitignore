@@ -3,7 +3,6 @@
 .vscode/
 CLAUDE.md
 .claude/
-docs/local/
 
 # Python
 *.pyc
