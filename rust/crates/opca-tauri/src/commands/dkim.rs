@@ -9,7 +9,6 @@ use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::op::StoreAction;
 use opca_core::services::database::DkimRecord;
 use opca_core::services::route53::{format_txt_value, split_txt_value, Route53Client};
-use opca_core::services::storage::get_aws_credentials;
 
 use crate::commands::dto::{
     CreateDkimRequest, CreateDkimResult, DkimKeyDetail, DkimKeyItem, DkimRoute53Result,
@@ -617,9 +616,11 @@ pub async fn deploy_dkim_route53(
         Ok(record.trim().to_string())
     })?;
 
-    let creds = state.with_op(|op| {
-        get_aws_credentials(op.runner(), op.account()).map_err(|e| e.to_string())
-    })?;
+    let creds = {
+        let conn = state.ensure_ca()?;
+        let ca = conn.ca.as_ref().ok_or("CA not available")?;
+        ca.aws_credentials().map_err(|e| e.to_string())?
+    };
 
     let client = Route53Client::new(creds);
     let result = client

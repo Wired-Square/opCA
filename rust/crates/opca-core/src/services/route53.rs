@@ -108,22 +108,12 @@ impl Route53Client {
 
     /// Build an AWS SDK Route53 client from the stored credentials.
     fn sdk_client(&self) -> aws_sdk_route53::Client {
-        use aws_credential_types::Credentials;
-
-        let region = self.creds.region.as_deref().unwrap_or("ap-southeast-2");
-
-        let creds = Credentials::new(
-            &self.creds.access_key_id,
-            &self.creds.secret_access_key,
-            self.creds.session_token.clone(),
-            None, // expiry
-            "opca-1password",
-        );
+        let region = self.creds.region_or_default().to_string();
 
         let config = aws_sdk_route53::config::Builder::new()
             .behavior_version(aws_sdk_route53::config::BehaviorVersion::latest())
-            .region(aws_sdk_route53::config::Region::new(region.to_string()))
-            .credentials_provider(creds)
+            .region(aws_sdk_route53::config::Region::new(region))
+            .credentials_provider(self.creds.sdk_credentials())
             .build();
 
         aws_sdk_route53::Client::from_conf(config)

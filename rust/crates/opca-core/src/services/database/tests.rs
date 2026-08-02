@@ -1090,10 +1090,12 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 7); // v5→v6 … v10→v11, v11→v12
+    assert_eq!(info.steps.len(), 8); // v5→v6 … v11→v12, v12→v13
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
+    // v12→v13 adds the AWS region column, empty on an upgraded database.
+    assert_eq!(config.ca_aws_region, None);
 
     // Local cert should remain in certificate_authority
     assert_eq!(db.count_certs().unwrap(), 1);

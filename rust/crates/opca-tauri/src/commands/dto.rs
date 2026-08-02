@@ -106,6 +106,7 @@ pub struct CaConfigDto {
     pub ca_public_store: Option<String>,
     pub ca_private_store: Option<String>,
     pub ca_backup_store: Option<String>,
+    pub ca_aws_region: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

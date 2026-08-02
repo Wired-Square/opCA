@@ -6,7 +6,7 @@ use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
 use opca_core::services::route53::{extract_dkim_key, Route53Client};
-use opca_core::services::storage::get_aws_credentials;
+use opca_core::services::storage::AwsCredentials;
 
 use crate::app::AppContext;
 use crate::output;
@@ -21,6 +21,11 @@ fn make_dkim_title(domain: &str, selector: &str) -> String {
 
 fn make_dns_name(domain: &str, selector: &str) -> String {
     format!("{selector}._domainkey.{domain}")
+}
+
+/// The AWS credentials for this CA, with its configured region applied.
+fn aws_credentials<R: CommandRunner>(app: &AppContext<R>) -> Result<AwsCredentials, OpcaError> {
+    app.ca.as_ref().ok_or(OpcaError::CaNotFound)?.aws_credentials()
 }
 
 fn format_dkim_dns_record(public_key_pem: &str) -> String {
@@ -119,9 +124,7 @@ fn handle_create<R: CommandRunner>(
 
     // Deploy to Route53 if requested
     if deploy_route53 {
-        let op = app.op()?;
-        let creds = get_aws_credentials(op.runner(), op.account())?;
-        let client = Route53Client::new(creds);
+        let client = Route53Client::new(aws_credentials(app)?);
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?;
         let result = rt.block_on(client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL))?;
@@ -190,8 +193,7 @@ fn handle_deploy<R: CommandRunner>(
     let url = op.mk_url(&item_title, Some("dns_record"));
     let dns_record = op.read_item(&url)?.trim().to_string();
 
-    let creds = get_aws_credentials(op.runner(), op.account())?;
-    let client = Route53Client::new(creds);
+    let client = Route53Client::new(aws_credentials(app)?);
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?;
     let result = rt.block_on(client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL))?;

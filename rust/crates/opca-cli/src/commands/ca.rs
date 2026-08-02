@@ -95,6 +95,7 @@ fn handle_init<R: CommandRunner>(
         ca_public_store: None,
         ca_private_store: None,
         ca_backup_store: None,
+        ca_aws_region: None,
     };
 
     with_lock(app, "ca_init", |app| {

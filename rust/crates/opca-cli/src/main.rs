@@ -33,6 +33,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// AWS credential selection (per-user, per-machine)
+    Aws(AwsArgs),
     /// Certificate Authority operations
     Ca(CaArgs),
     /// Certificate operations
@@ -49,6 +51,34 @@ pub enum Commands {
     Openvpn(OpenvpnArgs),
     /// Vault backup and restore
     Vault(VaultArgs),
+}
+
+// ---------------------------------------------------------------------------
+// AWS
+// ---------------------------------------------------------------------------
+
+#[derive(Args)]
+pub struct AwsArgs {
+    #[command(subcommand)]
+    pub action: AwsAction,
+}
+
+#[derive(Subcommand)]
+pub enum AwsAction {
+    /// List 1Password items that could hold an AWS access key
+    List {
+        /// Only show items whose title contains this text
+        pattern: Option<String>,
+    },
+    /// Show the credential selected for the current 1Password account
+    Show,
+    /// Use a 1Password item as this account's AWS credential
+    Use {
+        /// Item ID or title
+        item: String,
+    },
+    /// Clear the selection for the current 1Password account
+    Clear,
 }
 
 // ---------------------------------------------------------------------------

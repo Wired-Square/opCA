@@ -154,6 +154,9 @@ pub struct CaConfig {
     pub ca_public_store: Option<String>,
     pub ca_private_store: Option<String>,
     pub ca_backup_store: Option<String>,
+    /// AWS region for `s3://` stores and Route53. Shared CA config — the AWS
+    /// credential itself is per-user local state (see `crate::settings`).
+    pub ca_aws_region: Option<String>,
 }
 
 /// A DKIM key entry (`dkim_key` table). Mirrors the small set of metadata

@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 12;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 13;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v8 — current)
+// Table DDL (v13 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -29,7 +29,8 @@ pub const CREATE_CONFIG_TABLE: &str = "
         schema_version INTEGER,
         ca_public_store TEXT,
         ca_private_store TEXT,
-        ca_backup_store TEXT
+        ca_backup_store TEXT,
+        ca_aws_region TEXT
     )
 ";
 
@@ -392,8 +393,23 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v11→v12: {e}")))?;
 
         version = 12;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 12, ok: true });
+    }
+
+    // v12 → v13: record the AWS region for `s3://` stores and Route53. The
+    // region belongs to the bucket, so it is shared CA config — unlike the
+    // AWS credential itself, which is per-user local state (see
+    // `crate::settings`).
+    if version == 12 {
+        conn.execute_batch(
+            "ALTER TABLE config ADD COLUMN ca_aws_region TEXT;
+             UPDATE config SET schema_version = 13 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v12→v13: {e}")))?;
+
+        version = 13;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 13, ok: true });
     }
 
     info.migrated = true;

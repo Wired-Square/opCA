@@ -95,6 +95,10 @@ pub const DEFAULT_STORAGE_CONF: StorageConf = StorageConf {
 /// 1Password CLI binary name.
 pub const OP_BIN: &str = "op";
 
+/// Region used for S3 and Route53 when neither the CA config
+/// (`ca_aws_region`) nor the credential item names one.
+pub const DEFAULT_AWS_REGION: &str = "ap-southeast-2";
+
 /// Process exit codes matching the Python conventions.
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_VALIDATION_ERROR: i32 = 1;

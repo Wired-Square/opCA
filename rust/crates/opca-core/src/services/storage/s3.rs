@@ -1,7 +1,7 @@
 //! Amazon S3 storage backend.
 //!
 //! Uploads content to AWS S3 buckets using the native AWS SDK.  Credentials
-//! are obtained from 1Password via the `op` CLI plugin (see
+//! are read from the 1Password item this operator selected (see
 //! [`super::get_aws_credentials`]).
 //!
 //! URI format: `s3://bucket/key/prefix`
@@ -25,22 +25,12 @@ impl StorageS3 {
 
     /// Build an AWS SDK S3 client from the stored credentials.
     fn sdk_client(&self) -> aws_sdk_s3::Client {
-        use aws_credential_types::Credentials;
-
-        let region = self.credentials.region.as_deref().unwrap_or("ap-southeast-2");
-
-        let creds = Credentials::new(
-            &self.credentials.access_key_id,
-            &self.credentials.secret_access_key,
-            self.credentials.session_token.clone(),
-            None, // expiry
-            "opca-1password",
-        );
+        let region = self.credentials.region_or_default().to_string();
 
         let config = aws_sdk_s3::config::Builder::new()
             .behavior_version(aws_sdk_s3::config::BehaviorVersion::latest())
-            .region(aws_sdk_s3::config::Region::new(region.to_string()))
-            .credentials_provider(creds)
+            .region(aws_sdk_s3::config::Region::new(region))
+            .credentials_provider(self.credentials.sdk_credentials())
             .build();
 
         aws_sdk_s3::Client::from_conf(config)

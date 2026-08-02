@@ -1,3 +1,4 @@
+pub mod aws;
 pub mod ca;
 pub mod cert;
 pub mod crl;
@@ -28,6 +29,7 @@ pub fn dispatch(cli: Cli) -> Result<(), OpcaError> {
                 action: crate::DatabaseAction::Rebuild { .. },
             })
             | Commands::Vault(_)
+            | Commands::Aws(_)
     );
 
     if needs_ca {
@@ -36,6 +38,7 @@ pub fn dispatch(cli: Cli) -> Result<(), OpcaError> {
     }
 
     match cli.command {
+        Commands::Aws(args) => aws::dispatch(args, &mut app),
         Commands::Ca(args) => ca::dispatch(args, &mut app),
         Commands::Cert(args) => cert::dispatch(args, &mut app),
         Commands::Crl(args) => crl::dispatch(args, &mut app),

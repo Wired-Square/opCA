@@ -6,7 +6,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use opca_core::op::ShellRunner;
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::database::CaConfig;
-use opca_core::services::storage::storage_from_uri;
+use opca_core::services::storage::{
+    get_aws_credentials, needs_aws_credentials, storage_from_uri_with_creds,
+};
 
 use crate::commands::dto::{CaConfigDto, CaInfo};
 use crate::state::AppState;
@@ -189,7 +191,12 @@ pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> R
         // Serialise uploads on a dedicated lock (not `conn`) so reads stay free.
         let _guard = state.private_store_lock.lock().expect("mutex poisoned");
         let _ = app.emit("op-status", Some("sync_private_store"));
-        let result = storage_from_uri(&job.uri, &ShellRunner, job.account.as_deref())
+        let result = needs_aws_credentials(&job.uri)
+            .then(|| {
+                get_aws_credentials(&ShellRunner, job.account.as_deref(), job.region.as_deref())
+            })
+            .transpose()
+            .and_then(|creds| storage_from_uri_with_creds(&job.uri, creds.as_ref()))
             .and_then(|backend| backend.upload(&job.bytes, &job.uri));
         match result {
             Ok(()) => {
@@ -272,6 +279,7 @@ pub(crate) fn ca_config_to_dto(config: &CaConfig) -> CaConfigDto {
         ca_public_store: config.ca_public_store.clone(),
         ca_private_store: config.ca_private_store.clone(),
         ca_backup_store: config.ca_backup_store.clone(),
+        ca_aws_region: config.ca_aws_region.clone(),
     }
 }
 
@@ -295,5 +303,6 @@ fn dto_to_ca_config(dto: &CaConfigDto) -> CaConfig {
         ca_public_store: dto.ca_public_store.clone(),
         ca_private_store: dto.ca_private_store.clone(),
         ca_backup_store: dto.ca_backup_store.clone(),
+        ca_aws_region: dto.ca_aws_region.clone(),
     }
 }

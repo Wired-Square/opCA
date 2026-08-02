@@ -190,6 +190,8 @@ pub struct PrivateStoreJob {
     pub bytes: Vec<u8>,
     pub uri: String,
     pub account: Option<String>,
+    /// AWS region from the CA config, for `s3://` private stores.
+    pub region: Option<String>,
     /// SHA-256 of `bytes`, so callers can skip an upload when unchanged.
     pub fingerprint: String,
 }
@@ -1464,6 +1466,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             bytes,
             uri,
             account: self.op.account().map(String::from),
+            region: self.aws_region()?,
             fingerprint,
         }))
     }
@@ -1584,9 +1587,32 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     // -----------------------------------------------------------------------
 
     /// Upload content to a storage URI.
+    ///
+    /// AWS credentials are resolved only for `s3://` targets, so `rsync://`
+    /// and `sftp://` uploads never touch the CA config or 1Password.
     pub fn upload_content(&self, content: &[u8], store_uri: &str) -> Result<(), OpcaError> {
-        let backend = storage::storage_from_uri(store_uri, self.op.runner(), self.op.account())?;
+        let creds = storage::needs_aws_credentials(store_uri)
+            .then(|| self.aws_credentials())
+            .transpose()?;
+        let backend = storage::storage_from_uri_with_creds(store_uri, creds.as_ref())?;
         backend.upload(content, store_uri)
+    }
+
+    /// The AWS region configured for this CA, if any.
+    pub fn aws_region(&self) -> Result<Option<String>, OpcaError> {
+        let db = self.ca_database.as_ref()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
+        Ok(db.get_config()?.ca_aws_region)
+    }
+
+    /// The AWS credentials this operator has selected, with the CA's
+    /// configured region applied.
+    pub fn aws_credentials(&self) -> Result<storage::AwsCredentials, OpcaError> {
+        storage::get_aws_credentials(
+            self.op.runner(),
+            self.op.account(),
+            self.aws_region()?.as_deref(),
+        )
     }
 
     /// Upload the CA database to the private store.
@@ -1666,7 +1692,11 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         });
 
         let aws_creds = if needs_s3 {
-            match storage::get_aws_credentials(self.op.runner(), self.op.account()) {
+            match storage::get_aws_credentials(
+                self.op.runner(),
+                self.op.account(),
+                config.ca_aws_region.as_deref(),
+            ) {
                 Ok(creds) => Some(creds),
                 Err(e) => {
                     error!("[ca] failed to retrieve AWS credentials: {e}");

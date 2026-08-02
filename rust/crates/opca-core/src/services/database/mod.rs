@@ -230,6 +230,7 @@ impl CertificateAuthorityDB {
         push_field!(ca_public_store, "ca_public_store", str);
         push_field!(ca_private_store, "ca_private_store", str);
         push_field!(ca_backup_store, "ca_backup_store", str);
+        push_field!(ca_aws_region, "ca_aws_region", str);
 
         let col_list = columns.join(", ");
         let placeholders = (0..columns.len())
@@ -262,7 +263,7 @@ impl CertificateAuthorityDB {
         let mut stmt = self.conn.prepare(
             "SELECT next_serial, next_crl_serial, org, ou, email, city, state, country,
                     ca_url, crl_url, days, crl_days, schema_version,
-                    ca_public_store, ca_private_store, ca_backup_store
+                    ca_public_store, ca_private_store, ca_backup_store, ca_aws_region
              FROM config LIMIT 1",
         )?;
 
@@ -294,6 +295,7 @@ impl CertificateAuthorityDB {
                 ca_public_store: row.get(13)?,
                 ca_private_store: row.get(14)?,
                 ca_backup_store: row.get(15)?,
+                ca_aws_region: row.get(16)?,
             })
         })?;
 
@@ -344,6 +346,7 @@ impl CertificateAuthorityDB {
         maybe_update!(ca_public_store, "ca_public_store", str);
         maybe_update!(ca_private_store, "ca_private_store", str);
         maybe_update!(ca_backup_store, "ca_backup_store", str);
+        maybe_update!(ca_aws_region, "ca_aws_region", str);
 
         if set_clauses.is_empty() {
             return Ok(());

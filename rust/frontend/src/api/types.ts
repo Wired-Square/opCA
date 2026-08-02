@@ -88,6 +88,26 @@ export interface CaConfig {
   ca_public_store: string | null;
   ca_private_store: string | null;
   ca_backup_store: string | null;
+  /** AWS region for s3:// stores and Route53. Shared CA config — the AWS
+   * credential itself is per-user (see `api/aws.ts`). */
+  ca_aws_region: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// AWS credentials (per-user, per-machine)
+// ---------------------------------------------------------------------------
+
+/** A 1Password item offered as an AWS credential candidate. */
+export interface AwsItemRef {
+  id: string;
+  title: string;
+  vault: string;
+}
+
+/** The AWS credential selected for the connected 1Password account. */
+export interface AwsCredentialSelection {
+  item_id: string | null;
+  account: string | null;
 }
 
 // ---------------------------------------------------------------------------

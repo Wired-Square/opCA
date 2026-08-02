@@ -1,3 +1,4 @@
+pub mod aws;
 pub mod ca;
 pub mod cert;
 pub mod connect;

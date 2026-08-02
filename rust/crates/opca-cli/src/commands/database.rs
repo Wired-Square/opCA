@@ -77,6 +77,7 @@ fn handle_config_set<R: CommandRunner>(
             "ca_public_store" => updates.ca_public_store = Some(value),
             "ca_private_store" => updates.ca_private_store = Some(value),
             "ca_backup_store" => updates.ca_backup_store = Some(value),
+            "ca_aws_region" => updates.ca_aws_region = Some(value),
             _ => {
                 return Err(OpcaError::Other(format!(
                     "Unknown configuration key: '{key}'"
@@ -205,4 +206,5 @@ fn print_config(config: &CaConfig) {
     field("Public Store", &config.ca_public_store);
     field("Private Store", &config.ca_private_store);
     field("Backup Store", &config.ca_backup_store);
+    field("AWS Region", &config.ca_aws_region);
 }
