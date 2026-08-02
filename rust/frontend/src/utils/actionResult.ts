@@ -8,7 +8,7 @@ export interface ActionResult {
 }
 
 /** How long a successful result stays on screen. */
-const SUCCESS_DISMISS_MS = 4000;
+export const SUCCESS_DISMISS_MS = 4000;
 
 export interface ActionResultController {
   result: Accessor<ActionResult | null>;
@@ -29,7 +29,7 @@ export interface ActionResultController {
  * Holds state only — render it through `ResultBanner` or inline
  * `form-success`/`form-error`, whichever matches the page.
  */
-export function createActionResult(ms = SUCCESS_DISMISS_MS): ActionResultController {
+export function createActionResult(): ActionResultController {
   const [result, setResult] = createSignal<ActionResult | null>(null);
   let timer: number | undefined;
 
@@ -42,7 +42,7 @@ export function createActionResult(ms = SUCCESS_DISMISS_MS): ActionResultControl
     clearTimeout(timer);
     const message = error == null ? null : String(error);
     setResult({ summary, error: message });
-    if (!message) timer = window.setTimeout(() => setResult(null), ms);
+    if (!message) timer = window.setTimeout(() => setResult(null), SUCCESS_DISMISS_MS);
   };
 
   onCleanup(() => clearTimeout(timer));

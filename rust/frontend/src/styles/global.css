@@ -466,6 +466,7 @@ input::placeholder {
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-primary);
+  margin-bottom: 16px;
 }
 
 .upload-actions {

@@ -2,7 +2,7 @@ import { Show, createSignal, createEffect } from "solid-js";
 import type { JSX } from "solid-js";
 import Modal from "./Modal";
 
-interface BulkConfirmDialogProps {
+interface ConfirmDialogProps {
   open: boolean;
   title: string;
   message: JSX.Element | string;
@@ -13,6 +13,10 @@ interface BulkConfirmDialogProps {
   /** When set, render a required reason input and pass it to `onConfirm`. */
   requireReason?: boolean;
   reasonPlaceholder?: string;
+  /** Extra fields, rendered below the message. Callers owning their own input
+   * gate the confirm button with `canConfirm`. */
+  children?: JSX.Element;
+  canConfirm?: () => boolean;
   onClose: () => void;
   /** Runs the action; the dialog owns the acting/error state and closes on
    * success. Receives the trimmed reason (empty string when not required). */
@@ -20,12 +24,11 @@ interface BulkConfirmDialogProps {
 }
 
 /**
- * Generic confirmation dialog for bulk (and one-off destructive) actions.
- * Owns acting + error state and, optionally, a required reason field — so the
- * various bulk call sites stay a single element. Mirrors the single-cert
- * Revoke/Ignore dialogs.
+ * Confirmation dialog for destructive actions, bulk or one-off. Owns acting +
+ * error state and, optionally, a required reason field — so call sites stay a
+ * single element.
  */
-export default function BulkConfirmDialog(props: BulkConfirmDialogProps) {
+export default function ConfirmDialog(props: ConfirmDialogProps) {
   const [reason, setReason] = createSignal("");
   const [acting, setActing] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -38,9 +41,10 @@ export default function BulkConfirmDialog(props: BulkConfirmDialogProps) {
   });
 
   const reasonOk = () => !props.requireReason || !!reason().trim();
+  const canConfirm = () => reasonOk() && (props.canConfirm?.() ?? true);
 
   async function handleConfirm() {
-    if (!reasonOk()) return;
+    if (!canConfirm()) return;
     setActing(true);
     setError(null);
     try {
@@ -70,6 +74,7 @@ export default function BulkConfirmDialog(props: BulkConfirmDialogProps) {
           />
         </div>
       </Show>
+      {props.children}
       <Show when={error()}>
         <p class="page-error" role="alert">{error()}</p>
       </Show>
@@ -77,7 +82,7 @@ export default function BulkConfirmDialog(props: BulkConfirmDialogProps) {
         <button
           class={props.danger ? "btn-danger" : "btn-primary"}
           onClick={handleConfirm}
-          disabled={acting() || !reasonOk()}
+          disabled={acting() || !canConfirm()}
         >
           {acting() ? props.actingLabel : props.confirmLabel}
         </button>

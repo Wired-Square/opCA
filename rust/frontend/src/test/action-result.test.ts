@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@solidjs/testing-library";
-import { createActionResult } from "../utils/actionResult";
+import { createActionResult, SUCCESS_DISMISS_MS } from "../utils/actionResult";
 
-/** Mount the hook with a short timeout so the tests read clearly. Cleanup is
- * registered with the library's auto-afterEach, so a failed assertion cannot
- * leak a live timer into the next test. */
-const mount = (ms = 1000) =>
-  renderHook(createActionResult, { initialProps: [ms] }).result;
+/** Cleanup is registered with the library's auto-afterEach, so a failed
+ * assertion cannot leak a live timer into the next test. */
+const mount = () => renderHook(createActionResult).result;
 
 describe("createActionResult", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -21,7 +19,7 @@ describe("createActionResult", () => {
     a.report("Done");
     expect(a.result()).toEqual({ summary: "Done", error: null });
 
-    vi.advanceTimersByTime(999);
+    vi.advanceTimersByTime(SUCCESS_DISMISS_MS - 1);
     expect(a.result()).not.toBeNull();
 
     vi.advanceTimersByTime(1);
@@ -54,7 +52,7 @@ describe("createActionResult", () => {
   it("does not let an earlier success timer clear a later result", () => {
     const a = mount();
     a.report("First");
-    vi.advanceTimersByTime(900);
+    vi.advanceTimersByTime(SUCCESS_DISMISS_MS - 100);
 
     // The second report must cancel the first one's pending clear, otherwise
     // this failure would vanish 100ms later.
@@ -76,7 +74,7 @@ describe("createActionResult", () => {
 
   it("cleans its timer up on unmount", () => {
     const clearSpy = vi.spyOn(globalThis, "clearTimeout");
-    const { result: a, cleanup } = renderHook(createActionResult, { initialProps: [1000] });
+    const { result: a, cleanup } = renderHook(createActionResult);
     a.report("Done");
     cleanup();
     expect(clearSpy).toHaveBeenCalled();

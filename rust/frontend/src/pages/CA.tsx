@@ -1,7 +1,7 @@
 import { Show, For, createSignal, createResource, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
-import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, resignCa, recordCaCertCopy } from "../api/ca";
+import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, recordCaCertCopy } from "../api/ca";
 import { listAwsCredentials, getAwsCredential, setAwsCredential } from "../api/aws";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
 import { formatDate } from "../utils/dates";
@@ -13,7 +13,8 @@ import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { CaInfo, CaConfig, RestoreResult, BackupInfoResult, StoreTestResults, AwsItemRef } from "../api/types";
-import { ActionResultLine } from "../components/ResultBanner";
+import { ActionResultBanner, ActionResultLine } from "../components/ResultBanner";
+import ResignCaDialog from "../components/ResignCaDialog";
 import { createActionResult } from "../utils/actionResult";
 import "../styles/pages/ca.css";
 
@@ -24,43 +25,114 @@ export default function CA() {
   const [caInfo, { refetch: refetchCaInfo }] = createResource<CaInfo>(getCaInfo);
   const [caConfig, { refetch: refetchConfig }] = createResource<CaConfig>(getCaConfig);
 
+  // Certificate-tab actions live up here so they can sit in the page header
+  // beside the title, the way the CRL page does it.
+  const [uploading, setUploading] = createSignal(false);
+  const [showResignDialog, setShowResignDialog] = createSignal(false);
+  const [showUploadPrompt, setShowUploadPrompt] = createSignal(false);
+  const outcome = createActionResult();
+
+  // Reading `.error` first: a resource getter rethrows, and the header reads
+  // this before the tab body has gated on a loaded resource.
+  const hasPublicStore = () => !caConfig.error && !!caConfig()?.ca_public_store;
+
+  /** Certificate-tab feedback is owned by the shell now, so it would otherwise
+   * outlive the tab it belongs to. */
+  function selectTab(next: Tab) {
+    setTab(next);
+    setShowUploadPrompt(false);
+    outcome.clear();
+  }
+
+  async function handleUpload() {
+    setUploading(true);
+    outcome.clear();
+    try {
+      await uploadCaCert();
+      setShowUploadPrompt(false);
+      outcome.report("Certificate uploaded to public store");
+    } catch (e) {
+      outcome.report("Upload failed", e);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleResigned(days: number) {
+    refetchCaInfo();
+    outcome.report(`CA certificate re-signed for ${days} days`);
+    // Re-signing does not publish, so the store still holds the old
+    // certificate — same gap the CRL page closes after Generate.
+    if (hasPublicStore()) setShowUploadPrompt(true);
+  }
+
   return (
     <div class="page-ca">
-      <h2>Certificate Authority</h2>
+      <div class="page-header">
+        <h2>Certificate Authority</h2>
+        <Show when={tab() === "certificate"}>
+          <div class="header-actions">
+            <button class="btn-ghost" onClick={() => setShowResignDialog(true)}>
+              Re-sign Certificate
+            </button>
+            <Show when={hasPublicStore()}>
+              <button class="btn-ghost" onClick={handleUpload} disabled={uploading()}>
+                {uploading() ? "Uploading…" : "Upload Certificate"}
+              </button>
+            </Show>
+          </div>
+        </Show>
+      </div>
 
       <div class="tab-bar">
         <Show when={hasCA()}>
           <button
             class={`tab-btn ${tab() === "certificate" ? "tab-active" : ""}`}
-            onClick={() => setTab("certificate")}
+            onClick={() => selectTab("certificate")}
           >Certificate</button>
           <button
             class={`tab-btn ${tab() === "config" ? "tab-active" : ""}`}
-            onClick={() => setTab("config")}
+            onClick={() => selectTab("config")}
           >Configuration</button>
           <button
             class={`tab-btn ${tab() === "stores" ? "tab-active" : ""}`}
-            onClick={() => setTab("stores")}
+            onClick={() => selectTab("stores")}
           >Stores</button>
         </Show>
         <Show when={!hasCA()}>
           <button
             class={`tab-btn ${tab() === "init" ? "tab-active" : ""}`}
-            onClick={() => setTab("init")}
+            onClick={() => selectTab("init")}
           >Initialise CA</button>
           <button
             class={`tab-btn ${tab() === "restore" ? "tab-active" : ""}`}
-            onClick={() => setTab("restore")}
+            onClick={() => selectTab("restore")}
           >Restore</button>
           <button
             class={`tab-btn ${tab() === "info" ? "tab-active" : ""}`}
-            onClick={() => setTab("info")}
+            onClick={() => selectTab("info")}
           >Info</button>
         </Show>
       </div>
 
       <Show when={tab() === "certificate"}>
-        <CertificateTab info={caInfo} config={caConfig} onResign={refetchCaInfo} />
+        <Show when={showUploadPrompt()}>
+          <div class="upload-prompt">
+            <span>Upload the re-signed certificate to the public store?</span>
+            <div class="upload-actions">
+              <button class="btn-primary btn-sm" onClick={handleUpload} disabled={uploading()}>
+                {uploading() ? "Uploading…" : "Upload"}
+              </button>
+              <button class="btn-ghost btn-sm" onClick={() => setShowUploadPrompt(false)}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </Show>
+
+        <ActionResultBanner outcome={outcome} />
+
+        <CertificateTab info={caInfo} />
       </Show>
       <Show when={tab() === "config"}>
         <ConfigTab config={caConfig} onSave={refetchConfig} />
@@ -78,24 +150,17 @@ export default function CA() {
         <InfoTab />
       </Show>
 
+      <ResignCaDialog
+        open={showResignDialog()}
+        onClose={() => setShowResignDialog(false)}
+        onDone={handleResigned}
+      />
     </div>
   );
 }
 
-function CertificateTab(props: {
-  info: () => CaInfo | undefined;
-  config: () => CaConfig | undefined;
-  onResign: () => void;
-}) {
+function CertificateTab(props: { info: () => CaInfo | undefined }) {
   const [copied, markCopied] = createCopiedSignal();
-  const [uploading, setUploading] = createSignal(false);
-  const [showResign, setShowResign] = createSignal(false);
-  const [resignDays, setResignDays] = createSignal("3650");
-  const [resigning, setResigning] = createSignal(false);
-  const upload = createActionResult(3000);
-  const resign = createActionResult(5000);
-
-  const hasPublicStore = () => !!props.config()?.ca_public_store;
 
   function copyPem() {
     const pem = props.info()?.cert_pem;
@@ -103,39 +168,6 @@ function CertificateTab(props: {
       void writeClipboard(pem);
       markCopied();
       void recordCaCertCopy();
-    }
-  }
-
-  async function handleUpload() {
-    setUploading(true);
-    upload.clear();
-    try {
-      await uploadCaCert();
-      upload.report("Certificate uploaded to public store.");
-    } catch (e) {
-      upload.report("Upload failed", e);
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function handleResign() {
-    const days = parseInt(resignDays());
-    if (!days || days <= 0) {
-      resign.report("Invalid input", "Please enter a valid number of days.");
-      return;
-    }
-    setResigning(true);
-    resign.clear();
-    try {
-      await resignCa(days);
-      setShowResign(false);
-      props.onResign();
-      resign.report("CA certificate re-signed successfully.");
-    } catch (e) {
-      resign.report("Re-sign failed", e);
-    } finally {
-      setResigning(false);
     }
   }
 
@@ -176,49 +208,6 @@ function CertificateTab(props: {
                 </div>
               </div>
             </div>
-
-            <div class="form-actions">
-              <button class="btn-secondary" onClick={() => setShowResign(!showResign())}>
-                {showResign() ? "Cancel" : "Re-sign Certificate"}
-              </button>
-              <Show when={hasPublicStore()}>
-                <button class="btn-warning" onClick={handleUpload} disabled={uploading()}>
-                  {uploading() ? "Uploading…" : "Upload Certificate"}
-                </button>
-              </Show>
-            </div>
-
-            <ActionResultLine outcome={resign} />
-
-            <Show when={showResign()}>
-              <div class="resign-section">
-                <p class="text-muted">
-                  Re-sign the CA certificate with the same key pair but new validity dates.
-                  Existing certificates remain valid.
-                </p>
-                <div class="resign-form">
-                  <div class="form-group">
-                    <label class="form-label">New validity (days)</label>
-                    <input
-                      type="number"
-                      value={resignDays()}
-                      onInput={(e) => setResignDays(e.currentTarget.value)}
-                      min="1"
-                      class="max-w-input"
-                    />
-                  </div>
-                  <div class="form-actions">
-                    <button class="btn-primary" onClick={handleResign} disabled={resigning()}>
-                      {resigning() ? "Re-signing…" : "Re-sign CA"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </Show>
-
-            <Show when={hasPublicStore()}>
-              <ActionResultLine outcome={upload} />
-            </Show>
 
             <Show when={info().cert_pem}>
               <div class="pem-section">

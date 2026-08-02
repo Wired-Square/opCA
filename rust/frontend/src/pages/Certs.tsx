@@ -15,7 +15,7 @@ import CertStatusBadge from "../components/CertStatusBadge";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
-import BulkConfirmDialog from "../components/BulkConfirmDialog";
+import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
 import { createSelection } from "../utils/selection";
@@ -639,7 +639,7 @@ export default function Certs() {
         onDone={() => { const c = revokeTarget(); if (c) { outcome.report(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
-      <BulkConfirmDialog
+      <ConfirmDialog
         open={!!bulkAction()}
         title={bulkDialogConfig().title}
         message={bulkDialogConfig().message}

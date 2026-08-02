@@ -22,7 +22,7 @@ import SearchInput from "../components/SearchInput";
 import AddProfileModal from "../components/AddProfileModal";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
-import BulkConfirmDialog from "../components/BulkConfirmDialog";
+import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
 import { createSelection } from "../utils/selection";
@@ -674,7 +674,7 @@ export default function OpenVPN() {
         }}
       />
 
-      <BulkConfirmDialog
+      <ConfirmDialog
         open={!!confirmDelete()}
         title="Delete VPN Profile"
         message={

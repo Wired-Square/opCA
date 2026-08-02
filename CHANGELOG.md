@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   settable in **CA → Stores** or via `opca database config-set ca_aws_region`.
   It applies to both `s3://` stores and Route53. Previously the region was
   hard-coded to `ap-southeast-2`, which remains the fallback.
+- **Re-signing the CA now asks for confirmation.** It previously took two
+  ordinary clicks with no warning, while `re_sign_ca` overwrites the certificate
+  in 1Password with no snapshot — opCA cannot undo it. The dialog says so
+  plainly, and since re-signing does not publish, the CA page now offers to
+  upload the new certificate afterwards, as the CRL page does after Generate.
 - **Actions that change the vault now report a final status.** The sidebar
   indicator only shows work in flight, so these previously left no trace at all
   on success. A result banner — green and self-clearing, or red and persistent
@@ -28,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **CA → Certificate** puts Re-sign and Upload in the page header beside the
+  title, matching the CRL page, and reports both through the same result banner
+  instead of two inline messages.
 - OPCA no longer reads `~/.config/op/plugins/aws.json`, so `op plugin init aws`
   is no longer a prerequisite. That file holds one machine-global default and
   OPCA always took its first entry, which failed outright when that entry

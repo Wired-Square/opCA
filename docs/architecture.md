@@ -359,6 +359,22 @@ A single-page SolidJS app. Key conventions:
   per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
   `Modal` dialogs reused across those pages.
 
+### Confirming destructive actions
+
+Anything irreversible goes through a `Modal`, never a bare button. `ConfirmDialog`
+is the generic gate: it owns the acting/error state, renders a `danger` confirm,
+closes only on success, and takes a `children` slot plus a `canConfirm` predicate
+for callers that need their own field. Bulk cert and OpenVPN actions use it with
+a reason field; `ResignCaDialog` uses it with a validity-days field. `RevokeCertDialog`
+and `IgnoreCertDialog` predate it and still hand-roll the same shape.
+
+Re-signing the CA earns a confirmation despite keeping the key, subject and
+serial (so issued certificates still chain): `re_sign_ca` overwrites the vault
+item with `StoreAction::Edit` and takes no snapshot, so **opCA cannot undo it** —
+recovery means 1Password's own item history or a vault restore. It also does not
+publish, so the CA page offers to upload afterwards, the same way the CRL page
+does after Generate.
+
 ### Reporting the outcome of an action
 
 The operation indicator above is strictly *in-flight* — it clears the moment a
