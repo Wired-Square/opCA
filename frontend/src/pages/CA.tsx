@@ -13,7 +13,7 @@ import SearchInput from "../components/SearchInput";
 import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { defaultKeyAlgorithm, type CaInfo, type CaConfig, type RestoreResult, type BackupInfoResult, type StoreTestResults, type AwsItemRef } from "../api/types";
+import { caDaysOverAppleLimit, defaultKeyAlgorithm, type CaInfo, type CaConfig, type RestoreResult, type BackupInfoResult, type StoreTestResults, type AwsItemRef } from "../api/types";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import { ActionResultBanner, ActionResultLine } from "../components/ResultBanner";
 import ResignCaDialog from "../components/ResignCaDialog";
@@ -241,7 +241,8 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <FormField label="State" value={merged().state} onChange={(v) => set("state", v)} />
               <FormField label="Country" value={merged().country} onChange={(v) => set("country", v)} />
               <FormField label="Certificate Days" value={String(merged().days ?? "")}
-                onChange={(v) => set("days", v ? parseInt(v) : null)} type="number" />
+                onChange={(v) => set("days", v ? parseInt(v) : null)} type="number"
+                warning={caDaysOverAppleLimit(merged().days)} />
               <FormField label="CRL Days" value={String(merged().crl_days ?? "")}
                 onChange={(v) => set("crl_days", v ? parseInt(v) : null)} type="number" />
               <FormField label="CA URL" value={merged().ca_url} onChange={(v) => set("ca_url", v)} />
@@ -515,7 +516,8 @@ function InitTab(props: { onInitialised: () => void }) {
           <FormField label="CA Days" value={String(form().ca_days ?? "")}
             onChange={(v) => set("ca_days", v ? parseInt(v) : null)} type="number" />
           <FormField label="Certificate Days" value={String(form().days ?? "")}
-            onChange={(v) => set("days", v ? parseInt(v) : null)} type="number" />
+            onChange={(v) => set("days", v ? parseInt(v) : null)} type="number"
+            warning={caDaysOverAppleLimit(form().days)} />
           <FormField label="CRL Days" value={String(form().crl_days ?? "")}
             onChange={(v) => set("crl_days", v ? parseInt(v) : null)} type="number" />
           <FormField label="CA URL" value={form().ca_url} onChange={(v) => set("ca_url", v)} />
@@ -828,6 +830,7 @@ function FormField(props: {
   value: string | null | undefined;
   onChange: (value: string) => void;
   type?: string;
+  warning?: string | null;
 }) {
   const id = createUniqueId();
   return (
@@ -843,6 +846,9 @@ function FormField(props: {
         autocapitalize="off"
         spellcheck={false}
       />
+      <Show when={props.warning}>
+        <p class="form-hint is-warning" role="status">{props.warning}</p>
+      </Show>
     </div>
   );
 }

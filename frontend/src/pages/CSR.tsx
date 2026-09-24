@@ -15,6 +15,7 @@ import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
 import PageError from "../components/PageError";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
+import CertDaysField, { createCertDays } from "../components/CertDaysField";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import DeleteCsrDialog from "../components/DeleteCsrDialog";
 import SanInput from "../components/SanInput";
@@ -60,6 +61,7 @@ export default function CSR() {
   const [signPem, setSignPem] = createSignal("");
   const [signType, setSignType] = createSignal("webserver");
   const [signCn, setSignCn] = createSignal("");
+  const signLifetime = createCertDays(signType);
   const [signing, setSigning] = createSignal(false);
   const [signError, setSignError] = createSignal<string | null>(null);
   const [signResult, setSignResult] = createSignal<SignCsrResult | null>(null);
@@ -265,10 +267,12 @@ export default function CSR() {
         csr_pem: pem,
         csr_type: signType(),
         cn: signCn().trim() || undefined,
+        days: signLifetime.days(),
       });
       setSignResult(result);
       setSignPem("");
       setSignCn("");
+      signLifetime.setEntered(null);
     } catch (err) {
       setSignError(String(err));
     } finally {
@@ -634,6 +638,8 @@ export default function CSR() {
                       </For>
                     </select>
                   </div>
+
+                  <CertDaysField state={signLifetime} />
 
                   <div class="form-group">
                     <label class="form-label">Subject Alternative Names</label>

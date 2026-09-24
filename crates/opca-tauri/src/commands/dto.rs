@@ -269,6 +269,7 @@ pub struct CreateCertRequest {
     pub alt_names: Option<Vec<String>>,
     #[serde(default)]
     pub key_algorithm: Option<KeyAlgorithm>,
+    pub days: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -354,6 +355,7 @@ pub struct SignCsrRequest {
     pub csr_pem: String,
     pub csr_type: String,
     pub cn: Option<String>,
+    pub days: Option<u32>,
 }
 
 /// Result of signing a CSR.

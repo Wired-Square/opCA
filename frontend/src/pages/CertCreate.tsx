@@ -2,6 +2,7 @@ import { createSignal, Show, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
+import CertDaysField, { createCertDays } from "../components/CertDaysField";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import SanInput from "../components/SanInput";
 import "../styles/pages/cert-create.css";
@@ -11,6 +12,7 @@ export default function CertCreate() {
   const [cn, setCn] = createSignal("");
   const [certType, setCertType] = createSignal("webserver");
   const [keyAlgorithm, setKeyAlgorithm] = createSignal<KeyAlgorithm>(defaultKeyAlgorithm("webserver"));
+  const lifetime = createCertDays(certType);
   const [sans, setSans] = createSignal<string[]>([]);
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -27,6 +29,7 @@ export default function CertCreate() {
         cert_type: certType(),
         alt_names: sans().length > 0 ? sans() : undefined,
         key_algorithm: keyAlgorithm(),
+        days: lifetime.days(),
       });
       // create_cert already persisted the DB (1Password + private store), so
       // just return to the list.
@@ -73,6 +76,8 @@ export default function CertCreate() {
         </div>
 
         <KeyAlgorithmSelect value={keyAlgorithm()} onChange={setKeyAlgorithm} />
+
+        <CertDaysField state={lifetime} />
 
         <SanInput values={sans()} onChange={setSans} />
 

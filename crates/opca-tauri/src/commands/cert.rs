@@ -370,7 +370,7 @@ pub async fn create_cert(
         ca_days: ca_config.days,
     };
 
-    let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), &request.cn, bundle_config, None)
+    let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), &request.cn, bundle_config, request.days)
         .map_err(|e| {
             warn!("[tauri] create_cert failed: {e}");
             state.log_err("create_cert", Some(e.to_string()));

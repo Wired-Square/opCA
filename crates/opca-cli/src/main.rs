@@ -297,7 +297,7 @@ pub enum CertAction {
     Rekey(CertRekeyArgs),
 
     /// Renew a x509 certificate
-    Renew(CertIdentifier),
+    Renew(CertRenewArgs),
 
     /// Revoke a x509 certificate
     Revoke(CertRevokeArgs),
@@ -328,6 +328,10 @@ pub struct CertCreateArgs {
     /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default ec-p256)
     #[arg(long)]
     pub key: Option<KeyAlgorithm>,
+
+    /// Validity in days (default: the CA's, capped at 825 for server certificates)
+    #[arg(long)]
+    pub days: Option<u32>,
 }
 
 #[derive(Args)]
@@ -388,6 +392,20 @@ pub struct CertRekeyArgs {
     /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default: keep the current one)
     #[arg(long)]
     pub key: Option<KeyAlgorithm>,
+
+    /// Validity in days (default: the CA's, capped at 825 for server certificates)
+    #[arg(long)]
+    pub days: Option<u32>,
+}
+
+#[derive(Args)]
+pub struct CertRenewArgs {
+    #[command(flatten)]
+    pub id: CertIdentifier,
+
+    /// Validity in days (default: the CA's, capped at 825 for server certificates)
+    #[arg(long)]
+    pub days: Option<u32>,
 }
 
 #[derive(Args)]
@@ -521,6 +539,10 @@ pub enum CsrAction {
         /// CN override
         #[arg(short = 'n', long)]
         cn: Option<String>,
+
+        /// Validity in days (default: the CA's, capped at 825 for server certificates)
+        #[arg(long)]
+        days: Option<u32>,
     },
 }
 

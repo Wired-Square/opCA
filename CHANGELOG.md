@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   themes. It is compiled into development builds only. Building now needs SSH access to the
   private `lib-wiredai-rs`. `query`, `click` and `wait_for` can also match by visible text,
   and `query` reports each match's form state.
+- **Choose a certificate's lifetime.** **Create Certificate** and CSR signing have a
+  **Validity (days)** field, prefilled with the default; a server certificate over 825 days
+  is allowed with a warning that Apple devices will reject it. `--days` does the same on
+  `opca cert create`, `cert renew`, `cert rekey` and `csr sign`. The dashboard and the CA
+  configuration flag a CA-wide certificate lifetime over 825 days.
 
 ### Changed
 

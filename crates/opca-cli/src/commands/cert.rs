@@ -6,7 +6,8 @@ use opca_core::services::database::CertLookup;
 use crate::app::{with_lock, AppContext};
 use crate::output;
 use crate::{
-    CertAction, CertArgs, CertCreateArgs, CertExportArgs, CertIdentifier, CertRekeyArgs, CertRevokeArgs,
+    CertAction, CertArgs, CertCreateArgs, CertExportArgs, CertIdentifier, CertRekeyArgs, CertRenewArgs,
+    CertRevokeArgs,
 };
 
 pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(), OpcaError> {
@@ -21,7 +22,7 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
             external: _,
         } => handle_import(app, cert_file, key_file, cn),
         CertAction::Rekey(args) => handle_rekey(app, args),
-        CertAction::Renew(id) => handle_renew(app, id),
+        CertAction::Renew(args) => handle_renew(app, args),
         CertAction::Revoke(revoke_args) => handle_revoke(app, revoke_args),
     }
 }
@@ -75,7 +76,7 @@ fn handle_create<R: CommandRunner>(
                 ca_days: ca_config.days,
             };
 
-            let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), cn, config, None)?;
+            let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), cn, config, args.days)?;
             let valid = bundle.is_valid().unwrap_or(false);
             output::print_result(&format!("Certificate '{cn}'"), valid);
             for w in &issuance_warnings {
@@ -241,7 +242,7 @@ fn handle_rekey<R: CommandRunner>(
 
     with_lock(app, "cert_rekey", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warnings) = ca.rekey_certificate_bundle(&lookup, args.key, None)?;
+        let (new_pem, new_serial, issuance_warnings) = ca.rekey_certificate_bundle(&lookup, args.key, args.days)?;
         output::print_result(&format!("Certificate rekeyed (new serial {new_serial})"), true);
         for w in &issuance_warnings {
             output::warning(&w.message);
@@ -253,15 +254,15 @@ fn handle_rekey<R: CommandRunner>(
 
 fn handle_renew<R: CommandRunner>(
     app: &mut AppContext<R>,
-    id: CertIdentifier,
+    args: CertRenewArgs,
 ) -> Result<(), OpcaError> {
     output::title("Renewing Certificate");
 
-    let lookup = make_lookup(id.cn.as_deref(), id.serial.as_deref())?;
+    let lookup = make_lookup(args.id.cn.as_deref(), args.id.serial.as_deref())?;
 
     with_lock(app, "cert_renew", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warnings) = ca.renew_certificate_bundle(&lookup, None)?;
+        let (new_pem, new_serial, issuance_warnings) = ca.renew_certificate_bundle(&lookup, args.days)?;
         output::print_result(&format!("Certificate renewed (new serial {new_serial})"), true);
         for w in &issuance_warnings {
             output::warning(&w.message);

@@ -29,7 +29,8 @@ pub fn dispatch(args: CsrArgs, app: &mut AppContext<ShellRunner>) -> Result<(), 
             csr_pem,
             csr_type,
             cn,
-        } => handle_sign(app, csr_file, csr_pem, csr_type, cn),
+            days,
+        } => handle_sign(app, csr_file, csr_pem, csr_type, cn, days),
     }
 }
 
@@ -264,6 +265,7 @@ fn handle_sign<R: CommandRunner>(
     csr_pem_arg: Option<String>,
     csr_type: String,
     cn_override: Option<String>,
+    days: Option<u32>,
 ) -> Result<(), OpcaError> {
     output::title("Signing Certificate Signing Request");
 
@@ -291,7 +293,7 @@ fn handle_sign<R: CommandRunner>(
     let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
 
     // Sign CSR with CA
-    let (signed_cert, _) = ca.issue_certificate(&csr, &cert_type, None)?;
+    let (signed_cert, issuance_warnings) = ca.issue_certificate(&csr, &cert_type, days)?;
     let cert_pem_bytes = signed_cert
         .to_pem()
         .map_err(|e| OpcaError::Crypto(format!("Encode signed certificate: {e}")))?;
@@ -312,6 +314,9 @@ fn handle_sign<R: CommandRunner>(
     ca.store_certbundle_for(&bundle, None, None, true)?;
 
     output::print_result(&format!("Signed certificate for '{cn}'"), true);
+    for w in &issuance_warnings {
+        output::warning(&w.message);
+    }
     println!();
     print!("{cert_pem}");
 

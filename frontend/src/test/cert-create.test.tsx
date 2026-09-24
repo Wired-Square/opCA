@@ -5,9 +5,14 @@ import CertCreate from "../pages/CertCreate";
 const createCert = vi.hoisted(() => vi.fn());
 vi.mock("../api/certs", async (actual) => ({ ...(await actual<object>()), createCert }));
 vi.mock("@solidjs/router", () => ({ useNavigate: () => vi.fn() }));
+vi.mock("../api/ca", () => ({ getCaConfig: () => Promise.resolve({ days: 3650 }) }));
 
 function sanField() {
   return screen.getByLabelText("Subject Alternative Names") as HTMLInputElement;
+}
+
+function daysField() {
+  return screen.getByLabelText("Validity (days)") as HTMLInputElement;
 }
 
 function type(input: HTMLInputElement, value: string) {
@@ -52,6 +57,7 @@ describe("CertCreate", () => {
     fireEvent.change(screen.getByLabelText("Key Type"), { target: { value: "rsa-4096" } });
     type(sanField(), "10.0.0.30");
     fireEvent.keyDown(sanField(), { key: "Enter" });
+    await vi.waitFor(() => expect(daysField().value).toBe("825"));
     fireEvent.click(screen.getByRole("button", { name: /Create/ }));
     await vi.waitFor(() =>
       expect(createCert).toHaveBeenCalledWith({
@@ -59,7 +65,41 @@ describe("CertCreate", () => {
         cert_type: "webserver",
         alt_names: ["10.0.0.30"],
         key_algorithm: "rsa-4096",
+        days: 825,
       }),
+    );
+  });
+
+  it("prefills the CA's lifetime, capped at 825 days for server types", async () => {
+    render(() => <CertCreate />);
+    await vi.waitFor(() => expect(daysField().value).toBe("825"));
+    fireEvent.change(screen.getByLabelText("Certificate Type"), { target: { value: "device" } });
+    expect(daysField().value).toBe("3650");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("warns but still submits a server lifetime over 825 days", async () => {
+    createCert.mockResolvedValue({});
+    render(() => <CertCreate />);
+    fireEvent.input(screen.getByLabelText("Common Name"), { target: { value: "www.example.com" } });
+    await vi.waitFor(() => expect(daysField().value).toBe("825"));
+    type(daysField(), "900");
+    expect(screen.getByRole("status")).toHaveTextContent("macOS and iOS will reject");
+    fireEvent.click(screen.getByRole("button", { name: /Create/ }));
+    await vi.waitFor(() =>
+      expect(createCert).toHaveBeenCalledWith(expect.objectContaining({ days: 900 })),
+    );
+  });
+
+  it("leaves a cleared lifetime to the backend default", async () => {
+    createCert.mockResolvedValue({});
+    render(() => <CertCreate />);
+    fireEvent.input(screen.getByLabelText("Common Name"), { target: { value: "www.example.com" } });
+    await vi.waitFor(() => expect(daysField().value).toBe("825"));
+    type(daysField(), "");
+    fireEvent.click(screen.getByRole("button", { name: /Create/ }));
+    await vi.waitFor(() =>
+      expect(createCert).toHaveBeenLastCalledWith(expect.objectContaining({ days: undefined })),
     );
   });
 });

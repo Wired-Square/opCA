@@ -37,6 +37,14 @@ describe("CA init tab", () => {
     });
   });
 
+  it("flags a certificate lifetime over Apple's 825-day server limit", () => {
+    render(() => <CA />);
+    const days = screen.getByLabelText("Certificate Days");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.input(days, { target: { value: "3650" } });
+    expect(screen.getByRole("status")).toHaveTextContent("capped at 825 days");
+  });
+
   it("switches to the new CA's certificate tab without reloading", async () => {
     render(() => <CA />);
     const [, button] = screen.getAllByRole("button", { name: "Initialise CA" });

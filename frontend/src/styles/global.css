@@ -209,6 +209,7 @@ input[aria-invalid="true"]:focus {
 
 .form-hint.is-valid   { color: var(--success); }
 .form-hint.is-invalid { color: var(--error); }
+.form-hint.is-warning { color: var(--warning); }
 
 .checkbox-row {
   display: flex;

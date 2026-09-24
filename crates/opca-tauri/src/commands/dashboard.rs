@@ -3,6 +3,7 @@ use log::warn;
 use tauri::State;
 
 use opca_core::services::ca::{assess_crl_expiry, CaExpiryWarning, CrlExpiryWarning};
+use opca_core::services::cert::APPLE_TLS_MAX_DAYS;
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
 use crate::commands::dto::{
@@ -50,10 +51,9 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
     // Read CRL metadata and public-store config (immutable DB borrow)
     let db_ref = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     let crl_metadata = db_ref.get_crl_metadata().map_err(|e| e.to_string())?;
-    let has_public_store = db_ref
-        .get_config()
-        .map(|c| c.ca_public_store.is_some())
-        .unwrap_or(false);
+    let config = db_ref.get_config().ok();
+    let has_public_store = config.as_ref().is_some_and(|c| c.ca_public_store.is_some());
+    let cert_days = config.and_then(|c| c.days);
 
     let crl_next_update = crl_metadata.as_ref().and_then(|m| m.next_update.clone());
     let crl_present = crl_next_update.is_some();
@@ -133,6 +133,7 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         &ca_warning_raw,
         crl_warning_raw.as_ref(),
         has_public_store,
+        cert_days,
         expired_certs,
         pending_csrs,
     );
@@ -163,6 +164,7 @@ fn build_action_items(
     ca_warning: &CaExpiryWarning,
     crl_warning: Option<&CrlExpiryWarning>,
     has_public_store: bool,
+    cert_days: Option<i64>,
     expired_certs: usize,
     pending_csrs: usize,
 ) -> Vec<ActionItemDto> {
@@ -216,6 +218,19 @@ fn build_action_items(
         });
     }
 
+    if let Some(days) = cert_days.filter(|&d| d > APPLE_TLS_MAX_DAYS.into()) {
+        items.push(ActionItemDto {
+            id: "cert_days_over_apple_limit".to_string(),
+            severity: "info".to_string(),
+            message: format!(
+                "Default certificate lifetime is {days} days; server certificates are capped at \
+                 {APPLE_TLS_MAX_DAYS} for Apple devices"
+            ),
+            button_label: "Review CA".to_string(),
+            action: "view_ca".to_string(),
+        });
+    }
+
     if expired_certs > 0 {
         let noun = if expired_certs == 1 { "certificate has" } else { "certificates have" };
         items.push(ActionItemDto {
@@ -239,4 +254,23 @@ fn build_action_items(
     }
 
     items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item_ids(cert_days: Option<i64>) -> Vec<String> {
+        build_action_items(&CaExpiryWarning::None, None, false, cert_days, 0, 0)
+            .into_iter()
+            .map(|i| i.id)
+            .collect()
+    }
+
+    #[test]
+    fn flags_a_default_lifetime_over_the_apple_limit() {
+        assert_eq!(item_ids(Some(3650)), ["cert_days_over_apple_limit"]);
+        assert!(item_ids(Some(825)).is_empty());
+        assert!(item_ids(None).is_empty());
+    }
 }

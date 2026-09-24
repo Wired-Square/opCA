@@ -319,10 +319,13 @@ pub async fn sign_csr(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     // Sign CSR with CA
-    let (signed_cert, _) = ca.issue_certificate(&csr, &cert_type, None).map_err(|e| {
+    let (signed_cert, issuance_warnings) = ca.issue_certificate(&csr, &cert_type, request.days).map_err(|e| {
         state.log_err("sign_csr", Some(e.to_string()));
         e.to_string()
     })?;
+    for w in issuance_warnings {
+        state.log_ok("sign_csr", Some(w.message));
+    }
 
     let cert_pem_bytes = signed_cert
         .to_pem()

@@ -301,9 +301,13 @@ fn t23_cert_create_webserver_b() {
     let s = state.as_ref().expect("t01 must run first");
     let output = run_opca(s, &[
         "cert", "create", "-t", "webserver", "-n", "mailserver-cert",
-        "--alt", "mail.webserver.com",
+        "--alt", "mail.webserver.com", "--days", "900",
     ]);
     assert_ok(&output, "cert create mailserver-cert");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("825-day limit"),
+        "a 900-day server cert should warn about Apple's limit"
+    );
 }
 
 #[test]
@@ -312,8 +316,9 @@ fn t24_cert_renew_mailserver() {
     bail_if_failed!();
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
-    let output = run_opca(s, &["cert", "renew", "-n", "mailserver-cert"]);
+    let output = run_opca(s, &["cert", "renew", "-n", "mailserver-cert", "--days", "30"]);
     assert_ok(&output, "cert renew mailserver-cert");
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("825-day limit"));
 }
 
 #[test]

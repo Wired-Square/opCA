@@ -143,6 +143,31 @@ export function defaultKeyAlgorithm(certType: string): KeyAlgorithm {
   return "ec-p256";
 }
 
+/** Mirrors `APPLE_TLS_MAX_DAYS`. */
+export const APPLE_TLS_MAX_DAYS = 825;
+
+/** Mirrors `CertType::is_tls_server`. */
+export function isTlsServer(certType: string): boolean {
+  return certType === "webserver" || certType === "vpnserver";
+}
+
+/** Mirrors `CertType::default_days`. */
+export function defaultCertDays(certType: string, caDays: number): number {
+  return isTlsServer(certType) ? Math.min(caDays, APPLE_TLS_MAX_DAYS) : caDays;
+}
+
+export function appleTlsLimitWarning(certType: string, days: number | undefined): string | null {
+  return isTlsServer(certType) && days !== undefined && days > APPLE_TLS_MAX_DAYS
+    ? `Over ${APPLE_TLS_MAX_DAYS} days: macOS and iOS will reject this server certificate.`
+    : null;
+}
+
+export function caDaysOverAppleLimit(days: number | null | undefined): string | null {
+  return days != null && days > APPLE_TLS_MAX_DAYS
+    ? `Server certificates will be capped at ${APPLE_TLS_MAX_DAYS} days for Apple devices.`
+    : null;
+}
+
 export interface CertListItem {
   serial: string | null;
   cn: string | null;
@@ -252,6 +277,7 @@ export interface CreateCertRequest {
   cert_type: string;
   alt_names?: string[];
   key_algorithm?: KeyAlgorithm;
+  days?: number;
 }
 
 export interface ImportCertRequest {
@@ -323,6 +349,7 @@ export interface SignCsrRequest {
   csr_pem: string;
   csr_type: string;
   cn?: string;
+  days?: number;
 }
 
 export interface SignCsrResult {
