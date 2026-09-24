@@ -636,6 +636,10 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
   ([harness/](../harness)) by selector, asserting on layout numbers in
   both themes. It prints PASS/FAIL/SKIP and exits non-zero on a failure; it
   never selects a mutating menu item.
+- **GUI flow** — with the dev app up and disconnected, `npm run harness:flow`
+  starts a CA in a new `opca-flow-*` vault through the connect screen, then
+  issues, revokes and deletes a certificate through the Certs page, asserting on
+  the DOM and `list_certs`; teardown forgets the saved login and deletes that vault.
 
 ---
 
