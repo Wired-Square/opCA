@@ -8,6 +8,7 @@ import { setAppState, type VaultState } from "../stores/app";
 import { themeMode, toggleTheme } from "../stores/theme";
 import { availableUpdate, fetchUpdate } from "../stores/update";
 import Icon from "../components/Icon";
+import Popover, { PopoverOption } from "../components/Popover";
 import "../styles/pages/connect.css";
 
 interface ConnectionInfo {
@@ -77,13 +78,14 @@ function PickerField(props: {
   toggle?: { glyph: string; label: string };
   open: boolean;
   onToggle: () => void;
+  onClose: () => void;
   children: JSX.Element;
 }) {
+  let fieldEl!: HTMLDivElement;
   return (
     <div class="form-group">
       <label class="form-label" for={props.id}>{props.label}</label>
-      {/* Clicks inside the field must not reach the page's close-everything handler. */}
-      <div class="input-with-dropdown" onClick={(e) => e.stopPropagation()}>
+      <div ref={fieldEl} class="input-with-dropdown">
         <input
           id={props.id}
           type="text"
@@ -103,6 +105,8 @@ function PickerField(props: {
               type="button"
               class="dropdown-toggle"
               aria-label={toggle().label}
+              aria-haspopup="listbox"
+              aria-expanded={props.open}
               onClick={props.onToggle}
               tabIndex={-1}
             >
@@ -113,7 +117,9 @@ function PickerField(props: {
         {/* Gated on `toggle` as well as `open`, so forgetting the last saved
             login closes the menu instead of leaving an empty box behind. */}
         <Show when={props.open && props.toggle}>
-          <div class="dropdown-menu">{props.children}</div>
+          <Popover anchor={fieldEl} matchWidth role="listbox" onClose={props.onClose}>
+            {props.children}
+          </Popover>
         </Show>
       </div>
     </div>
@@ -129,7 +135,7 @@ function DropdownItem(props: {
   children?: JSX.Element;
 }) {
   return (
-    <div class="dropdown-item" onClick={props.onSelect}>
+    <PopoverOption class="dropdown-item" onSelect={props.onSelect}>
       <div class="dropdown-item-lines">
         <span class="dropdown-item-primary">{props.primary}</span>
         <Show when={props.secondary}>
@@ -137,7 +143,7 @@ function DropdownItem(props: {
         </Show>
       </div>
       {props.children}
-    </div>
+    </PopoverOption>
   );
 }
 
@@ -213,7 +219,7 @@ export default function Connect() {
   }
 
   return (
-    <div class="connect-page" onClick={() => setOpenDropdown(null)}>
+    <div class="connect-page">
       <div class="connect-card">
         <div class="connect-header">
           <div class="connect-brand-row">
@@ -239,6 +245,7 @@ export default function Connect() {
             toggle={saved().length > 0 ? { glyph: "↻", label: "Show saved vaults" } : undefined}
             open={openDropdown() === "vault"}
             onToggle={() => toggle("vault")}
+            onClose={() => setOpenDropdown(null)}
           >
             <For each={saved()}>
               {(login) => (
@@ -270,6 +277,7 @@ export default function Connect() {
             toggle={accounts().length > 0 ? { glyph: "▾", label: "Show 1Password accounts" } : undefined}
             open={openDropdown() === "account"}
             onToggle={() => toggle("account")}
+            onClose={() => setOpenDropdown(null)}
           >
             <For each={accounts()}>
               {(configured) => (

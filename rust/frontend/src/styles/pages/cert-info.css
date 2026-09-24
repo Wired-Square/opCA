@@ -25,7 +25,7 @@
   color: var(--text-secondary);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -46,10 +46,10 @@
   align-items: baseline;
   gap: 12px;
   padding: 10px 14px;
-  background: rgba(138, 138, 145, 0.08);
-  border: 1px solid rgba(138, 138, 145, 0.3);
+  background: var(--neutral-tint);
+  border: 1px solid var(--neutral-edge);
   border-left-width: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   margin-bottom: 16px;
   font-size: 0.875rem;
   color: var(--text-secondary);
@@ -80,13 +80,13 @@
 .cert-info-sticky-banners {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: var(--z-sticky);
   background: var(--bg-primary);
 }
 
 .fresh-banner {
-  border-left-color: var(--success, #2e7d32);
-  background: color-mix(in srgb, var(--success, #2e7d32) 8%, var(--bg-primary));
+  border-left-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, var(--bg-primary));
 }
 
 .vpn-regen-banner {

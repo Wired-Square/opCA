@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Developers:** `npm run tauri:dev` starts a local MCP server for driving the app window by
+  CSS selector, and `npm run harness:walk` uses it to check every popover's layout in both
+  themes. It is compiled into development builds only. Building now needs SSH access to the
+  private `lib-wiredai-rs`.
+
+### Fixed
+
+- Row action (⋮) menus open upward when there is no room below, instead of running off
+  the bottom of the window, and can be driven with the arrow keys.
+- The vault picker in **Send to Vault** and **Add VPN Profile** is no longer cut off by the
+  dialog, and closes when you click outside it.
+- Opening a certificate no longer re-uploads the CA database every time when its stored
+  bundle lacks some of the details the list is missing.
+
+### Removed
+
+- The deprecated Python implementation (`python/`). Its final source remains at commit
+  `8a75b1f` (release 0.99.7) and on PyPI.
+
 ## [0.101.0] - 2026-08-02
 
 ### Added

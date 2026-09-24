@@ -1,6 +1,6 @@
 //! End-to-end integration tests for the opca CLI binary.
 //!
-//! Mirrors the Python e2e test suite in `python/tests/e2e/`. Tests invoke the
+//! Mirrors the Python e2e test suite (`python/tests/e2e/`, removed after `cc7d913`). Tests invoke the
 //! compiled `opca` binary via `std::process::Command` against a real 1Password
 //! vault, verifying exit codes and stdout content.
 //!

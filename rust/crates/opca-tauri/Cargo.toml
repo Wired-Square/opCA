@@ -22,6 +22,11 @@ reqwest = { version = "0.12", features = ["json"] }
 rand = "0.9"
 base64 = "0.22"
 md5 = "0.7"
+wiredai-mcp = { git = "ssh://git@github.com/Wired-Square/lib-wiredai-rs.git", tag = "v0.1.0", features = ["http"], optional = true }
+
+[features]
+# Dev-only MCP server for the UI harness; refused in release builds (see main.rs).
+mcp = ["dep:wiredai-mcp"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

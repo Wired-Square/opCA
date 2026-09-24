@@ -35,7 +35,7 @@ impl FromStr for CertStatus {
 }
 
 /// A CA-issued certificate record (`certificate_authority` table).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CertRecord {
     pub serial: String,
     pub cn: Option<String>,

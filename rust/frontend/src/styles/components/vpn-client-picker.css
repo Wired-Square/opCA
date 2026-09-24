@@ -1,5 +1,4 @@
 .vpn-picker {
-  position: relative;
   max-width: 560px;
 }
 
@@ -48,25 +47,6 @@
   white-space: nowrap;
 }
 
-/* Invisible full-screen layer so an outside click closes the menu. Both this
-   and the dropdown are portalled to <body> and sit above the modal overlay
-   (z-index 100), so the list is never clipped by the dialog's scroll box. */
-.vpn-picker-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-}
-
-.vpn-picker-dropdown {
-  position: fixed;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  z-index: 201;
-  overflow: hidden;
-}
-
 /* Search header stays put; only the rows below it scroll. */
 .vpn-picker-search {
   padding: 8px;
@@ -80,31 +60,4 @@
 .vpn-picker-list {
   max-height: 280px;
   overflow-y: auto;
-}
-
-.vpn-picker-item {
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-  transition: background 0.1s;
-}
-
-.vpn-picker-item:hover {
-  background: var(--bg-elevated);
-}
-
-.vpn-picker-item-selected {
-  background: var(--accent-glow);
-}
-
-.vpn-picker-item + .vpn-picker-item {
-  border-top: 1px solid var(--border);
-}
-
-.vpn-picker-loading,
-.vpn-picker-empty {
-  padding: 12px;
-  font-size: 0.8125rem;
-  color: var(--text-secondary);
 }

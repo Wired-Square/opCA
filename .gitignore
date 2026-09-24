@@ -10,7 +10,6 @@ __pycache__/
 .pylintrc
 .venv-build/
 opca.egg-info/
-python/dist/
 
 # Rust
 /target/

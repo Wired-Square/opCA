@@ -26,4 +26,4 @@ export function toggleTheme() {
   setThemeMode((prev) => (prev === "dark" ? "light" : "dark"));
 }
 
-export { themeMode };
+export { themeMode, setThemeMode };

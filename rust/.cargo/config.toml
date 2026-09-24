@@ -1,0 +1,3 @@
+[net]
+# lib-wiredai-rs is private and fetched over ssh; the git CLI uses the ssh agent.
+git-fetch-with-cli = true

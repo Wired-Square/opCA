@@ -37,7 +37,7 @@
 }
 
 .checkbox-row input[type="checkbox"] {
-  accent-color: var(--accent, #e97319);
+  accent-color: var(--accent);
   width: 16px;
   height: 16px;
 }
@@ -60,10 +60,6 @@
   gap: 8px;
 }
 
-.page-vault .btn-warning:hover:not(:disabled) {
-  background: #d97706;
-}
-
 .page-vault .btn-warning:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -74,8 +70,8 @@
   color: var(--text-secondary);
   padding: 6px 12px;
   background: var(--bg-elevated);
-  border-radius: 6px;
-  font-family: monospace;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
 }
 
 .md5-label {

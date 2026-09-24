@@ -1,0 +1,41 @@
+.popover {
+  position: fixed;
+  z-index: var(--z-popover);
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-popover);
+}
+
+.popover-option {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+
+.popover-option:hover,
+.popover-option:focus-visible {
+  background: var(--bg-elevated);
+  outline: none;
+}
+
+.popover-option[aria-selected="true"] {
+  background: var(--accent-glow);
+}
+
+.popover-option + .popover-option {
+  border-top: 1px solid var(--border);
+}
+
+.popover-note {
+  padding: 12px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.popover-error {
+  color: var(--error);
+}

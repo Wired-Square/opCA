@@ -48,7 +48,7 @@
   padding: 10px 12px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 0.6875rem;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -93,5 +93,5 @@
 }
 
 .dns-name-suffix {
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }

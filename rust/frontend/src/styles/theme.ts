@@ -17,6 +17,10 @@ export const darkTheme = {
   "--warning": "#FFD60A",
   "--error": "#FF453A",
   "--info": "#64D2FF",
+  "--caution": "#FF9500",
+  "--link": "#3B82F6",
+  "--neutral": "#8A8A91",
+  "--on-accent": "#FFFFFF",
 } as const;
 
 export const lightTheme = {
@@ -38,6 +42,10 @@ export const lightTheme = {
   "--warning": "#B25000",
   "--error": "#D70015",
   "--info": "#0071E3",
+  "--caution": "#FF9500",
+  "--link": "#3B82F6",
+  "--neutral": "#8A8A91",
+  "--on-accent": "#FFFFFF",
 } as const;
 
 export type Theme = Record<string, string>;

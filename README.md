@@ -88,10 +88,15 @@ The built application will be in `rust/crates/opca-tauri/target/release/bundle/`
 ```shell
 cd rust
 npm install
-npm run tauri dev
+npm run tauri:dev
 ```
 
-This starts the SolidJS dev server on `localhost:5173` with hot-reload and launches the Tauri window.
+This starts the SolidJS dev server on `localhost:5173` with hot-reload and launches the Tauri window,
+with a dev-only MCP server on `127.0.0.1:8790` (URL and token in `rust/target/mcp.json`) for driving
+the UI. `npm run tauri dev` starts the same window without it.
+
+Every build, with or without the MCP server, fetches the private `lib-wiredai-rs` over SSH, so it needs
+a GitHub SSH key with access to it.
 
 ---
 
@@ -148,12 +153,22 @@ OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test op_integration
 
 Set `OPCA_TEST_VAULT` and optionally `OPCA_TEST_ACCOUNT` to configure the test vault.
 
+### UI Walk
+
+With `npm run tauri:dev` running and a CA loaded, drive the app's popovers in both themes and check
+their layout:
+
+```shell
+cd rust
+npm run harness:walk
+```
+
 ---
 
 ## Python CLI (Deprecated)
 
-The original Python CLI/TUI implementation (`python/`) is **deprecated** and in a read-only
-archive state. It will not receive new features or bug fixes.
+The original Python CLI/TUI implementation is **deprecated** and has been removed from this
+repository. It will not receive new features or bug fixes.
 
 The Python version is still available on [PyPI](https://pypi.org/project/opca/) for existing
 users who need it:
@@ -166,7 +181,8 @@ The final Python release is **v0.99.7**. All new development is in the Tauri/Rus
 application. Both implementations share the same 1Password vault format, so existing vaults
 work with the new version without migration.
 
-For the Python CLI documentation, refer to the [v0.99.7 release](https://github.com/wiredsquare/opCA/releases/tag/v0.99.7).
+For the Python source and CLI documentation, see the
+[final Python release commit](https://github.com/Wired-Square/opca/tree/8a75b1f/python).
 
 ---
 

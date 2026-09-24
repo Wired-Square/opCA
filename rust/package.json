@@ -7,6 +7,8 @@
     "dev": "npm run dev --prefix frontend",
     "build": "npm run build --prefix frontend",
     "tauri": "tauri",
+    "tauri:dev": "tauri dev --features mcp",
+    "harness:walk": "node harness/walk-phase8.mjs",
     "tauri:build:debug": "tauri build --debug",
     "version:patch": "node scripts/bump-version.js patch",
     "version:minor": "node scripts/bump-version.js minor",

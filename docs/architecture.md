@@ -317,6 +317,31 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
 The shell is intentionally thin: no PKI logic lives here, only glue between
 the webview and `opca-core`.
 
+### Dev-only MCP server
+
+The `mcp` cargo feature (on in `npm run tauri:dev`) compiles
+[mcp/](../rust/crates/opca-tauri/src/mcp) in, which serves an MCP endpoint on
+`127.0.0.1:${OPCA_MCP_PORT:-8790}` behind a bearer token (`OPCA_MCP_TOKEN`, or
+random), and writes `{url, token}` to `rust/target/mcp.json` (0600). Combining
+`mcp` with a release build is a `compile_error!`, so no shipped binary carries
+it. The server comes from the private `lib-wiredai-rs` (`wiredai-mcp`, over
+ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
+
+- **Read tools** — `app_status` and `list_certs` read `AppState` and never call
+  `op` (not even `ensure_ca`); `query` reports every element matching a CSS
+  selector with its rect, whether it sits wholly in the viewport, and the
+  overflow ancestor clipping it.
+- **UI tools** — `navigate`, `set_theme`, `resize_window`, `click`, `type`,
+  `press`, `wait_for`. The app is changed only through the UI under test.
+
+Everything except `resize_window` crosses a bridge: the server emits
+`harness:request {id, op, args}` to the main window and awaits the matching
+`harness:reply`, timing out after 10 s. The webview side,
+[harness/bridge.ts](../rust/frontend/src/harness/bridge.ts), is imported only
+under `import.meta.env.DEV`, so it is absent from `frontend/dist`. `click`
+dispatches pointerdown → mousedown → mouseup → click so outside-click dismissal
+is exercised.
+
 ### Dashboard as a persisting command
 
 `get_dashboard` is the one read-shaped command that can also write. It forces
@@ -388,6 +413,37 @@ A single-page SolidJS app. Key conventions:
   actions on the certificate list/detail and the OpenVPN Profiles list share a
   per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
   `Modal` dialogs reused across those pages.
+
+### Styling tokens
+
+The CSP forbids static inline styles, so all styling lives in
+[styles/](../rust/frontend/src/styles) and refers to tokens rather than
+literals. Colours that differ by theme are defined in
+[styles/theme.ts](../rust/frontend/src/styles/theme.ts) (`darkTheme` /
+`lightTheme`), which the `theme` store writes onto `:root`. Everything that
+does not vary by theme is a static `:root` variable in
+[styles/global.css](../rust/frontend/src/styles/global.css): status tints and
+edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
+`--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and the stacking order
+`--z-sticky` < `--z-modal` < `--z-popover`. New styles use these; a raw hex or
+pixel radius in a component stylesheet is a regression.
+
+### Popovers
+
+Anything that floats over the page — the row `KebabMenu`, `VaultPicker`,
+`VpnClientPicker` and Connect's saved-login and account pickers — renders
+through [components/Popover.tsx](../rust/frontend/src/components/Popover.tsx).
+It portals to `body` at `--z-popover`, so it escapes the `overflow` of a
+`.modal-dialog` or the page, and positions itself with the pure
+[utils/placePopover.ts](../rust/frontend/src/utils/placePopover.ts): below the
+anchor, else above, else on the larger side with a capped height, clamped
+8px inside the window horizontally. It closes on outside mousedown, Escape,
+outside scroll or resize, hands focus back to the anchor if it held it, and
+handles arrow / Home / End between items. Clicks stop at its root and Escape
+is captured on `window`, so a popover in a table row or a `Modal` triggers
+neither the row nor the dialog. List rows use `PopoverOption`
+(`role="option"`, Enter / Space to activate) and the shared `.popover-option`
+styles in `styles/components/popover.css`.
 
 ### Publishing to a store
 
@@ -514,6 +570,11 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
   deletes; needs an `op` session (set `OPCA_TEST_ACCOUNT`) and a `Private` vault
   to bootstrap. Tests are ordered (`t01`…`t90`) and share state, so they run
   single-threaded.
+- **Running app** — with `npm run tauri:dev` up and a CA loaded, `npm run
+  harness:walk` (in `rust/`) drives the window through the dev MCP server
+  ([harness/](../rust/harness)) by selector, asserting on layout numbers in
+  both themes. It prints PASS/FAIL/SKIP and exits non-zero on a failure; it
+  never selects a mutating menu item.
 
 ---
 
