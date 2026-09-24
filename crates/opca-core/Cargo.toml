@@ -33,3 +33,5 @@ whoami = "1"
 
 [features]
 default = []
+# Exposes `testutil` and `Op::with_runner` to other crates' tests.
+test-support = []

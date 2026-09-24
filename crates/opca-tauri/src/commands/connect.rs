@@ -5,7 +5,7 @@ use tauri::State;
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::{self, AccountInfo, Op, VaultInfo};
 
-use crate::state::{AppState, Connection};
+use crate::state::{AppState, Connection, Runner};
 
 /// Vault state returned to the frontend.
 ///
@@ -21,7 +21,7 @@ pub struct ConnectionInfo {
 }
 
 /// Determine the vault state by probing 1Password.
-fn detect_vault_state(op: &Op) -> String {
+fn detect_vault_state(op: &Op<Runner>) -> String {
     let ca_exists = op.item_exists(DEFAULT_OP_CONF.ca_title);
 
     if ca_exists {
@@ -47,7 +47,7 @@ pub async fn connect(
     account: Option<String>,
 ) -> Result<ConnectionInfo, String> {
     info!("[tauri] connect: vault='{}' account={:?}", vault, account);
-    let op = Op::new(&vault, account.clone(), None).map_err(|e| {
+    let op = Op::sign_in(&vault, account.clone(), None, Runner::default()).map_err(|e| {
         warn!("[tauri] connect failed: {e}");
         e.to_string()
     })?;

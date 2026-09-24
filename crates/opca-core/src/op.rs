@@ -45,7 +45,7 @@ pub trait CommandRunner {
 }
 
 /// Default runner — shells out to the real `op` binary.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ShellRunner;
 
 impl CommandRunner for ShellRunner {
@@ -269,6 +269,18 @@ impl Op<ShellRunner> {
         account: Option<String>,
         bin: Option<String>,
     ) -> Result<Self, OpcaError> {
+        Self::sign_in(vault, account, bin, ShellRunner)
+    }
+}
+
+impl<R: CommandRunner> Op<R> {
+    /// [`Op::new`] through a given runner.
+    pub fn sign_in(
+        vault: impl Into<String>,
+        account: Option<String>,
+        bin: Option<String>,
+        runner: R,
+    ) -> Result<Self, OpcaError> {
         let bin_name = bin.unwrap_or_else(|| OP_BIN.to_string());
 
         let resolved = which::which(&bin_name)
@@ -279,7 +291,7 @@ impl Op<ShellRunner> {
             bin: resolved,
             vault: vault.into().trim().to_string(),
             account,
-            runner: ShellRunner,
+            runner,
         };
 
         op.ensure_signed_in()?;
@@ -287,14 +299,12 @@ impl Op<ShellRunner> {
 
         Ok(op)
     }
-}
 
-impl<R: CommandRunner> Op<R> {
     /// Create an `Op` with a custom [`CommandRunner`] (for testing).
     ///
     /// Skips signin and vault validation — the caller is responsible for
     /// providing a runner that returns appropriate responses.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_runner(
         vault: impl Into<String>,
         account: Option<String>,

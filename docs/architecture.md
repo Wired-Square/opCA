@@ -617,6 +617,11 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
 
 - **Unit** — `cargo test -p opca-core`. Uses `MockRunner` to feed canned `op`
   output; no network, no `op` binary required.
+- **Tauri commands** — `cargo test -p opca-tauri`. Under `cfg(test)`
+  `state::Runner` is core's `MockRunner` (via core's `test-support` feature),
+  and `test_harness::Harness` builds a `tauri::test::mock_builder` app over a
+  loaded in-memory CA, invokes commands over IPC with the frontend's argument
+  names, and exposes the recorded `op` calls, action log and emitted events.
 - **Integration** — `OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test
   op_integration`. Exercises the low-level `Op` wrapper against a real `op`
   session and test vault (`OPCA_TEST_VAULT`, optionally `OPCA_TEST_ACCOUNT`).

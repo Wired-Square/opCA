@@ -2,10 +2,9 @@ use log::{info, warn, debug};
 use openssl::nid::Nid;
 use openssl::x509::X509;
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use opca_core::error::OpcaError;
-use opca_core::op::ShellRunner;
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType, KeyAlgorithm};
 use opca_core::services::database::{is_expiring_soon, CertLookup, CertRecord, ExternalCertRecord};
@@ -33,7 +32,7 @@ use crate::commands::dto::{
     ExternalCertListItem, ImportCertRequest, ImportCertResult, InspectCertificateResult,
     RenewRekeyResult,
 };
-use crate::state::{AppState, Connection};
+use crate::state::{AppState, Connection, Runner};
 
 /// Build a `CertListItem` from a raw `CertRecord`, folding in the classification
 /// state (`replacements`, `certs_expires_soon`) computed by `process_ca_database`.
@@ -549,8 +548,8 @@ pub async fn unignore_cert(
 /// A `bulk-progress` event is emitted before each item ("{verb} {n}/{total}")
 /// so the status indicator climbs through the batch rather than showing the
 /// raw command name.
-fn run_bulk_cert_op<F>(
-    app: &AppHandle,
+fn run_bulk_cert_op<R: Runtime, F>(
+    app: &AppHandle<R>,
     state: &State<'_, AppState>,
     serials: Vec<String>,
     label: &str,
@@ -558,7 +557,7 @@ fn run_bulk_cert_op<F>(
     mut action: F,
 ) -> Result<Vec<BulkCertResult>, String>
 where
-    F: FnMut(&mut CertificateAuthority<ShellRunner>, &str) -> Result<Option<String>, OpcaError>,
+    F: FnMut(&mut CertificateAuthority<Runner>, &str) -> Result<Option<String>, OpcaError>,
 {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
@@ -587,8 +586,8 @@ where
 }
 
 #[tauri::command]
-pub async fn bulk_rekey_certs(
-    app: AppHandle,
+pub async fn bulk_rekey_certs<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     serials: Vec<String>,
     key_algorithm: Option<KeyAlgorithm>,
@@ -603,8 +602,8 @@ pub async fn bulk_rekey_certs(
 }
 
 #[tauri::command]
-pub async fn bulk_renew_certs(
-    app: AppHandle,
+pub async fn bulk_renew_certs<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
@@ -618,8 +617,8 @@ pub async fn bulk_renew_certs(
 }
 
 #[tauri::command]
-pub async fn bulk_revoke_certs(
-    app: AppHandle,
+pub async fn bulk_revoke_certs<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
@@ -629,8 +628,8 @@ pub async fn bulk_revoke_certs(
 }
 
 #[tauri::command]
-pub async fn bulk_delete_certs(
-    app: AppHandle,
+pub async fn bulk_delete_certs<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
@@ -640,8 +639,8 @@ pub async fn bulk_delete_certs(
 }
 
 #[tauri::command]
-pub async fn bulk_ignore_certs(
-    app: AppHandle,
+pub async fn bulk_ignore_certs<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     serials: Vec<String>,
     note: Option<String>,
@@ -652,8 +651,8 @@ pub async fn bulk_ignore_certs(
 }
 
 #[tauri::command]
-pub async fn bulk_unignore_certs(
-    app: AppHandle,
+pub async fn bulk_unignore_certs<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
@@ -816,7 +815,7 @@ pub async fn get_cert_private_key(
 /// optionally re-encrypted with `passphrase`.
 fn export_leaf_key(
     state: &AppState,
-    ca: &mut CertificateAuthority<ShellRunner>,
+    ca: &mut CertificateAuthority<Runner>,
     title: &str,
     cert_type: Option<&str>,
     passphrase: Option<&str>,

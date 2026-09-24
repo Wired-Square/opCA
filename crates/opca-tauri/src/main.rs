@@ -4,6 +4,8 @@ mod commands;
 #[cfg(feature = "mcp")]
 mod mcp;
 mod state;
+#[cfg(test)]
+mod test_harness;
 
 #[cfg(all(feature = "mcp", not(debug_assertions)))]
 compile_error!("the `mcp` feature is for development builds only");

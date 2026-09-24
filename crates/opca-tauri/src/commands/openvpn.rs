@@ -17,7 +17,7 @@ use crate::commands::dto::{
     OpenVpnProfileItem, OpenVpnServerParams, OpenVpnTemplateDetail, OpenVpnTemplateItem,
     ServerSetupRequest,
 };
-use crate::state::{AppState, Connection};
+use crate::state::{AppState, Connection, Runner};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,7 +25,7 @@ use crate::state::{AppState, Connection};
 
 /// Read all field labels and values from the OpenVPN 1Password item.
 fn read_openvpn_fields(
-    op: &opca_core::op::Op,
+    op: &opca_core::op::Op<Runner>,
 ) -> Result<(bool, HashMap<String, String>), String> {
     let title = DEFAULT_OP_CONF.openvpn_title;
     if !op.item_exists(title) {
@@ -57,7 +57,7 @@ fn read_openvpn_fields(
 /// single `get_item` JSON parse. Templates are `[text]` fields under the
 /// "template" section, so each field's value *is* its content — no per-template
 /// `op read` spawn needed (the same optimisation `backfill_dkim` uses).
-fn read_openvpn_templates(op: &opca_core::op::Op) -> Result<Vec<(String, String)>, String> {
+fn read_openvpn_templates(op: &opca_core::op::Op<Runner>) -> Result<Vec<(String, String)>, String> {
     let title = DEFAULT_OP_CONF.openvpn_title;
     if !op.item_exists(title) {
         return Ok(Vec::new());
@@ -87,7 +87,7 @@ fn read_openvpn_templates(op: &opca_core::op::Op) -> Result<Vec<(String, String)
 }
 
 /// Determine create vs edit action for the OpenVPN item.
-fn resolve_store_action(op: &opca_core::op::Op) -> StoreAction {
+fn resolve_store_action(op: &opca_core::op::Op<Runner>) -> StoreAction {
     if op.item_exists(DEFAULT_OP_CONF.openvpn_title) {
         StoreAction::Edit
     } else {

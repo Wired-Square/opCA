@@ -201,7 +201,7 @@ pub struct BulkProgress {
 impl BulkProgress {
     /// Emit a `bulk-progress` event for item `current` of `total`. Best-effort:
     /// a failed emit (no frontend listening) is ignored.
-    pub fn emit(app: &tauri::AppHandle, verb: &str, current: usize, total: usize) {
+    pub fn emit<R: tauri::Runtime>(app: &tauri::AppHandle<R>, verb: &str, current: usize, total: usize) {
         use tauri::Emitter;
         let _ = app.emit("bulk-progress", BulkProgress { verb: verb.to_string(), current, total });
     }

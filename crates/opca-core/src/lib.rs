@@ -7,5 +7,5 @@ pub mod settings;
 pub mod utils;
 pub mod vault_lock;
 
-#[cfg(test)]
-pub(crate) mod testutil;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testutil;

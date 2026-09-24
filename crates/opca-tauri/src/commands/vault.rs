@@ -14,7 +14,7 @@ use opca_core::services::backup::{decrypt_payload, encrypt_payload};
 use opca_core::services::vault::{BackupPayload, VaultBackup};
 
 use crate::commands::dto::{BackupInfoResult, BackupItemCount, RestoreResult};
-use crate::state::{AppState, Connection};
+use crate::state::{AppState, Connection, Runner};
 
 /// Emit a progress message to the frontend.
 fn emit_progress(window: &Window, message: &str) {
@@ -146,7 +146,7 @@ pub async fn vault_restore(
     })?;
 
     emit_progress(&window, "Connecting to 1Password\u{2026}");
-    let op = Op::new(&vault, account, None).map_err(|e| {
+    let op = Op::sign_in(&vault, account, None, Runner::default()).map_err(|e| {
         state.log_err("vault_restore", Some(e.to_string()));
         e.to_string()
     })?;

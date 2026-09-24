@@ -1,6 +1,8 @@
 pub mod aws;
 pub mod ca;
 pub mod cert;
+#[cfg(test)]
+mod cert_tests;
 pub mod connect;
 pub mod crl;
 pub mod csr;

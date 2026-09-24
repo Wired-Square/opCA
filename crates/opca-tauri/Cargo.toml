@@ -25,6 +25,10 @@ base64 = "0.22"
 md5 = "0.7"
 wiredai-mcp = { git = "ssh://git@github.com/Wired-Square/lib-wiredai-rs.git", tag = "v0.2.0", features = ["http", "dom"], optional = true }
 
+[dev-dependencies]
+opca-core = { path = "../opca-core", features = ["test-support"] }
+tauri = { version = "2", features = ["test"] }
+
 [features]
 # Dev-only MCP server for the UI harness; refused in release builds (see main.rs).
 mcp = ["dep:wiredai-mcp"]

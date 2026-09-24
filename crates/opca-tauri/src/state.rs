@@ -4,13 +4,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{info, warn};
 use zeroize::Zeroizing;
-use opca_core::op::{Op, ShellRunner};
+use opca_core::op::Op;
 use opca_core::services::ca::{CertIssuanceWarning, CertificateAuthority};
 use opca_core::services::cert::CertificateBundle;
 use opca_core::services::database::CertificateAuthorityDB;
 use opca_core::vault_lock::VaultLock;
 
 use crate::commands::dto::LogEntry;
+
+/// Command tests swap in core's `MockRunner` so no command reaches the real `op`.
+#[cfg(not(test))]
+pub type Runner = opca_core::op::ShellRunner;
+#[cfg(test)]
+pub type Runner = opca_core::testutil::MockRunner;
 
 /// Connection state: holds the `Op` handle and, once loaded, the `CertificateAuthority`.
 ///
@@ -19,8 +25,8 @@ use crate::commands::dto::LogEntry;
 /// operations — preventing stale-vault races.
 #[derive(Default)]
 pub struct Connection {
-    pub op: Option<Op>,
-    pub ca: Option<CertificateAuthority<ShellRunner>>,
+    pub op: Option<Op<Runner>>,
+    pub ca: Option<CertificateAuthority<Runner>>,
     pub openvpn_templates_seeded: bool,
 }
 
@@ -105,7 +111,7 @@ impl AppState {
     /// Checks `ca.op` first (if CA is loaded), then falls back to raw `op`.
     pub fn with_op<F, T>(&self, f: F) -> Result<T, String>
     where
-        F: FnOnce(&Op) -> Result<T, String>,
+        F: FnOnce(&Op<Runner>) -> Result<T, String>,
     {
         let conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
         if let Some(ref ca) = conn.ca {

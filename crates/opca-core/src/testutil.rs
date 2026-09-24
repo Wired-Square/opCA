@@ -3,29 +3,31 @@
 //! Provides a [`MockRunner`] that returns pre-configured responses,
 //! plus helpers for building common [`CommandOutput`] values.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::error::OpcaError;
 use crate::op::{CommandOutput, CommandRunner, Op};
 
 /// A mock command runner that returns pre-configured responses in order.
+/// Clones share one queue and call log.
+#[derive(Clone, Default)]
 pub struct MockRunner {
-    responses: RefCell<Vec<CommandOutput>>,
-    calls: RefCell<Vec<Vec<String>>>,
+    responses: Arc<Mutex<Vec<CommandOutput>>>,
+    calls: Arc<Mutex<Vec<Vec<String>>>>,
 }
 
 impl MockRunner {
     pub fn new(responses: Vec<CommandOutput>) -> Self {
         Self {
-            responses: RefCell::new(responses),
-            calls: RefCell::new(Vec::new()),
+            responses: Arc::new(Mutex::new(responses)),
+            calls: Arc::default(),
         }
     }
 
     /// Return all recorded call argument lists.
     pub fn calls(&self) -> Vec<Vec<String>> {
-        self.calls.borrow().clone()
+        self.calls.lock().unwrap().clone()
     }
 }
 
@@ -38,10 +40,11 @@ impl CommandRunner for MockRunner {
         _env_vars: Option<&HashMap<String, String>>,
     ) -> Result<CommandOutput, OpcaError> {
         self.calls
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .push(args.iter().map(|s| s.to_string()).collect());
 
-        let mut responses = self.responses.borrow_mut();
+        let mut responses = self.responses.lock().unwrap();
         if responses.is_empty() {
             Ok(CommandOutput {
                 stdout: String::new(),
