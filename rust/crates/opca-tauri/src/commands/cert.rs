@@ -182,16 +182,16 @@ pub async fn backfill_cert(
             .or_else(|| bundle.as_ref().and_then(|b| b.certificate_pem().ok()));
         let chain_pem = bundle.as_ref().and_then(|b| b.chain_pem());
 
-        let mut did_backfill = false;
-        if needs_backfill {
-            if let Some(ref b) = bundle {
+        // A bundle can lack what the row is missing; upload only a row that changed.
+        let did_backfill = needs_backfill
+            && bundle.as_ref().is_some_and(|b| {
+                let before = record.clone();
                 backfill_record(&mut record, b);
-
-                // Persist to local (in-memory) database
-                if let Some(ref mut db) = ca.ca_database {
-                    let _ = db.update_cert(&record);
-                }
-                did_backfill = true;
+                record != before
+            });
+        if did_backfill {
+            if let Some(db) = ca.ca_database.as_mut() {
+                let _ = db.update_cert(&record);
             }
         }
 

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the bottom of the window, and can be driven with the arrow keys.
 - The vault picker in **Send to Vault** and **Add VPN Profile** is no longer cut off by the
   dialog, and closes when you click outside it.
+- Opening a certificate no longer re-uploads the CA database every time when its stored
+  bundle lacks some of the details the list is missing.
 
 ### Removed
 
