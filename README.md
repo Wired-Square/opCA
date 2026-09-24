@@ -88,10 +88,15 @@ The built application will be in `rust/crates/opca-tauri/target/release/bundle/`
 ```shell
 cd rust
 npm install
-npm run tauri dev
+npm run tauri:dev
 ```
 
-This starts the SolidJS dev server on `localhost:5173` with hot-reload and launches the Tauri window.
+This starts the SolidJS dev server on `localhost:5173` with hot-reload and launches the Tauri window,
+with a dev-only MCP server on `127.0.0.1:8790` (URL and token in `rust/target/mcp.json`) for driving
+the UI. `npm run tauri dev` starts the same window without it.
+
+Every build, with or without the MCP server, fetches the private `lib-wiredai-rs` over SSH, so it needs
+a GitHub SSH key with access to it.
 
 ---
 
@@ -147,6 +152,16 @@ OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test op_integration
 ```
 
 Set `OPCA_TEST_VAULT` and optionally `OPCA_TEST_ACCOUNT` to configure the test vault.
+
+### UI Walk
+
+With `npm run tauri:dev` running and a CA loaded, drive the app's popovers in both themes and check
+their layout:
+
+```shell
+cd rust
+npm run harness:walk
+```
 
 ---
 

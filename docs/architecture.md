@@ -317,6 +317,31 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
 The shell is intentionally thin: no PKI logic lives here, only glue between
 the webview and `opca-core`.
 
+### Dev-only MCP server
+
+The `mcp` cargo feature (on in `npm run tauri:dev`) compiles
+[mcp/](../rust/crates/opca-tauri/src/mcp) in, which serves an MCP endpoint on
+`127.0.0.1:${OPCA_MCP_PORT:-8790}` behind a bearer token (`OPCA_MCP_TOKEN`, or
+random), and writes `{url, token}` to `rust/target/mcp.json` (0600). Combining
+`mcp` with a release build is a `compile_error!`, so no shipped binary carries
+it. The server comes from the private `lib-wiredai-rs` (`wiredai-mcp`, over
+ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
+
+- **Read tools** — `app_status` and `list_certs` read `AppState` and never call
+  `op` (not even `ensure_ca`); `query` reports every element matching a CSS
+  selector with its rect, whether it sits wholly in the viewport, and the
+  overflow ancestor clipping it.
+- **UI tools** — `navigate`, `set_theme`, `resize_window`, `click`, `type`,
+  `press`, `wait_for`. The app is changed only through the UI under test.
+
+Everything except `resize_window` crosses a bridge: the server emits
+`harness:request {id, op, args}` to the main window and awaits the matching
+`harness:reply`, timing out after 10 s. The webview side,
+[harness/bridge.ts](../rust/frontend/src/harness/bridge.ts), is imported only
+under `import.meta.env.DEV`, so it is absent from `frontend/dist`. `click`
+dispatches pointerdown → mousedown → mouseup → click so outside-click dismissal
+is exercised.
+
 ### Dashboard as a persisting command
 
 `get_dashboard` is the one read-shaped command that can also write. It forces
@@ -545,6 +570,11 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
   deletes; needs an `op` session (set `OPCA_TEST_ACCOUNT`) and a `Private` vault
   to bootstrap. Tests are ordered (`t01`…`t90`) and share state, so they run
   single-threaded.
+- **Running app** — with `npm run tauri:dev` up and a CA loaded, `npm run
+  harness:walk` (in `rust/`) drives the window through the dev MCP server
+  ([harness/](../rust/harness)) by selector, asserting on layout numbers in
+  both themes. It prints PASS/FAIL/SKIP and exits non-zero on a failure; it
+  never selects a mutating menu item.
 
 ---
 

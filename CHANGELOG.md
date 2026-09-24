@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Developers:** `npm run tauri:dev` starts a local MCP server for driving the app window by
+  CSS selector, and `npm run harness:walk` uses it to check every popover's layout in both
+  themes. It is compiled into development builds only. Building now needs SSH access to the
+  private `lib-wiredai-rs`.
+
 ### Fixed
 
 - Row action (⋮) menus open upward when there is no room below, instead of running off
