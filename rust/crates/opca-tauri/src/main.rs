@@ -1,7 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod state;
+
+#[cfg(all(feature = "mcp", not(debug_assertions)))]
+compile_error!("the `mcp` feature is for development builds only");
 
 use log::info;
 use state::AppState;
@@ -178,6 +183,8 @@ fn main() {
         ])
         .setup(|_app| {
             info!("opCA v{} starting", env!("CARGO_PKG_VERSION"));
+            #[cfg(feature = "mcp")]
+            mcp::start(_app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

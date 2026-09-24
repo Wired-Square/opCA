@@ -30,7 +30,7 @@ use crate::commands::dto::{
     ExternalCertListItem, ImportCertRequest, ImportCertResult, InspectCertificateResult,
     RenewRekeyResult,
 };
-use crate::state::AppState;
+use crate::state::{AppState, Connection};
 
 /// Build a `CertListItem` from a raw `CertRecord`, folding in the classification
 /// state (`replacements`, `certs_expires_soon`) computed by `process_ca_database`.
@@ -60,7 +60,10 @@ pub(crate) fn cert_list_item(
 
 #[tauri::command]
 pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>, String> {
-    let mut conn = state.ensure_ca()?;
+    cert_items(&mut *state.ensure_ca()?)
+}
+
+pub(crate) fn cert_items(conn: &mut Connection) -> Result<Vec<CertListItem>, String> {
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     let db = ca.ca_database.as_mut()
