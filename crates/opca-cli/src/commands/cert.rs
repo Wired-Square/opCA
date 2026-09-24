@@ -1,6 +1,6 @@
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner};
-use opca_core::services::cert::{CertBundleConfig, CertType};
+use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle};
 use opca_core::services::database::CertLookup;
 
 use crate::app::{with_lock, AppContext};
@@ -92,12 +92,7 @@ fn handle_export<R: CommandRunner>(
     app: &mut AppContext<R>,
     args: CertExportArgs,
 ) -> Result<(), OpcaError> {
-    let cn = resolve_cn(app, args.cn.as_deref(), args.serial.as_deref())?;
-
-    let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
-    let bundle = ca
-        .retrieve_certbundle(&cn)?
-        .ok_or_else(|| OpcaError::CertificateNotFound(cn.clone()))?;
+    let (bundle, cn) = retrieve_bundle(app, args.cn.as_deref(), args.serial.as_deref())?;
 
     if args.format == "pkcs12" {
         let password = get_password("Enter export password: ")?;
@@ -156,12 +151,7 @@ fn handle_info<R: CommandRunner>(
     app: &mut AppContext<R>,
     id: CertIdentifier,
 ) -> Result<(), OpcaError> {
-    let cn = resolve_cn(app, id.cn.as_deref(), id.serial.as_deref())?;
-
-    let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
-    let bundle = ca
-        .retrieve_certbundle(&cn)?
-        .ok_or_else(|| OpcaError::CertificateNotFound(cn.clone()))?;
+    let (bundle, cn) = retrieve_bundle(app, id.cn.as_deref(), id.serial.as_deref())?;
 
     output::subtitle(&format!("Certificate: {cn}"));
 
@@ -391,25 +381,24 @@ fn deletable_serial_for_cn<R: CommandRunner>(
     }
 }
 
-fn resolve_cn<R: CommandRunner>(
+/// Item titles are `CRT_<serial>_<cn>`; a CN shared by renewals resolves to its valid certificate.
+/// Returns the bundle and the certificate's CN.
+fn retrieve_bundle<R: CommandRunner>(
     app: &AppContext<R>,
     cn: Option<&str>,
     serial: Option<&str>,
-) -> Result<String, OpcaError> {
-    if let Some(cn) = cn {
-        return Ok(cn.to_string());
-    }
-    if let Some(serial) = serial {
-        // Look up title from database
-        let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
-        let db = ca.ca_database.as_ref()
-            .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
-        let record = db
-            .query_cert(&CertLookup::Serial(serial.to_string()), false)?
-            .ok_or_else(|| OpcaError::CertificateNotFound(serial.to_string()))?;
-        return Ok(record.title.unwrap_or_else(|| serial.to_string()));
-    }
-    Err(OpcaError::Other("Either --cn or --serial is required".into()))
+) -> Result<(CertificateBundle, String), OpcaError> {
+    let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
+    let db = ca.ca_database.as_ref().ok_or(OpcaError::CaNotFound)?;
+    let lookup = make_lookup(cn, serial)?;
+    let not_found = || OpcaError::CertificateNotFound(cn.or(serial).unwrap_or_default().to_string());
+    let record = match db.query_cert(&lookup, true)? {
+        Some(record) => record,
+        None => db.query_cert(&lookup, false)?.ok_or_else(not_found)?,
+    };
+    let title = record.title.unwrap_or_else(|| record.serial.clone());
+    let bundle = ca.retrieve_certbundle(&title)?.ok_or_else(not_found)?;
+    Ok((bundle, record.cn.unwrap_or(record.serial)))
 }
 
 fn make_lookup(cn: Option<&str>, serial: Option<&str>) -> Result<CertLookup, OpcaError> {
