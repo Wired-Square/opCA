@@ -14,6 +14,7 @@ use crate::commands::dto::{
     CreateDkimRequest, CreateDkimResult, DkimKeyDetail, DkimKeyItem, DkimRoute53Result,
     DkimVerifyResult,
 };
+use crate::commands::cert::{encrypt_if_asked, encrypted_note};
 use crate::state::AppState;
 
 /// 1Password item title prefix for DKIM keys.
@@ -359,6 +360,7 @@ pub async fn get_dkim_private_key(
     state: State<'_, AppState>,
     domain: String,
     selector: String,
+    passphrase: Option<String>,
 ) -> Result<String, String> {
     info!("[tauri] get_dkim_private_key: domain='{domain}' selector='{selector}'");
     let mut conn = state.ensure_ca()?;
@@ -376,13 +378,15 @@ pub async fn get_dkim_private_key(
         return Err("No private key stored alongside this DKIM key".into());
     }
 
+    let exported = encrypt_if_asked(trimmed, passphrase.as_deref())?;
     state.log_ok(
         "get_dkim_private_key",
         Some(format!(
-            "Exported private key for DKIM key {selector}._domainkey.{domain}"
+            "Exported private key for DKIM key {selector}._domainkey.{domain}{}",
+            encrypted_note(passphrase.as_deref())
         )),
     );
-    Ok(trimmed.to_string())
+    Ok(exported)
 }
 
 /// Audit-log a clipboard copy of a non-secret DKIM artefact (selector,

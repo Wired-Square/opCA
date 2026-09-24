@@ -3,6 +3,8 @@
 
 use openssl::dh::Dh;
 use openssl::nid::Nid;
+use openssl::pkey::PKey;
+use openssl::symm::Cipher;
 use openssl::x509::X509;
 use rand::RngCore;
 
@@ -93,6 +95,16 @@ pub fn verify_ta_key(pem: &[u8]) -> Result<u32, OpcaError> {
 /// Load a PEM-encoded X.509 certificate.
 ///
 /// Returns an error if the data is missing PEM markers or cannot be parsed.
+/// Re-encode a PEM private key as passphrase-encrypted PKCS#8 (AES-256-CBC).
+pub fn encrypt_private_key_pem(pem: &str, passphrase: &str) -> Result<String, OpcaError> {
+    let key = PKey::private_key_from_pem(pem.as_bytes())
+        .map_err(|e| OpcaError::Crypto(format!("Failed to load private key: {e}")))?;
+    let encrypted = key
+        .private_key_to_pem_pkcs8_passphrase(Cipher::aes_256_cbc(), passphrase.as_bytes())
+        .map_err(|e| OpcaError::Crypto(format!("Failed to encrypt private key: {e}")))?;
+    String::from_utf8(encrypted).map_err(|e| OpcaError::Crypto(e.to_string()))
+}
+
 pub fn load_certificate_pem(pem: &[u8]) -> Result<X509, OpcaError> {
     let data = pem.to_vec();
     let trimmed = String::from_utf8_lossy(&data);
@@ -167,6 +179,22 @@ fn generate_test_cert(cn: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_encrypted_key_opens_only_with_its_passphrase() {
+        let key = crate::services::cert::CertificateBundle::generate_private_key(
+            crate::services::cert::KeyAlgorithm::EcP256,
+        )
+        .unwrap();
+        let plain = String::from_utf8(key.private_key_to_pem_pkcs8().unwrap()).unwrap();
+
+        let encrypted = encrypt_private_key_pem(&plain, "correct horse").unwrap();
+
+        assert!(encrypted.starts_with("-----BEGIN ENCRYPTED PRIVATE KEY-----"));
+        let opened = PKey::private_key_from_pem_passphrase(encrypted.as_bytes(), b"correct horse").unwrap();
+        assert!(opened.public_eq(&key));
+        assert!(PKey::private_key_from_pem_passphrase(encrypted.as_bytes(), b"wrong").is_err());
+    }
 
     #[test]
     fn test_generate_and_verify_ta_key_2048() {

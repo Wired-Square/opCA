@@ -185,6 +185,7 @@ pub async fn vault_restore(
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
     conn.ca = None;
     conn.op = Some(op);
+    state.forget_preloaded_key();
 
     state.log_ok(
         "vault_restore",

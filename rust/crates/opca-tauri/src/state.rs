@@ -3,8 +3,10 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{info, warn};
+use zeroize::Zeroizing;
 use opca_core::op::{Op, ShellRunner};
 use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::cert::CertificateBundle;
 use opca_core::services::database::CertificateAuthorityDB;
 use opca_core::vault_lock::VaultLock;
 
@@ -50,6 +52,14 @@ pub struct AppState {
     /// renew/rekey, so the detail page can show them without re-reading the
     /// bundle from 1Password. Consumed (one-shot) by `backfill_cert`.
     pub fresh_cert_pems: Mutex<HashMap<String, String>>,
+    /// The private key of the certificate open in a detail page, kept from
+    /// its backfill so copying it skips a second 1Password round-trip.
+    preloaded_key: Mutex<Option<PreloadedKey>>,
+}
+
+struct PreloadedKey {
+    item_title: String,
+    pem: Zeroizing<String>,
 }
 
 impl AppState {
@@ -131,6 +141,29 @@ impl AppState {
     pub fn take_fresh_pem(&self, serial: &str) -> Option<String> {
         self.fresh_cert_pems.lock().expect("mutex poisoned").remove(serial)
     }
+
+    /// Replace the preloaded key with this bundle's. Callers must have ruled
+    /// out a CA bundle: the preloaded key is served without re-checking.
+    pub fn preload_key(&self, item_title: &str, bundle: &CertificateBundle) {
+        *self.preloaded_key.lock().expect("mutex poisoned") =
+            bundle.private_key_pem().ok().map(|pem| PreloadedKey {
+                item_title: item_title.to_string(),
+                pem: Zeroizing::new(pem),
+            });
+    }
+
+    pub fn preloaded_key(&self, item_title: &str) -> Option<Zeroizing<String>> {
+        self.preloaded_key
+            .lock()
+            .expect("mutex poisoned")
+            .as_ref()
+            .filter(|k| k.item_title == item_title)
+            .map(|k| k.pem.clone())
+    }
+
+    pub fn forget_preloaded_key(&self) {
+        *self.preloaded_key.lock().expect("mutex poisoned") = None;
+    }
 }
 
 impl Default for AppState {
@@ -142,6 +175,7 @@ impl Default for AppState {
             private_store_lock: Mutex::new(()),
             last_private_store_sync: Mutex::new(None),
             fresh_cert_pems: Mutex::new(HashMap::new()),
+            preloaded_key: Mutex::new(None),
         }
     }
 }

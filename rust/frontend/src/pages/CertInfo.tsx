@@ -1,12 +1,11 @@
-import { Show, For, createSignal, createResource, createEffect } from "solid-js";
+import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
-import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy } from "../api/certs";
+import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy, forgetPreloadedKey } from "../api/certs";
 import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { getVpnProfileForCn, generateOpenVpnProfile } from "../api/openvpn";
 import type { CertDetail } from "../api/types";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
@@ -14,6 +13,7 @@ import CopyableValue from "../components/CopyableValue";
 import CertStatusBadge from "../components/CertStatusBadge";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
+import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import { ActionResultBanner } from "../components/ResultBanner";
 import PageError from "../components/PageError";
@@ -37,7 +37,8 @@ export default function CertInfo() {
   /** Rekey, renew and unignore share one action: the kebab disables all of its
    *  items together, so there is nothing to tell their busy states apart. */
   const headerAction = createAction(outcome);
-  const exportKey = createAction(outcome);
+  const [showKeyCopy, setShowKeyCopy] = createSignal(false);
+  onCleanup(() => void forgetPreloadedKey());
   const regenerateVpn = createAction(outcome);
   const label = () => certLabel({ cn: detail()?.cn, serial: params.serial as string });
   const [copied, markCopied] = createCopiedSignal();
@@ -145,19 +146,11 @@ export default function CertInfo() {
     }
   }
 
-  async function copyPrivateKey() {
-    const serial = params.serial as string;
-    if (!serial) return;
-    if (!(await confirmPrivateKeyCopy(detail()?.cn ?? serial))) return;
-    // The key stays scoped to the body, so it is unreachable the moment the
-    // run returns — nothing outside holds a reference to scrub.
-    await exportKey.run({ failure: "Could not copy the private key" }, async () => {
-      const key = await getCertPrivateKey(serial);
-      await writeClipboard(key);
-      markKeyCopied();
-      // No recordCertCopy() call here: get_cert_private_key already audits
-      // server-side via state.log_ok, and refuses CA keys outright.
-    });
+  async function copyPrivateKey(passphrase?: string) {
+    // No recordCertCopy() here: get_cert_private_key audits server-side and
+    // refuses CA keys outright.
+    await writeClipboard(await getCertPrivateKey(params.serial as string, passphrase));
+    markKeyCopied();
   }
 
   // Until backfill finishes, we know whether a chain exists (has_chain) but
@@ -320,8 +313,7 @@ export default function CertInfo() {
                     <Availability
                       label="Private Key"
                       available={d().has_private_key}
-                      onCopy={isCaCert(d()) ? undefined : copyPrivateKey}
-                      busy={exportKey.busy()}
+                      onCopy={isCaCert(d()) ? undefined : () => { setShowKeyCopy(true); }}
                       copied={copiedKey()}
                       blocked={isCaCert(d())
                         ? "CA private keys cannot be copied from opCA. Retrieve from 1Password directly if absolutely necessary."
@@ -409,6 +401,13 @@ export default function CertInfo() {
                 cn={d().cn}
                 onClose={() => setShowRevoke(false)}
                 onDone={() => { outcome.report(`Revoked ${label()}`); refetch(); }}
+              />
+
+              <CopyPrivateKeyDialog
+                open={showKeyCopy()}
+                label={label()}
+                onClose={() => setShowKeyCopy(false)}
+                onCopy={copyPrivateKey}
               />
             </>
           )}

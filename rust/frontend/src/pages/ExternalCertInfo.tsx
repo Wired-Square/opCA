@@ -1,19 +1,20 @@
-import { Show, For, createSignal, createResource, createEffect } from "solid-js";
+import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
 import { useParams, useNavigate } from "@solidjs/router";
 import {
   getExternalCertInfo,
   backfillExternalCert,
   getExternalCertPrivateKey,
   recordCertCopy,
+  forgetPreloadedKey,
 } from "../api/certs";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import type { ExternalCertDetail } from "../api/types";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import PageError from "../components/PageError";
+import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import "../styles/pages/cert-info.css";
 
 export default function ExternalCertInfo() {
@@ -23,11 +24,11 @@ export default function ExternalCertInfo() {
     () => params.serial as string | undefined,
     (serial: string) => getExternalCertInfo(serial),
   );
-  const [error, setError] = createSignal<string | null>(null);
   const [copiedPem, markPemCopied] = createCopiedSignal();
   const [copiedChain, markChainCopied] = createCopiedSignal();
   const [copiedKey, markKeyCopied] = createCopiedSignal();
-  const [exportingKey, setExportingKey] = createSignal(false);
+  const [showKeyCopy, setShowKeyCopy] = createSignal(false);
+  onCleanup(() => void forgetPreloadedKey());
   const [backfilling, setBackfilling] = createSignal(false);
 
   let enriched = false;
@@ -63,25 +64,11 @@ export default function ExternalCertInfo() {
     }
   }
 
-  async function copyPrivateKey() {
-    const serial = params.serial as string;
-    if (!serial) return;
-    if (!(await confirmPrivateKeyCopy(detail()?.cn ?? serial))) return;
-    setError(null);
-    setExportingKey(true);
-    let key = "";
-    try {
-      key = await getExternalCertPrivateKey(serial);
-      await writeClipboard(key);
-      markKeyCopied();
-      // No recordCertCopy() call here: get_external_cert_private_key already
-      // audits server-side via state.log_ok, and refuses CA keys outright.
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      key = "";
-      setExportingKey(false);
-    }
+  async function copyPrivateKey(passphrase?: string) {
+    // No recordCertCopy() here: get_external_cert_private_key audits
+    // server-side and refuses CA keys outright.
+    await writeClipboard(await getExternalCertPrivateKey(params.serial as string, passphrase));
+    markKeyCopied();
   }
 
   // Until backfill finishes, we know whether a chain exists (has_chain) but
@@ -160,8 +147,7 @@ export default function ExternalCertInfo() {
                     <Availability
                       label="Private Key"
                       available={d().has_private_key}
-                      onCopy={isCaCert(d()) ? undefined : copyPrivateKey}
-                      busy={exportingKey()}
+                      onCopy={isCaCert(d()) ? undefined : () => { setShowKeyCopy(true); }}
                       copied={copiedKey()}
                       blocked={isCaCert(d())
                         ? "CA private keys cannot be copied from opCA. Retrieve from 1Password directly if absolutely necessary."
@@ -195,7 +181,12 @@ export default function ExternalCertInfo() {
                 </div>
               </Show>
 
-              <PageError message={error()} class="mt-3" />
+              <CopyPrivateKeyDialog
+                open={showKeyCopy()}
+                label={d().cn ?? d().serial ?? ""}
+                onClose={() => setShowKeyCopy(false)}
+                onCopy={copyPrivateKey}
+              />
             </>
           )}
         </Show>

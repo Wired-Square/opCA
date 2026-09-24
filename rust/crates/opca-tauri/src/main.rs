@@ -120,6 +120,7 @@ fn main() {
             commands::cert::get_external_cert_info,
             commands::cert::backfill_external_cert,
             commands::cert::get_cert_private_key,
+            commands::cert::forget_preloaded_key,
             commands::cert::get_external_cert_private_key,
             commands::cert::record_cert_copy,
             commands::cert::create_cert,

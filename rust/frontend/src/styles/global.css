@@ -206,6 +206,21 @@ input[aria-invalid="true"]:focus {
 .form-hint.is-valid   { color: var(--success); }
 .form-hint.is-invalid { color: var(--error); }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
 /* ── Utility ───────────────────────────────────────────────────────── */
 .text-accent  { color: var(--accent); }
 .text-success { color: var(--success); }

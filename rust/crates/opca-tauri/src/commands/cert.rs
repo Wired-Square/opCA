@@ -9,7 +9,9 @@ use opca_core::op::ShellRunner;
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{is_expiring_soon, CertLookup, CertRecord, ExternalCertRecord};
+use opca_core::crypto::utils::encrypt_private_key_pem;
 use opca_core::services::san;
+use zeroize::Zeroizing;
 
 use crate::commands::inspect_helpers::{
     public_key_summary, signature_algorithm_from_text, x509_name_to_rdn_string,
@@ -178,6 +180,9 @@ pub async fn backfill_cert(
         } else {
             ca.retrieve_certbundle(title).ok().flatten()
         };
+        if let Some(b) = &bundle {
+            preload_unless_ca(&state, title, record.cert_type.as_deref(), b);
+        }
 
         let cert_pem = fresh_pem
             .or_else(|| bundle.as_ref().and_then(|b| b.certificate_pem().ok()));
@@ -730,6 +735,9 @@ pub async fn backfill_external_cert(
 
     let title = external_item_title(&record)?;
     let bundle = ca.retrieve_certbundle(&title).ok().flatten();
+    if let Some(b) = &bundle {
+        preload_unless_ca(&state, &title, record.cert_type.as_deref(), b);
+    }
 
     let cert_pem = bundle.as_ref().and_then(|b| b.certificate_pem().ok());
     let chain_pem = bundle.as_ref().and_then(|b| b.chain_pem());
@@ -749,9 +757,9 @@ pub async fn backfill_external_cert(
     Ok(external_record_to_detail(&record, cert_pem, chain_pem))
 }
 
-/// Return the PEM-encoded private key for a CA-issued certificate. The key is
-/// fetched from 1Password and returned to the frontend so the user can copy it
-/// to the clipboard. Never log or persist the key value.
+/// Return the PEM-encoded private key for a CA-issued certificate, optionally
+/// passphrase-encrypted, so the user can copy it to the clipboard. Never log or
+/// persist the key value.
 ///
 /// Refuses to export CA private keys: the CA key is the root of trust for
 /// every cert OPCA has issued, and we don't want a stray clipboard write to be
@@ -761,6 +769,7 @@ pub async fn backfill_external_cert(
 pub async fn get_cert_private_key(
     state: State<'_, AppState>,
     serial: String,
+    passphrase: Option<String>,
 ) -> Result<String, String> {
     info!("[tauri] get_cert_private_key: serial={serial}");
     let mut conn = state.ensure_ca()?;
@@ -773,22 +782,69 @@ pub async fn get_cert_private_key(
         .ok_or("Certificate not found")?;
 
     let title = record.title.as_deref().unwrap_or(&record.serial);
-    let bundle = ca
-        .retrieve_certbundle(title)
-        .map_err(|e| e.to_string())?
-        .ok_or("Certificate item not found in 1Password")?;
-
-    bail_if_ca_certificate(record.cert_type.as_deref(), &bundle)?;
-
-    let key_pem = bundle
-        .private_key_pem()
-        .map_err(|_| "No private key stored for this certificate".to_string())?;
-
+    let key = export_leaf_key(&state, ca, title, record.cert_type.as_deref(), passphrase.as_deref())?;
     state.log_ok(
         "get_cert_private_key",
-        Some(format!("Exported private key for cert {serial}")),
+        Some(format!("Exported private key for cert {serial}{}", encrypted_note(passphrase.as_deref()))),
     );
-    Ok(key_pem)
+    Ok(key)
+}
+
+/// A leaf certificate's private key — preloaded by its backfill, else fetched —
+/// optionally re-encrypted with `passphrase`.
+fn export_leaf_key(
+    state: &AppState,
+    ca: &mut CertificateAuthority<ShellRunner>,
+    title: &str,
+    cert_type: Option<&str>,
+    passphrase: Option<&str>,
+) -> Result<String, String> {
+    let pem = match state.preloaded_key(title) {
+        Some(pem) => pem,
+        None => {
+            let bundle = ca
+                .retrieve_certbundle(title)
+                .map_err(|e| e.to_string())?
+                .ok_or("Certificate item not found in 1Password")?;
+            bail_if_ca_certificate(cert_type, &bundle)?;
+            Zeroizing::new(
+                bundle
+                    .private_key_pem()
+                    .map_err(|_| "No private key stored for this certificate".to_string())?,
+            )
+        }
+    };
+    encrypt_if_asked(&pem, passphrase)
+}
+
+pub(crate) fn encrypt_if_asked(pem: &str, passphrase: Option<&str>) -> Result<String, String> {
+    match passphrase.filter(|p| !p.is_empty()) {
+        Some(p) => encrypt_private_key_pem(pem, p).map_err(|e| e.to_string()),
+        None => Ok(pem.to_string()),
+    }
+}
+
+pub(crate) fn encrypted_note(passphrase: Option<&str>) -> &'static str {
+    if passphrase.is_some_and(|p| !p.is_empty()) {
+        " (passphrase-encrypted)"
+    } else {
+        ""
+    }
+}
+
+/// Keep the bundle's key for a quick copy, but never a CA's.
+fn preload_unless_ca(state: &AppState, title: &str, cert_type: Option<&str>, bundle: &CertificateBundle) {
+    if bail_if_ca_certificate(cert_type, bundle).is_ok() {
+        state.preload_key(title, bundle);
+    } else {
+        state.forget_preloaded_key();
+    }
+}
+
+#[tauri::command]
+pub async fn forget_preloaded_key(state: State<'_, AppState>) -> Result<(), String> {
+    state.forget_preloaded_key();
+    Ok(())
 }
 
 fn is_ca_cert_type(cert_type: Option<&str>) -> bool {
@@ -894,6 +950,7 @@ pub async fn record_cert_copy(
 pub async fn get_external_cert_private_key(
     state: State<'_, AppState>,
     serial: String,
+    passphrase: Option<String>,
 ) -> Result<String, String> {
     info!("[tauri] get_external_cert_private_key: serial={serial}");
     let mut conn = state.ensure_ca()?;
@@ -906,22 +963,12 @@ pub async fn get_external_cert_private_key(
         .ok_or("External certificate not found")?;
 
     let title = external_item_title(&record)?;
-    let bundle = ca
-        .retrieve_certbundle(&title)
-        .map_err(|e| e.to_string())?
-        .ok_or("External certificate item not found in 1Password")?;
-
-    bail_if_ca_certificate(record.cert_type.as_deref(), &bundle)?;
-
-    let key_pem = bundle
-        .private_key_pem()
-        .map_err(|_| "No private key stored for this certificate".to_string())?;
-
+    let key = export_leaf_key(&state, ca, &title, record.cert_type.as_deref(), passphrase.as_deref())?;
     state.log_ok(
         "get_external_cert_private_key",
-        Some(format!("Exported private key for external cert {serial}")),
+        Some(format!("Exported private key for external cert {serial}{}", encrypted_note(passphrase.as_deref()))),
     );
-    Ok(key_pem)
+    Ok(key)
 }
 
 #[tauri::command]
@@ -985,4 +1032,52 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
 fn asn1_time_to_string(time: &openssl::asn1::Asn1TimeRef) -> Option<String> {
     let s = time.to_string();
     if s.is_empty() { None } else { Some(s) }
+}
+
+#[cfg(test)]
+mod preload_tests {
+    use super::*;
+    use opca_core::services::cert::KeyAlgorithm;
+
+    fn bundle(cert_type: CertType) -> CertificateBundle {
+        let config = CertBundleConfig {
+            cn: Some("t".into()),
+            key_algorithm: Some(KeyAlgorithm::EcP256),
+            next_serial: Some(1),
+            ca_days: Some(1),
+            ..CertBundleConfig::default()
+        };
+        let mut b = CertificateBundle::generate(cert_type.clone(), "t", config).unwrap();
+        if cert_type == CertType::Ca {
+            b.self_sign_ca().unwrap();
+        }
+        b
+    }
+
+    #[test]
+    fn a_leaf_key_is_preloaded_for_its_own_item_only() {
+        let state = AppState::default();
+        let leaf = bundle(CertType::WebServer);
+        preload_unless_ca(&state, "CRT_1_web", Some("webserver"), &leaf);
+        assert_eq!(*state.preloaded_key("CRT_1_web").unwrap(), leaf.private_key_pem().unwrap());
+        assert!(state.preloaded_key("CRT_2_other").is_none());
+        state.forget_preloaded_key();
+        assert!(state.preloaded_key("CRT_1_web").is_none());
+    }
+
+    #[test]
+    fn a_ca_key_is_never_preloaded_and_clears_the_slot() {
+        let state = AppState::default();
+        preload_unless_ca(&state, "CRT_1_web", Some("webserver"), &bundle(CertType::WebServer));
+        preload_unless_ca(&state, "CA", Some("ca"), &bundle(CertType::Ca));
+        assert!(state.preloaded_key("CA").is_none());
+        assert!(state.preloaded_key("CRT_1_web").is_none());
+    }
+
+    #[test]
+    fn an_empty_passphrase_means_unencrypted() {
+        let pem = bundle(CertType::WebServer).private_key_pem().unwrap();
+        assert_eq!(encrypt_if_asked(&pem, Some("")).unwrap(), pem);
+        assert!(encrypt_if_asked(&pem, Some("pw")).unwrap().contains("ENCRYPTED PRIVATE KEY"));
+    }
 }

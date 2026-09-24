@@ -36,12 +36,18 @@ export async function backfillExternalCert(serial: string): Promise<ExternalCert
   return tauriInvoke<ExternalCertDetail>("backfill_external_cert", { serial });
 }
 
-export async function getCertPrivateKey(serial: string): Promise<string> {
-  return tauriInvoke<string>("get_cert_private_key", { serial });
+/** `passphrase` returns the key as encrypted PKCS#8. */
+export async function getCertPrivateKey(serial: string, passphrase?: string): Promise<string> {
+  return tauriInvoke<string>("get_cert_private_key", { serial, passphrase: passphrase ?? null });
 }
 
-export async function getExternalCertPrivateKey(serial: string): Promise<string> {
-  return tauriInvoke<string>("get_external_cert_private_key", { serial });
+export async function getExternalCertPrivateKey(serial: string, passphrase?: string): Promise<string> {
+  return tauriInvoke<string>("get_external_cert_private_key", { serial, passphrase: passphrase ?? null });
+}
+
+/** Drop the key the backend kept from the last cert detail backfill. */
+export async function forgetPreloadedKey(): Promise<void> {
+  return tauriInvoke<void>("forget_preloaded_key");
 }
 
 export async function inspectCertificate(certPem: string): Promise<InspectCertificateResult> {

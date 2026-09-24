@@ -67,6 +67,7 @@ pub async fn connect(
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
     conn.ca = None;
     conn.op = Some(op);
+    state.forget_preloaded_key();
 
     state.log_ok("connect", Some(format!("Connected to vault '{}'", info.vault)));
     Ok(info)
@@ -88,6 +89,7 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     // Drop both CA and Op atomically.
     conn.ca = None;
     conn.op = None;
+    state.forget_preloaded_key();
     Ok(())
 }
 
