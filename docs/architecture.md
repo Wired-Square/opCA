@@ -389,6 +389,37 @@ A single-page SolidJS app. Key conventions:
   per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
   `Modal` dialogs reused across those pages.
 
+### Styling tokens
+
+The CSP forbids static inline styles, so all styling lives in
+[styles/](../rust/frontend/src/styles) and refers to tokens rather than
+literals. Colours that differ by theme are defined in
+[styles/theme.ts](../rust/frontend/src/styles/theme.ts) (`darkTheme` /
+`lightTheme`), which the `theme` store writes onto `:root`. Everything that
+does not vary by theme is a static `:root` variable in
+[styles/global.css](../rust/frontend/src/styles/global.css): status tints and
+edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
+`--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and the stacking order
+`--z-sticky` < `--z-modal` < `--z-popover`. New styles use these; a raw hex or
+pixel radius in a component stylesheet is a regression.
+
+### Popovers
+
+Anything that floats over the page — the row `KebabMenu`, `VaultPicker`,
+`VpnClientPicker` and Connect's saved-login and account pickers — renders
+through [components/Popover.tsx](../rust/frontend/src/components/Popover.tsx).
+It portals to `body` at `--z-popover`, so it escapes the `overflow` of a
+`.modal-dialog` or the page, and positions itself with the pure
+[utils/placePopover.ts](../rust/frontend/src/utils/placePopover.ts): below the
+anchor, else above, else on the larger side with a capped height, clamped
+8px inside the window horizontally. It closes on outside mousedown, Escape,
+outside scroll or resize, hands focus back to the anchor if it held it, and
+handles arrow / Home / End between items. Clicks stop at its root and Escape
+is captured on `window`, so a popover in a table row or a `Modal` triggers
+neither the row nor the dialog. List rows use `PopoverOption`
+(`role="option"`, Enter / Space to activate) and the shared `.popover-option`
+styles in `styles/components/popover.css`.
+
 ### Publishing to a store
 
 Generating a CRL, re-signing the CA and mutating the database all leave the

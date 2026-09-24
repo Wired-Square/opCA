@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Row action (⋮) menus open upward when there is no room below, instead of running off
   the bottom of the window, and can be driven with the arrow keys.
+- The vault picker in **Send to Vault** and **Add VPN Profile** is no longer cut off by the
+  dialog, and closes when you click outside it.
 
 ### Removed
 
