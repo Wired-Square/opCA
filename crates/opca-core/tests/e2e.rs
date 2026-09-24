@@ -33,6 +33,7 @@ struct TestState {
     client_cert_title: String,
     /// Second vault used for backup/restore
     restore_vault: String,
+    deleted_serial: String,
 }
 
 static STATE: Mutex<Option<TestState>> = Mutex::new(None);
@@ -82,6 +83,18 @@ fn cert_title_for_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, serial:
         .expect("cert title missing")
 }
 
+/// State of `title` in the vault (`ACTIVE`/`ARCHIVED`), including archived items.
+fn item_state(op: &Op, title: &str) -> String {
+    let mut args = vec!["item", "get", title, "--vault", &op.vault, "--include-archive", "--format=json"];
+    if let Some(account) = op.account() {
+        args.extend(["--account", account]);
+    }
+    let out = op.runner().run("op", &args, None, None).expect("op item get failed");
+    assert!(out.success, "op item get {title}: {}", out.stderr);
+    let item: serde_json::Value = serde_json::from_str(&out.stdout).expect("item json");
+    item["state"].as_str().unwrap_or("ACTIVE").to_string()
+}
+
 /// Assert a renew/rekey predecessor was auto-ignored with the expected reason
 /// and a `replaced by <new_serial>` note.
 fn assert_predecessor_ignored<R: CommandRunner>(
@@ -123,6 +136,7 @@ fn t01_create_vault() {
         server_cert_title: String::new(),
         client_cert_title: String::new(),
         restore_vault: String::new(),
+        deleted_serial: String::new(),
     });
 }
 
@@ -354,6 +368,61 @@ fn t24_cert_revoke() {
 }
 
 #[test]
+fn t25_cert_create_with_days() {
+    skip_unless_integration!();
+
+    let state = STATE.lock().unwrap();
+    let s = state.as_ref().expect("t01 must run first");
+    let mut ca = CertificateAuthority::retrieve(make_op(&s.vault)).expect("CA retrieve failed");
+
+    let config = opca_core::services::cert::CertBundleConfig {
+        cn: Some("e2e-shortlived".to_string()),
+        ..Default::default()
+    };
+    let (bundle, _warning) = ca
+        .generate_certificate_bundle(CertType::VpnClient, "e2e-shortlived", config, Some(30))
+        .expect("generate short-lived cert failed");
+
+    let cert = bundle.certificate.as_ref().expect("certificate missing");
+    let span = cert.not_before().diff(cert.not_after()).expect("validity diff");
+    assert_eq!(span.days, 30, "explicit days must set the validity span");
+    assert!(span.secs.abs() <= 1, "validity span off by {}s", span.secs);
+    eprintln!("[e2e] Short-lived cert created: {}", bundle.title);
+}
+
+#[test]
+fn t26_cert_delete_revoked() {
+    skip_unless_integration!();
+
+    let mut state = STATE.lock().unwrap();
+    let s = state.as_mut().expect("t01 must run first");
+    let op = make_op(&s.vault);
+    let mut ca = CertificateAuthority::retrieve(op.clone()).expect("CA retrieve failed");
+
+    let valid_serial = cert_serial(&ca, &CertLookup::Title(s.server_cert_title.clone()));
+    assert!(ca.delete_certificate(&valid_serial).is_err(), "a valid certificate must not be deletable");
+
+    let lookup = CertLookup::Cn("e2e-shortlived".to_string());
+    let serial = cert_serial(&ca, &lookup);
+    assert!(ca.revoke_certificate(&lookup).expect("revoke failed"));
+    let deleted = ca.delete_certificate(&serial).expect("delete failed");
+
+    let title = deleted.title.expect("deleted cert title");
+    assert_eq!(item_state(&op, &title), "ARCHIVED");
+    let row = ca
+        .ca_database
+        .as_ref()
+        .expect("database missing")
+        .query_cert(&CertLookup::Serial(serial.clone()), false)
+        .expect("query_cert failed")
+        .expect("deleted row kept");
+    assert!(row.deleted_at.is_some(), "deleted row must carry deleted_at");
+
+    s.deleted_serial = serial;
+    eprintln!("[e2e] Deleted revoked cert {} ({title})", s.deleted_serial);
+}
+
+#[test]
 fn t30_crl_generate() {
     skip_unless_integration!();
 
@@ -366,6 +435,18 @@ fn t30_crl_generate() {
 
     assert!(crl_pem.contains("BEGIN X509 CRL"), "CRL missing header");
     assert!(crl_pem.contains("END X509 CRL"), "CRL missing footer");
+    let crl = openssl::x509::X509Crl::from_pem(crl_pem.as_bytes()).expect("parse CRL");
+    let revoked: Vec<String> = crl
+        .get_revoked()
+        .into_iter()
+        .flatten()
+        .map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string())
+        .collect();
+    assert!(
+        revoked.contains(&s.deleted_serial),
+        "deleted revoked serial {} must stay on the CRL: {revoked:?}",
+        s.deleted_serial
+    );
     eprintln!("[e2e] CRL generated ({} bytes)", crl_pem.len());
 }
 
