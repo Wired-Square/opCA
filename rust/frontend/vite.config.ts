@@ -36,7 +36,7 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      ignored: ["**/rust/**"],
+      ignored: ["**/target/**"],
     },
   },
   build: {
