@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Row action (⋮) menus open upward when there is no room below, instead of running off
+  the bottom of the window, and can be driven with the arrow keys.
+
 ### Removed
 
 - The deprecated Python implementation (`python/`). Its final source remains at commit
