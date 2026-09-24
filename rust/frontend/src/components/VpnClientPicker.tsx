@@ -1,5 +1,5 @@
-import { Show, For, createSignal, createMemo, onCleanup } from "solid-js";
-import { Portal } from "solid-js/web";
+import { Show, For, createSignal, createMemo } from "solid-js";
+import Popover, { PopoverOption } from "./Popover";
 import CertStatusBadge from "./CertStatusBadge";
 import Spinner from "./Spinner";
 import { formatDate } from "../utils/dates";
@@ -37,15 +37,12 @@ function ClientRow(props: { cert: CertListItem }) {
  * it renders a coloured serial badge plus the expiry date per row, so renewal
  * duplicates — two valid certs sharing a CN — can be told apart. Clicking a row
  * toggles it without closing the menu, so several certs can be picked in one
- * pass. The menu is portalled with fixed positioning so it is never clipped by
- * the dialog's scroll box.
+ * pass.
  */
 export default function VpnClientPicker(props: VpnClientPickerProps) {
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
-  // Anchored position for the portalled dropdown (escapes the modal's clip).
-  const [pos, setPos] = createSignal({ top: 0, left: 0, width: 0 });
-  let triggerEl: HTMLButtonElement | undefined;
+  let triggerEl!: HTMLButtonElement;
 
   const isSelected = (cert: CertListItem) =>
     !!cert.serial && props.selected.has(cert.serial);
@@ -59,20 +56,9 @@ export default function VpnClientPicker(props: VpnClientPickerProps) {
     );
   });
 
-  function close() {
-    setOpen(false);
-    window.removeEventListener("resize", close);
-  }
-  onCleanup(close);
-
   function toggle() {
-    if (open()) { close(); return; }
-    setQuery("");
-    const r = triggerEl!.getBoundingClientRect();
-    setPos({ top: r.bottom + 4, left: r.left, width: r.width });
-    setOpen(true);
-    // The anchor is captured once; a resize invalidates it, so dismiss.
-    window.addEventListener("resize", close);
+    if (!open()) setQuery("");
+    setOpen(!open());
   }
 
   return (
@@ -81,6 +67,8 @@ export default function VpnClientPicker(props: VpnClientPickerProps) {
         ref={triggerEl}
         type="button"
         class="form-select vpn-picker-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open()}
         onClick={toggle}
       >
         <Show
@@ -94,12 +82,7 @@ export default function VpnClientPicker(props: VpnClientPickerProps) {
       </button>
 
       <Show when={open()}>
-        <Portal>
-          <div class="vpn-picker-backdrop" onClick={close} />
-          <div
-            class="vpn-picker-dropdown"
-            style={{ top: `${pos().top}px`, left: `${pos().left}px`, width: `${pos().width}px` }}
-          >
+        <Popover anchor={triggerEl} matchWidth onClose={() => setOpen(false)}>
           <Show when={!props.loading && props.clients.length > 0}>
             <div class="vpn-picker-search">
               <input
@@ -117,24 +100,25 @@ export default function VpnClientPicker(props: VpnClientPickerProps) {
             </div>
           </Show>
 
-          <div class="vpn-picker-list">
-            <Show when={props.loading}>
-              <div class="vpn-picker-loading">
-                <Spinner message="Loading VPN certificates..." small />
-              </div>
-            </Show>
+          <Show when={props.loading}>
+            <div class="popover-note">
+              <Spinner message="Loading VPN certificates..." small />
+            </div>
+          </Show>
 
-            <Show when={!props.loading && matches().length === 0}>
-              <div class="vpn-picker-empty">
-                {props.clients.length === 0 ? "No VPN certificates found" : "No matches"}
-              </div>
-            </Show>
+          <Show when={!props.loading && matches().length === 0}>
+            <div class="popover-note">
+              {props.clients.length === 0 ? "No VPN certificates found" : "No matches"}
+            </div>
+          </Show>
 
+          <div class="vpn-picker-list" role="listbox" aria-multiselectable="true">
             <For each={matches()}>
               {(cert) => (
-                <div
-                  class={`vpn-picker-item ${isSelected(cert) ? "vpn-picker-item-selected" : ""}`}
-                  onClick={() => props.onToggle(cert)}
+                <PopoverOption
+                  class="vpn-picker-item"
+                  selected={isSelected(cert)}
+                  onSelect={() => props.onToggle(cert)}
                 >
                   <input
                     type="checkbox"
@@ -143,12 +127,11 @@ export default function VpnClientPicker(props: VpnClientPickerProps) {
                     tabindex={-1}
                   />
                   <ClientRow cert={cert} />
-                </div>
+                </PopoverOption>
               )}
             </For>
           </div>
-          </div>
-        </Portal>
+        </Popover>
       </Show>
     </div>
   );

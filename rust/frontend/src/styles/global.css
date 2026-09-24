@@ -49,7 +49,6 @@
   --overlay: rgba(0, 0, 0, 0.5);
 
   --z-sticky: 2;
-  --z-dropdown: 10;
   --z-modal: 100;
   --z-popover: 200;
 }

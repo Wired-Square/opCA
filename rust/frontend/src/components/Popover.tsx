@@ -122,3 +122,29 @@ export default function Popover(props: PopoverProps) {
     </Portal>
   );
 }
+
+/** A selectable row for list-style popovers; reachable by the arrow keys and
+ *  activated by click, Enter or Space. */
+export function PopoverOption(props: {
+  selected?: boolean;
+  onSelect: () => void;
+  class?: string;
+  children: JSX.Element;
+}) {
+  return (
+    <div
+      role="option"
+      tabIndex={-1}
+      aria-selected={!!props.selected}
+      class={props.class ? `popover-option ${props.class}` : "popover-option"}
+      onClick={props.onSelect}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        props.onSelect();
+      }}
+    >
+      {props.children}
+    </div>
+  );
+}
