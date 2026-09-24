@@ -26,8 +26,8 @@ type Tab = "certificate" | "config" | "stores" | "init" | "restore" | "info";
 
 export default function CA() {
   const [tab, setTab] = createSignal<Tab>(hasCA() ? "certificate" : "init");
-  const [caInfo, { refetch: refetchCaInfo }] = createResource<CaInfo>(getCaInfo);
-  const [caConfig, { refetch: refetchConfig }] = createResource<CaConfig>(getCaConfig);
+  const [caInfo, { refetch: refetchCaInfo }] = createResource<CaInfo, true>(hasCA, getCaInfo);
+  const [caConfig, { refetch: refetchConfig }] = createResource<CaConfig, true>(hasCA, getCaConfig);
 
   // Certificate-tab actions live up here so they can sit in the page header
   // beside the title, the way the CRL page does it.

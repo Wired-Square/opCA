@@ -49,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The vault lock always recorded its holder as `unknown`, so "vault is locked by …"
+  could not say who held it.
+- A missing CA or vault surfaced as a raw `op` error: current `op` says "isn't an item"
+  and "isn't a vault" rather than "not found".
+- The CA page on a vault with no CA no longer tries to load one, saving several seconds.
 - Initialising a CA in the app always failed: opening the CA page on an empty vault
   dropped the connection ("Not connected"), and the form had no Common Name to send. It
   now has a required **Common Name** field.

@@ -626,7 +626,7 @@ impl<R: CommandRunner> Op<R> {
 
     /// Return the current 1Password CLI user details.
     pub fn get_current_user_details(&self) -> Result<String, OpcaError> {
-        let out = self.checked(&["user", "get", "--me"], None)?;
+        let out = self.checked(&["user", "get", "--me", "--format=json"], None)?;
         Ok(out.stdout)
     }
 
@@ -774,7 +774,7 @@ pub fn map_cli_error(out: &CommandOutput) -> OpcaError {
     };
     let low = msg.to_lowercase();
 
-    if low.contains("vault") && low.contains("not found") {
+    if low.contains("isn't a vault") || (low.contains("vault") && low.contains("not found")) {
         return OpcaError::VaultNotFound(msg.to_string());
     }
     if low.contains("sign in")
@@ -789,7 +789,7 @@ pub fn map_cli_error(out: &CommandOutput) -> OpcaError {
     if low.contains("already exists") || low.contains("duplicate") || low.contains("archived") {
         return OpcaError::ItemConflict(msg.to_string());
     }
-    if low.contains("not found") && low.contains("item") {
+    if low.contains("isn't an item") || (low.contains("not found") && low.contains("item")) {
         return OpcaError::ItemNotFound(msg.to_string());
     }
 
@@ -865,6 +865,13 @@ mod tests {
         let op = mock_op(vec![err_output("[ERROR] item \"CA\" not found")]);
         let err = op.get_item("CA", "json").unwrap_err();
         assert!(matches!(err, OpcaError::ItemNotFound(_)));
+    }
+
+    #[test]
+    fn get_current_user_details_asks_for_json() {
+        let op = mock_op(vec![ok_output("{}")]);
+        op.get_current_user_details().unwrap();
+        assert!(op.runner().calls()[0].iter().any(|a| a == "--format=json"));
     }
 
     // -- get_document -------------------------------------------------
@@ -1025,6 +1032,18 @@ mod tests {
     fn map_error_item_not_found() {
         let out = err_output("[ERROR] item \"CA\" not found");
         assert!(matches!(map_cli_error(&out), OpcaError::ItemNotFound(_)));
+    }
+
+    #[test]
+    fn map_error_isnt_an_item() {
+        let out = err_output("[ERROR] 2026/09/24 23:15:34 \"CA_Database\" isn't an item in the \"Private CA\" vault. Specify the item with its UUID, name, or domain.");
+        assert!(matches!(map_cli_error(&out), OpcaError::ItemNotFound(_)));
+    }
+
+    #[test]
+    fn map_error_isnt_a_vault() {
+        let out = err_output("[ERROR] 2026/09/24 23:15:37 \"Private CA\" isn't a vault in this account. Specify the vault with its ID or name.");
+        assert!(matches!(map_cli_error(&out), OpcaError::VaultNotFound(_)));
     }
 
     #[test]
