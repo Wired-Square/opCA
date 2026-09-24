@@ -37,7 +37,7 @@ export default function CertCreate() {
       await createCert({
         cn: cn(),
         cert_type: certType(),
-        alt_dns_names: sans().length > 0 ? sans() : undefined,
+        alt_names: sans().length > 0 ? sans() : undefined,
         key_algorithm: keyAlgorithm(),
       });
       // create_cert already persisted the DB (1Password + private store), so

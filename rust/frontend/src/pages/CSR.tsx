@@ -208,7 +208,7 @@ export default function CSR() {
         csr_type: csrType(),
         email: email().trim() || undefined,
         key_algorithm: keyAlgorithm(),
-        alt_dns_names: sans().length > 0 ? sans() : undefined,
+        alt_names: sans().length > 0 ? sans() : undefined,
       });
       setCreateResult(result);
       setCn("");
@@ -237,7 +237,7 @@ export default function CSR() {
       const result = await decodeCsr(pem);
       setDecoded(result);
       setSignCn(result.cn ?? "");
-      setSignSans([...result.alt_dns_names]);
+      setSignSans([...result.alt_names]);
     } catch (err) {
       setSignError(String(err));
     } finally {
@@ -795,11 +795,11 @@ export default function CSR() {
                 </div>
                 <div class="form-group">
                   <label class="form-label">Subject Alternative Names</label>
-                  <Show when={r().alt_dns_names.length > 0} fallback={
+                  <Show when={r().alt_names.length > 0} fallback={
                     <p class="text-muted text-sm">No alternative names.</p>
                   }>
                     <div class="san-list">
-                      <For each={r().alt_dns_names}>
+                      <For each={r().alt_names}>
                         {(san) => <span class="san-tag">{san}</span>}
                       </For>
                     </div>

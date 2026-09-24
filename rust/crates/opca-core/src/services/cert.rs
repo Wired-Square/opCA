@@ -19,6 +19,7 @@ use openssl::x509::{X509Builder, X509NameBuilder, X509Req, X509ReqBuilder, X509}
 use serde::{Deserialize, Serialize};
 
 use crate::error::OpcaError;
+use crate::services::san;
 
 // ---------------------------------------------------------------------------
 // Certificate type
@@ -173,7 +174,7 @@ pub struct CertBundleConfig {
     pub city: Option<String>,
     pub state: Option<String>,
     pub country: Option<String>,
-    pub alt_dns_names: Option<Vec<String>>,
+    pub alt_names: Option<Vec<String>>,
     /// Serial number for certificate signing.
     pub next_serial: Option<i64>,
     /// Validity period in days (for CA self-sign).
@@ -393,14 +394,13 @@ impl CertificateBundle {
             .set_pubkey(key)
             .map_err(|e| OpcaError::Crypto(format!("Set pubkey: {e}")))?;
 
-        // Add SAN extension if alt_dns_names are present
-        if let Some(ref alt_names) = config.alt_dns_names {
+        if let Some(ref alt_names) = config.alt_names {
             if !alt_names.is_empty() {
-                let mut san = SubjectAlternativeName::new();
+                let mut ext = SubjectAlternativeName::new();
                 for name in alt_names {
-                    san.dns(name);
+                    name.parse::<san::SubjectAltName>()?.add_to(&mut ext);
                 }
-                let san_ext = san.build(&req_builder.x509v3_context(None))
+                let san_ext = ext.build(&req_builder.x509v3_context(None))
                     .map_err(|e| OpcaError::Crypto(format!("SAN extension: {e}")))?;
 
                 let mut stack = openssl::stack::Stack::new()
@@ -911,16 +911,12 @@ impl CertificateBundle {
             self.config.cn = self.certificate.as_ref().and_then(extract_cn);
         }
         // Backfill SANs from certificate if not in config
-        if self.config.alt_dns_names.is_none() {
+        if self.config.alt_names.is_none() {
             if let Some(cert) = self.certificate.as_ref() {
-                if let Some(san_ext) = cert.subject_alt_names() {
-                    let dns_names: Vec<String> = san_ext
-                        .iter()
-                        .filter_map(|name| name.dnsname().map(String::from))
-                        .collect();
-                    if !dns_names.is_empty() {
-                        self.config.alt_dns_names = Some(dns_names);
-                    }
+                let names: Vec<String> =
+                    san::of_certificate(cert).iter().map(ToString::to_string).collect();
+                if !names.is_empty() {
+                    self.config.alt_names = Some(names);
                 }
             }
         }
@@ -1046,32 +1042,8 @@ fn extract_cn(cert: &X509) -> Option<String> {
 
 /// Extract Subject Alternative Names as a comma-separated string.
 fn get_san(cert: &X509) -> Option<String> {
-    let san_ext = cert.subject_alt_names()?;
-    let names: Vec<String> = san_ext
-        .iter()
-        .filter_map(|name| {
-            if let Some(dns) = name.dnsname() {
-                Some(format!("DNS:{dns}"))
-            } else if let Some(ip) = name.ipaddress() {
-                // Format IP bytes
-                if ip.len() == 4 {
-                    Some(format!("IP:{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]))
-                } else {
-                    Some(format!("IP:{ip:?}"))
-                }
-            } else if let Some(email) = name.email() {
-                Some(format!("email:{email}"))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if names.is_empty() {
-        None
-    } else {
-        Some(names.join(", "))
-    }
+    let names: Vec<String> = san::of_certificate(cert).iter().map(|n| n.tagged()).collect();
+    (!names.is_empty()).then(|| names.join(", "))
 }
 
 // ---------------------------------------------------------------------------
@@ -1092,7 +1064,7 @@ mod tests {
             city: Some("Melbourne".to_string()),
             state: Some("VIC".to_string()),
             country: Some("AU".to_string()),
-            alt_dns_names: None,
+            alt_names: None,
             next_serial: None,
             ca_days: None,
         }
@@ -1108,7 +1080,7 @@ mod tests {
             city: None,
             state: None,
             country: Some("AU".to_string()),
-            alt_dns_names: None,
+            alt_names: None,
             next_serial: Some(1),
             ca_days: Some(3650),
         }
@@ -1197,7 +1169,7 @@ mod tests {
     #[test]
     fn test_generate_csr_with_san() {
         let mut config = test_config();
-        config.alt_dns_names = Some(vec![
+        config.alt_names = Some(vec![
             "www.example.com".to_string(),
             "mail.example.com".to_string(),
         ]);
@@ -1384,7 +1356,7 @@ mod tests {
     #[test]
     fn test_get_san_attribute() {
         let mut config = test_config();
-        config.alt_dns_names = Some(vec![
+        config.alt_names = Some(vec![
             "www.example.com".to_string(),
             "mail.example.com".to_string(),
         ]);

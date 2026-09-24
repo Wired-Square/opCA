@@ -578,11 +578,11 @@ export default function Certs() {
 
               <div class="form-group">
                 <label class="form-label">Subject Alternative Names</label>
-                <Show when={r().alt_dns_names.length > 0} fallback={
+                <Show when={r().alt_names.length > 0} fallback={
                   <p class="text-muted text-sm">No alternative names.</p>
                 }>
                   <div class="san-list">
-                    <For each={r().alt_dns_names}>
+                    <For each={r().alt_names}>
                       {(san) => <span class="san-tag">{san}</span>}
                     </For>
                   </div>

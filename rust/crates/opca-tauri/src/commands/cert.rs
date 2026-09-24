@@ -9,6 +9,7 @@ use opca_core::op::ShellRunner;
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{is_expiring_soon, CertLookup, CertRecord, ExternalCertRecord};
+use opca_core::services::san;
 
 use crate::commands::inspect_helpers::{
     public_key_summary, signature_algorithm_from_text, x509_name_to_rdn_string,
@@ -359,7 +360,7 @@ pub async fn create_cert(
         city: ca_config.city,
         state: ca_config.state,
         country: ca_config.country,
-        alt_dns_names: request.alt_dns_names,
+        alt_names: request.alt_names,
         next_serial: ca_config.next_serial,
         ca_days: ca_config.days,
     };
@@ -960,15 +961,7 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
     let not_before = asn1_time_to_string(cert.not_before());
     let not_after = asn1_time_to_string(cert.not_after());
 
-    let alt_dns_names = cert
-        .subject_alt_names()
-        .map(|stack| {
-            stack
-                .iter()
-                .filter_map(|name| name.dnsname().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
+    let alt_names = san::of_certificate(&cert).iter().map(ToString::to_string).collect();
 
     let is_ca = text_dump.contains("CA:TRUE");
 
@@ -979,7 +972,7 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
         serial,
         not_before,
         not_after,
-        alt_dns_names,
+        alt_names,
         key_type,
         key_size,
         signature_algorithm,

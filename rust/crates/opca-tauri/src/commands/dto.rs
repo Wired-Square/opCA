@@ -221,7 +221,7 @@ pub struct InspectCertificateResult {
     pub serial: Option<String>,
     pub not_before: Option<String>,
     pub not_after: Option<String>,
-    pub alt_dns_names: Vec<String>,
+    pub alt_names: Vec<String>,
     pub key_type: String,
     pub key_size: u32,
     pub signature_algorithm: String,
@@ -260,7 +260,7 @@ pub struct ExternalCertDetail {
 pub struct CreateCertRequest {
     pub cn: String,
     pub cert_type: String,
-    pub alt_dns_names: Option<Vec<String>>,
+    pub alt_names: Option<Vec<String>>,
     #[serde(default)]
     pub key_algorithm: Option<KeyAlgorithm>,
 }
@@ -323,7 +323,7 @@ pub struct CreateCsrRequest {
     pub country: Option<String>,
     #[serde(default)]
     pub key_algorithm: Option<KeyAlgorithm>,
-    pub alt_dns_names: Option<Vec<String>>,
+    pub alt_names: Option<Vec<String>>,
 }
 
 /// Result of CSR creation.
@@ -338,7 +338,7 @@ pub struct CreateCsrResult {
 pub struct DecodeCsrResult {
     pub cn: Option<String>,
     pub subject: String,
-    pub alt_dns_names: Vec<String>,
+    pub alt_names: Vec<String>,
 }
 
 /// Request to sign an external CSR with the local CA.
@@ -376,7 +376,7 @@ pub struct GenerateCsrFromCertRequest {
 pub struct InspectCsrResult {
     pub cn: Option<String>,
     pub subject: String,
-    pub alt_dns_names: Vec<String>,
+    pub alt_names: Vec<String>,
     pub key_type: String,
     pub key_size: u32,
     pub signature_algorithm: String,

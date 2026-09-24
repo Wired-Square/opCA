@@ -218,7 +218,7 @@ fn t20_cert_create_server() {
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-webserver.example.com".to_string()),
         key_algorithm: Some(KeyAlgorithm::Rsa2048),
-        alt_dns_names: Some(vec!["www.e2e-webserver.example.com".to_string()]),
+        alt_names: Some(vec!["www.e2e-webserver.example.com".to_string()]),
         ..Default::default()
     };
 

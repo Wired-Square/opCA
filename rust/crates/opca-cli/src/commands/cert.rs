@@ -64,7 +64,7 @@ fn handle_create<R: CommandRunner>(
                 city: ca_config.city,
                 state: ca_config.state,
                 country: ca_config.country,
-                alt_dns_names: if alt_names.is_empty() {
+                alt_names: if alt_names.is_empty() {
                     None
                 } else {
                     Some(alt_names.clone())

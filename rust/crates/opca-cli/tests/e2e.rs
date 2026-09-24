@@ -266,7 +266,7 @@ fn t20_cert_create_vpnserver() {
     bail_if_failed!();
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
-    let output = run_opca(s, &["cert", "create", "-t", "vpnserver", "-n", "vpnserver-cert"]);
+    let output = run_opca(s, &["cert", "create", "-t", "vpnserver", "-n", "vpnserver-cert", "--key", "rsa-2048"]);
     assert_ok(&output, "cert create vpnserver");
 }
 
@@ -288,7 +288,7 @@ fn t22_cert_create_webserver_a() {
     let s = state.as_ref().expect("t01 must run first");
     let output = run_opca(s, &[
         "cert", "create", "-t", "webserver", "-n", "webserver-cert",
-        "--alt", "www.webserver.com",
+        "--alt", "www.webserver.com", "--alt", "10.0.0.1",
     ]);
     assert_ok(&output, "cert create webserver-cert");
 }

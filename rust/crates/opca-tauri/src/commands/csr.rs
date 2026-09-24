@@ -9,6 +9,7 @@ use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::StoreAction;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{CertLookup, CsrLookup, CsrRecord};
+use opca_core::services::san;
 use opca_core::utils::datetime::{now_utc_str, DateTimeFormat};
 
 use crate::commands::dto::{
@@ -87,33 +88,14 @@ fn cert_issuer_subject(cert: &X509) -> String {
         .join(", ")
 }
 
-/// Extract Subject Alternative Names (DNS entries) from a CSR.
+/// The CSR's SANs, minus the CN (which the CA adds back at signing).
 fn csr_sans(csr: &X509Req) -> Vec<String> {
-    let csr_text = csr
-        .to_text()
-        .map(|v| String::from_utf8_lossy(&v).to_string())
-        .unwrap_or_default();
-    extract_dns_sans_from_text(&csr_text, csr_cn(csr).as_deref())
-}
-
-/// Pull DNS SAN entries out of an OpenSSL `-text` style dump. The dump format
-/// is shared between certificates and CSRs, so this helper serves both.
-fn extract_dns_sans_from_text(text: &str, cn: Option<&str>) -> Vec<String> {
-    let mut sans = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.contains("DNS:") && !trimmed.starts_with("X509v3") {
-            for part in trimmed.split(',') {
-                let part = part.trim();
-                if let Some(dns) = part.strip_prefix("DNS:") {
-                    if cn != Some(dns) && !sans.contains(&dns.to_string()) {
-                        sans.push(dns.to_string());
-                    }
-                }
-            }
-        }
-    }
-    sans
+    let cn = csr_cn(csr);
+    san::of_csr(csr)
+        .iter()
+        .map(ToString::to_string)
+        .filter(|name| cn.as_ref() != Some(name))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +110,7 @@ pub async fn decode_csr(csr_pem: String) -> Result<DecodeCsrResult, String> {
     Ok(DecodeCsrResult {
         cn: csr_cn(&csr),
         subject: csr_subject_string(&csr),
-        alt_dns_names: csr_sans(&csr),
+        alt_names: csr_sans(&csr),
     })
 }
 
@@ -215,7 +197,7 @@ pub async fn create_csr(
         city: ca_config.city,
         state: ca_config.state,
         country,
-        alt_dns_names: request.alt_dns_names.clone(),
+        alt_names: request.alt_names.clone(),
         next_serial: ca_config.next_serial,
         ca_days: ca_config.days,
     };
@@ -564,13 +546,10 @@ pub async fn inspect_csr(csr_pem: String) -> Result<InspectCsrResult, String> {
 
     let signature_algorithm = signature_algorithm_from_text(&text_dump);
 
-    let cn = csr_cn(&csr);
-    let alt_dns_names = extract_dns_sans_from_text(&text_dump, cn.as_deref());
-
     Ok(InspectCsrResult {
-        cn,
+        cn: csr_cn(&csr),
+        alt_names: csr_sans(&csr),
         subject: x509_name_to_rdn_string(csr.subject_name()),
-        alt_dns_names,
         key_type,
         key_size,
         signature_algorithm,

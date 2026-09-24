@@ -246,7 +246,7 @@ export interface ExternalCertDetail {
 export interface CreateCertRequest {
   cn: string;
   cert_type: string;
-  alt_dns_names?: string[];
+  alt_names?: string[];
   key_algorithm?: KeyAlgorithm;
 }
 
@@ -269,7 +269,7 @@ export interface InspectCertificateResult {
   serial: string | null;
   not_before: string | null;
   not_after: string | null;
-  alt_dns_names: string[];
+  alt_names: string[];
   key_type: string;
   key_size: number;
   signature_algorithm: string;
@@ -296,7 +296,7 @@ export interface CsrListItem {
 export interface DecodeCsrResult {
   cn: string | null;
   subject: string;
-  alt_dns_names: string[];
+  alt_names: string[];
 }
 
 export interface CreateCsrRequest {
@@ -305,7 +305,7 @@ export interface CreateCsrRequest {
   email?: string;
   country?: string;
   key_algorithm?: KeyAlgorithm;
-  alt_dns_names?: string[];
+  alt_names?: string[];
 }
 
 export interface CreateCsrResult {
@@ -337,7 +337,7 @@ export interface GenerateCsrFromCertRequest {
 export interface InspectCsrResult {
   cn: string | null;
   subject: string;
-  alt_dns_names: string[];
+  alt_names: string[];
   key_type: string;
   key_size: number;
   signature_algorithm: string;

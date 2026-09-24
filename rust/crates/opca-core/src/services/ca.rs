@@ -30,6 +30,7 @@ use crate::services::database::models::{
     CaConfig, CertLookup, CertRecord, CrlMetadata, ExternalCertRecord, IgnoreReason, SerialType,
 };
 use crate::services::database::CertificateAuthorityDB;
+use crate::services::san;
 use crate::services::storage;
 use crate::utils::datetime::{self, DateTimeFormat};
 
@@ -457,7 +458,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                         builder.append_extension(eku)?;
 
                         // SAN from CSR CN + any CSR SANs
-                        self.add_san_from_csr(&mut builder, csr, ca_cert)?;
+                        self.add_san_from_csr(&mut builder, csr, ca_cert, true)?;
                     }
                     CertType::VpnClient => {
                         builder.append_extension(leaf_key_usage(false)?)?;
@@ -468,6 +469,8 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                             .build()
                             .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
                         builder.append_extension(eku)?;
+
+                        self.add_san_from_csr(&mut builder, csr, ca_cert, false)?;
                     }
                     CertType::VpnServer => {
                         builder.append_extension(leaf_key_usage(rsa_subject)?)?;
@@ -490,7 +493,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                         builder.append_extension(eku)?;
 
                         // SAN from CSR
-                        self.add_san_from_csr(&mut builder, csr, ca_cert)?;
+                        self.add_san_from_csr(&mut builder, csr, ca_cert, true)?;
 
                         // CRL Distribution Points
                         if let Some(ref crl_url) = ca_config.crl_url {
@@ -535,47 +538,41 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         Ok(builder.build())
     }
 
-    /// Add SAN extension to builder, using CN + any SANs from the CSR.
+    /// Add a SAN extension carrying the CSR's SANs, led by its CN (as an IP SAN
+    /// if it is one) when `with_cn`. VPN client CNs are people, not hosts.
     fn add_san_from_csr(
         &self,
         builder: &mut X509Builder,
         csr: &X509Req,
         ca_cert: &X509,
+        with_cn: bool,
     ) -> Result<(), OpcaError> {
-        // Get CN from CSR subject
         let cn = csr
             .subject_name()
             .entries_by_nid(Nid::COMMONNAME)
             .next()
             .and_then(|e| e.data().as_utf8().ok())
-            .map(|s| s.to_string());
+            .filter(|_| with_cn)
+            .map(|s| match s.parse() {
+                Ok(ip) => san::SubjectAltName::Ip(ip),
+                Err(_) => san::SubjectAltName::Dns(s.to_string()),
+            });
 
-        let mut san = SubjectAlternativeName::new();
-        if let Some(ref cn_str) = cn {
-            san.dns(cn_str);
-        }
-
-        // Copy SANs from CSR extensions — parse the text representation
-        // since the openssl crate doesn't expose CSR extension details directly
-        let csr_text = csr.to_text()
-            .map(|v| String::from_utf8_lossy(&v).to_string())
-            .unwrap_or_default();
-        for line in csr_text.lines() {
-            let trimmed = line.trim();
-            // Lines like "DNS:example.com, DNS:www.example.com"
-            if trimmed.contains("DNS:") && !trimmed.starts_with("X509v3") {
-                for part in trimmed.split(',') {
-                    let part = part.trim();
-                    if let Some(dns) = part.strip_prefix("DNS:") {
-                        if cn.as_deref() != Some(dns) {
-                            san.dns(dns);
-                        }
-                    }
-                }
+        let mut names: Vec<san::SubjectAltName> = cn.into_iter().collect();
+        for name in san::of_csr(csr) {
+            if !names.contains(&name) {
+                names.push(name);
             }
         }
+        if names.is_empty() {
+            return Ok(());
+        }
 
-        let san_ext = san
+        let mut ext = SubjectAlternativeName::new();
+        for name in &names {
+            name.add_to(&mut ext);
+        }
+        let san_ext = ext
             .build(&builder.x509v3_context(Some(ca_cert), None))
             .map_err(|e| OpcaError::Crypto(format!("SAN: {e}")))?;
         builder.append_extension(san_ext)?;
@@ -1752,7 +1749,7 @@ fn ca_config_to_bundle(config: &CaConfig) -> CertBundleConfig {
         city: config.city.clone(),
         state: config.state.clone(),
         country: config.country.clone(),
-        alt_dns_names: None,
+        alt_names: None,
         next_serial: config.next_serial,
         ca_days: config.ca_days.or(config.days),
     }
@@ -2085,7 +2082,7 @@ mod tests {
             city: None,
             state: None,
             country: Some("AU".to_string()),
-            alt_dns_names: None,
+            alt_names: None,
             next_serial: Some(1),
             ca_days: Some(3650),
         };
@@ -2211,7 +2208,7 @@ mod tests {
         let ws_config = CertBundleConfig {
             cn: Some("www.example.com".to_string()),
             key_algorithm: Some(KeyAlgorithm::Rsa2048),
-            alt_dns_names: Some(vec!["example.com".to_string()]),
+            alt_names: Some(vec!["example.com".to_string()]),
             ..CertBundleConfig::default()
         };
         let ws_bundle = CertificateBundle::generate(
@@ -2371,14 +2368,29 @@ mod tests {
         }
     }
 
-    fn sign_leaf(ca: &mut CertificateAuthority<crate::testutil::MockRunner>, algorithm: KeyAlgorithm) -> X509 {
+    fn sign(
+        ca: &mut CertificateAuthority<crate::testutil::MockRunner>,
+        cert_type: CertType,
+        cn: &str,
+        alt_names: &[&str],
+        algorithm: KeyAlgorithm,
+    ) -> X509 {
         let config = CertBundleConfig {
-            cn: Some("www.example.com".to_string()),
+            cn: Some(cn.to_string()),
             key_algorithm: Some(algorithm),
+            alt_names: Some(alt_names.iter().map(|s| s.to_string()).collect()),
             ..CertBundleConfig::default()
         };
-        let leaf = CertificateBundle::generate(CertType::WebServer, "www", config).unwrap();
-        ca.sign_certificate(leaf.csr.as_ref().unwrap(), &CertType::WebServer).unwrap()
+        let leaf = CertificateBundle::generate(cert_type.clone(), cn, config).unwrap();
+        ca.sign_certificate(leaf.csr.as_ref().unwrap(), &cert_type).unwrap()
+    }
+
+    fn sign_leaf(ca: &mut CertificateAuthority<crate::testutil::MockRunner>, algorithm: KeyAlgorithm) -> X509 {
+        sign(ca, CertType::WebServer, "www.example.com", &[], algorithm)
+    }
+
+    fn san_strings(cert: &X509) -> Vec<String> {
+        san::of_certificate(cert).iter().map(|n| n.tagged()).collect()
     }
 
     fn text_of(cert: &X509) -> String {
@@ -2420,6 +2432,58 @@ mod tests {
         let pem = build_crl(bundle.certificate.as_ref().unwrap(), key, 1, 30, &Default::default(), db).unwrap();
         let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
         assert!(crl.verify(key).unwrap());
+    }
+
+    #[test]
+    fn every_san_kind_survives_signing() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let signed = sign(
+            &mut ca,
+            CertType::WebServer,
+            "www.example.com",
+            &["10.0.0.5", "2001:db8::1", "ops@example.com", "spiffe://prod/web", "example.com"],
+            KeyAlgorithm::EcP256,
+        );
+        assert_eq!(
+            san_strings(&signed),
+            [
+                "DNS:www.example.com", "IP:10.0.0.5", "IP:2001:db8::1", "email:ops@example.com",
+                "URI:spiffe://prod/web", "DNS:example.com",
+            ]
+        );
+        let pem = signed.to_pem().unwrap();
+        let bundle = CertificateBundle::import(
+            CertType::WebServer, "www", &pem, None, None, None, CertBundleConfig::default(),
+        )
+        .unwrap();
+        let stored = bundle.get_certificate_attrib("san").unwrap().unwrap();
+        assert!(stored.contains("IP:2001:db8::1"), "{stored}");
+    }
+
+    #[test]
+    fn an_ip_common_name_becomes_an_ip_san() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let signed = sign(&mut ca, CertType::Device, "192.168.1.20", &[], KeyAlgorithm::EcP256);
+        assert_eq!(san_strings(&signed), ["IP:192.168.1.20"]);
+    }
+
+    #[test]
+    fn vpn_clients_carry_their_csr_sans_but_not_their_cn() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let signed = sign(&mut ca, CertType::VpnClient, "Alex", &["alex@example.com"], KeyAlgorithm::EcP256);
+        assert_eq!(san_strings(&signed), ["email:alex@example.com"]);
+        let bare = sign(&mut ca, CertType::VpnClient, "Sam", &[], KeyAlgorithm::EcP256);
+        assert!(bare.subject_alt_names().is_none());
+    }
+
+    #[test]
+    fn an_invalid_san_is_refused_before_a_key_is_stored() {
+        let config = CertBundleConfig {
+            cn: Some("www.example.com".to_string()),
+            alt_names: Some(vec!["10.0.0.300".to_string()]),
+            ..CertBundleConfig::default()
+        };
+        assert!(CertificateBundle::generate(CertType::WebServer, "www", config).is_err());
     }
 
     #[test]
