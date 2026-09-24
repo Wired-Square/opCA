@@ -329,8 +329,10 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
     and only drop it on success, so a failure (such as an empty vault) stays
     connected.
   - `vault_lock: VaultLock` — the current process's advisory lock handle.
-  - `action_log: Vec<LogEntry>` — in-memory audit trail surfaced on the Log
-    page.
+  - `action_log: Vec<LogEntry>` — in-memory audit trail surfaced on the
+    Database page's Activity Log. It belongs to the connection: cleared, with
+    the preloaded key, whenever `replace_connection` swaps `conn` (connect,
+    disconnect, vault restore).
   - `private_store_lock` / `last_private_store_sync` — serialise the background
     private-store upload (off `conn`) and skip it when the DB is unchanged (see
     Concurrent-writer safety).
@@ -604,7 +606,7 @@ list) is handed over in router `state`, which is transient by design.
 8. The handler serialises the result; the frontend updates its view.
 9. `withLock` releases `CA_Lock` in its `finally` clause, then fires
    `sync_private_store` (fire-and-forget) to back the DB up off the lock.
-10. An entry lands in `action_log` for display on the Log page.
+10. An entry lands in `action_log` for display on the Activity Log.
 
 If any step fails, the error propagates as an `OpcaError` through every
 layer and is surfaced in the UI via `setAppState("error", …)`.

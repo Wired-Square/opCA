@@ -65,8 +65,7 @@ pub async fn connect(
     // This single lock acquisition prevents the race where a stale CA
     // from a previous vault survives into the new session.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    *conn = Connection { op: Some(op), ..Connection::default() };
-    state.forget_preloaded_key();
+    state.replace_connection(&mut conn, Connection { op: Some(op), ..Connection::default() });
 
     state.log_ok("connect", Some(format!("Connected to vault '{}'", info.vault)));
     Ok(info)
@@ -86,8 +85,7 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     }
 
     // Drop both CA and Op atomically.
-    *conn = Connection::default();
-    state.forget_preloaded_key();
+    state.replace_connection(&mut conn, Connection::default());
     Ok(())
 }
 

@@ -183,8 +183,7 @@ pub async fn vault_restore(
 
     // Re-install the fresh Op into state so ensure_ca() works without reconnecting.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    *conn = Connection { op: Some(op), ..Connection::default() };
-    state.forget_preloaded_key();
+    state.replace_connection(&mut conn, Connection { op: Some(op), ..Connection::default() });
 
     state.log_ok(
         "vault_restore",

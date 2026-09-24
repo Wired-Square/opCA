@@ -92,6 +92,14 @@ impl AppState {
         Ok(conn)
     }
 
+    /// Install `next` in place of the held connection, dropping the per-vault
+    /// state that belonged to the old one.
+    pub fn replace_connection(&self, conn: &mut Connection, next: Connection) {
+        *conn = next;
+        self.forget_preloaded_key();
+        self.action_log.lock().expect("mutex poisoned — a prior operation panicked").clear();
+    }
+
     /// Run a closure with a reference to the connected `Op`.
     ///
     /// Checks `ca.op` first (if CA is loaded), then falls back to raw `op`.
@@ -199,5 +207,14 @@ mod tests {
         state.log_warnings("create_cert", vec![CertIssuanceWarning { message: "Outlives the CA.".into() }]);
         let log = state.action_log.lock().unwrap();
         assert_eq!(log[0].detail.as_deref(), Some("Warning: Outlives the CA."));
+    }
+
+    #[test]
+    fn a_new_connection_starts_with_an_empty_activity_log() {
+        let state = AppState::default();
+        state.log_ok("connect", "Connected to vault 'A'".to_string());
+        let mut conn = state.conn.lock().unwrap();
+        state.replace_connection(&mut conn, Connection::default());
+        assert!(state.action_log.lock().unwrap().is_empty());
     }
 }

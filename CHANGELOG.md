@@ -101,6 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - If connecting fails straight after **New CA in a new vault…** creates the vault, the form
   switches to that vault so trying again connects, rather than refusing the name as taken.
 - CA initialisation and configuration fields are labelled for screen readers.
+- The Database page's Activity Log no longer carries entries from a previously connected
+  vault.
 - CLI certificate warnings no longer read `Warning: Warning:`.
 - An OpenVPN profile whose certificate was deleted now shows its Client or Server type.
 - Opening the OpenVPN page on a CA with no OpenVPN templates no longer asks 1Password for
