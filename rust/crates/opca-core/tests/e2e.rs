@@ -1,6 +1,6 @@
 //! End-to-end integration tests for opca-core.
 //!
-//! Mirrors the Python e2e test suite in `python/tests/e2e/`. Tests run against
+//! Mirrors the Python e2e test suite (`python/tests/e2e/`, removed after `cc7d913`). Tests run against
 //! a real 1Password vault and exercise the full CA lifecycle: init, cert
 //! creation, renewal, revocation, CRL generation, database queries, and
 //! backup/restore.

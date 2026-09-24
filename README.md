@@ -152,8 +152,8 @@ Set `OPCA_TEST_VAULT` and optionally `OPCA_TEST_ACCOUNT` to configure the test v
 
 ## Python CLI (Deprecated)
 
-The original Python CLI/TUI implementation (`python/`) is **deprecated** and in a read-only
-archive state. It will not receive new features or bug fixes.
+The original Python CLI/TUI implementation is **deprecated** and has been removed from this
+repository. It will not receive new features or bug fixes.
 
 The Python version is still available on [PyPI](https://pypi.org/project/opca/) for existing
 users who need it:
@@ -166,7 +166,8 @@ The final Python release is **v0.99.7**. All new development is in the Tauri/Rus
 application. Both implementations share the same 1Password vault format, so existing vaults
 work with the new version without migration.
 
-For the Python CLI documentation, refer to the [v0.99.7 release](https://github.com/wiredsquare/opCA/releases/tag/v0.99.7).
+For the Python source and CLI documentation, see the
+[final Python release commit](https://github.com/Wired-Square/opca/tree/8a75b1f/python).
 
 ---
 

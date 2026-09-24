@@ -1,6 +1,6 @@
 //! Thin wrapper around the 1Password CLI (`op`).
 //!
-//! Mirrors the Python `Op` class in `python/src/opca/services/one_password.py`.
+//! Mirrors the Python `Op` class (`python/src/opca/services/one_password.py`, removed after `cc7d913`).
 //!
 //! The [`CommandRunner`] trait allows unit tests to inject a mock runner,
 //! while production code uses [`ShellRunner`] (the default).

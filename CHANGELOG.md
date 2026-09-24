@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+
+- The deprecated Python implementation (`python/`). Its final source remains at commit
+  `8a75b1f` (release 0.99.7) and on PyPI.
+
 ## [0.101.0] - 2026-08-02
 
 ### Added

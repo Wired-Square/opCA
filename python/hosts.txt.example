@@ -1,4 +1,0 @@
-host.domain.com
-host2.domain.com --alt www.domain.com
-host3.domain.com --alt mail.domain.com --alt smtp.domain.com --alt imap.domain.com
-#host99.domain.com --alt dns1.domain.com
