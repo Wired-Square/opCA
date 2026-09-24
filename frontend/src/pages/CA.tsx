@@ -126,7 +126,10 @@ export default function CA() {
         <StoresTab config={caConfig} onSave={refetchConfig} />
       </Show>
       <Show when={tab() === "init"}>
-        <InitTab />
+        <InitTab onInitialised={() => {
+          setAppState("vaultState", "valid_ca");
+          selectTab("certificate");
+        }} />
       </Show>
       <Show when={tab() === "restore"}>
         <RestoreTab />
@@ -469,7 +472,7 @@ function AwsCredentialSection() {
   );
 }
 
-function InitTab() {
+function InitTab(props: { onInitialised: () => void }) {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [form, setForm] = createSignal<Partial<CaConfig>>({
@@ -487,7 +490,7 @@ function InitTab() {
     setError(null);
     try {
       await initCa(form() as CaConfig);
-      window.location.reload();
+      props.onInitialised();
     } catch (e) {
       setError(errorMessage(e));
     } finally {

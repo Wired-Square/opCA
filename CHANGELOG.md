@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Initialising a CA in the app always failed: opening the CA page on an empty vault
   dropped the connection ("Not connected"), and the form had no Common Name to send. It
   now has a required **Common Name** field.
+- After initialising a CA the app no longer reloads into a half-disconnected state that
+  showed the initialisation form again; it opens the new CA's certificate.
 - A new CA got a 2048-bit RSA key rather than the intended 4096; it now gets the chosen
   key type (EC P-384 unless set).
 - Signing a CSR kept only its DNS SANs, silently dropping IP addresses. VPN client

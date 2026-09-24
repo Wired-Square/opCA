@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
 import CA from "../pages/CA";
+import { setAppState } from "../stores/app";
 
 const initCa = vi.hoisted(() => vi.fn(async (_config: object) => {}));
 const getCaInfo = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
@@ -14,8 +15,12 @@ vi.mock("../api/ca", async (actual) => ({
 vi.mock("@solidjs/router", () => ({ useNavigate: () => vi.fn() }));
 
 describe("CA init tab", () => {
+  beforeEach(() => {
+    setAppState("vaultState", "empty_vault");
+    vi.clearAllMocks();
+  });
+
   it("requires a Common Name and sends it with the default lifetimes", async () => {
-    Object.defineProperty(window, "location", { value: { reload: vi.fn() }, configurable: true });
     render(() => <CA />);
     const [, button] = screen.getAllByRole("button", { name: "Initialise CA" });
     expect(button).toBeDisabled();
@@ -30,6 +35,18 @@ describe("CA init tab", () => {
       days: 365,
       crl_days: 30,
     });
+  });
+
+  it("switches to the new CA's certificate tab without reloading", async () => {
+    render(() => <CA />);
+    const [, button] = screen.getAllByRole("button", { name: "Initialise CA" });
+
+    fireEvent.input(screen.getByLabelText("Common Name"), { target: { value: "Example Root CA" } });
+    fireEvent.click(button);
+
+    expect(await screen.findByRole("button", { name: "Certificate" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Common Name")).not.toBeInTheDocument();
+    expect(getCaInfo).toHaveBeenCalled();
   });
 
   it("shows a failed init without an Error: prefix", async () => {
