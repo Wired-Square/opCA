@@ -18,8 +18,8 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const rustDir = join(__dirname, '..');
-const tauriDir = join(rustDir, 'crates', 'opca-tauri');
+const rootDir = join(__dirname, '..');
+const tauriDir = join(rootDir, 'crates', 'opca-tauri');
 
 // Parse bump type from args (default: patch)
 const bumpType = process.argv[2] || 'patch';
@@ -30,7 +30,7 @@ if (!['major', 'minor', 'patch'].includes(bumpType)) {
 }
 
 // Read current version from workspace Cargo.toml (source of truth)
-const workspaceCargoPath = join(rustDir, 'Cargo.toml');
+const workspaceCargoPath = join(rootDir, 'Cargo.toml');
 const workspaceCargo = readFileSync(workspaceCargoPath, 'utf8');
 const versionMatch = workspaceCargo.match(/\[workspace\.package\]\s*\nversion\s*=\s*"([^"]+)"/);
 if (!versionMatch) {
@@ -64,14 +64,14 @@ writeFileSync(workspaceCargoPath, updatedCargo);
 console.log(`  ✓ Cargo.toml [workspace.package]`);
 
 // Update root package.json
-const packageJsonPath = join(rustDir, 'package.json');
+const packageJsonPath = join(rootDir, 'package.json');
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
 packageJson.version = newVersion;
 writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
 console.log(`  ✓ package.json`);
 
 // Update frontend/package.json
-const frontendPackageJsonPath = join(rustDir, 'frontend', 'package.json');
+const frontendPackageJsonPath = join(rootDir, 'frontend', 'package.json');
 const frontendPackageJson = JSON.parse(readFileSync(frontendPackageJsonPath, 'utf8'));
 frontendPackageJson.version = newVersion;
 writeFileSync(frontendPackageJsonPath, JSON.stringify(frontendPackageJson, null, 2) + '\n');

@@ -15,8 +15,7 @@ import { fileURLToPath } from 'url';
 import { createInterface } from 'readline';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const rustDir = join(__dirname, '..');
-const rootDir = join(rustDir, '..');
+const rootDir = join(__dirname, '..');
 
 // Parse bump type from args (default: patch)
 // Special mode: "rebuild" re-releases the current version without bumping
@@ -160,21 +159,21 @@ function extractVersionChangelog(version) {
 
 // Version files to stage for git commit
 const VERSION_FILES = [
-  'rust/Cargo.toml',
-  'rust/package.json',
-  'rust/frontend/package.json',
-  'rust/crates/opca-core/Cargo.toml',
-  'rust/crates/opca-cli/Cargo.toml',
-  'rust/crates/opca-tauri/Cargo.toml',
-  'rust/crates/opca-tauri/tauri.conf.json',
-  'rust/Cargo.lock',
+  'Cargo.toml',
+  'package.json',
+  'frontend/package.json',
+  'crates/opca-core/Cargo.toml',
+  'crates/opca-cli/Cargo.toml',
+  'crates/opca-tauri/Cargo.toml',
+  'crates/opca-tauri/tauri.conf.json',
+  'Cargo.lock',
   'CHANGELOG.md',
 ];
 
 // Optional iOS files (may not exist yet)
 const OPTIONAL_FILES = [
-  'rust/crates/opca-tauri/gen/apple/project.yml',
-  'rust/crates/opca-tauri/gen/apple/opca_iOS/Info.plist',
+  'crates/opca-tauri/gen/apple/project.yml',
+  'crates/opca-tauri/gen/apple/opca_iOS/Info.plist',
 ];
 
 async function main() {
@@ -202,7 +201,7 @@ async function main() {
   }
 
   // Calculate what the new version will be
-  const packageJson = JSON.parse(readFileSync(join(rustDir, 'package.json'), 'utf8'));
+  const packageJson = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8'));
   const currentVersion = packageJson.version;
   const newVersion = isRebuild ? currentVersion : calculateNewVersion(currentVersion, bumpType);
   const tag = `v${newVersion}`;
@@ -281,11 +280,11 @@ async function main() {
   } else {
     // Normal release: bump version, commit, create tag
     console.log(`\nBumping ${bumpType} version...`);
-    run(`node rust/scripts/bump-version.js ${bumpType}`);
+    run(`node scripts/bump-version.js ${bumpType}`);
 
     // Update Cargo.lock by running cargo check
     console.log('\nUpdating Cargo.lock...');
-    run('cargo check --manifest-path rust/crates/opca-tauri/Cargo.toml');
+    run('cargo check --manifest-path crates/opca-tauri/Cargo.toml');
 
     console.log('\nCommitting version bump...');
     // Stage version files (skip missing optional files)

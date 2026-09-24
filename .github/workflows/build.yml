@@ -79,11 +79,10 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: |
-            rust/package-lock.json
-            rust/frontend/package-lock.json
+            package-lock.json
+            frontend/package-lock.json
 
       - name: Install npm dependencies
-        working-directory: rust
         run: |
           npm ci
           npm ci --prefix frontend
@@ -117,7 +116,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
-          projectPath: rust
           args: --target ${{ matrix.target }}
           # Release is pre-created by create-release job; tauri-action finds it and uploads assets
           tagName: ${{ github.ref_name }}
@@ -131,7 +129,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
-          projectPath: rust
           args: --target ${{ matrix.target }}
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
@@ -140,5 +137,5 @@ jobs:
         with:
           name: opca-${{ matrix.target }}
           path: |
-            rust/target/${{ matrix.target }}/release/bundle/
+            target/${{ matrix.target }}/release/bundle/
           if-no-files-found: error

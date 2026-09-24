@@ -13,17 +13,17 @@ This document describes how the Rust + Tauri desktop app fits together.
 
 ```
 ┌───────────────────────────────┐
-│  Frontend — SolidJS + Vite    │   (rust/frontend)
+│  Frontend — SolidJS + Vite    │   (frontend)
 │  Pages · API wrappers · Store │
 └──────────────┬────────────────┘
                │  Tauri invoke() — JSON IPC
 ┌──────────────▼────────────────┐
-│  Tauri shell — opca-tauri     │   (rust/crates/opca-tauri)
+│  Tauri shell — opca-tauri     │   (crates/opca-tauri)
 │  Command handlers · AppState  │
 └──────────────┬────────────────┘
                │  Rust function calls
 ┌──────────────▼────────────────┐
-│  Core library — opca-core     │   (rust/crates/opca-core)
+│  Core library — opca-core     │   (crates/opca-core)
 │  CA · crypto · services · Op  │
 └──────────────┬────────────────┘
                │  std::process::Command
@@ -40,31 +40,31 @@ Two workspace crates plus a frontend make up the desktop app:
 
 | Component | Role |
 |---|---|
-| [opca-core](../rust/crates/opca-core) | Framework-free Rust library. Contains all PKI logic, the 1Password wrapper, services, and error types. |
-| [opca-tauri](../rust/crates/opca-tauri) | Tauri 2 desktop shell. Thin IPC layer that exposes `opca-core` to the webview. |
-| [frontend](../rust/frontend) | SolidJS + Vite single-page app rendered in the Tauri webview. |
+| [opca-core](../crates/opca-core) | Framework-free Rust library. Contains all PKI logic, the 1Password wrapper, services, and error types. |
+| [opca-tauri](../crates/opca-tauri) | Tauri 2 desktop shell. Thin IPC layer that exposes `opca-core` to the webview. |
+| [frontend](../frontend) | SolidJS + Vite single-page app rendered in the Tauri webview. |
 
 ---
 
 ## Core library (`opca-core`)
 
-Organised by concern under [src/](../rust/crates/opca-core/src):
+Organised by concern under [src/](../crates/opca-core/src):
 
-- [op.rs](../rust/crates/opca-core/src/op.rs) — thin wrapper around the
+- [op.rs](../crates/opca-core/src/op.rs) — thin wrapper around the
   1Password CLI. The `CommandRunner` trait abstracts process invocation;
   `ShellRunner` shells out to `op`, and unit tests inject a `MockRunner` to
   avoid real CLI calls. Private-key arguments are redacted from debug logs.
-- [vault_lock.rs](../rust/crates/opca-core/src/vault_lock.rs) — advisory lock
+- [vault_lock.rs](../crates/opca-core/src/vault_lock.rs) — advisory lock
   implemented as a 1Password Secure Note (`CA_Lock`). `op item create` acts as
   an atomic compare-and-swap; stale locks past TTL are broken automatically.
-- [crypto/](../rust/crates/opca-core/src/crypto) — key generation, CRL/DKIM/
+- [crypto/](../crates/opca-core/src/crypto) — key generation, CRL/DKIM/
   OpenVPN helpers, and PKCS#12 packaging via the `openssl` crate.
-- [services/](../rust/crates/opca-core/src/services):
-  - [ca.rs](../rust/crates/opca-core/src/services/ca.rs) — the
+- [services/](../crates/opca-core/src/services):
+  - [ca.rs](../crates/opca-core/src/services/ca.rs) — the
     `CertificateAuthority` struct. Orchestrates init, sign, revoke, renew,
     rekey, CRL generation, and upload. This is the capstone API the Tauri
     layer calls into.
-  - [cert.rs](../rust/crates/opca-core/src/services/cert.rs) —
+  - [cert.rs](../crates/opca-core/src/services/cert.rs) —
     per-certificate bundle operations (build, sign, import/export, inspect).
     `KeyAlgorithm` (`ec-p256`, `ec-p384`, `rsa-2048`, `rsa-4096`) picks the key;
     `CertType::default_key_algorithm` gives EC P-256 for leaves, EC P-384 for the
@@ -72,35 +72,35 @@ Organised by concern under [src/](../rust/crates/opca-core/src):
     family unless given an algorithm (`rekey_cert`, `bulk_rekey_certs` and
     `opca cert rekey --key` take one). `signing_digest` uses SHA-384 for P-384 keys, SHA-256 otherwise, and
     `keyEncipherment` is only set on RSA leaves.
-  - [san.rs](../rust/crates/opca-core/src/services/san.rs) — Subject
+  - [san.rs](../crates/opca-core/src/services/san.rs) — Subject
     Alternative Names: `SubjectAltName` (DNS, IP, email, URI) parses and
     validates user input, and `of_certificate` / `of_csr` read them back from
     the extension. The frontend's `utils/san.ts` mirrors its parsing rules.
-  - [database/](../rust/crates/opca-core/src/services/database) — in-memory
+  - [database/](../crates/opca-core/src/services/database) — in-memory
     SQLite (`rusqlite`) holding the CA config and every issued/external
     certificate, CSR, CRL metadata record, and OpenVPN template/profile. The
     whole DB is serialised and persisted as the `CA_Database` document in
     1Password. A schema-version field drives automatic migrations.
-  - [command_queue.rs](../rust/crates/opca-core/src/services/command_queue.rs)
+  - [command_queue.rs](../crates/opca-core/src/services/command_queue.rs)
     — batches write operations (`store_item`, `store_document`, `rename`,
     `delete`) in memory. Duplicate writes to the same target are collapsed so
     only the final state is flushed to 1Password. Never persisted — payloads
     contain secret material.
-  - [storage/](../rust/crates/opca-core/src/services/storage) — publishing
+  - [storage/](../crates/opca-core/src/services/storage) — publishing
     backends behind a `StorageBackend` trait: `rsync://`, `sftp://`/`scp://`,
     and `s3://`. A URI factory picks the right backend per upload. AWS
     credentials are read straight from a 1Password item with `op item get`
     (see [AWS credentials](#aws-credentials)).
-  - [route53.rs](../rust/crates/opca-core/src/services/route53.rs) — AWS SDK
+  - [route53.rs](../crates/opca-core/src/services/route53.rs) — AWS SDK
     calls for DKIM TXT record deployment and verification.
-  - [backup.rs](../rust/crates/opca-core/src/services/backup.rs) — encrypted
+  - [backup.rs](../crates/opca-core/src/services/backup.rs) — encrypted
     file format: 4-byte magic `OPCA` + version + 16-byte salt + 12-byte
     nonce + 16-byte GCM tag + AES-256-GCM ciphertext. Key derivation is
     PBKDF2-HMAC-SHA256, 600 000 iterations. Plaintext never touches disk.
-  - [vault.rs](../rust/crates/opca-core/src/services/vault.rs) — enumerates
+  - [vault.rs](../crates/opca-core/src/services/vault.rs) — enumerates
     every CA-related item in a vault and serialises them into the JSON
     payload consumed by `backup`.
-- [error.rs](../rust/crates/opca-core/src/error.rs) — `OpcaError`, a single
+- [error.rs](../crates/opca-core/src/error.rs) — `OpcaError`, a single
   `thiserror` enum that every layer returns. Serialises as `{kind, message}`
   so the frontend can pattern-match error types.
 
@@ -109,7 +109,7 @@ Organised by concern under [src/](../rust/crates/opca-core/src):
 ## 1Password vault as the source of truth
 
 OPCA stores ten logical kinds of item. Titles and field labels are fixed in
-[constants.rs](../rust/crates/opca-core/src/constants.rs).
+[constants.rs](../crates/opca-core/src/constants.rs).
 
 | Item | Title | Kind | Purpose |
 |---|---|---|---|
@@ -225,7 +225,7 @@ split across two homes, because the two halves have different owners:
 The CA database lives in the shared vault, so anything stored there applies to
 everyone. Several operators typically share one CA while each holds their own
 AWS access key, so the credential *choice* cannot live there. It is instead
-kept locally by [settings.rs](../rust/crates/opca-core/src/settings.rs) at the
+kept locally by [settings.rs](../crates/opca-core/src/settings.rs) at the
 platform config directory (macOS: `~/Library/Application Support/opca/
 settings.json`), keyed per account so an operator working across tenants keeps
 a separate selection per tenant.
@@ -279,7 +279,7 @@ Any mutating operation goes through `VaultLock`:
 4. Release — delete `CA_Lock`.
 
 The frontend wraps write calls in `withLock()` in
-[api/tauri.ts](../rust/frontend/src/api/tauri.ts) so the lock lifetime always
+[api/tauri.ts](../frontend/src/api/tauri.ts) so the lock lifetime always
 matches a single logical operation.
 
 `store_ca_database()` persists the SQLite dump to the canonical `CA_Database`
@@ -297,12 +297,12 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
 
 ## Tauri shell (`opca-tauri`)
 
-- [main.rs](../rust/crates/opca-tauri/src/main.rs) — Tauri builder. Registers
+- [main.rs](../crates/opca-tauri/src/main.rs) — Tauri builder. Registers
   the `log`, `dialog`, `shell`, and `clipboard-manager` plugins; extends `PATH`
   on macOS so bundled `.app` builds can find Homebrew-installed `op`; pre-warms
   `op --version` so macOS AMFI/OCSP verification is cached before the first real
   call.
-- [state.rs](../rust/crates/opca-tauri/src/state.rs) — `AppState`, Tauri's
+- [state.rs](../crates/opca-tauri/src/state.rs) — `AppState`, Tauri's
   managed singleton. Mutex-guarded fields:
   - `conn: Connection { op, ca }` — the live 1Password handle and the loaded
     `CertificateAuthority`. A single mutex makes connect/disconnect atomic
@@ -323,12 +323,12 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
     Cleared when the page unmounts (`forget_preloaded_key`) and whenever the
     CA is dropped (connect, disconnect, vault restore). Key exports take an
     optional passphrase and return encrypted PKCS#8.
-- [commands/](../rust/crates/opca-tauri/src/commands) — one module per
+- [commands/](../crates/opca-tauri/src/commands) — one module per
   feature area (`ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
   `vault`, `lock`, `connect`, `dashboard`, `files`, `logs`, `update`). Each
   module exposes `#[tauri::command]` async functions that deserialise DTOs,
   call into `opca-core`, and return serialisable results. DTO shapes are
-  defined in [commands/dto.rs](../rust/crates/opca-tauri/src/commands/dto.rs).
+  defined in [commands/dto.rs](../crates/opca-tauri/src/commands/dto.rs).
 
 The shell is intentionally thin: no PKI logic lives here, only glue between
 the webview and `opca-core`.
@@ -336,9 +336,9 @@ the webview and `opca-core`.
 ### Dev-only MCP server
 
 The `mcp` cargo feature (on in `npm run tauri:dev`) compiles
-[mcp/](../rust/crates/opca-tauri/src/mcp) in, which serves an MCP endpoint on
+[mcp/](../crates/opca-tauri/src/mcp) in, which serves an MCP endpoint on
 `127.0.0.1:${OPCA_MCP_PORT:-8790}` behind a bearer token (`OPCA_MCP_TOKEN`, or
-random), and writes `{url, token}` to `rust/target/mcp.json` (0600). Combining
+random), and writes `{url, token}` to `target/mcp.json` (0600). Combining
 `mcp` with a release build is a `compile_error!`, so no shipped binary carries
 it. The server comes from the private `lib-wiredai-rs` (`wiredai-mcp`, over
 ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
@@ -353,7 +353,7 @@ ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
 Everything except `resize_window` crosses a bridge: the server emits
 `harness:request {id, op, args}` to the main window and awaits the matching
 `harness:reply`, timing out after 10 s. The webview side,
-[harness/bridge.ts](../rust/frontend/src/harness/bridge.ts), is imported only
+[harness/bridge.ts](../frontend/src/harness/bridge.ts), is imported only
 under `import.meta.env.DEV`, so it is absent from `frontend/dist`. `click`
 dispatches pointerdown → mousedown → mouseup → click so outside-click dismissal
 is exercised.
@@ -394,38 +394,38 @@ accepted for now; batching the flushes is future work.
 
 ---
 
-## Frontend (`rust/frontend`)
+## Frontend (`frontend`)
 
 A single-page SolidJS app. Key conventions:
 
-- [App.tsx](../rust/frontend/src/App.tsx) routes based on `vaultState`
+- [App.tsx](../frontend/src/App.tsx) routes based on `vaultState`
   (`valid_ca` / `empty_vault` / `invalid_ca`) returned by `connect`. Empty
   vaults are steered to CA initialisation; broken vaults to the dashboard
   with an error banner.
-- [pages/Connect.tsx](../rust/frontend/src/pages/Connect.tsx) picks the vault
+- [pages/Connect.tsx](../frontend/src/pages/Connect.tsx) picks the vault
   from previously-used logins (localStorage) and the account from
   `list_accounts` — `op account list`, which reads local CLI config and so
   works signed out. Both dropdowns run before there is a connection, alongside
   `check_op_cli`; a failure just hides the picker. The account field takes the
   sign-in address, falling back to that account's UUID when two configured
   accounts share an address (see `accountValue` in
-  [api/accounts.ts](../rust/frontend/src/api/accounts.ts)) — `op --account`
+  [api/accounts.ts](../frontend/src/api/accounts.ts)) — `op --account`
   cannot resolve a shared address. Which form it sends is purely an `op`
   concern; `settings.rs` canonicalises them all (see AWS credentials above).
-- [api/](../rust/frontend/src/api) — one file per feature, each a typed
+- [api/](../frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
-  [api/tauri.ts](../rust/frontend/src/api/tauri.ts). `tauriInvoke` normalises
+  [api/tauri.ts](../frontend/src/api/tauri.ts). `tauriInvoke` normalises
   the rejection to an `Error` and tracks the in-flight operation — kept
-  as a stack in [stores/operation.ts](../rust/frontend/src/stores/operation.ts)
+  as a stack in [stores/operation.ts](../frontend/src/stores/operation.ts)
   (the side-nav shows the most recent op and never blanks mid-flight, and a
   finishing background task can't clear a running foreground one). `withLock()`
   wraps any mutation in acquire/release calls and then fires the background
   `sync_private_store`.
-- [stores/](../rust/frontend/src/stores) — small reactive stores (`app`,
+- [stores/](../frontend/src/stores) — small reactive stores (`app`,
   `operation`, `theme`, `update`). No global state framework.
-- [pages/](../rust/frontend/src/pages) mirror the Tauri command modules
+- [pages/](../frontend/src/pages) mirror the Tauri command modules
   roughly 1-to-1.
-- [components/](../rust/frontend/src/components) — reusable UI. Mutating
+- [components/](../frontend/src/components) — reusable UI. Mutating
   actions on the certificate list/detail and the OpenVPN Profiles list share a
   per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
   `Modal` dialogs reused across those pages.
@@ -433,12 +433,12 @@ A single-page SolidJS app. Key conventions:
 ### Styling tokens
 
 The CSP forbids static inline styles, so all styling lives in
-[styles/](../rust/frontend/src/styles) and refers to tokens rather than
+[styles/](../frontend/src/styles) and refers to tokens rather than
 literals. Colours that differ by theme are defined in
-[styles/theme.ts](../rust/frontend/src/styles/theme.ts) (`darkTheme` /
+[styles/theme.ts](../frontend/src/styles/theme.ts) (`darkTheme` /
 `lightTheme`), which the `theme` store writes onto `:root`. Everything that
 does not vary by theme is a static `:root` variable in
-[styles/global.css](../rust/frontend/src/styles/global.css): status tints and
+[styles/global.css](../frontend/src/styles/global.css): status tints and
 edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
 `--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and the stacking order
 `--z-sticky` < `--z-modal` < `--z-popover`. New styles use these; a raw hex or
@@ -448,10 +448,10 @@ pixel radius in a component stylesheet is a regression.
 
 Anything that floats over the page — the row `KebabMenu`, `VaultPicker`,
 `VpnClientPicker` and Connect's saved-login and account pickers — renders
-through [components/Popover.tsx](../rust/frontend/src/components/Popover.tsx).
+through [components/Popover.tsx](../frontend/src/components/Popover.tsx).
 It portals to `body` at `--z-popover`, so it escapes the `overflow` of a
 `.modal-dialog` or the page, and positions itself with the pure
-[utils/placePopover.ts](../rust/frontend/src/utils/placePopover.ts): below the
+[utils/placePopover.ts](../frontend/src/utils/placePopover.ts): below the
 anchor, else above, else on the larger side with a capped height, clamped
 8px inside the window horizontally. It closes on outside mousedown, Escape,
 outside scroll or resize, hands focus back to the anchor if it held it, and
@@ -466,18 +466,18 @@ styles in `styles/components/popover.css`.
 Generating a CRL, re-signing the CA and mutating the database all leave the
 copy in the store stale — the backend does not upload as a side effect. That
 follow-up is one mechanism, not three:
-[utils/publishFlow.ts](../rust/frontend/src/utils/publishFlow.ts)'s
+[utils/publishFlow.ts](../frontend/src/utils/publishFlow.ts)'s
 `createPublishFlow({ upload, success, outcome })` owns the in-flight flag and
 the offer-to-upload state, and reports through the page's existing banner
 controller rather than a second one — the CRL page narrates generate *and*
-upload in one place. [components/UploadPrompt.tsx](../rust/frontend/src/components/UploadPrompt.tsx)
+upload in one place. [components/UploadPrompt.tsx](../frontend/src/components/UploadPrompt.tsx)
 renders the amber prompt from it. Same state-here / rendering-there split as
 `createActionResult` and `ResultBanner`.
 
 ### When a page throws
 
 Resource getters rethrow on read, so a failed load would otherwise blank the
-window. [components/RouteErrorBoundary.tsx](../rust/frontend/src/components/RouteErrorBoundary.tsx)
+window. [components/RouteErrorBoundary.tsx](../frontend/src/components/RouteErrorBoundary.tsx)
 wraps the route outlet *inside* the layout, so the sidebar and header stay
 usable and the user can navigate away — which recovers on its own, because the
 router rebuilds the outlet. "Try again" is for retrying in place. This catches
@@ -507,11 +507,11 @@ does after Generate.
 The operation indicator above is strictly *in-flight* — it clears the moment a
 command returns and carries no terminal state. Actions that change the vault
 therefore report their own outcome through
-[utils/actionResult.ts](../rust/frontend/src/utils/actionResult.ts):
+[utils/actionResult.ts](../frontend/src/utils/actionResult.ts):
 `createActionResult()` holds one `{summary, error}` result, auto-clears a
 success after a few seconds, and keeps a failure until dismissed so the error
 stays readable. It owns state only; three renderers in
-[components/ResultBanner.tsx](../rust/frontend/src/components/ResultBanner.tsx)
+[components/ResultBanner.tsx](../frontend/src/components/ResultBanner.tsx)
 share one `BannerShell`:
 
 | Renderer | Used for |
@@ -524,7 +524,7 @@ A bulk count is reported neutrally rather than green: a partially-failed run
 should not read as simply "good".
 
 Reporting is one half; running is the other.
-[utils/action.ts](../rust/frontend/src/utils/action.ts)'s
+[utils/action.ts](../frontend/src/utils/action.ts)'s
 `createAction(outcome)` owns an action's in-flight flag and the
 clear/try/report dance around its body. Take one per button so `busy()` gates
 just that button, or share one across a group that is enabled and disabled
@@ -535,7 +535,7 @@ upload failed". `run()` never throws, so whatever used to sit in `finally` is
 simply the code after the await. `createPublishFlow` is built on it.
 
 An error that belongs to the page rather than to one action is rendered by
-[components/PageError.tsx](../rust/frontend/src/components/PageError.tsx). It
+[components/PageError.tsx](../frontend/src/components/PageError.tsx). It
 coerces whatever it is given and renders nothing for null/undefined, so a
 resource error goes straight in with no `<Show>` and no `String()` around it.
 The `.form-error` line under a form (the CA tabs, the create/import pages) is
@@ -587,8 +587,8 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
   to bootstrap. Tests are ordered (`t01`…`t90`) and share state, so they run
   single-threaded.
 - **Running app** — with `npm run tauri:dev` up and a CA loaded, `npm run
-  harness:walk` (in `rust/`) drives the window through the dev MCP server
-  ([harness/](../rust/harness)) by selector, asserting on layout numbers in
+  harness:walk` drives the window through the dev MCP server
+  ([harness/](../harness)) by selector, asserting on layout numbers in
   both themes. It prints PASS/FAIL/SKIP and exits non-zero on a failure; it
   never selects a mutating menu item.
 

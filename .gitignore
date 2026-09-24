@@ -13,15 +13,12 @@ opca.egg-info/
 
 # Rust
 /target/
-rust/target/
-rust/crates/opca-tauri/gen/
+crates/opca-tauri/gen/
 
 # Frontend
+/node_modules/
 frontend/node_modules/
 frontend/dist/
-rust/node_modules/
-rust/frontend/node_modules/
-rust/frontend/dist/
 
 # Secrets / certificates
 *.crt

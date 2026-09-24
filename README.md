@@ -4,7 +4,7 @@ OPCA is a desktop PKI toolkit that manages keys, CSRs, certificates, CRLs, and m
 securely in [1Password](https://1password.com) via the 1Password CLI. No sensitive data is ever
 written to disk.
 
-Built with [Tauri 2](https://v2.tauri.app), a Rust backend ([opca-core](rust/crates/opca-core)),
+Built with [Tauri 2](https://v2.tauri.app), a Rust backend ([opca-core](crates/opca-core)),
 and a [SolidJS](https://www.solidjs.com) frontend.
 
 - **Cross-platform** desktop app (macOS, Linux, Windows)
@@ -76,23 +76,21 @@ Download the latest release for your platform from
 ### Build from Source
 
 ```shell
-cd rust
 npm install
 npm run tauri build
 ```
 
-The built application will be in `rust/crates/opca-tauri/target/release/bundle/`.
+The built application will be in `target/release/bundle/`.
 
 ### Development
 
 ```shell
-cd rust
 npm install
 npm run tauri:dev
 ```
 
 This starts the SolidJS dev server on `localhost:5173` with hot-reload and launches the Tauri window,
-with a dev-only MCP server on `127.0.0.1:8790` (URL and token in `rust/target/mcp.json`) for driving
+with a dev-only MCP server on `127.0.0.1:8790` (URL and token in `target/mcp.json`) for driving
 the UI. `npm run tauri dev` starts the same window without it.
 
 Every build, with or without the MCP server, fetches the private `lib-wiredai-rs` over SSH, so it needs
@@ -159,7 +157,6 @@ With `npm run tauri:dev` running and a CA loaded, drive the app's popovers in bo
 their layout:
 
 ```shell
-cd rust
 npm run harness:walk
 ```
 
