@@ -9,13 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **EC keys, by default.** New certificates and CSRs get an EC P-256 key and a new CA an
+  EC P-384 key; RSA 2048 and 4096 stay available from the new **Key Type** field (and
+  `--key` on `opca ca init`, `cert create` and `csr create`). Apple developer CSRs default
+  to RSA 2048, the only kind Apple accepts. Rekeying keeps a certificate's key type.
+- **IP address, email and URI SANs** alongside DNS names, in the app and via `--alt`. The
+  SAN field says what it recognised as you type (DNS name, IPv4/IPv6 address, email, URI)
+  or why an entry is invalid, and won't add an invalid one. A certificate whose Common Name
+  is an IP address gets it as an IP SAN.
+- **Delete CSRs** from the CSR list, or with `opca csr delete -n <cn>`. Deleting a pending
+  CSR archives its 1Password item, private key included. Pending CSRs older than 30 days
+  are marked **stale**.
+- **Passphrase-encrypted key copy.** The private-key copy dialog can encrypt the key with a
+  passphrase (typed or generated) before it reaches the clipboard, for certificates and
+  DKIM keys alike.
 - **Developers:** `npm run tauri:dev` starts a local MCP server for driving the app window by
   CSS selector, and `npm run harness:walk` uses it to check every popover's layout in both
   themes. It is compiled into development builds only. Building now needs SSH access to the
   private `lib-wiredai-rs`.
 
+### Changed
+
+- **Web Server** is the default type on **Create Certificate**.
+- Copying a certificate's private key is immediate: the key is kept from when the page
+  loaded, in memory only, and dropped when you leave the page.
+- EC leaf certificates no longer claim Key Encipherment, which ECDSA keys can't do.
+
 ### Fixed
 
+- A new CA got a 2048-bit RSA key rather than the intended 4096; it now gets the chosen
+  key type (EC P-384 unless set).
+- Signing a CSR kept only its DNS SANs, silently dropping IP addresses. VPN client
+  certificates now keep the SANs in their CSR.
+- `opca cert create --serial` no longer fails trying to generate a zero-bit key.
 - Row action (⋮) menus open upward when there is no room below, instead of running off
   the bottom of the window, and can be driven with the arrow keys.
 - The vault picker in **Send to Vault** and **Add VPN Profile** is no longer cut off by the
