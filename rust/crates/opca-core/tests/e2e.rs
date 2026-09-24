@@ -8,12 +8,14 @@
 //! Gated by `OPCA_INTEGRATION_TEST=1`. Run with:
 //!   OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test e2e -- --test-threads=1
 //!
+//! It creates its own `opca-e2e-<timestamp>` vaults and deletes them at the end.
+//!
 //! Optionally set `OPCA_TEST_ACCOUNT` for a specific 1Password account.
 
 use std::sync::Mutex;
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::{CommandRunner, Op};
+use opca_core::op::{create_vault_standalone, CommandRunner, Op};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertType, KeyAlgorithm};
 use opca_core::services::database::models::{CaConfig, CertLookup};
@@ -25,7 +27,6 @@ use opca_core::services::vault::VaultBackup;
 
 struct TestState {
     vault: String,
-    account: Option<String>,
     /// Track serial of the server cert for verification
     server_cert_title: String,
     /// Track the client cert title for revocation
@@ -112,19 +113,13 @@ fn assert_predecessor_ignored<R: CommandRunner>(
 fn t01_create_vault() {
     skip_unless_integration!();
 
-    let account = test_account();
-    // Use a temporary Op on any vault just to call vault_create
-    let tmp_op = Op::new("Private", account.clone(), None)
-        .expect("Need at least a 'Private' vault to bootstrap");
-
     let vault_name = format!("opca-e2e-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
-    let info = tmp_op.vault_create(&vault_name).expect("vault_create failed");
+    let info = create_vault_standalone(&vault_name, test_account().as_deref()).expect("vault create failed");
     eprintln!("[e2e] Created vault: {} (id={})", info.name, info.id);
 
     let mut state = STATE.lock().unwrap();
     *state = Some(TestState {
         vault: vault_name,
-        account,
         server_cert_title: String::new(),
         client_cert_title: String::new(),
         restore_vault: String::new(),
@@ -182,6 +177,8 @@ fn t11_ca_retrieve() {
         .and_then(|e| e.data().as_utf8().ok())
         .map(|s| s.to_string());
     assert_eq!(org.as_deref(), Some("OPCA E2E Test"));
+    let key = cert.public_key().expect("CA public key");
+    assert_eq!((key.id(), key.bits()), (openssl::pkey::Id::EC, 384), "new CA must default to EC P-384");
     eprintln!("[e2e] CA retrieved — org={:?}", org);
 }
 
@@ -218,7 +215,7 @@ fn t20_cert_create_server() {
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-webserver.example.com".to_string()),
         key_algorithm: Some(KeyAlgorithm::Rsa2048),
-        alt_names: Some(vec!["www.e2e-webserver.example.com".to_string()]),
+        alt_names: Some(vec!["www.e2e-webserver.example.com".to_string(), "10.0.0.1".to_string()]),
         ..Default::default()
     };
 
@@ -227,7 +224,10 @@ fn t20_cert_create_server() {
         .generate_certificate_bundle(CertType::WebServer, title, config)
         .expect("generate webserver cert failed");
 
-    assert!(bundle.certificate.is_some());
+    let cert = bundle.certificate.as_ref().expect("certificate missing");
+    assert_eq!(cert.signature_algorithm().object().nid(), openssl::nid::Nid::ECDSA_WITH_SHA384);
+    let ips: Vec<_> = cert.subject_alt_names().into_iter().flatten().filter_map(|n| n.ipaddress().map(<[u8]>::to_vec)).collect();
+    assert_eq!(ips, vec![vec![10, 0, 0, 1]], "IP SAN must survive signing");
     let pem = bundle.certificate_pem().expect("cert pem");
     assert!(pem.contains("BEGIN CERTIFICATE"));
     // Store the real stored title (`CRT_<serial>_<cn>`), not the bare arg, so
@@ -483,24 +483,13 @@ fn t90_cleanup() {
     let state = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let s = state.as_ref().expect("t01 must run first");
 
-    // Delete the test vaults — use a temporary Op on Private to run vault_delete
-    let tmp_op = Op::new("Private", s.account.clone(), None)
-        .expect("Need 'Private' vault for cleanup");
-
-    // Delete main test vault
-    match tmp_op.vault_delete(&s.vault) {
-        Ok(()) => eprintln!("[e2e] Deleted vault: {}", s.vault),
-        Err(e) => eprintln!("[e2e] Warning: failed to delete vault '{}': {}", s.vault, e),
-    }
-
-    // Delete restore vault if created
-    if !s.restore_vault.is_empty() {
-        match tmp_op.vault_delete(&s.restore_vault) {
-            Ok(()) => eprintln!("[e2e] Deleted vault: {}", s.restore_vault),
-            Err(e) => eprintln!(
-                "[e2e] Warning: failed to delete vault '{}': {}",
-                s.restore_vault, e
-            ),
+    // `op vault delete` is account-wide, so the test vault's own `Op` can
+    // delete the restore vault and then itself.
+    let op = make_op(&s.vault);
+    for vault in [&s.restore_vault, &s.vault].into_iter().filter(|v| !v.is_empty()) {
+        match op.vault_delete(vault) {
+            Ok(()) => eprintln!("[e2e] Deleted vault: {vault}"),
+            Err(e) => eprintln!("[e2e] Warning: failed to delete vault '{vault}': {e}"),
         }
     }
 }
