@@ -105,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   vault.
 - CLI certificate warnings no longer read `Warning: Warning:`.
 - An OpenVPN profile whose certificate was deleted now shows its Client or Server type.
+- Creating a vault now refuses a name that differs from an existing one only in the case
+  of non-ASCII letters (`Café` vs `CAFÉ`).
 - Opening the OpenVPN page on a CA with no OpenVPN templates no longer asks 1Password for
   them on every visit.
 

@@ -733,9 +733,10 @@ pub fn create_vault_standalone(name: &str, account: Option<&str>) -> Result<Vaul
 }
 
 fn vault_name_taken(vaults: &[VaultInfo], name: &str) -> bool {
+    let lowered = name.to_lowercase();
     vaults
         .iter()
-        .any(|v| v.id == name || v.name.eq_ignore_ascii_case(name))
+        .any(|v| v.id == name || v.name.to_lowercase() == lowered)
 }
 
 /// Run `op account list`.
@@ -1072,6 +1073,12 @@ mod tests {
     fn vault_name_taken_matches_name_ignoring_case() {
         assert!(vault_name_taken(&vaults(), "Private CA"));
         assert!(vault_name_taken(&vaults(), "private ca"));
+    }
+
+    #[test]
+    fn vault_name_taken_ignores_case_beyond_ascii() {
+        let cafe = [VaultInfo { id: "def456".to_string(), name: "Café".to_string() }];
+        assert!(vault_name_taken(&cafe, "CAFÉ"));
     }
 
     #[test]
