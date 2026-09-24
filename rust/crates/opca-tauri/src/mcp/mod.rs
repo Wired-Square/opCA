@@ -1,3 +1,4 @@
+mod bridge;
 mod tools;
 
 use std::net::SocketAddr;
@@ -34,6 +35,7 @@ fn try_start(app: AppHandle) -> Result<(), String> {
     let handoff = app.path().app_data_dir().map_err(|e| e.to_string())?.join("mcp.json");
     write_handoff(&handoff, &serde_json::json!({ "url": url, "token": token }))?;
 
+    bridge::listen(&app);
     let router = Arc::new(OpcaTools::router());
     let identity = OpcaTools::identity();
     let config = HttpConfig {

@@ -17,6 +17,7 @@ export default function App(props: ParentProps) {
 
   onMount(() => {
     initOperationListener();
+    if (import.meta.env.DEV) import("./harness/bridge").then((m) => m.startHarnessBridge(navigate));
   });
 
   // Redirect based on vault state
