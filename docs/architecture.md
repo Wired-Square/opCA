@@ -346,17 +346,24 @@ it. The server comes from the private `lib-wiredai-rs` (`wiredai-mcp`, over
 ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
 
 - **Read tools** — `app_status` and `list_certs` read `AppState` and never call
-  `op` (not even `ensure_ca`); `query` reports every element matching a CSS
-  selector with its rect, whether it sits wholly in the viewport, and the
-  overflow ancestor clipping it.
-- **UI tools** — `navigate`, `set_theme`, `resize_window`, `click`, `type`,
-  `press`, `wait_for`. The app is changed only through the UI under test.
+  `op` (not even `ensure_ca`).
+- **UI tools** — `navigate`, `set_theme`, `resize_window`. The app is changed
+  only through the UI under test.
+- **DOM tools** — `query`, `wait_for` (read-only), `click`, `type`, `press`,
+  from `wiredai-mcp`'s `dom` feature via `impl DomBridge for OpcaTools`.
+  `query` reports every element matching a CSS selector (optionally filtered
+  by visible text) with its form state, rect, whether it sits wholly in the
+  viewport, and the overflow ancestor clipping it.
 
 Everything except `resize_window` crosses a bridge: the server emits
 `harness:request {id, op, args}` to the main window and awaits the matching
 `harness:reply`, timing out after 10 s. The webview side,
-[harness/bridge.ts](../frontend/src/harness/bridge.ts), is imported only
-under `import.meta.env.DEV`, so it is absent from `frontend/dist`. `click`
+[harness/bridge.ts](../frontend/src/harness/bridge.ts), handles `navigate`
+and `set_theme` and hands the DOM ops to
+[harness/domOps.ts](../frontend/src/harness/domOps.ts), vendored
+byte-for-byte from the library (a Rust test compares it with
+`wiredai_mcp::dom::OPS_TS`). Both are imported only under
+`import.meta.env.DEV`, so they are absent from `frontend/dist`. `click`
 dispatches pointerdown → mousedown → mouseup → click so outside-click dismissal
 is exercised.
 

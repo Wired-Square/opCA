@@ -6,8 +6,9 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{ErrorData, tool, tool_router};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::{AppHandle, LogicalSize, Manager};
+use wiredai_mcp::dom::{self, DomBridge, BRIDGE_TIMEOUT};
 use wiredai_mcp::result::{ok_json, tool_error};
 use wiredai_mcp::router::mark_read_only;
 use wiredai_mcp::server::ServerIdentity;
@@ -16,12 +17,6 @@ use super::bridge;
 use crate::commands::cert::cert_items;
 use crate::state::AppState;
 
-const BRIDGE_TIMEOUT: Duration = Duration::from_secs(10);
-
-fn default_wait_ms() -> u64 {
-    5000
-}
-
 #[derive(Clone)]
 pub struct OpcaTools {
     pub app: AppHandle,
@@ -29,9 +24,9 @@ pub struct OpcaTools {
 
 impl OpcaTools {
     pub fn router() -> ToolRouter<Self> {
-        let mut router = Self::read_router();
-        mark_read_only(&mut router);
-        router + Self::ui_router()
+        let mut read = Self::read_router();
+        mark_read_only(&mut read);
+        read + dom::read_router() + Self::ui_router() + dom::drive_router()
     }
 
     pub fn identity() -> ServerIdentity {
@@ -48,20 +43,19 @@ impl OpcaTools {
         self.app.state::<AppState>()
     }
 
-    async fn relay(&self, op: &str, args: impl Serialize, timeout: Duration) -> Result<CallToolResult, ErrorData> {
+    async fn relay(&self, op: &str, args: impl Serialize) -> Result<CallToolResult, ErrorData> {
         let args = serde_json::to_value(args).expect("tool params serialise");
-        match bridge::request(&self.app, op, args, timeout).await {
+        match self.call(op, args, BRIDGE_TIMEOUT).await {
             Ok(value) => ok_json(value),
             Err(e) => Ok(tool_error(e)),
         }
     }
 }
 
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-struct SelectorParams {
-    /// CSS selector.
-    selector: String,
+impl DomBridge for OpcaTools {
+    async fn call(&self, op: &str, args: Value, timeout: Duration) -> Result<Value, String> {
+        bridge::request(&self.app, op, args, timeout).await
+    }
 }
 
 #[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
@@ -94,50 +88,6 @@ struct SizeParams {
     height: f64,
 }
 
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-struct ClickParams {
-    selector: String,
-    /// Which match to click when the selector matches several.
-    #[serde(default)]
-    index: usize,
-}
-
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-struct TypeParams {
-    selector: String,
-    /// Replaces the field's value.
-    text: String,
-}
-
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-struct PressParams {
-    /// A `KeyboardEvent.key` value, e.g. `Escape`, `ArrowDown`, `Enter`.
-    key: String,
-    /// Target element; defaults to the focused one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selector: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-#[schemars(crate = "rmcp::schemars")]
-enum WaitState {
-    Visible,
-    Gone,
-}
-
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-struct WaitParams {
-    selector: String,
-    state: WaitState,
-    #[serde(default = "default_wait_ms")]
-    timeout_ms: u64,
-}
-
 #[tool_router(router = read_router)]
 impl OpcaTools {
     #[tool(description = "Connection state: the 1Password account and vault, and whether the CA is loaded.")]
@@ -165,23 +115,18 @@ impl OpcaTools {
             Err(e) => Ok(tool_error(e)),
         }
     }
-
-    #[tool(description = "Every element matching a CSS selector: text, role, aria-label, rect, whether it lies wholly inside the viewport, and the nearest overflow ancestor clipping it (null if none).")]
-    async fn query(&self, Parameters(p): Parameters<SelectorParams>) -> Result<CallToolResult, ErrorData> {
-        self.relay("query", p, BRIDGE_TIMEOUT).await
-    }
 }
 
 #[tool_router(router = ui_router)]
 impl OpcaTools {
     #[tool(description = "Navigate the app to a route.")]
     async fn navigate(&self, Parameters(p): Parameters<NavigateParams>) -> Result<CallToolResult, ErrorData> {
-        self.relay("navigate", p, BRIDGE_TIMEOUT).await
+        self.relay("navigate", p).await
     }
 
     #[tool(description = "Switch the app theme.")]
     async fn set_theme(&self, Parameters(p): Parameters<ThemeParams>) -> Result<CallToolResult, ErrorData> {
-        self.relay("set_theme", p, BRIDGE_TIMEOUT).await
+        self.relay("set_theme", p).await
     }
 
     #[tool(description = "Resize the main window's content area.")]
@@ -193,27 +138,6 @@ impl OpcaTools {
             Ok(()) => ok_json(json!({ "width": p.width, "height": p.height })),
             Err(e) => Ok(tool_error(e.to_string())),
         }
-    }
-
-    #[tool(description = "Click an element as a pointer would: pointerdown, mousedown, mouseup, click.")]
-    async fn click(&self, Parameters(p): Parameters<ClickParams>) -> Result<CallToolResult, ErrorData> {
-        self.relay("click", p, BRIDGE_TIMEOUT).await
-    }
-
-    #[tool(name = "type", description = "Set an input's value and fire input and change.")]
-    async fn type_text(&self, Parameters(p): Parameters<TypeParams>) -> Result<CallToolResult, ErrorData> {
-        self.relay("type", p, BRIDGE_TIMEOUT).await
-    }
-
-    #[tool(description = "Fire keydown and keyup for a key.")]
-    async fn press(&self, Parameters(p): Parameters<PressParams>) -> Result<CallToolResult, ErrorData> {
-        self.relay("press", p, BRIDGE_TIMEOUT).await
-    }
-
-    #[tool(description = "Wait until an element matching the selector is visible, or until none is.")]
-    async fn wait_for(&self, Parameters(p): Parameters<WaitParams>) -> Result<CallToolResult, ErrorData> {
-        let wait = Duration::from_millis(p.timeout_ms);
-        self.relay("wait_for", p, wait + BRIDGE_TIMEOUT).await
     }
 }
 
@@ -240,9 +164,14 @@ mod tests {
                 ("resize_window", false),
                 ("set_theme", false),
                 ("type", false),
-                ("wait_for", false),
+                ("wait_for", true),
             ]
             .map(|(n, r)| (n.to_string(), r))
         );
+    }
+
+    #[test]
+    fn the_vendored_dom_ops_match_the_library() {
+        assert_eq!(include_str!("../../../../frontend/src/harness/domOps.ts"), dom::OPS_TS);
     }
 }
