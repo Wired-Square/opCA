@@ -377,9 +377,7 @@ pub async fn create_cert(
             e.to_string()
         })?;
 
-    for w in &issuance_warnings {
-        state.log_ok("create_cert", Some(w.message.clone()));
-    }
+    state.log_warnings("create_cert", issuance_warnings);
 
     state.log_ok("create_cert", Some(format!("Created {} cert '{}'", cert_type, request.cn)));
 
@@ -461,9 +459,7 @@ pub async fn renew_cert(
             e.to_string()
         })?;
 
-    for w in &issuance_warnings {
-        state.log_ok("renew_cert", Some(w.message.clone()));
-    }
+    state.log_warnings("renew_cert", issuance_warnings);
 
     state.log_ok("renew_cert", Some(format!("Renewed certificate {serial} → {new_serial}")));
     state.cache_fresh_pem(new_serial.clone(), new_pem.clone());
@@ -487,9 +483,7 @@ pub async fn rekey_cert(
             e.to_string()
         })?;
 
-    for w in &issuance_warnings {
-        state.log_ok("rekey_cert", Some(w.message.clone()));
-    }
+    state.log_warnings("rekey_cert", issuance_warnings);
 
     state.log_ok("rekey_cert", Some(format!("Rekeyed certificate {serial} → {new_serial}")));
     state.cache_fresh_pem(new_serial.clone(), new_pem.clone());
@@ -602,9 +596,7 @@ pub async fn bulk_rekey_certs(
     run_bulk_cert_op(&app, &state, serials, "bulk_rekey", "Rekeying", |ca, serial| {
         let (new_pem, new_serial, warnings) =
             ca.rekey_certificate_bundle(&CertLookup::Serial(serial.to_string()), key_algorithm, None)?;
-        for w in warnings {
-            state.log_ok("bulk_rekey", Some(w.message));
-        }
+        state.log_warnings("bulk_rekey", warnings);
         state.cache_fresh_pem(new_serial.clone(), new_pem);
         Ok(Some(new_serial))
     })
@@ -619,9 +611,7 @@ pub async fn bulk_renew_certs(
     run_bulk_cert_op(&app, &state, serials, "bulk_renew", "Renewing", |ca, serial| {
         let (new_pem, new_serial, warnings) =
             ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()), None)?;
-        for w in warnings {
-            state.log_ok("bulk_renew", Some(w.message));
-        }
+        state.log_warnings("bulk_renew", warnings);
         state.cache_fresh_pem(new_serial.clone(), new_pem);
         Ok(Some(new_serial))
     })

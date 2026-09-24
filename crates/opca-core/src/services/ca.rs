@@ -162,7 +162,7 @@ pub fn assess_cert_issuance(
         let cert_str = datetime::format_datetime(cert_not_after, DateTimeFormat::Text);
         Some(CertIssuanceWarning {
             message: format!(
-                "Warning: This certificate will expire on {cert_str} but the CA expires on {ca_str}. \
+                "This certificate will expire on {cert_str} but the CA expires on {ca_str}. \
                  The certificate will become invalid when the CA expires."
             ),
         })
@@ -174,7 +174,7 @@ pub fn assess_cert_issuance(
 fn assess_apple_tls_limit(cert_type: &CertType, days: u32) -> Option<CertIssuanceWarning> {
     (cert_type.is_tls_server() && days > APPLE_TLS_MAX_DAYS).then(|| CertIssuanceWarning {
         message: format!(
-            "Warning: {days} days exceeds the {APPLE_TLS_MAX_DAYS}-day limit macOS and iOS \
+            "{days} days exceeds the {APPLE_TLS_MAX_DAYS}-day limit macOS and iOS \
              enforce on TLS server certificates; Apple devices will reject it."
         ),
     })
@@ -2730,6 +2730,16 @@ mod tests {
         assert!(result.is_some());
         let w = result.unwrap();
         assert!(w.message.contains("will expire on"));
+    }
+
+    #[test]
+    fn issuance_warnings_leave_the_warning_label_to_the_caller() {
+        let now = chrono::Utc::now();
+        let outlives_ca = assess_cert_issuance(now + chrono::Duration::days(200), 365, now).unwrap();
+        let over_apple_limit = assess_apple_tls_limit(&CertType::WebServer, 826).unwrap();
+        for w in [outlives_ca, over_apple_limit] {
+            assert!(!w.message.starts_with("Warning"), "{}", w.message);
+        }
     }
 
     fn issued_days(

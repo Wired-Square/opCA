@@ -323,9 +323,7 @@ pub async fn sign_csr(
         state.log_err("sign_csr", Some(e.to_string()));
         e.to_string()
     })?;
-    for w in issuance_warnings {
-        state.log_ok("sign_csr", Some(w.message));
-    }
+    state.log_warnings("sign_csr", issuance_warnings);
 
     let cert_pem_bytes = signed_cert
         .to_pem()

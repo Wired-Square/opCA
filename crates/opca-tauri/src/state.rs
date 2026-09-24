@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::{info, warn};
 use zeroize::Zeroizing;
 use opca_core::op::{Op, ShellRunner};
-use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::ca::{CertIssuanceWarning, CertificateAuthority};
 use opca_core::services::cert::CertificateBundle;
 use opca_core::services::database::CertificateAuthorityDB;
 use opca_core::vault_lock::VaultLock;
@@ -132,6 +132,12 @@ impl AppState {
         self.log_action(action, detail.into(), false);
     }
 
+    pub fn log_warnings(&self, action: &str, warnings: Vec<CertIssuanceWarning>) {
+        for w in warnings {
+            self.log_ok(action, format!("Warning: {}", w.message));
+        }
+    }
+
     /// Remember a freshly-issued certificate's PEM so the detail page can show
     /// it without re-reading the bundle from 1Password.
     pub fn cache_fresh_pem(&self, serial: String, pem: String) {
@@ -178,5 +184,18 @@ impl Default for AppState {
             fresh_cert_pems: Mutex::new(HashMap::new()),
             preloaded_key: Mutex::new(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_issuance_warning_is_logged_with_one_label() {
+        let state = AppState::default();
+        state.log_warnings("create_cert", vec![CertIssuanceWarning { message: "Outlives the CA.".into() }]);
+        let log = state.action_log.lock().unwrap();
+        assert_eq!(log[0].detail.as_deref(), Some("Warning: Outlives the CA."));
     }
 }

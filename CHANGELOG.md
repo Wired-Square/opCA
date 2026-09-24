@@ -101,6 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - If connecting fails straight after **New CA in a new vault…** creates the vault, the form
   switches to that vault so trying again connects, rather than refusing the name as taken.
 - CA initialisation and configuration fields are labelled for screen readers.
+- CLI certificate warnings no longer read `Warning: Warning:`.
 
 ### Removed
 
