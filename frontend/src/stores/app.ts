@@ -1,4 +1,5 @@
 import { createStore } from "solid-js/store";
+import { tauriInvoke } from "../api/tauri";
 
 export type VaultState = "disconnected" | "valid_ca" | "empty_vault" | "invalid_ca";
 
@@ -20,5 +21,16 @@ const [appState, setAppState] = createStore<AppStore>({
 
 /** Convenience: true when the vault contains a valid CA. */
 export const hasCA = () => appState.vaultState === "valid_ca";
+
+/** Releases the vault lock and connection in the backend, then forgets them here. */
+export async function disconnect() {
+  await tauriInvoke("disconnect");
+  setAppState({
+    connected: false,
+    vaultState: "disconnected",
+    vault: "",
+    account: null,
+  });
+}
 
 export { appState, setAppState };

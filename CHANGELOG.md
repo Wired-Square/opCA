@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - After initialising a CA the app no longer reloads into a half-disconnected state that
   showed the initialisation form again; it opens the new CA's certificate.
 - Opening the DKIM page no longer re-uploads the CA database when no DKIM key changed.
+- **Disconnect** in the sidebar now releases the vault lock and the backend's connection,
+  as the header's button already did.
 - A new CA got a 2048-bit RSA key rather than the intended 4096; it now gets the chosen
   key type (EC P-384 unless set).
 - Signing a CSR kept only its DNS SANs, silently dropping IP addresses. VPN client

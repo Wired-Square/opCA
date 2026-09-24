@@ -2,7 +2,7 @@ import { For, Show, createSignal, onMount } from "solid-js";
 import { A, useLocation, useNavigate } from "@solidjs/router";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
-import { appState, setAppState, hasCA } from "../../stores/app";
+import { appState, disconnect, hasCA } from "../../stores/app";
 import { availableUpdate, fetchUpdate } from "../../stores/update";
 import { operationLabel } from "../../stores/operation";
 import Icon from "../Icon";
@@ -43,13 +43,8 @@ export default function Sidebar() {
     fetchUpdate();
   });
 
-  function handleLogout() {
-    setAppState({
-      connected: false,
-      vaultState: "disconnected",
-      vault: "",
-      account: null,
-    });
+  async function handleLogout() {
+    await disconnect();
     navigate("/");
   }
 

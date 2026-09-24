@@ -1,7 +1,6 @@
 import { Show, Switch, Match } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { invoke } from "@tauri-apps/api/core";
-import { appState, setAppState } from "../../stores/app";
+import { appState, disconnect } from "../../stores/app";
 import { themeMode, toggleTheme } from "../../stores/theme";
 import Icon from "../Icon";
 import "../../styles/components/header.css";
@@ -10,13 +9,7 @@ export default function Header() {
   const navigate = useNavigate();
 
   async function handleLogout() {
-    await invoke("disconnect");
-    setAppState({
-      connected: false,
-      vaultState: "disconnected",
-      vault: "",
-      account: null,
-    });
+    await disconnect();
     navigate("/");
   }
 
