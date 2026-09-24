@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::{info, warn};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use wiredai_mcp::CancellationToken;
 use wiredai_mcp::http::{self, HttpConfig};
 use wiredai_mcp::server::ToolServer;
@@ -32,7 +32,8 @@ fn try_start(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     let url = format!("http://127.0.0.1:{port}/mcp");
-    let handoff = app.path().app_data_dir().map_err(|e| e.to_string())?.join("mcp.json");
+    // Outside app data: reading another app's container from a terminal trips macOS's privacy prompt.
+    let handoff = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/mcp.json");
     write_handoff(&handoff, &serde_json::json!({ "url": url, "token": token }))?;
 
     bridge::listen(&app);
