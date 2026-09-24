@@ -77,6 +77,12 @@ export async function revokeCert(serial: string): Promise<boolean> {
   );
 }
 
+export async function deleteCert(serial: string): Promise<void> {
+  return withLock("delete_cert", () =>
+    tauriInvoke<void>("delete_cert", { serial }),
+  );
+}
+
 export async function renewCert(serial: string): Promise<RenewRekeyResult> {
   return withLock("renew_cert", () =>
     tauriInvoke<RenewRekeyResult>("renew_cert", { serial }),
@@ -132,6 +138,12 @@ export async function bulkRenewCerts(serials: string[]): Promise<BulkCertResult[
 export async function bulkRevokeCerts(serials: string[]): Promise<BulkCertResult[]> {
   return withLock("bulk_revoke", () =>
     tauriInvoke<BulkCertResult[]>("bulk_revoke_certs", { serials }),
+  );
+}
+
+export async function bulkDeleteCerts(serials: string[]): Promise<BulkCertResult[]> {
+  return withLock("bulk_delete", () =>
+    tauriInvoke<BulkCertResult[]>("bulk_delete_certs", { serials }),
   );
 }
 

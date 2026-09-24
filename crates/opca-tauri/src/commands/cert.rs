@@ -427,6 +427,25 @@ pub async fn revoke_cert(
 }
 
 #[tauri::command]
+pub async fn delete_cert(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<(), String> {
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    info!("[tauri] delete_cert: serial={serial}");
+    ca.delete_certificate(&serial).map_err(|e| {
+        warn!("[tauri] delete_cert failed: {e}");
+        state.log_err("delete_cert", Some(e.to_string()));
+        e.to_string()
+    })?;
+
+    state.log_ok("delete_cert", Some(format!("Deleted certificate {serial}")));
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn renew_cert(
     state: State<'_, AppState>,
     serial: String,
@@ -532,7 +551,7 @@ pub async fn unignore_cert(
 
 /// Run a per-cert action across `serials` under one CA borrow, collecting a
 /// `BulkCertResult` each. `action` returns the new serial for rekey/renew (and
-/// is where they cache the fresh PEM), or `None` for revoke/ignore/unignore.
+/// is where they cache the fresh PEM), or `None` for revoke/delete/ignore/unignore.
 /// A `bulk-progress` event is emitted before each item ("{verb} {n}/{total}")
 /// so the status indicator climbs through the batch rather than showing the
 /// raw command name.
@@ -616,6 +635,17 @@ pub async fn bulk_revoke_certs(
 ) -> Result<Vec<BulkCertResult>, String> {
     run_bulk_cert_op(&app, &state, serials, "bulk_revoke", "Revoking", |ca, serial| {
         ca.revoke_certificate(&CertLookup::Serial(serial.to_string())).map(|_| None)
+    })
+}
+
+#[tauri::command]
+pub async fn bulk_delete_certs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    serials: Vec<String>,
+) -> Result<Vec<BulkCertResult>, String> {
+    run_bulk_cert_op(&app, &state, serials, "bulk_delete", "Deleting", |ca, serial| {
+        ca.delete_certificate(serial).map(|_| None)
     })
 }
 

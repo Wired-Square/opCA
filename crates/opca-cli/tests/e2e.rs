@@ -404,6 +404,42 @@ fn t28_cert_import_into_new_vault() {
     assert!(stdout.contains("BEGIN CERTIFICATE"));
 }
 
+#[test]
+fn t29_cert_delete_revoked() {
+    skip_unless_integration!();
+    bail_if_failed!();
+    let state = get_state();
+    let s = state.as_ref().expect("t01 must run first");
+
+    let output = run_opca(s, &["cert", "delete", "-n", "vpnclient-cert"]);
+    assert!(!output.status.success(), "a valid certificate must not be deletable");
+
+    let output = run_opca(s, &["cert", "delete", "-n", "webserver-cert"]);
+    assert_ok(&output, "cert delete webserver-cert");
+    let text = combined_output(&output);
+    let serial: u64 = text
+        .split("Deleted certificate ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("no deleted serial in output:\n{text}"));
+
+    assert_ok(&run_opca(s, &["crl", "create"]), "crl create after delete");
+    let crl_path = s.tmp_dir.join("crl-after-delete.pem");
+    assert_ok(
+        &run_opca(s, &["crl", "export", "-o", crl_path.to_str().unwrap()]),
+        "crl export after delete",
+    );
+    let output = Command::new("openssl")
+        .args(["crl", "-in", crl_path.to_str().unwrap(), "-noout", "-text"])
+        .output().expect("failed to run openssl");
+    let crl_text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        crl_text.contains(&format!("Serial Number: {serial:02X}")),
+        "deleted revoked serial {serial} must stay on the CRL:\n{crl_text}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // CRL tests
 // ---------------------------------------------------------------------------

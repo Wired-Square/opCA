@@ -10,12 +10,19 @@ export function certLabel(cert: { cn?: string | null; serial?: string | null }):
 }
 
 
+/** Only a revoked or expired certificate can be deleted, and never the CA. */
+export function canDeleteCert(cert: CertListItem): boolean {
+  const status = cert.status?.toLowerCase();
+  return (status === "revoked" || status === "expired") && cert.cert_type !== "ca";
+}
+
 type Navigate = ReturnType<typeof useNavigate>;
 
 export interface CertActionHandlers {
   onRekey: () => void;
   onRenew: () => void;
   onRevoke: () => void;
+  onDelete: () => void;
   onIgnore: () => void;
   onUnignore: () => void;
 }
@@ -39,6 +46,9 @@ export function certKebabItems(
   }
   if (cert.ignored_at) {
     items.push({ label: "Unignore", disabled, onSelect: h.onUnignore });
+  }
+  if (canDeleteCert(cert)) {
+    items.push({ label: "Delete", danger: true, disabled, onSelect: h.onDelete });
   }
   return items;
 }

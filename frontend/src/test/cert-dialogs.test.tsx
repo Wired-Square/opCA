@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import RevokeCertDialog from "../components/RevokeCertDialog";
+import DeleteCertDialog from "../components/DeleteCertDialog";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 
@@ -9,10 +10,12 @@ import RekeyDialog from "../components/RekeyDialog";
 
 const revokeCert = vi.hoisted(() => vi.fn());
 const ignoreCert = vi.hoisted(() => vi.fn());
+const deleteCert = vi.hoisted(() => vi.fn());
 vi.mock("../api/certs", async (actual) => ({
   ...(await actual<object>()),
   revokeCert,
   ignoreCert,
+  deleteCert,
 }));
 
 const CERT = { serial: "131", cn: "vpn.example.com" };
@@ -34,6 +37,27 @@ describe("RevokeCertDialog", () => {
 
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(revokeCert).toHaveBeenCalledWith("131");
+    expect(onDone).toHaveBeenCalled();
+  });
+});
+
+describe("DeleteCertDialog", () => {
+  it("names the certificate and says revoked serials stay on the CRL", () => {
+    render(() => <DeleteCertDialog open {...CERT} onClose={() => {}} onDone={() => {}} />);
+    expect(screen.getByText("vpn.example.com")).toBeInTheDocument();
+    expect(screen.getByText(/stays on the CRL/)).toBeInTheDocument();
+  });
+
+  it("deletes by serial and reports back", async () => {
+    deleteCert.mockImplementation(() => Promise.resolve());
+    const onDone = vi.fn();
+    const onClose = vi.fn();
+    render(() => <DeleteCertDialog open {...CERT} onClose={onClose} onDone={onDone} />);
+
+    screen.getByRole("button", { name: /^Delete/ }).click();
+
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(deleteCert).toHaveBeenCalledWith("131");
     expect(onDone).toHaveBeenCalled();
   });
 });

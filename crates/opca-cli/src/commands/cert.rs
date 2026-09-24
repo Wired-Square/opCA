@@ -24,6 +24,7 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
         CertAction::Rekey(args) => handle_rekey(app, args),
         CertAction::Renew(args) => handle_renew(app, args),
         CertAction::Revoke(revoke_args) => handle_revoke(app, revoke_args),
+        CertAction::Delete(id) => handle_delete(app, id),
     }
 }
 
@@ -331,9 +332,64 @@ fn handle_revoke<R: CommandRunner>(
     })
 }
 
+fn handle_delete<R: CommandRunner>(
+    app: &mut AppContext<R>,
+    id: CertIdentifier,
+) -> Result<(), OpcaError> {
+    output::title("Deleting Certificate");
+
+    with_lock(app, "cert_delete", |app| {
+        let serial = match (id.serial, id.cn) {
+            (Some(serial), _) => serial,
+            (None, Some(cn)) => deletable_serial_for_cn(app, &cn)?,
+            (None, None) => {
+                return Err(OpcaError::Other("Either --cn or --serial is required".into()))
+            }
+        };
+        let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+        let cert = ca.delete_certificate(&serial)?;
+        output::print_result(
+            &format!("Deleted certificate {serial} ({})", cert.cn.as_deref().unwrap_or("-")),
+            true,
+        );
+        Ok(())
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// A CN is shared by every renewal of a certificate, so it names a delete only
+/// when exactly one of its certificates is revoked or expired.
+fn deletable_serial_for_cn<R: CommandRunner>(
+    app: &AppContext<R>,
+    cn: &str,
+) -> Result<String, OpcaError> {
+    let db = app
+        .ca
+        .as_ref()
+        .and_then(|ca| ca.ca_database.as_ref())
+        .ok_or(OpcaError::CaNotFound)?;
+    let serials: Vec<String> = db
+        .query_all_certs()?
+        .into_iter()
+        .filter(|c| {
+            c.cn.as_deref() == Some(cn)
+                && c.cert_type.as_deref() != Some("ca")
+                && matches!(c.status.as_deref(), Some("Revoked" | "Expired"))
+        })
+        .map(|c| c.serial)
+        .collect();
+    match serials.as_slice() {
+        [serial] => Ok(serial.clone()),
+        [] => Err(OpcaError::Other(format!("No revoked or expired certificate for CN {cn}"))),
+        _ => Err(OpcaError::Other(format!(
+            "CN {cn} has several revoked or expired certificates (serials {}); pass --serial",
+            serials.join(", ")
+        ))),
+    }
+}
 
 fn resolve_cn<R: CommandRunner>(
     app: &AppContext<R>,

@@ -301,6 +301,9 @@ pub enum CertAction {
 
     /// Revoke a x509 certificate
     Revoke(CertRevokeArgs),
+
+    /// Delete a revoked or expired x509 certificate
+    Delete(CertIdentifier),
 }
 
 #[derive(Args)]

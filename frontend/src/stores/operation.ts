@@ -30,6 +30,7 @@ const operationLabels: Record<string, string> = {
   backfill_cert: "Retrieving certificate\u2026",
   create_cert: "Creating certificate\u2026",
   revoke_cert: "Revoking certificate\u2026",
+  delete_cert: "Deleting certificate\u2026",
   renew_cert: "Renewing certificate\u2026",
   rekey_cert: "Rekeying certificate\u2026",
   ignore_cert: "Marking certificate ignored\u2026",
@@ -40,6 +41,7 @@ const operationLabels: Record<string, string> = {
   bulk_rekey_certs: "Rekeying certificates\u2026",
   bulk_renew_certs: "Renewing certificates\u2026",
   bulk_revoke_certs: "Revoking certificates\u2026",
+  bulk_delete_certs: "Deleting certificates\u2026",
   bulk_ignore_certs: "Ignoring certificates\u2026",
   bulk_unignore_certs: "Clearing ignores\u2026",
 

@@ -13,6 +13,7 @@ import CopyableValue from "../components/CopyableValue";
 import CertStatusBadge from "../components/CertStatusBadge";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
+import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
@@ -34,6 +35,7 @@ export default function CertInfo() {
     (serial: string) => getCertInfo(serial),
   );
   const [showRevoke, setShowRevoke] = createSignal(false);
+  const [showDelete, setShowDelete] = createSignal(false);
   const [showRekey, setShowRekey] = createSignal(false);
   const outcome = createActionResult();
   /** Renew and unignore share one action: the kebab disables all of its
@@ -114,6 +116,7 @@ export default function CertInfo() {
       onRekey: () => setShowRekey(true),
       onRenew: handleRenew,
       onRevoke: () => setShowRevoke(true),
+      onDelete: () => setShowDelete(true),
       onIgnore: () => setShowIgnore(true),
       onUnignore: handleUnignore,
     }, headerAction.busy());
@@ -402,6 +405,14 @@ export default function CertInfo() {
                 cn={d().cn}
                 onClose={() => setShowRevoke(false)}
                 onDone={() => { outcome.report(`Revoked ${label()}`); refetch(); }}
+              />
+
+              <DeleteCertDialog
+                open={showDelete()}
+                serial={d().serial}
+                cn={d().cn}
+                onClose={() => setShowDelete(false)}
+                onDone={() => navigate("/certs")}
               />
 
               <CopyPrivateKeyDialog

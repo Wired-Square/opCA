@@ -3,9 +3,9 @@ import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
   listCerts, listExternalCerts, inspectCertificate, unignoreCert, backfillCert,
-  bulkRekeyCerts, bulkRenewCerts, bulkRevokeCerts, bulkIgnoreCerts,
+  bulkRekeyCerts, bulkRenewCerts, bulkRevokeCerts, bulkDeleteCerts, bulkIgnoreCerts,
 } from "../api/certs";
-import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
+import { canDeleteCert, certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
@@ -16,6 +16,7 @@ import CertStatusBadge from "../components/CertStatusBadge";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
+import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
@@ -27,7 +28,7 @@ import { createAction, type ActionMessages } from "../utils/action";
 import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult, KeyAlgorithm } from "../api/types";
 import "../styles/pages/certs.css";
 
-type BulkAction = "rekey" | "renew" | "revoke" | "ignore";
+type BulkAction = "rekey" | "renew" | "revoke" | "delete" | "ignore";
 
 type Tab = "local" | "external" | "inspect";
 
@@ -124,11 +125,12 @@ export default function Certs() {
   const [generateError, setGenerateError] = createSignal<string | null>(null);
 
   // Per-row certificate actions (kebab menu). Rekey/Renew navigate away to the
-  // new cert; Rekey/Revoke/Ignore use shared dialogs; Unignore acts immediately.
+  // new cert; Rekey/Revoke/Delete/Ignore use shared dialogs; Unignore acts immediately.
   const outcome = createActionResult();
   const action = createAction(outcome);
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = createSignal<CertListItem | null>(null);
   const [rekeyTarget, setRekeyTarget] = createSignal<CertListItem | null>(null);
 
   // --- Bulk multi-select (Local tab) ---------------------------------------
@@ -146,6 +148,8 @@ export default function Certs() {
   const canRenewOrRevoke = () =>
     sel.selectedItems().length > 0 &&
     sel.selectedItems().every((c) => c.status?.toLowerCase() === "valid");
+  const canDelete = () =>
+    sel.selectedItems().length > 0 && sel.selectedItems().every(canDeleteCert);
   const canIgnore = () =>
     sel.selectedItems().length > 0 &&
     sel.selectedItems().every(
@@ -162,6 +166,7 @@ export default function Certs() {
       case "rekey": results = await bulkRekeyCerts(serials, keyAlgorithm); break;
       case "renew": results = await bulkRenewCerts(serials); break;
       case "revoke": results = await bulkRevokeCerts(serials); break;
+      case "delete": results = await bulkDeleteCerts(serials); break;
       case "ignore": results = await bulkIgnoreCerts(serials, reason); break;
       default: return;
     }
@@ -176,6 +181,7 @@ export default function Certs() {
     switch (bulkAction()) {
       case "renew": return { title: "Renew Certificates", message: `Renew ${n} certificate(s)? Each is reissued at a new serial.`, confirmLabel: "Renew", actingLabel: "Renewing…", danger: false, requireReason: false };
       case "revoke": return { title: "Revoke Certificates", message: `Revoke ${n} certificate(s)? This cannot be undone.`, confirmLabel: "Revoke", actingLabel: "Revoking…", danger: true, requireReason: false };
+      case "delete": return { title: "Delete Certificates", message: `Delete ${n} certificate(s)? Their 1Password items are archived; revoked serials stay on the CRL until they expire.`, confirmLabel: "Delete", actingLabel: "Deleting…", danger: true, requireReason: false };
       case "ignore": return { title: "Ignore Certificates", message: `Stop counting ${n} certificate(s) toward expiry alerts. Provide a reason for the audit trail.`, confirmLabel: "Confirm Ignore", actingLabel: "Ignoring…", danger: false, requireReason: true };
       default: return { title: "", message: "", confirmLabel: "", actingLabel: "", danger: false, requireReason: false };
     }
@@ -209,6 +215,7 @@ export default function Certs() {
       onRekey: () => setRekeyTarget(cert),
       onRenew: act({ failure: "Renew failed" }, async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
       onRevoke: () => setRevokeTarget(cert),
+      onDelete: () => setDeleteTarget(cert),
       onIgnore: () => setIgnoreTarget(cert),
       onUnignore: act({ failure: "Unignore failed", success: `Unignored ${label}` }, async () => {
         await unignoreCert(serial!);
@@ -370,6 +377,12 @@ export default function Certs() {
               title={canIgnore() ? undefined : "All selected certs must be Expired or Expiring and not already ignored"}
               onClick={() => setBulkAction("ignore")}
             >Ignore</button>
+            <button
+              class="btn-danger btn-sm"
+              disabled={!canDelete()}
+              title={canDelete() ? undefined : "All selected certs must be Revoked or Expired"}
+              onClick={() => setBulkAction("delete")}
+            >Delete</button>
             <button class="btn-ghost btn-sm" onClick={sel.clear}>Clear</button>
           </div>
         </Show>
@@ -623,6 +636,14 @@ export default function Certs() {
         cn={revokeTarget()?.cn ?? null}
         onClose={() => setRevokeTarget(null)}
         onDone={() => { const c = revokeTarget(); if (c) { outcome.report(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
+      />
+
+      <DeleteCertDialog
+        open={!!deleteTarget()}
+        serial={deleteTarget()?.serial ?? null}
+        cn={deleteTarget()?.cn ?? null}
+        onClose={() => setDeleteTarget(null)}
+        onDone={() => { const c = deleteTarget(); if (c) { outcome.report(`Deleted ${certLabel(c)}`); refetchLocal(); } }}
       />
 
       <RekeyDialog
