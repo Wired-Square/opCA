@@ -54,16 +54,16 @@
 .vpn-picker-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: var(--z-popover);
 }
 
 .vpn-picker-dropdown {
   position: fixed;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  z-index: 201;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-popover);
+  z-index: calc(var(--z-popover) + 1);
   overflow: hidden;
 }
 

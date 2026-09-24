@@ -6,11 +6,11 @@
   padding: 2px 8px;
   font-size: 0.6875rem;
   font-weight: 600;
-  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-family: var(--font-mono);
   color: var(--accent);
   background: var(--accent-glow);
   border: 1px solid var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;
   vertical-align: middle;
@@ -20,5 +20,5 @@
 
 .tz-toggle:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }

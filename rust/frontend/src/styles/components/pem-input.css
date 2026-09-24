@@ -6,7 +6,7 @@
 
 .pem-textarea {
   flex: 1;
-  font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   line-height: 1.5;
   resize: vertical;

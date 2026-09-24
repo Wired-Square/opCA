@@ -138,8 +138,7 @@ export default function VpnClientPicker(props: VpnClientPickerProps) {
                 >
                   <input
                     type="checkbox"
-                    class="table-checkbox"
-                    style={{ "pointer-events": "none" }}
+                    class="table-checkbox table-checkbox-passive"
                     checked={isSelected(cert)}
                     tabindex={-1}
                   />

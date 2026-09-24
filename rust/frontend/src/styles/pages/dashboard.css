@@ -17,7 +17,7 @@
   padding: 16px 20px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   margin-bottom: 24px;
 }
 
@@ -49,7 +49,7 @@
   padding: 20px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -129,7 +129,7 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-left-width: 4px;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
 }
 
 .action-item-dot {
