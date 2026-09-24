@@ -9,13 +9,22 @@ pub mod openvpn;
 pub mod vault;
 
 use opca_core::error::OpcaError;
-use opca_core::op::ShellRunner;
+use opca_core::op::{self, ShellRunner};
 
 use crate::app::AppContext;
+use crate::output;
 use crate::{Cli, Commands};
 
 /// Dispatch the parsed CLI to the appropriate command handler.
 pub fn dispatch(cli: Cli) -> Result<(), OpcaError> {
+    if let Commands::Ca(crate::CaArgs {
+        action: crate::CaAction::Init { create_vault: true, .. },
+    }) = &cli.command
+    {
+        let created = op::create_vault_standalone(&cli.vault, cli.account.as_deref())?;
+        output::print_result(&format!("Created vault {}", created.name), true);
+    }
+
     let mut app = AppContext::<ShellRunner>::new(&cli.vault, cli.account)?;
 
     // Determine if we need eager CA loading.

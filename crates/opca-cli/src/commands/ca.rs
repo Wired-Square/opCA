@@ -24,6 +24,7 @@ pub fn dispatch(args: CaArgs, app: &mut AppContext<ShellRunner>) -> Result<(), O
             ca_url,
             crl_url,
             key,
+            create_vault: _,
         } => handle_init(
             app, cn, org, ca_days, crl_days, days, email, ou, city, state, country, ca_url,
             crl_url, key,

@@ -147,6 +147,10 @@ pub enum CaAction {
         /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default ec-p384)
         #[arg(long)]
         key: Option<KeyAlgorithm>,
+
+        /// Create the vault first, refusing a name already in use
+        #[arg(long)]
+        create_vault: bool,
     },
 
     /// Import a Certificate Authority from file
@@ -862,7 +866,8 @@ fn main() {
                 | OpcaError::InvalidCertificate(_)
                 | OpcaError::CertificateRevoked(_)
                 | OpcaError::CertificateExpired(_)
-                | OpcaError::CsrNotFound(_) => EXIT_VALIDATION_ERROR,
+                | OpcaError::CsrNotFound(_)
+                | OpcaError::VaultAlreadyExists(_) => EXIT_VALIDATION_ERROR,
                 _ => EXIT_FATAL,
             }
         }

@@ -23,6 +23,7 @@ struct TestState {
     account: Option<String>,
     bin: PathBuf,
     import_vault: String,
+    created_vault: String,
     tmp_dir: PathBuf,
 }
 
@@ -156,6 +157,7 @@ fn t01_setup() {
         account,
         bin,
         import_vault: String::new(),
+        created_vault: String::new(),
         tmp_dir,
     });
 }
@@ -187,6 +189,31 @@ fn t10_ca_init() {
         "--crl-url", "https://ca.home.com/crl.pem",
     ]);
     assert_ok(&output, "CA init");
+}
+
+#[test]
+fn t11_ca_init_create_vault() {
+    skip_unless_integration!();
+    bail_if_failed!();
+    let mut state = get_state();
+    let s = state.as_mut().expect("t01 must run first");
+    let init = ["ca", "init", "--create-vault", "-o", "Test Organisation",
+        "-n", "Created Vault CA", "--ca-days", "365", "--crl-days", "30", "--days", "90"];
+
+    let output = run_opca(s, &init);
+    assert_eq!(output.status.code(), Some(1), "an existing vault must be refused");
+    assert!(
+        combined_output(&output).contains("Vault already exists"),
+        "unexpected refusal:\n{}",
+        combined_output(&output)
+    );
+
+    s.created_vault = format!("{}-created", s.vault);
+    let output = run_opca_vault(s, &s.created_vault, &init);
+    assert_ok(&output, "CA init --create-vault");
+    let text = combined_output(&output);
+    assert!(text.contains(&format!("Created vault {}", s.created_vault)), "{text}");
+    assert!(text.contains("CA certificate validation: OK"), "{text}");
 }
 
 #[test]
@@ -618,5 +645,6 @@ fn t90_cleanup() {
 
     delete_vault(&s.vault);
     delete_vault(&s.import_vault);
+    delete_vault(&s.created_vault);
     let _ = std::fs::remove_dir_all(&s.tmp_dir);
 }

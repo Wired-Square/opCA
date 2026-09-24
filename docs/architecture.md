@@ -442,7 +442,8 @@ A single-page SolidJS app. Key conventions:
   needs no connection and refuses a name or ID already in `op vault list`
   because `op` allows duplicate names, then connects and lands on `/ca`, where
   the empty vault opens the Init tab. `VaultPicker` creates vaults the same
-  way, in the connected account.
+  way, in the connected account, and so does `opca ca init --create-vault`
+  before it connects.
 - [api/](../frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
   [api/tauri.ts](../frontend/src/api/tauri.ts). `tauriInvoke` normalises
