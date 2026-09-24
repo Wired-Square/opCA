@@ -3,6 +3,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use crate::services::cert::KeyAlgorithm;
+
 /// Certificate status values stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CertStatus {
@@ -138,6 +140,9 @@ pub struct CaConfig {
     /// CA certificate validity in days — used only during init, not persisted.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ca_days: Option<i64>,
+    /// CA key algorithm — used only during init, not persisted.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub key_algorithm: Option<KeyAlgorithm>,
     pub next_serial: Option<i64>,
     pub next_crl_serial: Option<i64>,
     pub org: Option<String>,

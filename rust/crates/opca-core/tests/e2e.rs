@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::{CommandRunner, Op};
 use opca_core::services::ca::CertificateAuthority;
-use opca_core::services::cert::CertType;
+use opca_core::services::cert::{CertType, KeyAlgorithm};
 use opca_core::services::database::models::{CaConfig, CertLookup};
 use opca_core::services::vault::VaultBackup;
 
@@ -217,7 +217,7 @@ fn t20_cert_create_server() {
 
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-webserver.example.com".to_string()),
-        key_size: Some(2048),
+        key_algorithm: Some(KeyAlgorithm::Rsa2048),
         alt_dns_names: Some(vec!["www.e2e-webserver.example.com".to_string()]),
         ..Default::default()
     };
@@ -248,7 +248,6 @@ fn t21_cert_create_client() {
 
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-vpnclient".to_string()),
-        key_size: Some(2048),
         ..Default::default()
     };
 
@@ -258,6 +257,7 @@ fn t21_cert_create_client() {
         .expect("generate vpnclient cert failed");
 
     assert!(bundle.certificate.is_some());
+    assert_eq!(bundle.public_key_type_str().unwrap(), "EC", "default key should be EC");
     s.client_cert_title = bundle.title.clone();
     eprintln!("[e2e] VPN client cert created: {}", bundle.title);
 }

@@ -1,14 +1,15 @@
 import { createSignal, Show, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
-import { CERT_TYPES } from "../api/types";
+import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
+import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import "../styles/pages/cert-create.css";
 
 export default function CertCreate() {
   const navigate = useNavigate();
   const [cn, setCn] = createSignal("");
   const [certType, setCertType] = createSignal("device");
-  const [keySize, setKeySize] = createSignal<number | undefined>(undefined);
+  const [keyAlgorithm, setKeyAlgorithm] = createSignal<KeyAlgorithm>(defaultKeyAlgorithm("webserver"));
   const [sanInput, setSanInput] = createSignal("");
   const [sans, setSans] = createSignal<string[]>([]);
   const [saving, setSaving] = createSignal(false);
@@ -37,7 +38,7 @@ export default function CertCreate() {
         cn: cn(),
         cert_type: certType(),
         alt_dns_names: sans().length > 0 ? sans() : undefined,
-        key_size: keySize(),
+        key_algorithm: keyAlgorithm(),
       });
       // create_cert already persisted the DB (1Password + private store), so
       // just return to the list.
@@ -81,20 +82,7 @@ export default function CertCreate() {
           </select>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Key Size (optional)</label>
-          <select
-            value={keySize() ?? ""}
-            onChange={(e) => {
-              const v = e.currentTarget.value;
-              setKeySize(v ? parseInt(v) : undefined);
-            }}
-          >
-            <option value="">Default</option>
-            <option value="2048">2048</option>
-            <option value="4096">4096</option>
-          </select>
-        </div>
+        <KeyAlgorithmSelect value={keyAlgorithm()} onChange={setKeyAlgorithm} />
 
         <div class="form-group">
           <label class="form-label">Subject Alternative Names</label>

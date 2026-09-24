@@ -280,6 +280,7 @@ pub(crate) fn ca_config_to_dto(config: &CaConfig) -> CaConfigDto {
         ca_private_store: config.ca_private_store.clone(),
         ca_backup_store: config.ca_backup_store.clone(),
         ca_aws_region: config.ca_aws_region.clone(),
+        key_algorithm: None,
     }
 }
 
@@ -287,6 +288,7 @@ fn dto_to_ca_config(dto: &CaConfigDto) -> CaConfig {
     CaConfig {
         cn: None,
         ca_days: None,
+        key_algorithm: dto.key_algorithm,
         next_serial: dto.next_serial,
         next_crl_serial: dto.next_crl_serial,
         org: dto.org.clone(),

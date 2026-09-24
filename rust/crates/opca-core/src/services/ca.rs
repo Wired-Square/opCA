@@ -10,8 +10,8 @@ use foreign_types::ForeignType;
 use log::{debug, error, info};
 use openssl::asn1::Asn1Time;
 use openssl::bn::BigNum;
-use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
+use openssl::pkey::Id;
 use openssl::x509::extension::{
     AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
     SubjectAlternativeName, SubjectKeyIdentifier,
@@ -23,7 +23,9 @@ use sha2::{Digest, Sha256};
 use crate::constants::{OpConf, DEFAULT_OP_CONF, DEFAULT_STORAGE_CONF};
 use crate::error::OpcaError;
 use crate::op::{CommandRunner, Op, StoreAction};
-use crate::services::cert::{asn1_time_to_openssl_str, CertBundleConfig, CertType, CertificateBundle};
+use crate::services::cert::{
+    asn1_time_to_openssl_str, signing_digest, CertBundleConfig, CertType, CertificateBundle,
+};
 use crate::services::database::models::{
     CaConfig, CertLookup, CertRecord, CrlMetadata, ExternalCertRecord, IgnoreReason, SerialType,
 };
@@ -442,16 +444,11 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                 let bc = BasicConstraints::new().build()
                     .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
                 builder.append_extension(bc)?;
+                let rsa_subject = csr.public_key().is_ok_and(|k| k.id() == Id::RSA);
 
                 match cert_type {
                     CertType::AppleDev | CertType::Device => {
-                        let ku = KeyUsage::new()
-                            .critical()
-                            .digital_signature()
-                            .key_encipherment()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(ku)?;
+                        builder.append_extension(leaf_key_usage(rsa_subject)?)?;
 
                         let eku = ExtendedKeyUsage::new()
                             .client_auth()
@@ -463,12 +460,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                         self.add_san_from_csr(&mut builder, csr, ca_cert)?;
                     }
                     CertType::VpnClient => {
-                        let ku = KeyUsage::new()
-                            .critical()
-                            .digital_signature()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(ku)?;
+                        builder.append_extension(leaf_key_usage(false)?)?;
 
                         let eku = ExtendedKeyUsage::new()
                             .critical()
@@ -478,13 +470,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                         builder.append_extension(eku)?;
                     }
                     CertType::VpnServer => {
-                        let ku = KeyUsage::new()
-                            .critical()
-                            .digital_signature()
-                            .key_encipherment()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(ku)?;
+                        builder.append_extension(leaf_key_usage(rsa_subject)?)?;
 
                         let eku = ExtendedKeyUsage::new()
                             .critical()
@@ -494,13 +480,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                         builder.append_extension(eku)?;
                     }
                     CertType::WebServer => {
-                        let ku = KeyUsage::new()
-                            .critical()
-                            .digital_signature()
-                            .key_encipherment()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(ku)?;
+                        builder.append_extension(leaf_key_usage(rsa_subject)?)?;
 
                         let eku = ExtendedKeyUsage::new()
                             .server_auth()
@@ -549,7 +529,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             }
         }
 
-        builder.sign(ca_key, MessageDigest::sha256())
+        builder.sign(ca_key, signing_digest(ca_key))
             .map_err(|e| OpcaError::Crypto(format!("Sign: {e}")))?;
 
         Ok(builder.build())
@@ -1750,11 +1730,22 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Critical digitalSignature, plus keyEncipherment for RSA keys only: ECDSA
+/// keys cannot encipher, and some TLS stacks reject certs claiming they can.
+fn leaf_key_usage(key_encipherment: bool) -> Result<openssl::x509::X509Extension, OpcaError> {
+    let mut ku = KeyUsage::new();
+    ku.critical().digital_signature();
+    if key_encipherment {
+        ku.key_encipherment();
+    }
+    ku.build().map_err(|e| OpcaError::Crypto(format!("{e}")))
+}
+
 /// Convert a `CaConfig` (database model) into a `CertBundleConfig` (cert model).
 fn ca_config_to_bundle(config: &CaConfig) -> CertBundleConfig {
     CertBundleConfig {
         cn: config.cn.clone(),
-        key_size: None, // Uses default
+        key_algorithm: config.key_algorithm,
         org: config.org.clone(),
         ou: config.ou.clone(),
         email: config.email.clone(),
@@ -1938,7 +1929,7 @@ fn build_crl(
         openssl_sys::X509_CRL_sort(crl_ptr);
 
         // Sign
-        let md = openssl_sys::EVP_sha256();
+        let md = signing_digest(ca_key).as_ptr();
         if openssl_sys::X509_CRL_sign(crl_ptr, ca_key.as_ptr() as *mut _, md) == 0 {
             openssl_sys::X509_CRL_free(crl_ptr);
             return Err(OpcaError::Crypto("Failed to sign CRL".into()));
@@ -2082,12 +2073,12 @@ fn extract_crl_number(crl: &openssl::x509::X509Crl) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::cert::{CertBundleConfig, CertType, CertificateBundle};
+    use crate::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 
     fn make_ca_bundle() -> CertificateBundle {
         let config = CertBundleConfig {
             cn: Some("Test CA".to_string()),
-            key_size: Some(2048),
+            key_algorithm: Some(KeyAlgorithm::Rsa2048),
             org: Some("Test Org".to_string()),
             ou: None,
             email: None,
@@ -2169,7 +2160,7 @@ mod tests {
         // Create a device CSR
         let device_config = CertBundleConfig {
             cn: Some("device.example.com".to_string()),
-            key_size: Some(2048),
+            key_algorithm: Some(KeyAlgorithm::Rsa2048),
             org: Some("Test Org".to_string()),
             ..CertBundleConfig::default()
         };
@@ -2219,7 +2210,7 @@ mod tests {
 
         let ws_config = CertBundleConfig {
             cn: Some("www.example.com".to_string()),
-            key_size: Some(2048),
+            key_algorithm: Some(KeyAlgorithm::Rsa2048),
             alt_dns_names: Some(vec!["example.com".to_string()]),
             ..CertBundleConfig::default()
         };
@@ -2264,7 +2255,7 @@ mod tests {
 
         let vpn_config = CertBundleConfig {
             cn: Some("vpn-client-1".to_string()),
-            key_size: Some(2048),
+            key_algorithm: Some(KeyAlgorithm::Rsa2048),
             ..CertBundleConfig::default()
         };
         let vpn_bundle = CertificateBundle::generate(
@@ -2308,7 +2299,7 @@ mod tests {
 
         let vpn_config = CertBundleConfig {
             cn: Some("vpn-server".to_string()),
-            key_size: Some(2048),
+            key_algorithm: Some(KeyAlgorithm::Rsa2048),
             ..CertBundleConfig::default()
         };
         let vpn_bundle = CertificateBundle::generate(
@@ -2353,6 +2344,88 @@ mod tests {
         let pem = build_crl(ca_cert, ca_key, 1, 30, &revoked, &db).unwrap();
         assert!(pem.contains("BEGIN X509 CRL"));
         assert!(pem.contains("END X509 CRL"));
+    }
+
+    fn ca_with_key(algorithm: KeyAlgorithm) -> CertificateAuthority<crate::testutil::MockRunner> {
+        let config = CertBundleConfig {
+            cn: Some("Test CA".to_string()),
+            key_algorithm: Some(algorithm),
+            next_serial: Some(1),
+            ca_days: Some(3650),
+            ..CertBundleConfig::default()
+        };
+        let mut ca_bundle = CertificateBundle::generate(CertType::Ca, "CA", config).unwrap();
+        ca_bundle.self_sign_ca().unwrap();
+        let db = CertificateAuthorityDB::new(&CaConfig {
+            next_serial: Some(2),
+            days: Some(365),
+            ..CaConfig::default()
+        })
+        .unwrap();
+        CertificateAuthority {
+            op: crate::testutil::mock_op(vec![]),
+            op_config: DEFAULT_OP_CONF,
+            ca_bundle: Some(ca_bundle),
+            ca_database: Some(db),
+            crl: None,
+        }
+    }
+
+    fn sign_leaf(ca: &mut CertificateAuthority<crate::testutil::MockRunner>, algorithm: KeyAlgorithm) -> X509 {
+        let config = CertBundleConfig {
+            cn: Some("www.example.com".to_string()),
+            key_algorithm: Some(algorithm),
+            ..CertBundleConfig::default()
+        };
+        let leaf = CertificateBundle::generate(CertType::WebServer, "www", config).unwrap();
+        ca.sign_certificate(leaf.csr.as_ref().unwrap(), &CertType::WebServer).unwrap()
+    }
+
+    fn text_of(cert: &X509) -> String {
+        String::from_utf8_lossy(&cert.to_text().unwrap()).into_owned()
+    }
+
+    #[test]
+    fn ec_and_rsa_cas_sign_leaves_of_the_other_family() {
+        for (ca_alg, leaf_alg) in [
+            (KeyAlgorithm::EcP384, KeyAlgorithm::Rsa2048),
+            (KeyAlgorithm::Rsa2048, KeyAlgorithm::EcP256),
+        ] {
+            let mut ca = ca_with_key(ca_alg);
+            let signed = sign_leaf(&mut ca, leaf_alg);
+            let ca_key = ca.ca_bundle.as_ref().unwrap().private_key.as_ref().unwrap();
+            assert!(signed.verify(ca_key).unwrap(), "{ca_alg} CA → {leaf_alg} leaf");
+        }
+    }
+
+    #[test]
+    fn key_encipherment_is_only_claimed_for_rsa_leaves() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        assert!(!text_of(&sign_leaf(&mut ca, KeyAlgorithm::EcP256)).contains("Key Encipherment"));
+        assert!(text_of(&sign_leaf(&mut ca, KeyAlgorithm::Rsa2048)).contains("Key Encipherment"));
+    }
+
+    #[test]
+    fn p384_ca_signs_with_sha384() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP384);
+        assert!(text_of(&sign_leaf(&mut ca, KeyAlgorithm::EcP256)).contains("ecdsa-with-SHA384"));
+    }
+
+    #[test]
+    fn ec_ca_signs_a_verifiable_crl() {
+        let ca = ca_with_key(KeyAlgorithm::EcP384);
+        let bundle = ca.ca_bundle.as_ref().unwrap();
+        let key = bundle.private_key.as_ref().unwrap();
+        let db = ca.ca_database.as_ref().unwrap();
+        let pem = build_crl(bundle.certificate.as_ref().unwrap(), key, 1, 30, &Default::default(), db).unwrap();
+        let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
+        assert!(crl.verify(key).unwrap());
+    }
+
+    #[test]
+    fn ca_init_config_carries_its_key_algorithm() {
+        let config = CaConfig { key_algorithm: Some(KeyAlgorithm::Rsa4096), ..CaConfig::default() };
+        assert_eq!(ca_config_to_bundle(&config).key_algorithm, Some(KeyAlgorithm::Rsa4096));
     }
 
     // -----------------------------------------------------------------------

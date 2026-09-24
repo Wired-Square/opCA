@@ -6,9 +6,10 @@ use std::str::FromStr;
 
 use openssl::asn1::Asn1Time;
 use openssl::bn::BigNum;
+use openssl::ec::{EcGroup, EcKey};
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
-use openssl::pkey::{PKey, Private};
+use openssl::pkey::{HasPublic, Id, PKey, PKeyRef, Private};
 use openssl::rsa::Rsa;
 use openssl::x509::extension::{
     AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectAlternativeName,
@@ -72,19 +73,100 @@ impl FromStr for CertType {
     }
 }
 
+impl CertType {
+    /// AppleDev is RSA 2048 because Apple's developer portal accepts nothing else.
+    pub fn default_key_algorithm(&self) -> KeyAlgorithm {
+        match self {
+            CertType::Ca => KeyAlgorithm::EcP384,
+            CertType::AppleDev => KeyAlgorithm::Rsa2048,
+            _ => KeyAlgorithm::EcP256,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Key algorithm
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyAlgorithm {
+    #[serde(rename = "ec-p256")]
+    EcP256,
+    #[serde(rename = "ec-p384")]
+    EcP384,
+    #[serde(rename = "rsa-2048")]
+    Rsa2048,
+    #[serde(rename = "rsa-4096")]
+    Rsa4096,
+}
+
+impl KeyAlgorithm {
+    pub const ALL: [Self; 4] = [Self::EcP256, Self::EcP384, Self::Rsa2048, Self::Rsa4096];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EcP256 => "ec-p256",
+            Self::EcP384 => "ec-p384",
+            Self::Rsa2048 => "rsa-2048",
+            Self::Rsa4096 => "rsa-4096",
+        }
+    }
+
+    /// The closest supported algorithm to an existing key, so a rekey keeps its family.
+    pub fn matching<T: HasPublic>(key: &PKeyRef<T>) -> Option<Self> {
+        match key.id() {
+            Id::RSA if key.bits() >= 4096 => Some(Self::Rsa4096),
+            Id::RSA => Some(Self::Rsa2048),
+            Id::EC if key.bits() >= 384 => Some(Self::EcP384),
+            Id::EC => Some(Self::EcP256),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for KeyAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for KeyAlgorithm {
+    type Err = OpcaError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|a| a.as_str().eq_ignore_ascii_case(s))
+            .ok_or_else(|| {
+                OpcaError::InvalidCertificate(format!(
+                    "Unknown key algorithm: {s} (expected ec-p256, ec-p384, rsa-2048 or rsa-4096)"
+                ))
+            })
+    }
+}
+
+/// SHA-384 for P-384 and larger EC keys, whose strength SHA-256 would undercut.
+pub fn signing_digest<T: HasPublic>(key: &PKeyRef<T>) -> MessageDigest {
+    if key.id() == Id::EC && key.bits() >= 384 {
+        MessageDigest::sha384()
+    } else {
+        MessageDigest::sha256()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Bundle configuration
 // ---------------------------------------------------------------------------
 
 /// Configuration used to generate or import a certificate bundle.
 ///
-/// When generating, `cn` and `key_size` are required.
+/// When generating, `cn` is required; `key_algorithm` defaults per cert type.
 /// When self-signing a CA, `next_serial` and `ca_days` are also required.
 /// Subject attributes (org, ou, etc.) are optional.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CertBundleConfig {
     pub cn: Option<String>,
-    pub key_size: Option<u32>,
+    pub key_algorithm: Option<KeyAlgorithm>,
     pub org: Option<String>,
     pub ou: Option<String>,
     pub email: Option<String>,
@@ -119,20 +201,22 @@ impl CertificateBundle {
     // Constructors
     // -----------------------------------------------------------------------
 
-    /// Create a new bundle by generating a fresh RSA key pair and CSR.
+    /// Create a new bundle by generating a fresh key pair and CSR.
     pub fn generate(
         cert_type: CertType,
         title: &str,
         config: CertBundleConfig,
     ) -> Result<Self, OpcaError> {
-        let key_size = config.key_size.unwrap_or(2048);
+        let algorithm = config
+            .key_algorithm
+            .unwrap_or_else(|| cert_type.default_key_algorithm());
         let cn = config
             .cn
             .as_deref()
             .ok_or_else(|| OpcaError::InvalidCertificate("CN is required for generation".into()))?
             .to_string();
 
-        let private_key = Self::generate_private_key(key_size)?;
+        let private_key = Self::generate_private_key(algorithm)?;
         let csr = Self::build_csr(&cn, &private_key, &config)?;
 
         Ok(Self {
@@ -219,12 +303,20 @@ impl CertificateBundle {
     // Key generation
     // -----------------------------------------------------------------------
 
-    /// Generate an RSA private key with the given bit size.
-    pub fn generate_private_key(key_size: u32) -> Result<PKey<Private>, OpcaError> {
-        let rsa = Rsa::generate(key_size)
-            .map_err(|e| OpcaError::Crypto(format!("RSA key generation failed: {e}")))?;
-        PKey::from_rsa(rsa)
-            .map_err(|e| OpcaError::Crypto(format!("PKey conversion failed: {e}")))
+    pub fn generate_private_key(algorithm: KeyAlgorithm) -> Result<PKey<Private>, OpcaError> {
+        let failed = |e| OpcaError::Crypto(format!("{algorithm} key generation failed: {e}"));
+        let ec = |curve| {
+            let group = EcGroup::from_curve_name(curve)?;
+            PKey::from_ec_key(EcKey::generate(&group)?)
+        };
+        let rsa = |bits| PKey::from_rsa(Rsa::generate(bits)?);
+        match algorithm {
+            KeyAlgorithm::EcP256 => ec(Nid::X9_62_PRIME256V1),
+            KeyAlgorithm::EcP384 => ec(Nid::SECP384R1),
+            KeyAlgorithm::Rsa2048 => rsa(2048),
+            KeyAlgorithm::Rsa4096 => rsa(4096),
+        }
+        .map_err(failed)
     }
 
     /// Load a PEM-encoded private key, optionally decrypting with a passphrase.
@@ -292,6 +384,9 @@ impl CertificateBundle {
         let mut req_builder = X509ReqBuilder::new()
             .map_err(|e| OpcaError::Crypto(format!("X509Req builder: {e}")))?;
         req_builder
+            .set_version(0)
+            .map_err(|e| OpcaError::Crypto(format!("Set version: {e}")))?;
+        req_builder
             .set_subject_name(&name)
             .map_err(|e| OpcaError::Crypto(format!("Set subject: {e}")))?;
         req_builder
@@ -320,7 +415,7 @@ impl CertificateBundle {
         }
 
         req_builder
-            .sign(key, MessageDigest::sha256())
+            .sign(key, signing_digest(key))
             .map_err(|e| OpcaError::Crypto(format!("CSR sign: {e}")))?;
 
         Ok(req_builder.build())
@@ -432,7 +527,7 @@ impl CertificateBundle {
             .map_err(|e| OpcaError::Crypto(format!("Append KU: {e}")))?;
 
         builder
-            .sign(key, MessageDigest::sha256())
+            .sign(key, signing_digest(key))
             .map_err(|e| OpcaError::Crypto(format!("Sign: {e}")))?;
 
         self.certificate = Some(builder.build());
@@ -542,7 +637,7 @@ impl CertificateBundle {
             .map_err(|e| OpcaError::Crypto(format!("Append KU: {e}")))?;
 
         builder
-            .sign(key, MessageDigest::sha256())
+            .sign(key, signing_digest(key))
             .map_err(|e| OpcaError::Crypto(format!("Sign: {e}")))?;
 
         self.certificate = Some(builder.build());
@@ -643,7 +738,7 @@ impl CertificateBundle {
         Ok(String::from_utf8_lossy(&pem).to_string())
     }
 
-    /// Return the private key as a PEM string (unencrypted, TraditionalOpenSSL format).
+    /// Return the private key as an unencrypted PKCS#8 PEM string.
     pub fn private_key_pem(&self) -> Result<String, OpcaError> {
         let key = self.private_key.as_ref().ok_or_else(|| {
             OpcaError::InvalidCertificate("No private key is set on this bundle".into())
@@ -830,11 +925,16 @@ impl CertificateBundle {
             }
         }
 
-        let key_size = self.public_key_size().unwrap_or(2048);
+        let algorithm = self
+            .certificate
+            .as_ref()
+            .and_then(|c| c.public_key().ok())
+            .and_then(|pk| KeyAlgorithm::matching(&pk))
+            .unwrap_or_else(|| self.cert_type.default_key_algorithm());
         let cn = self.config.cn.as_deref().ok_or_else(|| {
             OpcaError::InvalidCertificate("CN is required for rekeying".into())
         })?;
-        let new_key = Self::generate_private_key(key_size)?;
+        let new_key = Self::generate_private_key(algorithm)?;
         let new_csr = Self::build_csr(cn, &new_key, &self.config)?;
         self.private_key = Some(new_key);
         self.csr = Some(new_csr);
@@ -985,7 +1085,7 @@ mod tests {
     fn test_config() -> CertBundleConfig {
         CertBundleConfig {
             cn: Some("test.example.com".to_string()),
-            key_size: Some(2048),
+            key_algorithm: Some(KeyAlgorithm::Rsa2048),
             org: Some("Test Org".to_string()),
             ou: Some("Test Unit".to_string()),
             email: Some("test@example.com".to_string()),
@@ -1001,7 +1101,7 @@ mod tests {
     fn ca_config() -> CertBundleConfig {
         CertBundleConfig {
             cn: Some("Test CA".to_string()),
-            key_size: Some(2048),
+            key_algorithm: Some(KeyAlgorithm::Rsa2048),
             org: Some("Test Org".to_string()),
             ou: None,
             email: None,
@@ -1012,6 +1112,45 @@ mod tests {
             next_serial: Some(1),
             ca_days: Some(3650),
         }
+    }
+
+    #[test]
+    fn each_key_algorithm_generates_its_family_and_size() {
+        for (algorithm, id, bits) in [
+            (KeyAlgorithm::EcP256, Id::EC, 256),
+            (KeyAlgorithm::EcP384, Id::EC, 384),
+            (KeyAlgorithm::Rsa2048, Id::RSA, 2048),
+            (KeyAlgorithm::Rsa4096, Id::RSA, 4096),
+        ] {
+            let key = CertificateBundle::generate_private_key(algorithm).unwrap();
+            assert_eq!((key.id(), key.bits()), (id, bits), "{algorithm}");
+            assert_eq!(KeyAlgorithm::matching(&key), Some(algorithm));
+            assert_eq!(algorithm.to_string().parse::<KeyAlgorithm>().unwrap(), algorithm);
+        }
+    }
+
+    #[test]
+    fn default_key_algorithm_is_ec_except_for_apple_developer_csrs() {
+        assert_eq!(CertType::WebServer.default_key_algorithm(), KeyAlgorithm::EcP256);
+        assert_eq!(CertType::Ca.default_key_algorithm(), KeyAlgorithm::EcP384);
+        assert_eq!(CertType::AppleDev.default_key_algorithm(), KeyAlgorithm::Rsa2048);
+        let config = CertBundleConfig { key_algorithm: None, ..test_config() };
+        let bundle = CertificateBundle::generate(CertType::Device, "d", config).unwrap();
+        assert_eq!(bundle.private_key.unwrap().id(), Id::EC);
+    }
+
+    #[test]
+    fn rekey_keeps_the_key_algorithm() {
+        let mut ca = CertificateBundle::generate(
+            CertType::Ca,
+            "CA",
+            CertBundleConfig { key_algorithm: Some(KeyAlgorithm::EcP384), ..ca_config() },
+        )
+        .unwrap();
+        ca.self_sign_ca().unwrap();
+        ca.regenerate_key_and_csr().unwrap();
+        let key = ca.private_key.as_ref().unwrap();
+        assert_eq!((key.id(), key.bits()), (Id::EC, 384));
     }
 
     #[test]

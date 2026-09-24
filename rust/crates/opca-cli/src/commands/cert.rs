@@ -57,7 +57,7 @@ fn handle_create<R: CommandRunner>(
 
             let config = CertBundleConfig {
                 cn: Some(cn.clone()),
-                key_size: args.serial.map(|_| 0).or(None), // use default
+                key_algorithm: args.key,
                 org: ca_config.org,
                 ou: ca_config.ou,
                 email: ca_config.email,

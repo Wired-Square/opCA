@@ -3,6 +3,7 @@
 //! These structs bridge opca-core domain types to the frontend.
 //! They are Serialize-only — the frontend never sends them back.
 
+use opca_core::services::cert::KeyAlgorithm;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,9 @@ pub struct CaConfigDto {
     pub ca_private_store: Option<String>,
     pub ca_backup_store: Option<String>,
     pub ca_aws_region: Option<String>,
+    /// Init only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_algorithm: Option<KeyAlgorithm>,
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +261,8 @@ pub struct CreateCertRequest {
     pub cn: String,
     pub cert_type: String,
     pub alt_dns_names: Option<Vec<String>>,
-    pub key_size: Option<u32>,
+    #[serde(default)]
+    pub key_algorithm: Option<KeyAlgorithm>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -316,7 +321,8 @@ pub struct CreateCsrRequest {
     pub csr_type: String,
     pub email: Option<String>,
     pub country: Option<String>,
-    pub key_size: Option<u32>,
+    #[serde(default)]
+    pub key_algorithm: Option<KeyAlgorithm>,
     pub alt_dns_names: Option<Vec<String>>,
 }
 

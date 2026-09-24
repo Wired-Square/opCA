@@ -13,7 +13,8 @@ import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
 import PageError from "../components/PageError";
-import { CERT_TYPES } from "../api/types";
+import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
+import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import type {
   CsrListItem,
   CreateCsrResult,
@@ -44,6 +45,7 @@ export default function CSR() {
   // Create form
   const [cn, setCn] = createSignal("");
   const [csrType, setCsrType] = createSignal("webserver");
+  const [keyAlgorithm, setKeyAlgorithm] = createSignal<KeyAlgorithm>(defaultKeyAlgorithm("webserver"));
   const [email, setEmail] = createSignal("");
   const [creating, setCreating] = createSignal(false);
   const [createError, setCreateError] = createSignal<string | null>(null);
@@ -205,6 +207,7 @@ export default function CSR() {
         cn: c,
         csr_type: csrType(),
         email: email().trim() || undefined,
+        key_algorithm: keyAlgorithm(),
         alt_dns_names: sans().length > 0 ? sans() : undefined,
       });
       setCreateResult(result);
@@ -507,12 +510,20 @@ export default function CSR() {
 
             <div class="form-group">
               <label class="form-label">Certificate Type</label>
-              <select value={csrType()} onChange={(e) => setCsrType(e.currentTarget.value)}>
+              <select
+                value={csrType()}
+                onChange={(e) => {
+                  setCsrType(e.currentTarget.value);
+                  setKeyAlgorithm(defaultKeyAlgorithm(e.currentTarget.value));
+                }}
+              >
                 <For each={CSR_TYPES}>
                   {(t) => <option value={t.value}>{t.label}</option>}
                 </For>
               </select>
             </div>
+
+            <KeyAlgorithmSelect value={keyAlgorithm()} onChange={setKeyAlgorithm} />
 
             <div class="form-group">
               <label class="form-label">Email (optional)</label>

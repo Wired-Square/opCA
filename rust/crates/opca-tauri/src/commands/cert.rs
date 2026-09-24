@@ -352,7 +352,7 @@ pub async fn create_cert(
 
     let bundle_config = CertBundleConfig {
         cn: Some(request.cn.clone()),
-        key_size: request.key_size,
+        key_algorithm: request.key_algorithm,
         org: ca_config.org,
         ou: ca_config.ou,
         email: ca_config.email,

@@ -5,7 +5,7 @@ use openssl::x509::{X509Req, X509};
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
-use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
+use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType, KeyAlgorithm};
 use opca_core::services::database::CsrRecord;
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
@@ -20,7 +20,8 @@ pub fn dispatch(args: CsrArgs, app: &mut AppContext<ShellRunner>) -> Result<(), 
             cn,
             email,
             country,
-        } => handle_create(app, csr_type, cn, email, country),
+            key,
+        } => handle_create(app, csr_type, cn, email, country, key),
         CsrAction::Import { cn, cert_file } => handle_import(app, cn, cert_file),
         CsrAction::Sign {
             csr_file,
@@ -37,6 +38,7 @@ fn handle_create<R: CommandRunner>(
     cn: String,
     email: String,
     country: Option<String>,
+    key_algorithm: Option<KeyAlgorithm>,
 ) -> Result<(), OpcaError> {
     output::title("Creating Certificate Signing Request");
 
@@ -67,6 +69,7 @@ fn handle_create<R: CommandRunner>(
         cn: Some(cn.clone()),
         email: Some(email.clone()),
         country: resolved_country,
+        key_algorithm,
         ..CertBundleConfig::default()
     };
 

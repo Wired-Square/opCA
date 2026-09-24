@@ -56,29 +56,18 @@ pub const DEFAULT_OP_CONF: OpConf = OpConf {
     lock_title: "CA_Lock",
 };
 
-/// Default key sizes by certificate/key type.
+/// Default key sizes for the RSA-only artefacts; certificate keys use
+/// `CertType::default_key_algorithm`.
 pub struct KeySizeDefaults {
-    pub ca: u32,
     pub dh: u32,
     pub dkim: u32,
     pub ta: u32,
-    pub appledev: u32,
-    pub device: u32,
-    pub vpnclient: u32,
-    pub vpnserver: u32,
-    pub webserver: u32,
 }
 
 pub const DEFAULT_KEY_SIZE: KeySizeDefaults = KeySizeDefaults {
-    ca: 4096,
     dh: 2048,
     dkim: 2048,
     ta: 2048,
-    appledev: 2048,
-    device: 2048,
-    vpnclient: 2048,
-    vpnserver: 2048,
-    webserver: 2048,
 };
 
 /// Default filenames for published artefacts.

@@ -275,6 +275,7 @@ impl CertificateAuthorityDB {
             Ok(CaConfig {
                 cn: None,
                 ca_days: None,
+                key_algorithm: None,
                 next_serial: next_serial
                     .as_deref()
                     .and_then(|s| s.trim().parse::<i64>().ok()),

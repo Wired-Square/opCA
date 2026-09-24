@@ -208,7 +208,7 @@ pub async fn create_csr(
 
     let bundle_config = CertBundleConfig {
         cn: Some(request.cn.clone()),
-        key_size: request.key_size,
+        key_algorithm: request.key_algorithm,
         org: ca_config.org,
         ou: ca_config.ou,
         email: request.email.clone().or(ca_config.email),

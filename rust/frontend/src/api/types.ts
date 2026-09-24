@@ -91,6 +91,8 @@ export interface CaConfig {
   /** AWS region for s3:// stores and Route53. Shared CA config — the AWS
    * credential itself is per-user (see `api/aws.ts`). */
   ca_aws_region: string | null;
+  /** Init only. */
+  key_algorithm?: KeyAlgorithm;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +122,22 @@ export const CERT_TYPES = [
   { value: "vpnclient", label: "VPN Client" },
   { value: "vpnserver", label: "VPN Server" },
 ] as const;
+
+export const KEY_ALGORITHMS = [
+  { value: "ec-p256", label: "EC P-256" },
+  { value: "ec-p384", label: "EC P-384" },
+  { value: "rsa-2048", label: "RSA 2048" },
+  { value: "rsa-4096", label: "RSA 4096" },
+] as const;
+
+export type KeyAlgorithm = (typeof KEY_ALGORITHMS)[number]["value"];
+
+/** Mirrors `CertType::default_key_algorithm`: Apple only accepts RSA 2048 CSRs. */
+export function defaultKeyAlgorithm(certType: string): KeyAlgorithm {
+  if (certType === "ca") return "ec-p384";
+  if (certType === "appledev") return "rsa-2048";
+  return "ec-p256";
+}
 
 export interface CertListItem {
   serial: string | null;
@@ -229,7 +247,7 @@ export interface CreateCertRequest {
   cn: string;
   cert_type: string;
   alt_dns_names?: string[];
-  key_size?: number;
+  key_algorithm?: KeyAlgorithm;
 }
 
 export interface ImportCertRequest {
@@ -286,7 +304,7 @@ export interface CreateCsrRequest {
   csr_type: string;
   email?: string;
   country?: string;
-  key_size?: number;
+  key_algorithm?: KeyAlgorithm;
   alt_dns_names?: string[];
 }
 

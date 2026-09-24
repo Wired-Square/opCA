@@ -1,6 +1,7 @@
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner};
 use opca_core::services::ca::{CaExpiryWarning, CertificateAuthority};
+use opca_core::services::cert::KeyAlgorithm;
 use opca_core::services::database::CaConfig;
 
 use crate::app::{with_lock, AppContext};
@@ -22,9 +23,10 @@ pub fn dispatch(args: CaArgs, app: &mut AppContext<ShellRunner>) -> Result<(), O
             country,
             ca_url,
             crl_url,
+            key,
         } => handle_init(
             app, cn, org, ca_days, crl_days, days, email, ou, city, state, country, ca_url,
-            crl_url,
+            crl_url, key,
         ),
         CaAction::Import {
             cert_file,
@@ -73,12 +75,14 @@ fn handle_init<R: CommandRunner>(
     country: Option<String>,
     ca_url: Option<String>,
     crl_url: Option<String>,
+    key_algorithm: Option<KeyAlgorithm>,
 ) -> Result<(), OpcaError> {
     output::title("Initialising the Certificate Authority");
 
     let init_config = CaConfig {
         cn: Some(cn),
         ca_days: Some(ca_days),
+        key_algorithm,
         next_serial: Some(1),
         next_crl_serial: Some(1),
         org: Some(org),

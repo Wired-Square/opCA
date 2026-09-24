@@ -12,7 +12,8 @@ import SearchInput from "../components/SearchInput";
 import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { CaInfo, CaConfig, RestoreResult, BackupInfoResult, StoreTestResults, AwsItemRef } from "../api/types";
+import { defaultKeyAlgorithm, type CaInfo, type CaConfig, type RestoreResult, type BackupInfoResult, type StoreTestResults, type AwsItemRef } from "../api/types";
+import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import { ActionResultBanner, ActionResultLine } from "../components/ResultBanner";
 import ResignCaDialog from "../components/ResignCaDialog";
 import UploadPrompt from "../components/UploadPrompt";
@@ -473,6 +474,7 @@ function InitTab() {
   const [form, setForm] = createSignal<Partial<CaConfig>>({
     days: 3650,
     crl_days: 30,
+    key_algorithm: defaultKeyAlgorithm("ca"),
   });
 
   const set = (key: keyof CaConfig, value: string | number | null) =>
@@ -510,6 +512,10 @@ function InitTab() {
             onChange={(v) => set("crl_days", v ? parseInt(v) : null)} type="number" />
           <FormField label="CA URL" value={form().ca_url} onChange={(v) => set("ca_url", v)} />
           <FormField label="CRL URL" value={form().crl_url} onChange={(v) => set("crl_url", v)} />
+          <KeyAlgorithmSelect
+            value={form().key_algorithm ?? defaultKeyAlgorithm("ca")}
+            onChange={(v) => setForm((f) => ({ ...f, key_algorithm: v }))}
+          />
         </div>
 
         <Show when={error()}>
