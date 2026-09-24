@@ -183,7 +183,7 @@ pub struct CaConfig {
 /// A DKIM key entry (`dkim_key` table). Mirrors the small set of metadata
 /// the keys list needs without round-tripping 1Password — full PEM material
 /// stays in the vault item titled `DKIM_<domain>_<selector>`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DkimRecord {
     pub domain: String,
     pub selector: String,
@@ -194,6 +194,13 @@ pub struct DkimRecord {
     pub has_private_key: Option<bool>,
     pub has_public_key: Option<bool>,
     pub has_dns_record: Option<bool>,
+}
+
+/// Outcome of [`CertificateAuthorityDB::sync_dkim`](super::CertificateAuthorityDB::sync_dkim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DkimSync {
+    pub removed: usize,
+    pub changed: bool,
 }
 
 /// CRL cache metadata (singleton row, `id=1`).

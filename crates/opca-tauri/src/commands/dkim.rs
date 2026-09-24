@@ -7,7 +7,7 @@ use tauri::State;
 
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::op::StoreAction;
-use opca_core::services::database::DkimRecord;
+use opca_core::services::database::{DkimRecord, DkimSync};
 use opca_core::services::route53::{format_txt_value, split_txt_value, Route53Client};
 
 use crate::commands::dto::{
@@ -159,31 +159,15 @@ fn do_sync_dkim_keys(state: &State<'_, AppState>) -> Result<usize, String> {
     }
 
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
-    for record in &found {
-        db.upsert_dkim(record).map_err(|e| e.to_string())?;
+    // Reconciling deletions stops a key removed by an older client (or `op item delete`)
+    // lingering as a ghost row that throws on detail-page open.
+    let DkimSync { removed, changed } = db.sync_dkim(&found).map_err(|e| e.to_string())?;
+    if changed {
+        ca.store_ca_database().map_err(|e| {
+            state.log_err("sync_dkim_keys", Some(e.to_string()));
+            e.to_string()
+        })?;
     }
-
-    // Reconcile deletions: drop DB rows whose 1Password item no longer
-    // exists. Without this, a key deleted by an older client (or via
-    // `op item delete` directly) would linger as a ghost row that throws
-    // on detail-page open.
-    let live: std::collections::HashSet<(String, String)> = found
-        .iter()
-        .map(|r| (r.domain.clone(), r.selector.clone()))
-        .collect();
-    let mut removed = 0usize;
-    for stale in db.query_all_dkim().map_err(|e| e.to_string())? {
-        if !live.contains(&(stale.domain.clone(), stale.selector.clone())) {
-            db.delete_dkim(&stale.domain, &stale.selector)
-                .map_err(|e| e.to_string())?;
-            removed += 1;
-        }
-    }
-
-    ca.store_ca_database().map_err(|e| {
-        state.log_err("sync_dkim_keys", Some(e.to_string()));
-        e.to_string()
-    })?;
 
     let summary = if removed > 0 {
         format!(

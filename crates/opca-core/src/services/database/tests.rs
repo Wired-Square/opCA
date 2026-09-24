@@ -1409,3 +1409,51 @@ fn test_derive_profile_status_not_generated() {
     assert_eq!(status, VpnProfileStatus::NeedsRegen);
     assert_eq!(replacement.as_deref(), Some("100"));
 }
+
+fn make_dkim(domain: &str, selector: &str) -> DkimRecord {
+    DkimRecord {
+        domain: domain.to_string(),
+        selector: selector.to_string(),
+        title: Some(format!("DKIM_{domain}_{selector}")),
+        key_size: None,
+        created_at: Some("2026-01-01T00:00:00Z".to_string()),
+        has_private_key: None,
+        has_public_key: None,
+        has_dns_record: None,
+    }
+}
+
+#[test]
+fn test_sync_dkim_unchanged_keys_report_no_change() {
+    let mut db = test_db();
+    let live = [make_dkim("example.com", "mail")];
+    assert_eq!(db.sync_dkim(&live).unwrap(), DkimSync { removed: 0, changed: true });
+    assert_eq!(db.sync_dkim(&live).unwrap(), DkimSync { removed: 0, changed: false });
+}
+
+#[test]
+fn test_sync_dkim_removes_keys_gone_from_1password() {
+    let mut db = test_db();
+    db.sync_dkim(&[make_dkim("example.com", "mail"), make_dkim("example.org", "s1")]).unwrap();
+
+    let sync = db.sync_dkim(&[make_dkim("example.com", "mail")]).unwrap();
+
+    assert_eq!(sync, DkimSync { removed: 1, changed: true });
+    assert_eq!(db.query_all_dkim().unwrap(), vec![make_dkim("example.com", "mail")]);
+}
+
+#[test]
+fn test_sync_dkim_keeps_stored_detail_the_listing_lacks() {
+    let mut db = test_db();
+    db.upsert_dkim(&DkimRecord {
+        key_size: Some(2048),
+        has_private_key: Some(true),
+        ..make_dkim("example.com", "mail")
+    })
+    .unwrap();
+
+    let sync = db.sync_dkim(&[make_dkim("example.com", "mail")]).unwrap();
+
+    assert!(!sync.changed);
+    assert_eq!(db.query_dkim("example.com", "mail").unwrap().unwrap().key_size, Some(2048));
+}

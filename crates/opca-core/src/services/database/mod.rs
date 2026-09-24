@@ -1239,6 +1239,23 @@ impl CertificateAuthorityDB {
         Ok(rows > 0)
     }
 
+    /// Makes the DKIM rows match `live`, the keys present in 1Password.
+    pub fn sync_dkim(&mut self, live: &[DkimRecord]) -> Result<DkimSync, OpcaError> {
+        let before = self.query_all_dkim()?;
+        for record in live {
+            self.upsert_dkim(record)?;
+        }
+        let mut removed = 0;
+        for row in &before {
+            if !live.iter().any(|r| r.domain == row.domain && r.selector == row.selector) {
+                self.delete_dkim(&row.domain, &row.selector)?;
+                removed += 1;
+            }
+        }
+        let changed = self.query_all_dkim()? != before;
+        Ok(DkimSync { removed, changed })
+    }
+
     pub fn query_dkim(
         &self,
         domain: &str,
