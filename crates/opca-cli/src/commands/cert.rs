@@ -75,10 +75,10 @@ fn handle_create<R: CommandRunner>(
                 ca_days: ca_config.days,
             };
 
-            let (bundle, issuance_warning) = ca.generate_certificate_bundle(cert_type.clone(), cn, config)?;
+            let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), cn, config, None)?;
             let valid = bundle.is_valid().unwrap_or(false);
             output::print_result(&format!("Certificate '{cn}'"), valid);
-            if let Some(ref w) = issuance_warning {
+            for w in &issuance_warnings {
                 output::warning(&w.message);
             }
         }
@@ -241,9 +241,9 @@ fn handle_rekey<R: CommandRunner>(
 
     with_lock(app, "cert_rekey", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warning) = ca.rekey_certificate_bundle(&lookup, args.key)?;
+        let (new_pem, new_serial, issuance_warnings) = ca.rekey_certificate_bundle(&lookup, args.key, None)?;
         output::print_result(&format!("Certificate rekeyed (new serial {new_serial})"), true);
-        if let Some(ref w) = issuance_warning {
+        for w in &issuance_warnings {
             output::warning(&w.message);
         }
         print!("{new_pem}");
@@ -261,9 +261,9 @@ fn handle_renew<R: CommandRunner>(
 
     with_lock(app, "cert_renew", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warning) = ca.renew_certificate_bundle(&lookup)?;
+        let (new_pem, new_serial, issuance_warnings) = ca.renew_certificate_bundle(&lookup, None)?;
         output::print_result(&format!("Certificate renewed (new serial {new_serial})"), true);
-        if let Some(ref w) = issuance_warning {
+        for w in &issuance_warnings {
             output::warning(&w.message);
         }
         print!("{new_pem}");

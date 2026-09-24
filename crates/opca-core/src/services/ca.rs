@@ -25,7 +25,7 @@ use crate::error::OpcaError;
 use crate::op::{CommandRunner, Op, StoreAction};
 use crate::services::cert::{
     asn1_time_to_openssl_str, signing_digest, CertBundleConfig, CertType, CertificateBundle,
-    KeyAlgorithm,
+    KeyAlgorithm, APPLE_TLS_MAX_DAYS,
 };
 use crate::services::database::models::{
     CaConfig, CertLookup, CertRecord, CrlMetadata, CsrLookup, CsrRecord, ExternalCertRecord,
@@ -117,11 +117,9 @@ pub fn assess_crl_expiry(next_update: DateTime<Utc>, now: DateTime<Utc>) -> CrlE
     }
 }
 
-/// Warning returned when a certificate would outlive the CA.
+/// A reason a certificate about to be issued may not work everywhere it is used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CertIssuanceWarning {
-    pub cert_not_after: String,
-    pub ca_not_after: String,
     pub message: String,
 }
 
@@ -163,8 +161,6 @@ pub fn assess_cert_issuance(
         let ca_str = datetime::format_datetime(ca_not_after, DateTimeFormat::Text);
         let cert_str = datetime::format_datetime(cert_not_after, DateTimeFormat::Text);
         Some(CertIssuanceWarning {
-            cert_not_after: cert_str.clone(),
-            ca_not_after: ca_str.clone(),
             message: format!(
                 "Warning: This certificate will expire on {cert_str} but the CA expires on {ca_str}. \
                  The certificate will become invalid when the CA expires."
@@ -173,6 +169,15 @@ pub fn assess_cert_issuance(
     } else {
         None
     }
+}
+
+fn assess_apple_tls_limit(cert_type: &CertType, days: u32) -> Option<CertIssuanceWarning> {
+    (cert_type.is_tls_server() && days > APPLE_TLS_MAX_DAYS).then(|| CertIssuanceWarning {
+        message: format!(
+            "Warning: {days} days exceeds the {APPLE_TLS_MAX_DAYS}-day limit macOS and iOS \
+             enforce on TLS server certificates; Apple devices will reject it."
+        ),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -350,10 +355,11 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     // -----------------------------------------------------------------------
 
     /// Sign a CSR with the CA's private key, adding extensions per `cert_type`.
-    pub fn sign_certificate(
+    fn sign_certificate(
         &mut self,
         csr: &X509Req,
         cert_type: &CertType,
+        days: u32,
     ) -> Result<X509, OpcaError> {
         debug!("[ca] signing {cert_type} certificate");
         let db = self
@@ -386,7 +392,6 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 
         let ca_config = db.get_config()?;
         let serial = db.increment_serial(SerialType::Cert, None)?;
-        let days = ca_config.days.unwrap_or(365) as u32;
 
         let serial_bn = BigNum::from_dec_str(&serial.to_string())
             .map_err(|e| OpcaError::Crypto(format!("Serial: {e}")))?;
@@ -595,8 +600,8 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         cert_type: CertType,
         item_title: &str,
         config: CertBundleConfig,
-
-    ) -> Result<(CertificateBundle, Option<CertIssuanceWarning>), OpcaError> {
+        days: Option<u32>,
+    ) -> Result<(CertificateBundle, Vec<CertIssuanceWarning>), OpcaError> {
         info!("[ca] generating {cert_type} certificate '{item_title}'");
         let mut bundle = CertificateBundle::generate(cert_type.clone(), item_title, config)?;
 
@@ -606,21 +611,18 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let csr = X509Req::from_pem(csr_pem.as_bytes())
             .map_err(|e| OpcaError::Crypto(format!("Parse CSR: {e}")))?;
 
-        let signed_cert = self.sign_certificate(&csr, &cert_type)?;
+        let (signed_cert, warnings) = self.issue_certificate(&csr, &cert_type, days)?;
         bundle.update_certificate(signed_cert)?;
 
         // Update title to CRT_{serial}_{cn}
         let serial = bundle.get_certificate_attrib("serial")?.unwrap_or_default();
         bundle.title = format!("CRT_{serial}_{item_title}");
 
-        // Check if the cert will outlive the CA
-        let warning = self.check_cert_issuance_warning();
-
         // Store in 1Password
         self.ca_bundle_for_store(Some(&bundle))?;
         self.store_certbundle_for(&bundle, None, None, true)?;
 
-        Ok((bundle, warning))
+        Ok((bundle, warnings))
     }
 
     /// Check whether a certificate was signed by this CA and is within its validity period.
@@ -757,7 +759,8 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     pub fn renew_certificate_bundle(
         &mut self,
         lookup: &CertLookup,
-    ) -> Result<(String, String, Option<CertIssuanceWarning>), OpcaError> {
+        days: Option<u32>,
+    ) -> Result<(String, String, Vec<CertIssuanceWarning>), OpcaError> {
         info!("[ca] renewing certificate {lookup:?}");
         let db = self.ca_database.as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
@@ -788,16 +791,13 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             .map_err(|e| OpcaError::Crypto(format!("Parse CSR: {e}")))?;
 
         let cert_type = cert_bundle.cert_type.clone();
-        let signed_cert = self.sign_certificate(&csr, &cert_type)?;
+        let (signed_cert, warnings) = self.issue_certificate(&csr, &cert_type, days)?;
         cert_bundle.update_certificate(signed_cert)?;
 
         // Update title with new serial
         let new_serial = cert_bundle.get_certificate_attrib("serial")?.unwrap_or_default();
         let cn = cert_bundle.get_certificate_attrib("cn")?.unwrap_or_default();
         cert_bundle.title = format!("CRT_{new_serial}_{cn}");
-
-        // Check if the renewed cert will outlive the CA
-        let warning = self.check_cert_issuance_warning();
 
         // Persist the new bundle, then auto-ignore the predecessor so it stops
         // triggering expiry alerts (Lambda + dashboard) the moment it's been
@@ -807,7 +807,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         self.store_ca_database()?;
 
         let pem = cert_bundle.certificate_pem()?;
-        Ok((pem, new_serial, warning))
+        Ok((pem, new_serial, warnings))
     }
 
     /// Rekey a previously signed certificate — generate a new private key and
@@ -819,7 +819,8 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         &mut self,
         lookup: &CertLookup,
         key_algorithm: Option<KeyAlgorithm>,
-    ) -> Result<(String, String, Option<CertIssuanceWarning>), OpcaError> {
+        days: Option<u32>,
+    ) -> Result<(String, String, Vec<CertIssuanceWarning>), OpcaError> {
         info!("[ca] rekeying certificate {lookup:?}");
         let db = self.ca_database.as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
@@ -846,16 +847,13 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             .map_err(|e| OpcaError::Crypto(format!("Parse CSR: {e}")))?;
 
         let cert_type = cert_bundle.cert_type.clone();
-        let signed_cert = self.sign_certificate(&csr, &cert_type)?;
+        let (signed_cert, warnings) = self.issue_certificate(&csr, &cert_type, days)?;
         cert_bundle.update_certificate(signed_cert)?;
 
         // Update title with new serial
         let new_serial = cert_bundle.get_certificate_attrib("serial")?.unwrap_or_default();
         let cn = cert_bundle.get_certificate_attrib("cn")?.unwrap_or_default();
         cert_bundle.title = format!("CRT_{new_serial}_{cn}");
-
-        // Check if the rekeyed cert will outlive the CA
-        let warning = self.check_cert_issuance_warning();
 
         // Persist the updated bundle (new key, CSR, and cert), then auto-ignore
         // the predecessor so it stops triggering expiry alerts (Lambda +
@@ -865,7 +863,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         self.store_ca_database()?;
 
         let pem = cert_bundle.certificate_pem()?;
-        Ok((pem, new_serial, warning))
+        Ok((pem, new_serial, warnings))
     }
 
     // -----------------------------------------------------------------------
@@ -1064,16 +1062,36 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         datetime::parse_datetime(&not_after_str, DateTimeFormat::Openssl)
     }
 
-    /// Check if a certificate with the default lifetime would outlive the CA.
-    fn check_cert_issuance_warning(&self) -> Option<CertIssuanceWarning> {
-        let ca_not_after = self.ca_not_after().ok()?;
-        let cert_days = self
-            .ca_database
-            .as_ref()
-            .and_then(|db| db.get_config().ok())
-            .and_then(|c| c.days)
-            .unwrap_or(365);
-        assess_cert_issuance(ca_not_after, cert_days, Utc::now())
+    /// Sign `csr` for the requested lifetime, else the CA's `days` capped per
+    /// [`CertType::default_days`], with any warnings about where it won't be trusted.
+    pub fn issue_certificate(
+        &mut self,
+        csr: &X509Req,
+        cert_type: &CertType,
+        days: Option<u32>,
+    ) -> Result<(X509, Vec<CertIssuanceWarning>), OpcaError> {
+        let days = self.cert_days(cert_type, days)?;
+        let cert = self.sign_certificate(csr, cert_type, days)?;
+        Ok((cert, self.issuance_warnings(cert_type, days)))
+    }
+
+    fn cert_days(&self, cert_type: &CertType, requested: Option<u32>) -> Result<u32, OpcaError> {
+        match requested {
+            Some(0) => Err(OpcaError::Other("Certificate lifetime must be at least 1 day".into())),
+            Some(days) => Ok(days),
+            None => {
+                let db = self.ca_database.as_ref()
+                    .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
+                let ca_days = db.get_config()?.days.unwrap_or(365) as u32;
+                Ok(cert_type.default_days(ca_days))
+            }
+        }
+    }
+
+    fn issuance_warnings(&self, cert_type: &CertType, days: u32) -> Vec<CertIssuanceWarning> {
+        let outlives_ca = self.ca_not_after().ok()
+            .and_then(|ca_not_after| assess_cert_issuance(ca_not_after, days.into(), Utc::now()));
+        outlives_ca.into_iter().chain(assess_apple_tls_limit(cert_type, days)).collect()
     }
 
     // -----------------------------------------------------------------------
@@ -2201,7 +2219,7 @@ mod tests {
             crl: None,
         };
 
-        let signed = ca.sign_certificate(&csr, &CertType::Device).unwrap();
+        let signed = ca.sign_certificate(&csr, &CertType::Device, 365).unwrap();
 
         // Verify extensions
         let text = signed.to_text().unwrap();
@@ -2250,7 +2268,7 @@ mod tests {
             crl: None,
         };
 
-        let signed = ca.sign_certificate(&csr, &CertType::WebServer).unwrap();
+        let signed = ca.sign_certificate(&csr, &CertType::WebServer, 365).unwrap();
 
         let text = signed.to_text().unwrap();
         let text = String::from_utf8_lossy(&text);
@@ -2294,7 +2312,7 @@ mod tests {
             crl: None,
         };
 
-        let signed = ca.sign_certificate(&csr, &CertType::VpnClient).unwrap();
+        let signed = ca.sign_certificate(&csr, &CertType::VpnClient, 365).unwrap();
 
         let text = signed.to_text().unwrap();
         let text = String::from_utf8_lossy(&text);
@@ -2338,7 +2356,7 @@ mod tests {
             crl: None,
         };
 
-        let signed = ca.sign_certificate(&csr, &CertType::VpnServer).unwrap();
+        let signed = ca.sign_certificate(&csr, &CertType::VpnServer, 365).unwrap();
 
         let text = signed.to_text().unwrap();
         let text = String::from_utf8_lossy(&text);
@@ -2404,7 +2422,7 @@ mod tests {
             ..CertBundleConfig::default()
         };
         let leaf = CertificateBundle::generate(cert_type.clone(), cn, config).unwrap();
-        ca.sign_certificate(leaf.csr.as_ref().unwrap(), &cert_type).unwrap()
+        ca.sign_certificate(leaf.csr.as_ref().unwrap(), &cert_type, 365).unwrap()
     }
 
     fn sign_leaf(ca: &mut CertificateAuthority<crate::testutil::MockRunner>, algorithm: KeyAlgorithm) -> X509 {
@@ -2598,6 +2616,59 @@ mod tests {
         assert!(result.is_some());
         let w = result.unwrap();
         assert!(w.message.contains("will expire on"));
+    }
+
+    fn issued_days(
+        ca_days: i64,
+        cert_type: CertType,
+        requested: Option<u32>,
+    ) -> (i32, Vec<CertIssuanceWarning>) {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let db = ca.ca_database.as_ref().unwrap();
+        db.update_config(&CaConfig { days: Some(ca_days), ..CaConfig::default() }).unwrap();
+        let leaf = CertificateBundle::generate(
+            cert_type.clone(),
+            "leaf.example.com",
+            CertBundleConfig { cn: Some("leaf.example.com".into()), ..CertBundleConfig::default() },
+        )
+        .unwrap();
+        let (cert, warnings) =
+            ca.issue_certificate(leaf.csr.as_ref().unwrap(), &cert_type, requested).unwrap();
+        (cert.not_before().diff(cert.not_after()).unwrap().days, warnings)
+    }
+
+    #[test]
+    fn server_certs_default_to_the_apple_limit_and_client_certs_to_the_ca_days() {
+        assert_eq!(issued_days(3000, CertType::WebServer, None), (825, vec![]));
+        assert_eq!(issued_days(3000, CertType::VpnServer, None), (825, vec![]));
+        assert_eq!(issued_days(3000, CertType::Device, None), (3000, vec![]));
+        assert_eq!(issued_days(365, CertType::WebServer, None), (365, vec![]));
+    }
+
+    #[test]
+    fn a_requested_lifetime_beats_the_ca_days() {
+        assert_eq!(issued_days(365, CertType::VpnClient, Some(90)).0, 90);
+    }
+
+    #[test]
+    fn only_a_server_cert_over_the_apple_limit_warns() {
+        let (days, warnings) = issued_days(365, CertType::WebServer, Some(826));
+        assert_eq!(days, 826);
+        assert!(warnings[0].message.contains("825-day limit"));
+        assert!(issued_days(365, CertType::WebServer, Some(825)).1.is_empty());
+        assert!(issued_days(365, CertType::Device, Some(3000)).1.is_empty());
+    }
+
+    #[test]
+    fn a_zero_day_lifetime_is_refused() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let leaf = CertificateBundle::generate(
+            CertType::Device,
+            "d",
+            CertBundleConfig { cn: Some("d".into()), ..CertBundleConfig::default() },
+        )
+        .unwrap();
+        assert!(ca.issue_certificate(leaf.csr.as_ref().unwrap(), &CertType::Device, Some(0)).is_err());
     }
 
     // -----------------------------------------------------------------------

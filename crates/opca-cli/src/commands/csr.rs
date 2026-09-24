@@ -291,7 +291,7 @@ fn handle_sign<R: CommandRunner>(
     let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
 
     // Sign CSR with CA
-    let signed_cert = ca.sign_certificate(&csr, &cert_type)?;
+    let (signed_cert, _) = ca.issue_certificate(&csr, &cert_type, None)?;
     let cert_pem_bytes = signed_cert
         .to_pem()
         .map_err(|e| OpcaError::Crypto(format!("Encode signed certificate: {e}")))?;

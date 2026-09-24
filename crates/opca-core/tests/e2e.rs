@@ -221,7 +221,7 @@ fn t20_cert_create_server() {
 
     let title = "e2e-webserver";
     let (bundle, _warning) = ca
-        .generate_certificate_bundle(CertType::WebServer, title, config)
+        .generate_certificate_bundle(CertType::WebServer, title, config, None)
         .expect("generate webserver cert failed");
 
     let cert = bundle.certificate.as_ref().expect("certificate missing");
@@ -253,7 +253,7 @@ fn t21_cert_create_client() {
 
     let title = "e2e-vpnclient";
     let (bundle, _warning) = ca
-        .generate_certificate_bundle(CertType::VpnClient, title, config)
+        .generate_certificate_bundle(CertType::VpnClient, title, config, None)
         .expect("generate vpnclient cert failed");
 
     assert!(bundle.certificate.is_some());
@@ -296,7 +296,7 @@ fn t23_cert_renew() {
     let old_serial = cert_serial(&ca, &lookup);
 
     let (new_pem, new_serial, _warning) = ca
-        .renew_certificate_bundle(&lookup)
+        .renew_certificate_bundle(&lookup, None)
         .expect("renew failed");
 
     assert!(new_pem.contains("BEGIN CERTIFICATE"));
@@ -324,7 +324,7 @@ fn t23b_cert_rekey() {
     let old_serial = cert_serial(&ca, &lookup);
 
     let (new_pem, new_serial, _warning) = ca
-        .rekey_certificate_bundle(&lookup, None)
+        .rekey_certificate_bundle(&lookup, None, None)
         .expect("rekey failed");
 
     assert!(new_pem.contains("BEGIN CERTIFICATE"));

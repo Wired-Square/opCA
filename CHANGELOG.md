@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Copying a certificate's private key is immediate: the key is kept from when the page
   loaded, in memory only, and dropped when you leave the page.
 - EC leaf certificates no longer claim Key Encipherment, which ECDSA keys can't do.
+- Web server and VPN server certificates are issued for at most 825 days, the limit macOS
+  and iOS enforce on TLS server certificates, even when the CA's certificate lifetime is
+  longer. Other types still get the CA's full lifetime.
 - **Developers:** the Cargo workspace and frontend moved from `rust/` to the repository
   root, so build and `npm` commands run from there.
 

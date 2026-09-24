@@ -83,7 +83,23 @@ impl CertType {
             _ => KeyAlgorithm::EcP256,
         }
     }
+
+    /// Carries the serverAuth EKU, so Apple's 825-day limit applies.
+    pub fn is_tls_server(&self) -> bool {
+        matches!(self, CertType::WebServer | CertType::VpnServer)
+    }
+
+    pub fn default_days(&self, ca_days: u32) -> u32 {
+        if self.is_tls_server() {
+            ca_days.min(APPLE_TLS_MAX_DAYS)
+        } else {
+            ca_days
+        }
+    }
 }
+
+/// macOS and iOS reject TLS server certificates valid for longer, even from a private root.
+pub const APPLE_TLS_MAX_DAYS: u32 = 825;
 
 // ---------------------------------------------------------------------------
 // Key algorithm

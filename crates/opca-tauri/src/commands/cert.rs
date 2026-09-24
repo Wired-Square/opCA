@@ -370,14 +370,14 @@ pub async fn create_cert(
         ca_days: ca_config.days,
     };
 
-    let (bundle, issuance_warning) = ca.generate_certificate_bundle(cert_type.clone(), &request.cn, bundle_config)
+    let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), &request.cn, bundle_config, None)
         .map_err(|e| {
             warn!("[tauri] create_cert failed: {e}");
             state.log_err("create_cert", Some(e.to_string()));
             e.to_string()
         })?;
 
-    if let Some(ref w) = issuance_warning {
+    for w in &issuance_warnings {
         state.log_ok("create_cert", Some(w.message.clone()));
     }
 
@@ -435,14 +435,14 @@ pub async fn renew_cert(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] renew_cert: serial={serial}");
-    let (new_pem, new_serial, issuance_warning) = ca.renew_certificate_bundle(&CertLookup::Serial(serial.clone()))
+    let (new_pem, new_serial, issuance_warnings) = ca.renew_certificate_bundle(&CertLookup::Serial(serial.clone()), None)
         .map_err(|e| {
             warn!("[tauri] renew_cert failed: {e}");
             state.log_err("renew_cert", Some(e.to_string()));
             e.to_string()
         })?;
 
-    if let Some(ref w) = issuance_warning {
+    for w in &issuance_warnings {
         state.log_ok("renew_cert", Some(w.message.clone()));
     }
 
@@ -461,14 +461,14 @@ pub async fn rekey_cert(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] rekey_cert: serial={serial}");
-    let (new_pem, new_serial, issuance_warning) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()), key_algorithm)
+    let (new_pem, new_serial, issuance_warnings) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()), key_algorithm, None)
         .map_err(|e| {
             warn!("[tauri] rekey_cert failed: {e}");
             state.log_err("rekey_cert", Some(e.to_string()));
             e.to_string()
         })?;
 
-    if let Some(ref w) = issuance_warning {
+    for w in &issuance_warnings {
         state.log_ok("rekey_cert", Some(w.message.clone()));
     }
 
@@ -581,9 +581,9 @@ pub async fn bulk_rekey_certs(
     key_algorithm: Option<KeyAlgorithm>,
 ) -> Result<Vec<BulkCertResult>, String> {
     run_bulk_cert_op(&app, &state, serials, "bulk_rekey", "Rekeying", |ca, serial| {
-        let (new_pem, new_serial, warning) =
-            ca.rekey_certificate_bundle(&CertLookup::Serial(serial.to_string()), key_algorithm)?;
-        if let Some(w) = warning {
+        let (new_pem, new_serial, warnings) =
+            ca.rekey_certificate_bundle(&CertLookup::Serial(serial.to_string()), key_algorithm, None)?;
+        for w in warnings {
             state.log_ok("bulk_rekey", Some(w.message));
         }
         state.cache_fresh_pem(new_serial.clone(), new_pem);
@@ -598,9 +598,9 @@ pub async fn bulk_renew_certs(
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
     run_bulk_cert_op(&app, &state, serials, "bulk_renew", "Renewing", |ca, serial| {
-        let (new_pem, new_serial, warning) =
-            ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()))?;
-        if let Some(w) = warning {
+        let (new_pem, new_serial, warnings) =
+            ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()), None)?;
+        for w in warnings {
             state.log_ok("bulk_renew", Some(w.message));
         }
         state.cache_fresh_pem(new_serial.clone(), new_pem);
