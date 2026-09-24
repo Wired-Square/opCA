@@ -12,3 +12,10 @@ export async function listVaults(
 export async function createVault(name: string): Promise<VaultInfo> {
   return tauriInvoke<VaultInfo>("create_vault", { name });
 }
+
+export async function createNewVault(
+  name: string,
+  account: string | null,
+): Promise<VaultInfo> {
+  return tauriInvoke<VaultInfo>("create_new_vault", { name, account });
+}

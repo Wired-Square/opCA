@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Start a new CA from the connect screen.** **New CA in a new vault…** creates the
+  1Password vault, refusing a name that is already taken, then opens CA initialisation.
 - **CA Days** on the CA initialisation form sets the CA certificate's own lifetime,
   separately from issued certificates. New CAs default to 10 years for the CA,
   365 days for certificates (was 3650, over Apple's 825-day limit for TLS server

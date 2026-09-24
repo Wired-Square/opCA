@@ -3,6 +3,7 @@ import { useNavigate } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { listAccounts, accountValue, accountLabel } from "../api/accounts";
+import { createNewVault } from "../api/vaults";
 import type { AccountInfo } from "../api/types";
 import { setAppState, type VaultState } from "../stores/app";
 import { themeMode, toggleTheme } from "../stores/theme";
@@ -157,6 +158,7 @@ export default function Connect() {
   const [accounts, setAccounts] = createSignal<AccountInfo[]>([]);
   const [openDropdown, setOpenDropdown] = createSignal<Dropdown | null>(null);
   const [opCli, setOpCli] = createSignal<OpCliStatus | null>(null);
+  const [creating, setCreating] = createSignal(false);
 
   onMount(async () => {
     setSaved(loadSavedLogins());
@@ -191,7 +193,13 @@ export default function Connect() {
     setOpenDropdown(null);
   }
 
-  async function handleConnect(e: Event) {
+  function switchMode() {
+    setCreating(!creating());
+    setOpenDropdown(null);
+    setError(null);
+  }
+
+  async function handleSubmit(e: Event) {
     e.preventDefault();
     if (!vault().trim()) return;
 
@@ -199,8 +207,11 @@ export default function Connect() {
     setError(null);
 
     try {
+      const name = creating()
+        ? (await createNewVault(vault(), account() || null)).name
+        : vault();
       const info = await invoke<ConnectionInfo>("connect", {
-        vault: vault(),
+        vault: name,
         account: account() || null,
       });
       setAppState({
@@ -210,9 +221,9 @@ export default function Connect() {
         vaultState: info.vault_state as VaultState,
       });
       setSaved(addLogin(info.vault, info.account));
-      navigate("/dashboard");
+      navigate(creating() ? "/ca" : "/dashboard");
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -233,16 +244,16 @@ export default function Connect() {
           <p class="connect-byline">by Wired Square</p>
         </div>
 
-        <form class="connect-form" onSubmit={handleConnect}>
+        <form class="connect-form" onSubmit={handleSubmit}>
           <PickerField
             id="vault"
-            label="1Password Vault"
+            label={creating() ? "New 1Password Vault" : "1Password Vault"}
             placeholder="e.g. Private CA"
             value={vault()}
             onInput={(v) => { setVault(v); setOpenDropdown(null); }}
-            onFocus={() => saved().length > 0 && setOpenDropdown("vault")}
+            onFocus={() => !creating() && saved().length > 0 && setOpenDropdown("vault")}
             autofocus
-            toggle={saved().length > 0 ? { glyph: "↻", label: "Show saved vaults" } : undefined}
+            toggle={!creating() && saved().length > 0 ? { glyph: "↻", label: "Show saved vaults" } : undefined}
             open={openDropdown() === "vault"}
             onToggle={() => toggle("vault")}
             onClose={() => setOpenDropdown(null)}
@@ -293,9 +304,15 @@ export default function Connect() {
           {error() && <p class="connect-error" role="alert">{error()}</p>}
 
           <button class="btn-primary connect-btn" type="submit" disabled={loading() || !vault().trim()}>
-            {loading() ? "Connecting…" : "Connect"}
+            {creating()
+              ? loading() ? "Creating…" : "Create vault"
+              : loading() ? "Connecting…" : "Connect"}
           </button>
         </form>
+
+        <button class="btn-ghost connect-mode-switch" type="button" onClick={switchMode} disabled={loading()}>
+          {creating() ? "Connect to an existing vault" : "New CA in a new vault…"}
+        </button>
 
         <button class="btn-ghost theme-toggle-connect" onClick={toggleTheme} title="Toggle theme">
           {themeMode() === "dark" ? "☀ Light mode" : "☾ Dark mode"}

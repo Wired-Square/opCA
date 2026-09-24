@@ -9,6 +9,7 @@ const operationLabels: Record<string, string> = {
   list_vaults: "Listing vaults\u2026",
   list_accounts: "Listing accounts\u2026",
   create_vault: "Creating vault\u2026",
+  create_new_vault: "Creating vault\u2026",
   check_vault_state: "Checking vault\u2026",
 
   // Dashboard

@@ -43,6 +43,9 @@ pub enum OpcaError {
     #[error("Vault not found: {0}")]
     VaultNotFound(String),
 
+    #[error("Vault already exists: {0}")]
+    VaultAlreadyExists(String),
+
     #[error("1Password authentication failed")]
     AuthenticationFailed,
 

@@ -260,3 +260,9 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+.connect-mode-switch {
+  display: block;
+  margin: 16px auto 0;
+  font-size: 0.875rem;
+}

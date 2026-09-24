@@ -735,6 +735,21 @@ pub fn create_vault_standalone(name: &str, account: Option<&str>) -> Result<Vaul
     op_json(&args)
 }
 
+/// Create a vault, refusing a name already in use: `op` itself allows duplicates.
+pub fn create_new_vault_standalone(name: &str, account: Option<&str>) -> Result<VaultInfo, OpcaError> {
+    let name = name.trim();
+    if vault_name_taken(&list_vaults_standalone(account)?, name) {
+        return Err(OpcaError::VaultAlreadyExists(name.to_string()));
+    }
+    create_vault_standalone(name, account)
+}
+
+fn vault_name_taken(vaults: &[VaultInfo], name: &str) -> bool {
+    vaults
+        .iter()
+        .any(|v| v.id == name || v.name.eq_ignore_ascii_case(name))
+}
+
 /// Run `op account list`.
 ///
 /// Unlike `op vault list` this reads the CLI's local configuration, so it
@@ -1038,6 +1053,29 @@ mod tests {
             success: false,
         };
         assert!(matches!(map_cli_error(&out), OpcaError::VaultNotFound(_)));
+    }
+
+    // -- vault_name_taken ------------------------------------------------
+
+    fn vaults() -> Vec<VaultInfo> {
+        vec![VaultInfo { id: "abc123".to_string(), name: "Private CA".to_string() }]
+    }
+
+    #[test]
+    fn vault_name_taken_matches_name_ignoring_case() {
+        assert!(vault_name_taken(&vaults(), "Private CA"));
+        assert!(vault_name_taken(&vaults(), "private ca"));
+    }
+
+    #[test]
+    fn vault_name_taken_matches_id() {
+        assert!(vault_name_taken(&vaults(), "abc123"));
+    }
+
+    #[test]
+    fn vault_name_taken_false_for_a_new_name() {
+        assert!(!vault_name_taken(&vaults(), "Private CA 2"));
+        assert!(!vault_name_taken(&[], "Private CA"));
     }
 
     // -- vault_item_count ------------------------------------------------
