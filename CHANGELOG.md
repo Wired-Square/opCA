@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   dialog, and closes when you click outside it.
 - Opening a certificate no longer re-uploads the CA database every time when its stored
   bundle lacks some of the details the list is missing.
+- Error messages across the app no longer start with `Error:`.
+- If connecting fails straight after **New CA in a new vault…** creates the vault, the form
+  switches to that vault so trying again connects, rather than refusing the name as taken.
+- CA initialisation and configuration fields are labelled for screen readers.
 
 ### Removed
 

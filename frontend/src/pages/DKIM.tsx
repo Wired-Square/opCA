@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createResource, onMount } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { useLocation, useNavigate } from "@solidjs/router";
 import {
   listDkimKeys,
@@ -45,7 +46,7 @@ export default function DKIM() {
       await syncDkimKeys();
       refetch();
     } catch (e) {
-      setSyncError(String(e));
+      setSyncError(errorMessage(e));
     } finally {
       setSyncing(false);
     }
@@ -118,7 +119,7 @@ export default function DKIM() {
       outcome.report(result.message);
       setTab("keys");
     } catch (e) {
-      setCreateError(String(e));
+      setCreateError(errorMessage(e));
     } finally {
       setDeploying(false);
     }

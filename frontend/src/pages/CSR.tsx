@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import {
   listCsrs,
   getCsrInfo,
@@ -166,7 +167,7 @@ export default function CSR() {
       const info = await getCsrInfo(sel.cn);
       setDetail(info);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setLoadingDetail(false);
     }

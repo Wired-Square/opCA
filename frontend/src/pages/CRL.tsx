@@ -1,4 +1,5 @@
 import { Show, createEffect, createResource, createSignal } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import {
   getCrlInfo,
   backfillCrl,
@@ -99,7 +100,7 @@ export default function CRL() {
       const result = await inspectCrl(pem);
       setInspectResult(result);
     } catch (e) {
-      setInspectError(String(e));
+      setInspectError(errorMessage(e));
     } finally {
       setInspecting(false);
     }

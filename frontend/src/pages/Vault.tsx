@@ -1,4 +1,5 @@
 import { Show, For, createSignal, onMount, onCleanup } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import {
   vaultBackup,
   vaultRestore,
@@ -144,7 +145,7 @@ export default function Vault() {
         setStoreTitle(`Vault Backup: ${appState.vault} ${date}`);
       }
     } catch (e) {
-      setBackupError(String(e));
+      setBackupError(errorMessage(e));
     }
   }
 
@@ -200,7 +201,7 @@ export default function Vault() {
       setBackupPassword("");
       setBackupConfirm("");
     } catch (e) {
-      setBackupError(String(e));
+      setBackupError(errorMessage(e));
     } finally {
       setBackingUp(false);
       setProgressMsg(null);
@@ -236,7 +237,7 @@ export default function Vault() {
       // Navigate to dashboard after a short delay so the user sees the success message
       navTimer = window.setTimeout(() => navigate("/dashboard"), 1500);
     } catch (e) {
-      setRestoreError(String(e));
+      setRestoreError(errorMessage(e));
     } finally {
       setRestoring(false);
       setProgressMsg(null);
@@ -265,7 +266,7 @@ export default function Vault() {
       setInfoResult(result);
       setInfoPassword("");
     } catch (e) {
-      setInfoError(String(e));
+      setInfoError(errorMessage(e));
     } finally {
       setLoadingInfo(false);
     }

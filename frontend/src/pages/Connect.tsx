@@ -1,4 +1,5 @@
 import { createSignal, Show, For, onMount, type JSX } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
@@ -206,12 +207,15 @@ export default function Connect() {
     setLoading(true);
     setError(null);
 
+    let created: string | null = null;
     try {
-      const name = creating()
-        ? (await createVault(vault(), account() || null)).name
-        : vault();
+      if (creating()) {
+        created = (await createVault(vault(), account() || null)).name;
+        setCreating(false);
+        setVault(created);
+      }
       const info = await invoke<ConnectionInfo>("connect", {
-        vault: name,
+        vault: created ?? vault(),
         account: account() || null,
       });
       setAppState({
@@ -221,9 +225,11 @@ export default function Connect() {
         vaultState: info.vault_state as VaultState,
       });
       setSaved(addLogin(info.vault, info.account));
-      navigate(creating() ? "/ca" : "/dashboard");
+      navigate(created ? "/ca" : "/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(created
+        ? `Created vault "${created}" but couldn't connect: ${errorMessage(err)}. Connect to try again.`
+        : errorMessage(err));
     } finally {
       setLoading(false);
     }

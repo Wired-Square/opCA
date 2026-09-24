@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { tauriInvoke } from "../api/tauri";
+import { errorMessage, tauriInvoke } from "../api/tauri";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -37,5 +37,15 @@ describe("tauriInvoke", () => {
     mockInvoke.mockRejectedValueOnce({ code: 42 });
 
     await expect(tauriInvoke("get_ca_info")).rejects.toThrow("[object Object]");
+  });
+});
+
+describe("errorMessage", () => {
+  it("takes an Error's message without the Error: prefix", () => {
+    expect(errorMessage(new Error("Vault not found"))).toBe("Vault not found");
+  });
+
+  it("stringifies anything else", () => {
+    expect(errorMessage("plain")).toBe("plain");
   });
 });

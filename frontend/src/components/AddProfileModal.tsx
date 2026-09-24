@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createMemo, createEffect } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import Modal from "./Modal";
 import PageError from "./PageError";
 import VpnClientPicker from "./VpnClientPicker";
@@ -141,7 +142,7 @@ export default function AddProfileModal(props: AddProfileModalProps) {
       }
       props.onGenerated();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setActing(false);
     }

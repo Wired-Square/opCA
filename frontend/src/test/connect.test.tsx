@@ -48,4 +48,24 @@ describe("Connect create mode", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("connect", expect.anything());
     expect(navigate).not.toHaveBeenCalled();
   });
+
+  it("switches to the created vault when connecting fails, so a retry connects", async () => {
+    createVault.mockResolvedValue({ id: "v1", name: "New CA" });
+    let connects = 0;
+    mockInvoke.mockImplementation(async (cmd) => {
+      if (cmd !== "connect") return undefined;
+      if (connects++ === 0) throw new Error("Not signed in");
+      return { connected: true, vault: "New CA", account: null, vault_state: "empty_vault" };
+    });
+    createVaultNamed("New CA");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      'Created vault "New CA" but couldn\'t connect: Not signed in. Connect to try again.',
+    );
+    expect(screen.getByLabelText("1Password Vault")).toHaveValue("New CA");
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/dashboard"));
+    expect(createVault).toHaveBeenCalledTimes(1);
+  });
 });

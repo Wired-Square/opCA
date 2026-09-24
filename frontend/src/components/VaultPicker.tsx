@@ -1,4 +1,5 @@
 import { Show, For, createSignal } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { listVaults, createVault } from "../api/vaults";
 import Spinner from "./Spinner";
 import { appState } from "../stores/app";
@@ -48,7 +49,7 @@ export default function VaultPicker(props: VaultPickerProps) {
       const result = await listVaults();
       setVaultList(result);
     } catch (e) {
-      setFetchError(String(e));
+      setFetchError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -75,7 +76,7 @@ export default function VaultPicker(props: VaultPickerProps) {
       setShowCreate(false);
       selectVault(vault.name);
     } catch (e) {
-      setCreateError(String(e));
+      setCreateError(errorMessage(e));
     } finally {
       setCreating(false);
     }

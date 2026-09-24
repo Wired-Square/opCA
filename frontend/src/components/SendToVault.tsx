@@ -1,4 +1,5 @@
 import { Show, For, createSignal, onMount, type JSX } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { sendProfileToVault } from "../api/openvpn";
 import type { ProfileRef } from "../api/types";
 import VaultPicker from "./VaultPicker";
@@ -61,7 +62,7 @@ export default function SendToVault(props: SendToVaultProps) {
         await sendProfileToVault(p.title, p.cn, dest);
         sent.push(p);
       } catch (e) {
-        failed.push({ cn: p.cn, error: String(e) });
+        failed.push({ cn: p.cn, error: errorMessage(e) });
       }
     }
     setSending(false);

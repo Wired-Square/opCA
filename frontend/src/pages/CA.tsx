@@ -1,4 +1,5 @@
-import { Show, For, createSignal, createResource, onMount, onCleanup } from "solid-js";
+import { Show, For, createSignal, createResource, createUniqueId, onMount, onCleanup } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
 import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, recordCaCertCopy } from "../api/ca";
@@ -289,7 +290,7 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
       const results = await testStores();
       setTestResults(results);
     } catch (e) {
-      setTestError(String(e));
+      setTestError(errorMessage(e));
     } finally {
       setTesting(false);
     }
@@ -401,7 +402,7 @@ function AwsCredentialSection() {
       await refetchSelection();
       setResult("ok");
     } catch (e) {
-      setResult(String(e));
+      setResult(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -488,7 +489,7 @@ function InitTab() {
       await initCa(form() as CaConfig);
       window.location.reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -596,7 +597,7 @@ function RestoreTab() {
 
       navTimer = window.setTimeout(() => navigate("/dashboard"), 1500);
     } catch (e) {
-      setRestoreError(String(e));
+      setRestoreError(errorMessage(e));
     } finally {
       setRestoring(false);
       setProgressMsg(null);
@@ -714,7 +715,7 @@ function InfoTab() {
       setInfoResult(result);
       setInfoPassword("");
     } catch (e) {
-      setInfoError(String(e));
+      setInfoError(errorMessage(e));
     } finally {
       setLoadingInfo(false);
     }
@@ -825,10 +826,12 @@ function FormField(props: {
   onChange: (value: string) => void;
   type?: string;
 }) {
+  const id = createUniqueId();
   return (
     <div class="form-group">
-      <label class="form-label">{props.label}</label>
+      <label class="form-label" for={id}>{props.label}</label>
       <input
+        id={id}
         type={props.type ?? "text"}
         value={props.value ?? ""}
         onInput={(e) => props.onChange(e.currentTarget.value)}

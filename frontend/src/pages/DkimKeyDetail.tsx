@@ -1,4 +1,5 @@
 import { Show, createSignal, createResource, createEffect } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { useParams, useNavigate } from "@solidjs/router";
 import {
   getDkimInfo,
@@ -111,7 +112,7 @@ export default function DkimKeyDetailPage() {
         }
       }
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setVerifying(false);
     }
@@ -127,7 +128,7 @@ export default function DkimKeyDetailPage() {
       const result = await deployDkimRoute53(d.domain, d.selector);
       setSuccess(result.message);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setDeploying(false);
     }
@@ -144,7 +145,7 @@ export default function DkimKeyDetailPage() {
       // should not linger in the URL or survive a reload.
       navigate("/dkim", { state: { deleted: `${d.domain}/${d.selector}` } });
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setDeleting(false);
     }

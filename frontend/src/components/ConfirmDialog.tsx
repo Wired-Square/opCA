@@ -1,4 +1,5 @@
 import { Show, createSignal, createEffect } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import type { JSX } from "solid-js";
 import Modal from "./Modal";
 import PageError from "./PageError";
@@ -52,7 +53,7 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
       await props.onConfirm(reason().trim());
       props.onClose();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setActing(false);
     }

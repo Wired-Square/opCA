@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createMemo, createResource, onMount } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { useSearchParams } from "@solidjs/router";
 import {
   getOpenVpnParams,
@@ -196,7 +197,7 @@ export default function OpenVPN() {
       sel.clear();
       refetchProfiles();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBulkActing(false);
     }
@@ -264,7 +265,7 @@ export default function OpenVPN() {
       const detail = await getOpenVpnTemplate(name);
       setTemplateContent(detail.content);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setLoadingTemplate(false);
     }
@@ -282,7 +283,7 @@ export default function OpenVPN() {
       await refetchTemplates();
       setSuccess(`Template '${name}' saved`);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setActing(false);
     }
@@ -302,7 +303,7 @@ export default function OpenVPN() {
       await handleLoadTemplate(name);
       setSuccess(`Template '${name}' created with server setup`);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setActing(false);
     }
@@ -316,7 +317,7 @@ export default function OpenVPN() {
       await refetchTemplates();
       setSuccess(`Synced ${n} template(s) from 1Password`);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setSyncing(false);
     }
@@ -330,7 +331,7 @@ export default function OpenVPN() {
       setSuccess("DH parameters generated");
       refetchParams();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setGeneratingDh(false);
     }
@@ -344,7 +345,7 @@ export default function OpenVPN() {
       setSuccess("TLS Authentication key generated");
       refetchParams();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setGeneratingTa(false);
     }
@@ -367,7 +368,7 @@ export default function OpenVPN() {
       setSuccess(`Regenerated profile for '${result.cn}' (stored as ${result.title}).`);
       refetchProfiles();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setActing(false);
     }

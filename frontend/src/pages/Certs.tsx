@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
+import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
   listCerts, listExternalCerts, inspectCertificate, unignoreCert, backfillCert,
@@ -235,7 +236,7 @@ export default function Certs() {
       const result = await inspectCertificate(pem);
       setInspectResult(result);
     } catch (e) {
-      setInspectError(String(e));
+      setInspectError(errorMessage(e));
     } finally {
       setInspecting(false);
     }

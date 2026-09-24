@@ -559,7 +559,7 @@ fn t90_cleanup() {
         None => return,
     };
 
-    let archive_vault = |name: &str| {
+    let delete_vault = |name: &str| {
         if name.is_empty() {
             return;
         }
@@ -567,15 +567,15 @@ fn t90_cleanup() {
         if let Some(ref acct) = s.account {
             cmd.arg("--account").arg(acct);
         }
-        cmd.args(["vault", "delete", name, "--archive"]);
+        cmd.args(["vault", "delete", name]);
         match cmd.output() {
-            Ok(o) if o.status.success() => eprintln!("[e2e] Archived vault: {name}"),
-            Ok(o) => eprintln!("[e2e] Warning: archive '{name}': {}", String::from_utf8_lossy(&o.stderr)),
+            Ok(o) if o.status.success() => eprintln!("[e2e] Deleted vault: {name}"),
+            Ok(o) => eprintln!("[e2e] Warning: delete '{name}': {}", String::from_utf8_lossy(&o.stderr)),
             Err(e) => eprintln!("[e2e] Warning: op failed for '{name}': {e}"),
         }
     };
 
-    archive_vault(&s.vault);
-    archive_vault(&s.import_vault);
+    delete_vault(&s.vault);
+    delete_vault(&s.import_vault);
     let _ = std::fs::remove_dir_all(&s.tmp_dir);
 }
