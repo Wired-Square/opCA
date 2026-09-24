@@ -15,6 +15,7 @@ import PemInput from "../components/PemInput";
 import PageError from "../components/PageError";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
+import SanInput from "../components/SanInput";
 import type {
   CsrListItem,
   CreateCsrResult,
@@ -50,7 +51,6 @@ export default function CSR() {
   const [creating, setCreating] = createSignal(false);
   const [createError, setCreateError] = createSignal<string | null>(null);
   const [createResult, setCreateResult] = createSignal<CreateCsrResult | null>(null);
-  const [sanInput, setSanInput] = createSignal("");
   const [sans, setSans] = createSignal<string[]>([]);
 
   // Sign form
@@ -176,18 +176,6 @@ export default function CSR() {
       void writeClipboard(pem);
       markCopied();
     }
-  }
-
-  function addSan() {
-    const value = sanInput().trim();
-    if (value && !sans().includes(value)) {
-      setSans([...sans(), value]);
-      setSanInput("");
-    }
-  }
-
-  function removeSan(index: number) {
-    setSans(sans().filter((_, i) => i !== index));
   }
 
   async function handleCreate(e: Event) {
@@ -539,39 +527,7 @@ export default function CSR() {
               />
             </div>
 
-            <div class="form-group">
-              <label class="form-label">Subject Alternative Names</label>
-              <div class="san-input-row">
-                <input
-                  type="text"
-                  placeholder="e.g. alt.example.com"
-                  value={sanInput()}
-                  onInput={(e) => setSanInput(e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); addSan(); }
-                  }}
-                  autocomplete="off"
-                  autocorrect="off"
-                  autocapitalize="off"
-                  spellcheck={false}
-                />
-                <button type="button" class="btn-ghost" onClick={addSan}>Add</button>
-              </div>
-              <Show when={sans().length > 0}>
-                <div class="san-list">
-                  <For each={sans()}>
-                    {(san, i) => (
-                      <span class="san-tag">
-                        {san}
-                        <button type="button" class="san-remove" onClick={() => removeSan(i())}>
-                          &times;
-                        </button>
-                      </span>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
+            <SanInput values={sans()} onChange={setSans} />
 
             <PageError message={createError()} />
 

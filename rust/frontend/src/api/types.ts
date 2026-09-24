@@ -117,8 +117,8 @@ export interface AwsCredentialSelection {
 // ---------------------------------------------------------------------------
 
 export const CERT_TYPES = [
-  { value: "device", label: "Device" },
   { value: "webserver", label: "Web Server" },
+  { value: "device", label: "Device" },
   { value: "vpnclient", label: "VPN Client" },
   { value: "vpnserver", label: "VPN Server" },
 ] as const;

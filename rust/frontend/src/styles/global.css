@@ -189,6 +189,23 @@ input::placeholder {
   color: var(--text-tertiary);
 }
 
+input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px var(--error-tint);
+}
+
+.form-hint {
+  margin: 6px 0 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.form-hint.is-valid   { color: var(--success); }
+.form-hint.is-invalid { color: var(--error); }
+
 /* ── Utility ───────────────────────────────────────────────────────── */
 .text-accent  { color: var(--accent); }
 .text-success { color: var(--success); }
@@ -523,6 +540,14 @@ input::placeholder {
   border-radius: var(--radius-md);
   font-size: 0.8125rem;
   color: var(--text-primary);
+}
+
+.san-kind {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .san-remove {

@@ -3,29 +3,17 @@ import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
+import SanInput from "../components/SanInput";
 import "../styles/pages/cert-create.css";
 
 export default function CertCreate() {
   const navigate = useNavigate();
   const [cn, setCn] = createSignal("");
-  const [certType, setCertType] = createSignal("device");
+  const [certType, setCertType] = createSignal("webserver");
   const [keyAlgorithm, setKeyAlgorithm] = createSignal<KeyAlgorithm>(defaultKeyAlgorithm("webserver"));
-  const [sanInput, setSanInput] = createSignal("");
   const [sans, setSans] = createSignal<string[]>([]);
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-
-  function addSan() {
-    const value = sanInput().trim();
-    if (value && !sans().includes(value)) {
-      setSans([...sans(), value]);
-      setSanInput("");
-    }
-  }
-
-  function removeSan(index: number) {
-    setSans(sans().filter((_, i) => i !== index));
-  }
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
@@ -56,8 +44,9 @@ export default function CertCreate() {
 
       <form class="create-form" onSubmit={handleSubmit}>
         <div class="form-group">
-          <label class="form-label">Common Name</label>
+          <label class="form-label" for="cert-cn">Common Name</label>
           <input
+            id="cert-cn"
             type="text"
             placeholder="e.g. server.example.com"
             value={cn()}
@@ -71,8 +60,9 @@ export default function CertCreate() {
         </div>
 
         <div class="form-group">
-          <label class="form-label">Certificate Type</label>
+          <label class="form-label" for="cert-type">Certificate Type</label>
           <select
+            id="cert-type"
             value={certType()}
             onChange={(e) => setCertType(e.currentTarget.value)}
           >
@@ -84,39 +74,7 @@ export default function CertCreate() {
 
         <KeyAlgorithmSelect value={keyAlgorithm()} onChange={setKeyAlgorithm} />
 
-        <div class="form-group">
-          <label class="form-label">Subject Alternative Names</label>
-          <div class="san-input-row">
-            <input
-              type="text"
-              placeholder="e.g. alt.example.com"
-              value={sanInput()}
-              onInput={(e) => setSanInput(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); addSan(); }
-              }}
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              spellcheck={false}
-            />
-            <button type="button" class="btn-ghost" onClick={addSan}>Add</button>
-          </div>
-          <Show when={sans().length > 0}>
-            <div class="san-list">
-              <For each={sans()}>
-                {(san, i) => (
-                  <span class="san-tag">
-                    {san}
-                    <button type="button" class="san-remove" onClick={() => removeSan(i())}>
-                      &times;
-                    </button>
-                  </span>
-                )}
-              </For>
-            </div>
-          </Show>
-        </div>
+        <SanInput values={sans()} onChange={setSans} />
 
         <Show when={error()}>
           <p class="form-error" role="alert">{error()}</p>

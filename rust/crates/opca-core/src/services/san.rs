@@ -190,7 +190,7 @@ mod tests {
             "", "   ", "10.0.0.300", "1.2.3", "a@b@c", "@example.com", "user@bad_domain",
             "user@*.example.com", "-bad.example.com", "bad-.example.com", "foo..com",
             "no-scheme/path", "example.com:443", "https://", "has space.com", "*.*.example.com",
-            "www.*.example.com",
+            "www.*.example.com", "010.0.0.1", "::1]/x[",
         ] {
             assert!(input.parse::<SubjectAltName>().is_err(), "{input:?} should be rejected");
         }
