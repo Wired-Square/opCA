@@ -1,6 +1,7 @@
 import { Show, For } from "solid-js";
 import type { JSX } from "solid-js";
 import type { ActionResultController } from "../utils/actionResult";
+import PageError from "./PageError";
 
 export interface ResultItem {
   /** Identifier to show for a failed item (serial, CN, or title). */
@@ -104,7 +105,7 @@ export function ActionResultLine(props: { outcome: ActionResultController }) {
           fallback={<p class="form-success">{r().summary}</p>}
         >
           {(error) => (
-            <p class="form-error" role="alert">{r().summary}: {error()}</p>
+            <PageError placement="form" message={`${r().summary}: ${error()}`} />
           )}
         </Show>
       )}

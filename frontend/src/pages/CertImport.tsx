@@ -2,6 +2,7 @@ import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { importCert } from "../api/certs";
 import PemInput from "../components/PemInput";
+import PageError from "../components/PageError";
 import "../styles/pages/cert-import.css";
 
 export default function CertImport() {
@@ -107,9 +108,7 @@ export default function CertImport() {
           rows={4}
         />
 
-        <Show when={error()}>
-          <p class="form-error" role="alert">{error()}</p>
-        </Show>
+        <PageError placement="form" message={error()} />
 
         <div class="form-actions">
           <button class="btn-primary" type="submit" disabled={saving() || !certPem().trim()}>

@@ -264,7 +264,6 @@ input[aria-invalid="true"]:focus {
 .page-error,
 .page-success,
 .page-warning,
-.form-error,
 .form-success {
   font-size: 0.875rem;
   padding: 8px 12px;
@@ -276,12 +275,12 @@ input[aria-invalid="true"]:focus {
   margin-bottom: 16px;
 }
 
-.form-error {
+.page-error--form {
   margin-top: 16px;
+  margin-bottom: 0;
 }
 
-.page-error,
-.form-error {
+.page-error {
   color: var(--error);
   background: var(--error-tint);
 }

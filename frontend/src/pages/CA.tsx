@@ -10,6 +10,7 @@ import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
+import PageError from "../components/PageError";
 import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -337,9 +338,7 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <Spinner message="Testing store connections…" />
             </Show>
 
-            <Show when={testError()}>
-              <p class="form-error" role="alert">{testError()}</p>
-            </Show>
+            <PageError placement="form" message={testError()} />
 
             <Show when={testResults()}>
               {(results) => (
@@ -460,12 +459,8 @@ function AwsCredentialSection() {
         </div>
       </Show>
 
-      <Show when={items.error}>
-        <p class="form-error" role="alert">{String(items.error)}</p>
-      </Show>
-      <Show when={result() && result() !== "ok"}>
-        <p class="form-error" role="alert">{result()}</p>
-      </Show>
+      <PageError placement="form" message={items.error} />
+      <PageError placement="form" message={result() === "ok" ? null : result()} />
       <Show when={result() === "ok"}>
         <p class="form-success">AWS credential saved.</p>
       </Show>
@@ -528,9 +523,7 @@ function InitTab(props: { onInitialised: () => void }) {
           />
         </div>
 
-        <Show when={error()}>
-          <p class="form-error" role="alert">{error()}</p>
-        </Show>
+        <PageError placement="form" message={error()} />
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleInit} disabled={saving() || !form().cn?.trim()}>
@@ -646,9 +639,7 @@ function RestoreTab() {
           />
         </div>
 
-        <Show when={restoreError()}>
-          <p class="form-error" role="alert">{restoreError()}</p>
-        </Show>
+        <PageError placement="form" message={restoreError()} />
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleRestore} disabled={restoring()}>
@@ -763,9 +754,7 @@ function InfoTab() {
           />
         </div>
 
-        <Show when={infoError()}>
-          <p class="form-error" role="alert">{infoError()}</p>
-        </Show>
+        <PageError placement="form" message={infoError()} />
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleInfo} disabled={loadingInfo()}>

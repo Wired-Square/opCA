@@ -27,7 +27,7 @@ export interface ActionResultController {
  * second `report()` cancels the first one's pending clear.
  *
  * Holds state only — render it through `ResultBanner` or inline
- * `form-success`/`form-error`, whichever matches the page.
+ * `ActionResultLine`, whichever matches the page.
  */
 export function createActionResult(): ActionResultController {
   const [result, setResult] = createSignal<ActionResult | null>(null);

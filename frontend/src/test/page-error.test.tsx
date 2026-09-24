@@ -15,6 +15,16 @@ describe("PageError", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Error: boom");
   });
 
+  it("renders nothing for an empty message", () => {
+    const { container } = render(() => <PageError message="" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("takes the form spacing when placed under a form", () => {
+    render(() => <PageError message="x" placement="form" />);
+    expect(screen.getByRole("alert")).toHaveClass("page-error", "page-error--form");
+  });
+
   it("passes extra class names through", () => {
     const { container } = render(() => <PageError message="x" class="mt-3" />);
     expect(container.querySelector(".page-error")?.className).toContain("mt-3");

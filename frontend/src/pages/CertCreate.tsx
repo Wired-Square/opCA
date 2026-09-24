@@ -1,10 +1,11 @@
-import { createSignal, Show, For } from "solid-js";
+import { createSignal, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
 import CertDaysField, { createCertDays } from "../components/CertDaysField";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import SanInput from "../components/SanInput";
+import PageError from "../components/PageError";
 import "../styles/pages/cert-create.css";
 
 export default function CertCreate() {
@@ -81,9 +82,7 @@ export default function CertCreate() {
 
         <SanInput values={sans()} onChange={setSans} />
 
-        <Show when={error()}>
-          <p class="form-error" role="alert">{error()}</p>
-        </Show>
+        <PageError placement="form" message={error()} />
 
         <div class="form-actions">
           <button class="btn-primary" type="submit" disabled={saving() || !cn().trim()}>

@@ -576,11 +576,11 @@ simply the code after the await. `createPublishFlow` is built on it.
 
 An error that belongs to the page rather than to one action is rendered by
 [components/PageError.tsx](../frontend/src/components/PageError.tsx). It
-coerces whatever it is given and renders nothing for null/undefined, so a
-resource error goes straight in with no `<Show>` and no `String()` around it.
-The `.form-error` line under a form (the CA tabs, the create/import pages) is
-still hand-rolled; folding it in means giving `PageError` the form spacing,
-which is a separate change.
+coerces whatever it is given and renders nothing for null, undefined or an
+empty string, so a resource error goes straight in with no `<Show>` and no
+`String()` around it. An error under a form (the CA tabs, the create/import
+pages) is the same component with `placement="form"`, which swaps the page
+spacing for the form's.
 
 Two cases deliberately do **not** use this. Rekey and renew navigate to the new
 serial, where `CertInfo`'s `.fresh-banner` reports the outcome from

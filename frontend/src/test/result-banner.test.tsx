@@ -95,7 +95,7 @@ describe("ActionResultLine (inline variant)", () => {
     const { outcome, container } = mount();
     outcome.report("Save failed", "vault locked");
     // The summary must not be dropped — it names which action failed.
-    expect(container.querySelector(".form-error")?.textContent).toBe("Save failed: vault locked");
+    expect(container.querySelector(".page-error--form")?.textContent).toBe("Save failed: vault locked");
     expect(container.querySelector('[role="alert"]')).toBeInTheDocument();
   });
 });
