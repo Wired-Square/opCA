@@ -291,6 +291,8 @@ export interface CsrListItem {
   subject: string | null;
   status: string | null;
   created_date: string | null;
+  /** Pending for longer than the backend's `CSR_STALE_DAYS`. */
+  stale: boolean;
 }
 
 export interface DecodeCsrResult {

@@ -107,6 +107,7 @@ fn main() {
             commands::csr::decode_csr,
             commands::csr::inspect_csr,
             commands::csr::list_csrs,
+            commands::csr::delete_csr,
             commands::csr::get_csr_info,
             commands::csr::create_csr,
             commands::csr::sign_csr,

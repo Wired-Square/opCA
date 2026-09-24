@@ -312,6 +312,7 @@ pub struct CsrListItem {
     pub subject: Option<String>,
     pub status: Option<String>,
     pub created_date: Option<String>,
+    pub stale: bool,
 }
 
 /// Request to create a new CSR.

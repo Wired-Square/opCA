@@ -3,7 +3,11 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use chrono::{DateTime, Duration, Utc};
+
+use crate::constants::CSR_STALE_DAYS;
 use crate::services::cert::KeyAlgorithm;
+use crate::utils::datetime::{self, DateTimeFormat};
 
 /// Certificate status values stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +130,18 @@ pub struct CsrRecord {
     pub status: Option<String>,
     pub created_date: Option<String>,
     pub csr_pem: Option<String>,
+}
+
+impl CsrRecord {
+    /// Pending for longer than `CSR_STALE_DAYS`. An unparseable date is never stale.
+    pub fn is_stale(&self, now: DateTime<Utc>) -> bool {
+        self.status.as_deref() == Some("Pending")
+            && self
+                .created_date
+                .as_deref()
+                .and_then(|d| datetime::parse_datetime(d, DateTimeFormat::Compact).ok())
+                .is_some_and(|created| now - created > Duration::days(CSR_STALE_DAYS))
+    }
 }
 
 /// CA configuration (singleton row in `config` table).

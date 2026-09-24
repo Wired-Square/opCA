@@ -27,7 +27,8 @@ use crate::services::cert::{
     asn1_time_to_openssl_str, signing_digest, CertBundleConfig, CertType, CertificateBundle,
 };
 use crate::services::database::models::{
-    CaConfig, CertLookup, CertRecord, CrlMetadata, ExternalCertRecord, IgnoreReason, SerialType,
+    CaConfig, CertLookup, CertRecord, CrlMetadata, CsrLookup, CsrRecord, ExternalCertRecord,
+    IgnoreReason, SerialType,
 };
 use crate::services::database::CertificateAuthorityDB;
 use crate::services::san;
@@ -1401,6 +1402,25 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     // Storage — database
     // -----------------------------------------------------------------------
 
+    /// Remove a CSR row. A pending CSR's item (which holds its private key) is
+    /// archived; a completed one's was archived when its certificate was imported.
+    pub fn delete_csr(&mut self, id: i64) -> Result<CsrRecord, OpcaError> {
+        let db = self.ca_database.as_ref().ok_or(OpcaError::CaNotFound)?;
+        let record = db
+            .query_csr(&CsrLookup::Id(id))?
+            .ok_or_else(|| OpcaError::CsrNotFound(id.to_string()))?;
+        let title = record
+            .title
+            .clone()
+            .unwrap_or_else(|| format!("CSR_{}", record.cn.as_deref().unwrap_or_default()));
+        if record.status.as_deref() == Some("Pending") && self.op.item_exists(&title) {
+            self.op.delete_item(&title, true)?;
+        }
+        db.delete_csr(id)?;
+        self.store_ca_database()?;
+        Ok(record)
+    }
+
     /// Store the CA database in 1Password.
     pub fn store_ca_database(&mut self) -> Result<(), OpcaError> {
         self.update_db_fingerprint()?;
@@ -2484,6 +2504,30 @@ mod tests {
             ..CertBundleConfig::default()
         };
         assert!(CertificateBundle::generate(CertType::WebServer, "www", config).is_err());
+    }
+
+    #[test]
+    fn deleting_a_pending_csr_archives_its_key_item() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let db = ca.ca_database.as_ref().unwrap();
+        for (cn, status) in [("pending.example.com", "Pending"), ("done.example.com", "Complete")] {
+            db.add_csr(&CsrRecord {
+                cn: Some(cn.to_string()),
+                title: Some(format!("CSR_{cn}")),
+                status: Some(status.to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+
+        ca.delete_csr(1).unwrap();
+        ca.delete_csr(2).unwrap();
+
+        let deletes: Vec<_> = ca.op.runner().calls().into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
+        assert_eq!(deletes.len(), 1, "only the pending CSR's item is archived: {deletes:?}");
+        assert_eq!(deletes[0][2], "CSR_pending.example.com");
+        assert!(deletes[0].contains(&"--archive".to_string()));
+        assert!(ca.ca_database.as_ref().unwrap().query_all_csrs(None).unwrap().is_empty());
     }
 
     #[test]

@@ -475,6 +475,13 @@ pub enum CsrAction {
         key: Option<KeyAlgorithm>,
     },
 
+    /// Delete a CSR, archiving its private key if it is still pending
+    Delete {
+        /// Common Name of the CSR
+        #[arg(short = 'n', long)]
+        cn: String,
+    },
+
     /// Import a signed certificate into an existing CSR entry
     Import {
         /// CN override

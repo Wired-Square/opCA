@@ -32,6 +32,7 @@ fn record_to_list_item(r: &CsrRecord) -> CsrListItem {
         subject: r.subject.clone(),
         status: r.status.clone(),
         created_date: r.created_date.clone(),
+        stale: r.is_stale(chrono::Utc::now()),
     }
 }
 
@@ -132,6 +133,22 @@ pub async fn list_csrs(
         .map_err(|e| e.to_string())?;
 
     Ok(records.iter().map(record_to_list_item).collect())
+}
+
+#[tauri::command]
+pub async fn delete_csr(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    info!("[tauri] delete_csr: id={id}");
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let record = ca.delete_csr(id).map_err(|e| {
+        state.log_err("delete_csr", Some(e.to_string()));
+        e.to_string()
+    })?;
+    state.log_ok(
+        "delete_csr",
+        Some(format!("Deleted CSR '{}'", record.cn.unwrap_or_default())),
+    );
+    Ok(())
 }
 
 #[tauri::command]

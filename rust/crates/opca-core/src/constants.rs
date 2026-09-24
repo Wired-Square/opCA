@@ -88,6 +88,9 @@ pub const OP_BIN: &str = "op";
 /// (`ca_aws_region`) nor the credential item names one.
 pub const DEFAULT_AWS_REGION: &str = "ap-southeast-2";
 
+/// A pending CSR older than this is flagged as stale in the CSR list.
+pub const CSR_STALE_DAYS: i64 = 30;
+
 /// Process exit codes matching the Python conventions.
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_VALIDATION_ERROR: i32 = 1;

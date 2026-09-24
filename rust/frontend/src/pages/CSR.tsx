@@ -15,6 +15,7 @@ import PemInput from "../components/PemInput";
 import PageError from "../components/PageError";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
+import DeleteCsrDialog from "../components/DeleteCsrDialog";
 import SanInput from "../components/SanInput";
 import type {
   CsrListItem,
@@ -38,6 +39,7 @@ export default function CSR() {
   const [csrs, { refetch }] = createResource<CsrListItem[]>(() => listCsrs());
   const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal<CsrListItem | null>(null);
+  const [deleting, setDeleting] = createSignal<CsrListItem | null>(null);
   const [detail, setDetail] = createSignal<CreateCsrResult | null>(null);
   const [loadingDetail, setLoadingDetail] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -370,6 +372,9 @@ export default function CSR() {
                           <span class={statusClass(csr.status)}>
                             {csr.status ?? "\u2014"}
                           </span>
+                          <Show when={csr.stale}>
+                            <span class="status-badge status-stale" title="Pending for over 30 days">stale</span>
+                          </Show>
                         </td>
                         <td class="mono">{csr.created_date ?? "\u2014"}</td>
                       </tr>
@@ -394,6 +399,9 @@ export default function CSR() {
                     {importOpen() ? "Cancel Import" : "Import Signed Cert"}
                   </button>
                 </Show>
+                <button class="btn-danger" onClick={() => setDeleting(sel())}>
+                  Delete
+                </button>
               </div>
             )}
           </Show>
@@ -780,6 +788,17 @@ export default function CSR() {
         </div>
       </Show>
 
+
+      <DeleteCsrDialog
+        csr={deleting()}
+        onClose={() => setDeleting(null)}
+        onDone={() => {
+          setSelected(null);
+          setDetail(null);
+          setImportOpen(false);
+          refetch();
+        }}
+      />
     </div>
   );
 }

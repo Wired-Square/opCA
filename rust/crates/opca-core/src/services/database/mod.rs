@@ -900,6 +900,11 @@ impl CertificateAuthorityDB {
         Ok(rows > 0)
     }
 
+    pub fn delete_csr(&self, id: i64) -> Result<bool, OpcaError> {
+        let rows = self.conn.execute("DELETE FROM csr WHERE id = ?1", [id])?;
+        Ok(rows > 0)
+    }
+
     /// Search for a CSR by id or CN.
     pub fn query_csr(&self, lookup: &CsrLookup) -> Result<Option<CsrRecord>, OpcaError> {
         let (sql, param): (&str, Box<dyn rusqlite::types::ToSql>) = match lookup {

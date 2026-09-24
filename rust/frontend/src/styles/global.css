@@ -441,7 +441,8 @@ input[aria-invalid="true"]:focus {
 }
 
 .status-ignored,
-.status-superseded {
+.status-superseded,
+.status-stale {
   color: var(--text-secondary);
   background: var(--neutral-tint);
   border: 1px solid var(--neutral-edge);

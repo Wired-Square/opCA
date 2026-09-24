@@ -6,10 +6,10 @@ use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType, KeyAlgorithm};
-use opca_core::services::database::CsrRecord;
+use opca_core::services::database::{CsrLookup, CsrRecord};
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
-use crate::app::AppContext;
+use crate::app::{with_lock, AppContext};
 use crate::output;
 use crate::{CsrAction, CsrArgs};
 
@@ -22,6 +22,7 @@ pub fn dispatch(args: CsrArgs, app: &mut AppContext<ShellRunner>) -> Result<(), 
             country,
             key,
         } => handle_create(app, csr_type, cn, email, country, key),
+        CsrAction::Delete { cn } => handle_delete(app, cn),
         CsrAction::Import { cn, cert_file } => handle_import(app, cn, cert_file),
         CsrAction::Sign {
             csr_file,
@@ -130,6 +131,22 @@ fn handle_create<R: CommandRunner>(
     print!("{csr_pem}");
 
     Ok(())
+}
+
+fn handle_delete<R: CommandRunner>(app: &mut AppContext<R>, cn: String) -> Result<(), OpcaError> {
+    output::title("Deleting Certificate Signing Request");
+    app.ensure_ca()?;
+    with_lock(app, "csr_delete", |app| {
+        let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+        let db = ca.ca_database.as_ref().ok_or(OpcaError::CaNotFound)?;
+        let id = db
+            .query_csr(&CsrLookup::Cn(cn.clone()))?
+            .and_then(|r| r.id)
+            .ok_or_else(|| OpcaError::CsrNotFound(cn.clone()))?;
+        ca.delete_csr(id)?;
+        output::print_result(&format!("Deleted CSR '{cn}'"), true);
+        Ok(())
+    })
 }
 
 fn handle_import<R: CommandRunner>(
