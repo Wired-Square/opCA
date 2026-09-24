@@ -472,6 +472,7 @@ function InitTab(props: { onInitialised: () => void }) {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [form, setForm] = createSignal<Partial<CaConfig>>({
+    next_serial: 1,
     ca_days: 3650,
     days: 365,
     crl_days: 30,

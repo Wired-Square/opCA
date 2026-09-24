@@ -31,6 +31,7 @@ describe("CA init tab", () => {
     await waitFor(() => expect(initCa).toHaveBeenCalled());
     expect(initCa.mock.calls[0][0]).toMatchObject({
       cn: "Example Root CA",
+      next_serial: 1,
       ca_days: 3650,
       days: 365,
       crl_days: 30,

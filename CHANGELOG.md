@@ -65,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A CA initialised in the app could not issue its first certificate ("UNIQUE constraint
+  failed"): it reused the CA certificate's serial. The app now starts serials at 1, as
+  `opca ca init` does.
 - `opca cert export -n` and `opca cert info -n` could not find any certificate: they looked
   the item up by bare Common Name rather than its `CRT_<serial>_<cn>` title. They now resolve
   the name through the CA database, preferring the valid certificate among renewals.
