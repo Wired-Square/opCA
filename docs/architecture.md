@@ -117,7 +117,7 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 | Database | `CA_Database` | Document | SQLite dump of every tracked cert/CSR/CRL/VPN record |
 | CRL | `CRL` | Document | Latest published Certificate Revocation List |
 | OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key, server config, and the named templates (canonical store; mirrored into the `openvpn_template` table for fast reads) |
-| Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type) |
+| Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type). Deleting a revoked or expired cert (`CertificateAuthority::delete_certificate`) archives it; see [Deleted certificates](#deleted-certificates) |
 | External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
 | CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests, with their private key. Deleting a pending CSR (`CertificateAuthority::delete_csr`) archives it |
 | VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial, `generated`) is also written to the `openvpn_profile` table and persisted, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. A profile can be **registered without generating** (`generated = 0`, no document yet) and produced later via Regenerate; such rows surface as Needs Regen. Legacy profiles may still be titled `VPN_<cn>`. |
@@ -183,7 +183,7 @@ event system.
 **Ignore (a "don't-notify" overlay)** — ignoring a cert **never changes its
 status**. It records four audit columns (`ignored_at`, `ignored_by` =
 `username@hostname` from the `whoami` crate, `ignored_reason` ∈ {`renewed`,
-`rekeyed`, `manual`}, `ignored_note`) and adds the serial to the `certs_ignored`
+`rekeyed`, `manual`, `deleted`}, `ignored_note`) and adds the serial to the `certs_ignored`
 overlay set. The cert keeps appearing in its real bucket — a still-valid ignored
 cert is `Valid` (or `Expiring Soon`), an expired ignored cert is `Expired` —
 and renders on the list with its true status badge plus an `ignored` chip. What
@@ -203,6 +203,23 @@ replacement is stored (`ignored_reason` = `renewed`/`rekeyed`, `ignored_note` =
 `replaced by <new_serial>`, riding the same `store_ca_database` save — no extra
 1Password calls); and the cert detail page's `Ignore` action (`ignored_reason`
 = `manual`). An `Un-ignore` action clears all four columns.
+
+### Deleted certificates
+
+Delete is a soft delete. `delete_certificate` refuses the CA and any cert that
+is not Revoked or Expired, so it can never bypass revocation. It archives the
+item (`op item delete --archive`, tolerating a missing one), sets
+`deleted_at` (schema v14) and, unless already ignored, `ignored_at` with
+reason `deleted`, so the Lambda stops alerting with no change of its own. The
+row stays because `build_crl` reads revoked rows: removing an unexpired one
+would silently un-revoke it. `query_all_certs` and `count_certs` skip deleted
+rows (certificate list, bulk selection, CLI, dashboard total), while
+`process_ca_database` and `query_cert` still see them, so the CRL and VPN
+profile status keep working; a `certs_deleted` overlay lets the dashboard's
+revoked count leave them out. In the app, `canDeleteCert` in
+`api/certActions.ts` gates the kebab and bulk Delete; the CLI has
+`opca cert delete -s <serial>`, or `-n <cn>` when exactly one of that CN's
+certs is revoked or expired.
 
 On the certs list (which defaults to the `Valid` filter), status-axis filters
 match the true status: `Valid` includes valid-but-ignored certs, and an
@@ -390,7 +407,7 @@ entirely in the Rust layer to avoid duplication in TypeScript.
 ### Bulk command group
 
 The `bulk_*` commands (`bulk_rekey_certs`, `bulk_renew_certs`,
-`bulk_revoke_certs`, `bulk_ignore_certs`, `bulk_unignore_certs`, plus
+`bulk_revoke_certs`, `bulk_delete_certs`, `bulk_ignore_certs`, `bulk_unignore_certs`, plus
 `bulk_generate_openvpn_profiles` and `bulk_delete_openvpn_profiles`) each loop
 the same `opca-core` method their single-cert sibling calls, taking one CA
 borrow for the whole batch. The frontend wraps the single invocation in one
@@ -507,7 +524,7 @@ is the generic gate: it owns the acting/error state, renders a `danger` confirm,
 closes only on success, and takes a `children` slot plus a `canConfirm` predicate
 for callers that need their own field. Bulk cert and OpenVPN actions use it with
 a reason field; `ResignCaDialog` uses it with a validity-days field;
-`RevokeCertDialog` and `IgnoreCertDialog` wrap it with a `certLabel` message.
+`RevokeCertDialog`, `DeleteCertDialog` and `IgnoreCertDialog` wrap it with a `certLabel` message.
 Every wrapper is prop-passing only, so `ConfirmDialog`'s own test owns the
 shared behaviour and each wrapper's test asserts just its wiring.
 

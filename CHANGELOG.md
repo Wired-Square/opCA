@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   is allowed with a warning that Apple devices will reject it. `--days` does the same on
   `opca cert create`, `cert renew`, `cert rekey` and `csr sign`. The dashboard and the CA
   configuration flag a CA-wide certificate lifetime over 825 days.
+- **Delete revoked and expired certificates** from the certificate list (singly or in bulk),
+  the certificate page, or with `opca cert delete -s <serial>` (or `-n <cn>` when only one of
+  that name's certificates is revoked or expired). The 1Password item is archived and the
+  certificate leaves the list; a revoked serial stays on the CRL until it expires. A valid
+  certificate must be revoked first, and the CA certificate cannot be deleted.
 
 ### Changed
 
@@ -58,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `opca cert export -n` and `opca cert info -n` could not find any certificate: they looked
+  the item up by bare Common Name rather than its `CRT_<serial>_<cn>` title. They now resolve
+  the name through the CA database, preferring the valid certificate among renewals.
 - A CA with no private store failed every database sync with "Unsupported storage
   scheme": an unset or cleared store read back as an empty store, not as unset. The same
   applied to the public and backup stores.
