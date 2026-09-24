@@ -12,7 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **EC keys, by default.** New certificates and CSRs get an EC P-256 key and a new CA an
   EC P-384 key; RSA 2048 and 4096 stay available from the new **Key Type** field (and
   `--key` on `opca ca init`, `cert create` and `csr create`). Apple developer CSRs default
-  to RSA 2048, the only kind Apple accepts. Rekeying keeps a certificate's key type.
+  to RSA 2048, the only kind Apple accepts.
+- **Rekey to a different key type.** Rekeying, single or bulk, now confirms first and
+  offers a Key Type, defaulting to keeping the current one, so an RSA certificate can move
+  to EC in place (`opca cert rekey --key`).
 - **IP address, email and URI SANs** alongside DNS names, in the app and via `--alt`. The
   SAN field says what it recognised as you type (DNS name, IPv4/IPv6 address, email, URI)
   or why an entry is invalid, and won't add an invalid one. A certificate whose Common Name

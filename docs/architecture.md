@@ -69,7 +69,8 @@ Organised by concern under [src/](../rust/crates/opca-core/src):
     `KeyAlgorithm` (`ec-p256`, `ec-p384`, `rsa-2048`, `rsa-4096`) picks the key;
     `CertType::default_key_algorithm` gives EC P-256 for leaves, EC P-384 for the
     CA and RSA 2048 for Apple developer CSRs, and a rekey keeps the existing
-    family. `signing_digest` uses SHA-384 for P-384 keys, SHA-256 otherwise, and
+    family unless given an algorithm (`rekey_cert`, `bulk_rekey_certs` and
+    `opca cert rekey --key` take one). `signing_digest` uses SHA-384 for P-384 keys, SHA-256 otherwise, and
     `keyEncipherment` is only set on RSA leaves.
   - [san.rs](../rust/crates/opca-core/src/services/san.rs) — Subject
     Alternative Names: `SubjectAltName` (DNS, IP, email, URI) parses and

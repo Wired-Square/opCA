@@ -5,7 +5,9 @@ use opca_core::services::database::CertLookup;
 
 use crate::app::{with_lock, AppContext};
 use crate::output;
-use crate::{CertAction, CertArgs, CertCreateArgs, CertExportArgs, CertIdentifier, CertRevokeArgs};
+use crate::{
+    CertAction, CertArgs, CertCreateArgs, CertExportArgs, CertIdentifier, CertRekeyArgs, CertRevokeArgs,
+};
 
 pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(), OpcaError> {
     match args.action {
@@ -18,7 +20,7 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
             cn,
             external: _,
         } => handle_import(app, cert_file, key_file, cn),
-        CertAction::Rekey(id) => handle_rekey(app, id),
+        CertAction::Rekey(args) => handle_rekey(app, args),
         CertAction::Renew(id) => handle_renew(app, id),
         CertAction::Revoke(revoke_args) => handle_revoke(app, revoke_args),
     }
@@ -231,15 +233,15 @@ fn handle_import<R: CommandRunner>(
 
 fn handle_rekey<R: CommandRunner>(
     app: &mut AppContext<R>,
-    id: CertIdentifier,
+    args: CertRekeyArgs,
 ) -> Result<(), OpcaError> {
     output::title("Rekeying Certificate");
 
-    let lookup = make_lookup(id.cn.as_deref(), id.serial.as_deref())?;
+    let lookup = make_lookup(args.id.cn.as_deref(), args.id.serial.as_deref())?;
 
     with_lock(app, "cert_rekey", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warning) = ca.rekey_certificate_bundle(&lookup)?;
+        let (new_pem, new_serial, issuance_warning) = ca.rekey_certificate_bundle(&lookup, args.key)?;
         output::print_result(&format!("Certificate rekeyed (new serial {new_serial})"), true);
         if let Some(ref w) = issuance_warning {
             output::warning(&w.message);

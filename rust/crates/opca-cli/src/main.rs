@@ -294,7 +294,7 @@ pub enum CertAction {
     },
 
     /// Rekey a x509 certificate (renew with a new private key)
-    Rekey(CertIdentifier),
+    Rekey(CertRekeyArgs),
 
     /// Renew a x509 certificate
     Renew(CertIdentifier),
@@ -378,6 +378,16 @@ pub struct CertIdentifier {
     /// Serial number of the certificate
     #[arg(short = 's', long, group = "cert_id")]
     pub serial: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CertRekeyArgs {
+    #[command(flatten)]
+    pub id: CertIdentifier,
+
+    /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default: keep the current one)
+    #[arg(long)]
+    pub key: Option<KeyAlgorithm>,
 }
 
 #[derive(Args)]

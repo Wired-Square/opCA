@@ -1,6 +1,7 @@
 import { tauriInvoke, withLock } from "./tauri";
 import type {
   BulkCertResult,
+  KeyAlgorithm,
   CertListItem,
   ExternalCertListItem,
   CertDetail,
@@ -82,9 +83,12 @@ export async function renewCert(serial: string): Promise<RenewRekeyResult> {
   );
 }
 
-export async function rekeyCert(serial: string): Promise<RenewRekeyResult> {
+export async function rekeyCert(
+  serial: string,
+  keyAlgorithm: KeyAlgorithm | null,
+): Promise<RenewRekeyResult> {
   return withLock("rekey_cert", () =>
-    tauriInvoke<RenewRekeyResult>("rekey_cert", { serial }),
+    tauriInvoke<RenewRekeyResult>("rekey_cert", { serial, keyAlgorithm }),
   );
 }
 
@@ -110,9 +114,12 @@ export async function importCert(request: ImportCertRequest): Promise<ImportCert
 // One Tauri command per action, wrapped in a single `withLock` so a batch of N
 // certs costs one vault-lock cycle. Each returns a per-serial result vector.
 
-export async function bulkRekeyCerts(serials: string[]): Promise<BulkCertResult[]> {
+export async function bulkRekeyCerts(
+  serials: string[],
+  keyAlgorithm: KeyAlgorithm | null,
+): Promise<BulkCertResult[]> {
   return withLock("bulk_rekey", () =>
-    tauriInvoke<BulkCertResult[]>("bulk_rekey_certs", { serials }),
+    tauriInvoke<BulkCertResult[]>("bulk_rekey_certs", { serials, keyAlgorithm }),
   );
 }
 

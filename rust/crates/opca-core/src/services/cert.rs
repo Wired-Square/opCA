@@ -904,8 +904,12 @@ impl CertificateBundle {
     /// and SAN attributes.
     ///
     /// Used for rekeying — the caller should then re-sign the new CSR to produce
-    /// a fresh certificate that uses the new key pair.
-    pub fn regenerate_key_and_csr(&mut self) -> Result<(), OpcaError> {
+    /// a fresh certificate that uses the new key pair. Without an `algorithm`
+    /// the new key keeps the current key's family.
+    pub fn regenerate_key_and_csr(
+        &mut self,
+        algorithm: Option<KeyAlgorithm>,
+    ) -> Result<(), OpcaError> {
         // Backfill CN from certificate if not in config (lost on 1Password round-trip)
         if self.config.cn.is_none() {
             self.config.cn = self.certificate.as_ref().and_then(extract_cn);
@@ -921,11 +925,13 @@ impl CertificateBundle {
             }
         }
 
-        let algorithm = self
-            .certificate
-            .as_ref()
-            .and_then(|c| c.public_key().ok())
-            .and_then(|pk| KeyAlgorithm::matching(&pk))
+        let algorithm = algorithm
+            .or_else(|| {
+                self.certificate
+                    .as_ref()
+                    .and_then(|c| c.public_key().ok())
+                    .and_then(|pk| KeyAlgorithm::matching(&pk))
+            })
             .unwrap_or_else(|| self.cert_type.default_key_algorithm());
         let cn = self.config.cn.as_deref().ok_or_else(|| {
             OpcaError::InvalidCertificate("CN is required for rekeying".into())
@@ -1120,9 +1126,23 @@ mod tests {
         )
         .unwrap();
         ca.self_sign_ca().unwrap();
-        ca.regenerate_key_and_csr().unwrap();
+        ca.regenerate_key_and_csr(None).unwrap();
         let key = ca.private_key.as_ref().unwrap();
         assert_eq!((key.id(), key.bits()), (Id::EC, 384));
+    }
+
+    #[test]
+    fn rekey_moves_to_an_overriding_key_algorithm() {
+        let mut ca = CertificateBundle::generate(
+            CertType::Ca,
+            "CA",
+            CertBundleConfig { key_algorithm: Some(KeyAlgorithm::Rsa2048), ..ca_config() },
+        )
+        .unwrap();
+        ca.self_sign_ca().unwrap();
+        ca.regenerate_key_and_csr(Some(KeyAlgorithm::EcP256)).unwrap();
+        let key = ca.private_key.as_ref().unwrap();
+        assert_eq!((key.id(), key.bits()), (Id::EC, 256));
     }
 
     #[test]

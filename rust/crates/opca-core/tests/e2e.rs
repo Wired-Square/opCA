@@ -324,7 +324,7 @@ fn t23b_cert_rekey() {
     let old_serial = cert_serial(&ca, &lookup);
 
     let (new_pem, new_serial, _warning) = ca
-        .rekey_certificate_bundle(&lookup)
+        .rekey_certificate_bundle(&lookup, None)
         .expect("rekey failed");
 
     assert!(new_pem.contains("BEGIN CERTIFICATE"));

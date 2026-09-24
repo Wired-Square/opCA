@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use opca_core::error::OpcaError;
 use opca_core::op::ShellRunner;
 use opca_core::services::ca::CertificateAuthority;
-use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
+use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType, KeyAlgorithm};
 use opca_core::services::database::{is_expiring_soon, CertLookup, CertRecord, ExternalCertRecord};
 use opca_core::crypto::utils::encrypt_private_key_pem;
 use opca_core::services::san;
@@ -455,12 +455,13 @@ pub async fn renew_cert(
 pub async fn rekey_cert(
     state: State<'_, AppState>,
     serial: String,
+    key_algorithm: Option<KeyAlgorithm>,
 ) -> Result<RenewRekeyResult, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] rekey_cert: serial={serial}");
-    let (new_pem, new_serial, issuance_warning) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()))
+    let (new_pem, new_serial, issuance_warning) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()), key_algorithm)
         .map_err(|e| {
             warn!("[tauri] rekey_cert failed: {e}");
             state.log_err("rekey_cert", Some(e.to_string()));
@@ -577,10 +578,11 @@ pub async fn bulk_rekey_certs(
     app: AppHandle,
     state: State<'_, AppState>,
     serials: Vec<String>,
+    key_algorithm: Option<KeyAlgorithm>,
 ) -> Result<Vec<BulkCertResult>, String> {
     run_bulk_cert_op(&app, &state, serials, "bulk_rekey", "Rekeying", |ca, serial| {
         let (new_pem, new_serial, warning) =
-            ca.rekey_certificate_bundle(&CertLookup::Serial(serial.to_string()))?;
+            ca.rekey_certificate_bundle(&CertLookup::Serial(serial.to_string()), key_algorithm)?;
         if let Some(w) = warning {
             state.log_ok("bulk_rekey", Some(w.message));
         }

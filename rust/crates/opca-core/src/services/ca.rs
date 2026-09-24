@@ -25,6 +25,7 @@ use crate::error::OpcaError;
 use crate::op::{CommandRunner, Op, StoreAction};
 use crate::services::cert::{
     asn1_time_to_openssl_str, signing_digest, CertBundleConfig, CertType, CertificateBundle,
+    KeyAlgorithm,
 };
 use crate::services::database::models::{
     CaConfig, CertLookup, CertRecord, CrlMetadata, CsrLookup, CsrRecord, ExternalCertRecord,
@@ -817,6 +818,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     pub fn rekey_certificate_bundle(
         &mut self,
         lookup: &CertLookup,
+        key_algorithm: Option<KeyAlgorithm>,
     ) -> Result<(String, String, Option<CertIssuanceWarning>), OpcaError> {
         info!("[ca] rekeying certificate {lookup:?}");
         let db = self.ca_database.as_ref()
@@ -833,7 +835,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             .ok_or_else(|| OpcaError::CertificateNotFound(item_title.clone()))?;
 
         // Generate a new private key and CSR, preserving subject attributes
-        cert_bundle.regenerate_key_and_csr()?;
+        cert_bundle.regenerate_key_and_csr(key_algorithm)?;
 
         let csr_pem = cert_bundle.csr_pem()
             .ok_or_else(|| OpcaError::Other(

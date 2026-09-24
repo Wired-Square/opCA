@@ -13,6 +13,7 @@ import CopyableValue from "../components/CopyableValue";
 import CertStatusBadge from "../components/CertStatusBadge";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
+import RekeyDialog from "../components/RekeyDialog";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import { ActionResultBanner } from "../components/ResultBanner";
@@ -33,8 +34,9 @@ export default function CertInfo() {
     (serial: string) => getCertInfo(serial),
   );
   const [showRevoke, setShowRevoke] = createSignal(false);
+  const [showRekey, setShowRekey] = createSignal(false);
   const outcome = createActionResult();
-  /** Rekey, renew and unignore share one action: the kebab disables all of its
+  /** Renew and unignore share one action: the kebab disables all of its
    *  items together, so there is nothing to tell their busy states apart. */
   const headerAction = createAction(outcome);
   const [showKeyCopy, setShowKeyCopy] = createSignal(false);
@@ -86,17 +88,8 @@ export default function CertInfo() {
     );
   }
 
-  // Rekey and renew report no success — they navigate to the new serial, where
+  // Renew and rekey report no success — they navigate to the new serial, where
   // the fresh-banner says what happened.
-  function handleRekey() {
-    const serial = params.serial as string;
-    if (!serial) return;
-    // Navigates to the rekeyed cert's new serial so its fresh key +
-    // certificate are surfaced for copy-on-click; the DB sync runs in the
-    // background.
-    void headerAction.run({ failure: "Rekey failed" }, () => rekeyAndGo(navigate, serial));
-  }
-
   function handleRenew() {
     const serial = params.serial as string;
     if (!serial) return;
@@ -118,7 +111,7 @@ export default function CertInfo() {
   // Header actions menu — gating shared with the certificates list kebab.
   function certActions(d: CertDetail): KebabItem[] {
     return certKebabItems(d, {
-      onRekey: handleRekey,
+      onRekey: () => setShowRekey(true),
       onRenew: handleRenew,
       onRevoke: () => setShowRevoke(true),
       onIgnore: () => setShowIgnore(true),
@@ -393,6 +386,14 @@ export default function CertInfo() {
                 cn={d().cn}
                 onClose={() => setShowIgnore(false)}
                 onDone={() => { outcome.report(`Ignored ${label()}`); refetch(); }}
+              />
+
+              <RekeyDialog
+                open={showRekey()}
+                title="Rekey Certificate"
+                message={<>Rekey <span class="mono">{label()}</span>? It gets a fresh key and a new serial.</>}
+                onClose={() => setShowRekey(false)}
+                onConfirm={(keyAlgorithm) => rekeyAndGo(navigate, params.serial as string, keyAlgorithm)}
               />
 
               <RevokeCertDialog

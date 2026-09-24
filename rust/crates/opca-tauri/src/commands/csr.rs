@@ -609,7 +609,7 @@ pub async fn generate_csr_from_cert(
         .map_err(|e| e.to_string())?
         .ok_or("External certificate item not found in 1Password")?;
 
-    bundle.regenerate_key_and_csr().map_err(|e| {
+    bundle.regenerate_key_and_csr(None).map_err(|e| {
         state.log_err("generate_csr_from_cert", Some(e.to_string()));
         e.to_string()
     })?;

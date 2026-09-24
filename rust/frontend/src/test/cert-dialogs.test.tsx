@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import RevokeCertDialog from "../components/RevokeCertDialog";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
+import RekeyDialog from "../components/RekeyDialog";
 
 /** These are thin wrappers over ConfirmDialog, so only their own wiring is
  * tested here — the acting/error/reset behaviour lives in confirm-dialog.test. */
@@ -58,5 +59,36 @@ describe("IgnoreCertDialog", () => {
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(ignoreCert).toHaveBeenCalledWith("131", "decommissioned");
     expect(onDone).toHaveBeenCalled();
+  });
+});
+
+describe("RekeyDialog", () => {
+  function renderRekey(onConfirm: (k: unknown) => Promise<void>) {
+    const onClose = vi.fn();
+    render(() => (
+      <RekeyDialog open title="Rekey Certificate" message="Rekey it?" onClose={onClose} onConfirm={onConfirm} />
+    ));
+    return onClose;
+  }
+
+  it("keeps the current key algorithm by default", async () => {
+    const onConfirm = vi.fn(() => Promise.resolve());
+    const onClose = renderRekey(onConfirm);
+
+    screen.getByRole("button", { name: /^Rekey/ }).click();
+
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onConfirm).toHaveBeenCalledWith(null);
+  });
+
+  it("passes a chosen key algorithm", async () => {
+    const onConfirm = vi.fn(() => Promise.resolve());
+    const onClose = renderRekey(onConfirm);
+
+    fireEvent.change(screen.getByLabelText("Key Type"), { target: { value: "ec-p256" } });
+    screen.getByRole("button", { name: /^Rekey/ }).click();
+
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onConfirm).toHaveBeenCalledWith("ec-p256");
   });
 });
