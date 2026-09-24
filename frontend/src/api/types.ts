@@ -93,6 +93,10 @@ export interface CaConfig {
   ca_aws_region: string | null;
   /** Init only. */
   key_algorithm?: KeyAlgorithm;
+  /** Init only. */
+  cn?: string | null;
+  /** Init only. */
+  ca_days?: number | null;
 }
 
 // ---------------------------------------------------------------------------

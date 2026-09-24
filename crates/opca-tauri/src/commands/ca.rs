@@ -97,10 +97,8 @@ pub async fn init_ca(
     state: State<'_, AppState>,
     config: CaConfigDto,
 ) -> Result<(), String> {
-    // Take Op — it must be in `op` (CA shouldn't exist yet)
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    let op = conn.op.take()
-        .ok_or("Not connected")?;
+    let op = conn.op.clone().ok_or("Not connected")?;
 
     info!("[tauri] init_ca");
     let ca_config = dto_to_ca_config(&config);
@@ -108,13 +106,13 @@ pub async fn init_ca(
     match CertificateAuthority::init(op, &ca_config) {
         Ok(ca) => {
             conn.ca = Some(ca);
+            conn.op = None;
             state.log_ok("init_ca", Some("Certificate Authority initialised".to_string()));
             Ok(())
         }
         Err(e) => {
             error!("[tauri] init_ca failed: {e}");
             state.log_err("init_ca", Some(e.to_string()));
-            // On failure, we've lost the Op — caller must reconnect
             Err(e.to_string())
         }
     }
@@ -281,13 +279,15 @@ pub(crate) fn ca_config_to_dto(config: &CaConfig) -> CaConfigDto {
         ca_backup_store: config.ca_backup_store.clone(),
         ca_aws_region: config.ca_aws_region.clone(),
         key_algorithm: None,
+        cn: None,
+        ca_days: None,
     }
 }
 
 fn dto_to_ca_config(dto: &CaConfigDto) -> CaConfig {
     CaConfig {
-        cn: None,
-        ca_days: None,
+        cn: dto.cn.clone(),
+        ca_days: dto.ca_days,
         key_algorithm: dto.key_algorithm,
         next_serial: dto.next_serial,
         next_crl_serial: dto.next_crl_serial,

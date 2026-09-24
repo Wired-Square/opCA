@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **CA Days** on the CA initialisation form sets the CA certificate's own lifetime,
+  separately from issued certificates. New CAs default to 10 years for the CA,
+  365 days for certificates (was 3650, over Apple's 825-day limit for TLS server
+  certificates) and 30 days for the CRL.
 - **EC keys, by default.** New certificates and CSRs get an EC P-256 key and a new CA an
   EC P-384 key; RSA 2048 and 4096 stay available from the new **Key Type** field (and
   `--key` on `opca ca init`, `cert create` and `csr create`). Apple developer CSRs default
@@ -42,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Initialising a CA in the app always failed: opening the CA page on an empty vault
+  dropped the connection ("Not connected"), and the form had no Common Name to send. It
+  now has a required **Common Name** field.
 - A new CA got a 2048-bit RSA key rather than the intended 4096; it now gets the chosen
   key type (EC P-384 unless set).
 - Signing a CSR kept only its DNS SANs, silently dropping IP addresses. VPN client

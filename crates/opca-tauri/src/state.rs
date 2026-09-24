@@ -67,13 +67,13 @@ impl AppState {
     ///
     /// Returns a `MutexGuard<Connection>` so the caller holds the lock for the
     /// duration of the operation.  If `ca` is already populated the guard is
-    /// returned immediately; otherwise `Op` is consumed to retrieve the CA.
+    /// returned immediately; otherwise the CA is retrieved with a copy of `Op`,
+    /// which replaces it only on success so an empty vault stays connected.
     pub fn ensure_ca(&self) -> Result<MutexGuard<'_, Connection>, String> {
         let mut conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
 
         if conn.ca.is_none() {
-            let op = conn.op.take()
-                .ok_or("Not connected")?;
+            let op = conn.op.clone().ok_or("Not connected")?;
 
             info!("[tauri] loading CA from 1Password");
             let ca = CertificateAuthority::retrieve(op)
@@ -84,6 +84,7 @@ impl AppState {
                 })?;
             self.log_ok("retrieve_ca", Some("CA loaded from 1Password".to_string()));
             conn.ca = Some(ca);
+            conn.op = None;
         }
 
         Ok(conn)

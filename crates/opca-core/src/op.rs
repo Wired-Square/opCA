@@ -45,6 +45,7 @@ pub trait CommandRunner {
 }
 
 /// Default runner — shells out to the real `op` binary.
+#[derive(Clone)]
 pub struct ShellRunner;
 
 impl CommandRunner for ShellRunner {
@@ -238,6 +239,7 @@ pub enum StoreAction {
 // ------------------------------------------------------------------
 
 /// Thin wrapper that shells out to the `op` CLI binary.
+#[derive(Clone)]
 pub struct Op<R: CommandRunner = ShellRunner> {
     bin: String,
     pub vault: String,

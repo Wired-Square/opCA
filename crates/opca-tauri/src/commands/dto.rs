@@ -111,6 +111,12 @@ pub struct CaConfigDto {
     /// Init only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_algorithm: Option<KeyAlgorithm>,
+    /// Init only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cn: Option<String>,
+    /// Init only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_days: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------

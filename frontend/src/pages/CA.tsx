@@ -472,7 +472,8 @@ function InitTab() {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [form, setForm] = createSignal<Partial<CaConfig>>({
-    days: 3650,
+    ca_days: 3650,
+    days: 365,
     crl_days: 30,
     key_algorithm: defaultKeyAlgorithm("ca"),
   });
@@ -500,12 +501,15 @@ function InitTab() {
       </p>
       <div class="config-form">
         <div class="form-grid">
+          <FormField label="Common Name" value={form().cn} onChange={(v) => set("cn", v)} />
           <FormField label="Organisation" value={form().org} onChange={(v) => set("org", v)} />
           <FormField label="Organisational Unit" value={form().ou} onChange={(v) => set("ou", v)} />
           <FormField label="Email" value={form().email} onChange={(v) => set("email", v)} />
           <FormField label="City" value={form().city} onChange={(v) => set("city", v)} />
           <FormField label="State" value={form().state} onChange={(v) => set("state", v)} />
           <FormField label="Country" value={form().country} onChange={(v) => set("country", v)} />
+          <FormField label="CA Days" value={String(form().ca_days ?? "")}
+            onChange={(v) => set("ca_days", v ? parseInt(v) : null)} type="number" />
           <FormField label="Certificate Days" value={String(form().days ?? "")}
             onChange={(v) => set("days", v ? parseInt(v) : null)} type="number" />
           <FormField label="CRL Days" value={String(form().crl_days ?? "")}
@@ -523,7 +527,7 @@ function InitTab() {
         </Show>
 
         <div class="form-actions">
-          <button class="btn-primary" onClick={handleInit} disabled={saving()}>
+          <button class="btn-primary" onClick={handleInit} disabled={saving() || !form().cn?.trim()}>
             {saving() ? "Initialising…" : "Initialise CA"}
           </button>
         </div>
