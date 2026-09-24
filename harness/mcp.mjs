@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 const HANDOFF = new URL("../target/mcp.json", import.meta.url);
 const PROTOCOL_VERSION = "2025-03-26";
+const CALL_MS = 30000;
 
 // The server answers each POST as an SSE stream it never closes, so take the
 // first `data:` event and cancel.
@@ -32,14 +33,14 @@ export async function connect(handoff = process.env.OPCA_MCP_HANDOFF ?? HANDOFF)
   };
   let nextId = 1;
 
-  async function post(body) {
-    const response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+  async function post(body, ms = CALL_MS) {
+    const response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(ms) });
     if (!response.ok) throw new Error(`MCP ${body.method}: HTTP ${response.status} ${await response.text()}`);
     return response;
   }
 
-  async function rpc(method, params) {
-    const message = await firstMessage(await post({ jsonrpc: "2.0", id: nextId++, method, params }));
+  async function rpc(method, params, ms) {
+    const message = await firstMessage(await post({ jsonrpc: "2.0", id: nextId++, method, params }, ms));
     if (message.error) throw new Error(`MCP ${method}: ${message.error.message}`);
     return message;
   }
@@ -53,10 +54,10 @@ export async function connect(handoff = process.env.OPCA_MCP_HANDOFF ?? HANDOFF)
   const session = init.headers.get("mcp-session-id");
   await firstMessage(init);
   if (session) headers["mcp-session-id"] = session;
-  await fetch(url, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
+  await post({ jsonrpc: "2.0", method: "notifications/initialized" });
 
   async function call(name, args = {}) {
-    const { result } = await rpc("tools/call", { name, arguments: args });
+    const { result } = await rpc("tools/call", { name, arguments: args }, CALL_MS + (args.timeout_ms ?? 0));
     const text = result.content?.map((c) => c.text).join("") ?? "";
     if (result.isError) throw new Error(`${name}: ${text}`);
     return result.structuredContent ?? (text ? JSON.parse(text) : {});
