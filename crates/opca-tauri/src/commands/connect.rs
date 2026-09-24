@@ -5,7 +5,7 @@ use tauri::State;
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::{self, AccountInfo, Op, VaultInfo};
 
-use crate::state::AppState;
+use crate::state::{AppState, Connection};
 
 /// Vault state returned to the frontend.
 ///
@@ -65,8 +65,7 @@ pub async fn connect(
     // This single lock acquisition prevents the race where a stale CA
     // from a previous vault survives into the new session.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    conn.ca = None;
-    conn.op = Some(op);
+    *conn = Connection { op: Some(op), ..Connection::default() };
     state.forget_preloaded_key();
 
     state.log_ok("connect", Some(format!("Connected to vault '{}'", info.vault)));
@@ -87,8 +86,7 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     }
 
     // Drop both CA and Op atomically.
-    conn.ca = None;
-    conn.op = None;
+    *conn = Connection::default();
     state.forget_preloaded_key();
     Ok(())
 }

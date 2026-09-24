@@ -14,12 +14,14 @@ use crate::commands::dto::LogEntry;
 
 /// Connection state: holds the `Op` handle and, once loaded, the `CertificateAuthority`.
 ///
-/// Both fields are guarded by a single mutex on `AppState` so that
+/// All fields are guarded by a single mutex on `AppState` so that
 /// connect/disconnect transitions are atomic with respect to in-flight
 /// operations — preventing stale-vault races.
+#[derive(Default)]
 pub struct Connection {
     pub op: Option<Op>,
     pub ca: Option<CertificateAuthority<ShellRunner>>,
+    pub openvpn_templates_seeded: bool,
 }
 
 impl Connection {
@@ -176,7 +178,7 @@ impl AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            conn: Mutex::new(Connection { op: None, ca: None }),
+            conn: Mutex::new(Connection::default()),
             vault_lock: Mutex::new(VaultLock::new(None)),
             action_log: Mutex::new(Vec::new()),
             private_store_lock: Mutex::new(()),

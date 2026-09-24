@@ -14,7 +14,7 @@ use opca_core::services::backup::{decrypt_payload, encrypt_payload};
 use opca_core::services::vault::{BackupPayload, VaultBackup};
 
 use crate::commands::dto::{BackupInfoResult, BackupItemCount, RestoreResult};
-use crate::state::AppState;
+use crate::state::{AppState, Connection};
 
 /// Emit a progress message to the frontend.
 fn emit_progress(window: &Window, message: &str) {
@@ -183,8 +183,7 @@ pub async fn vault_restore(
 
     // Re-install the fresh Op into state so ensure_ca() works without reconnecting.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    conn.ca = None;
-    conn.op = Some(op);
+    *conn = Connection { op: Some(op), ..Connection::default() };
     state.forget_preloaded_key();
 
     state.log_ok(

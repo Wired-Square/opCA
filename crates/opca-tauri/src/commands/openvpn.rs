@@ -17,7 +17,7 @@ use crate::commands::dto::{
     OpenVpnProfileItem, OpenVpnServerParams, OpenVpnTemplateDetail, OpenVpnTemplateItem,
     ServerSetupRequest,
 };
-use crate::state::AppState;
+use crate::state::{AppState, Connection};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -361,7 +361,7 @@ pub async fn setup_openvpn_server(
 
     // Mirror the (possibly newly created) template into the DB so it shows up
     // in the picker without a manual refresh.
-    do_sync_openvpn_templates(&state)?;
+    do_sync_openvpn_templates(&state, &mut *state.ensure_ca()?)?;
 
     state.log_ok(
         "setup_openvpn",
@@ -374,9 +374,8 @@ pub async fn setup_openvpn_server(
 /// into the `openvpn_template` table, reconciling deletions, then persist the
 /// DB. Mirrors `do_sync_dkim_keys` — used once when the table is first found
 /// empty, and behind the Configuration tab's Refresh button.
-fn do_sync_openvpn_templates(state: &State<'_, AppState>) -> Result<usize, String> {
+fn do_sync_openvpn_templates(state: &AppState, conn: &mut Connection) -> Result<usize, String> {
     info!("[tauri] sync_openvpn_templates");
-    let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     let found = read_openvpn_templates(&ca.op)?;
@@ -411,13 +410,14 @@ fn do_sync_openvpn_templates(state: &State<'_, AppState>) -> Result<usize, Strin
         })?;
     }
 
+    conn.openvpn_templates_seeded = true;
     Ok(found.len())
 }
 
 /// Re-sync templates from 1Password (Configuration tab Refresh).
 #[tauri::command]
 pub async fn sync_openvpn_templates(state: State<'_, AppState>) -> Result<usize, String> {
-    let count = do_sync_openvpn_templates(&state)?;
+    let count = do_sync_openvpn_templates(&state, &mut *state.ensure_ca()?)?;
     state.log_ok(
         "sync_templates",
         Some(format!("Synced {count} OpenVPN template(s) from 1Password")),
@@ -425,24 +425,21 @@ pub async fn sync_openvpn_templates(state: State<'_, AppState>) -> Result<usize,
     Ok(count)
 }
 
-/// List templates from the local DB mirror (no `op` round-trip). On first call
-/// after the table is created, seeds it from 1Password so the dropdown is
-/// populated immediately — the lazy `op`-backed fetch was what left the picker
-/// empty on a deep-link.
+/// List templates from the local DB mirror (no `op` round-trip). An empty
+/// mirror is seeded from 1Password so the dropdown is populated immediately —
+/// the lazy `op`-backed fetch was what left the picker empty on a deep-link —
+/// but only once per connection, as a CA with no templates stays empty.
 #[tauri::command]
 pub async fn list_openvpn_templates(
     state: State<'_, AppState>,
 ) -> Result<Vec<OpenVpnTemplateItem>, String> {
-    let needs_sync = {
-        let conn = state.ensure_ca()?;
-        conn.db()?.count_openvpn_template().map_err(|e| e.to_string())? == 0
-    };
-
-    if needs_sync {
-        do_sync_openvpn_templates(&state)?;
+    let mut conn = state.ensure_ca()?;
+    if !conn.openvpn_templates_seeded
+        && conn.db()?.count_openvpn_template().map_err(|e| e.to_string())? == 0
+    {
+        do_sync_openvpn_templates(&state, &mut conn)?;
     }
 
-    let conn = state.ensure_ca()?;
     Ok(conn
         .db()?
         .query_all_openvpn_templates()
