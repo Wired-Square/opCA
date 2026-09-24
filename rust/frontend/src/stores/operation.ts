@@ -52,6 +52,7 @@ const operationLabels: Record<string, string> = {
   list_csrs: "Loading CSRs\u2026",
   get_csr_info: "Loading CSR\u2026",
   create_csr: "Creating CSR\u2026",
+  delete_csr: "Deleting CSR\u2026",
   sign_csr: "Signing CSR\u2026",
   import_csr_cert: "Importing CSR certificate\u2026",
   decode_csr: "Decoding CSR\u2026",

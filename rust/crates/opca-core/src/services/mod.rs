@@ -4,5 +4,6 @@ pub mod cert;
 pub mod command_queue;
 pub mod database;
 pub mod route53;
+pub mod san;
 pub mod storage;
 pub mod vault;

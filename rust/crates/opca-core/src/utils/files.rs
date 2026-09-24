@@ -9,7 +9,7 @@ use crate::error::OpcaError;
 #[derive(Debug, Clone)]
 pub struct BulkEntry {
     pub cn: String,
-    pub alt_dns_names: Option<Vec<String>>,
+    pub alt_names: Option<Vec<String>>,
 }
 
 /// Read a file as bytes with path expansion (`~` and env vars).
@@ -102,7 +102,7 @@ pub fn parse_bulk_file(path: impl AsRef<Path>) -> Result<Vec<BulkEntry>, OpcaErr
 
         let parts: Vec<&str> = line.split("--alt").collect();
         let cn = parts[0].trim().to_string();
-        let alt_dns_names = if parts.len() > 1 {
+        let alt_names = if parts.len() > 1 {
             let names: Vec<String> = parts[1..]
                 .iter()
                 .map(|p| p.trim().to_string())
@@ -117,7 +117,7 @@ pub fn parse_bulk_file(path: impl AsRef<Path>) -> Result<Vec<BulkEntry>, OpcaErr
             None
         };
 
-        entries.push(BulkEntry { cn, alt_dns_names });
+        entries.push(BulkEntry { cn, alt_names });
     }
 
     Ok(entries)
@@ -221,10 +221,10 @@ mod tests {
         assert_eq!(entries.len(), 2);
 
         assert_eq!(entries[0].cn, "server.example.com");
-        assert!(entries[0].alt_dns_names.is_none());
+        assert!(entries[0].alt_names.is_none());
 
         assert_eq!(entries[1].cn, "client.example.com");
-        let alts = entries[1].alt_dns_names.as_ref().unwrap();
+        let alts = entries[1].alt_names.as_ref().unwrap();
         assert_eq!(alts.len(), 2);
         assert_eq!(alts[0], "client1.example.com");
         assert_eq!(alts[1], "client2.example.com");

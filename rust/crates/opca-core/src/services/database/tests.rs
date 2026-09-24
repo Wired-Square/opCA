@@ -405,6 +405,33 @@ fn test_query_csr_by_id() {
 }
 
 #[test]
+fn delete_csr_removes_only_that_row() {
+    let db = test_db();
+    for cn in ["a.example.com", "b.example.com"] {
+        db.add_csr(&CsrRecord { cn: Some(cn.to_string()), ..Default::default() }).unwrap();
+    }
+    assert!(db.delete_csr(1).unwrap());
+    assert!(!db.delete_csr(1).unwrap());
+    let left: Vec<_> = db.query_all_csrs(None).unwrap().into_iter().filter_map(|r| r.cn).collect();
+    assert_eq!(left, ["b.example.com"]);
+}
+
+#[test]
+fn only_old_pending_csrs_are_stale() {
+    use crate::utils::datetime::{parse_datetime, DateTimeFormat};
+    let now = parse_datetime("12:00 01 Mar 2026", DateTimeFormat::Compact).unwrap();
+    let csr = |status: &str, created: &str| CsrRecord {
+        status: Some(status.to_string()),
+        created_date: Some(created.to_string()),
+        ..Default::default()
+    };
+    assert!(csr("Pending", "12:00 01 Jan 2026").is_stale(now));
+    assert!(!csr("Pending", "12:00 20 Feb 2026").is_stale(now));
+    assert!(!csr("Complete", "12:00 01 Jan 2026").is_stale(now));
+    assert!(!csr("Pending", "20250101000000Z").is_stale(now));
+}
+
+#[test]
 fn test_update_csr() {
     let db = test_db();
     let csr = CsrRecord {

@@ -30,12 +30,6 @@
   gap: 12px;
 }
 
-.form-hint {
-  margin: 6px 0 0 0;
-  font-size: 0.8125rem;
-  color: var(--text-secondary);
-}
-
 .server-params {
   margin-bottom: 16px;
 }

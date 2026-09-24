@@ -275,6 +275,7 @@ impl CertificateAuthorityDB {
             Ok(CaConfig {
                 cn: None,
                 ca_days: None,
+                key_algorithm: None,
                 next_serial: next_serial
                     .as_deref()
                     .and_then(|s| s.trim().parse::<i64>().ok()),
@@ -896,6 +897,11 @@ impl CertificateAuthorityDB {
             values.iter().map(|v| v.as_ref()).collect();
         let rows = self.conn.execute(&sql, param_refs.as_slice())?;
 
+        Ok(rows > 0)
+    }
+
+    pub fn delete_csr(&self, id: i64) -> Result<bool, OpcaError> {
+        let rows = self.conn.execute("DELETE FROM csr WHERE id = ?1", [id])?;
         Ok(rows > 0)
     }
 

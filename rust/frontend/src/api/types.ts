@@ -91,6 +91,8 @@ export interface CaConfig {
   /** AWS region for s3:// stores and Route53. Shared CA config — the AWS
    * credential itself is per-user (see `api/aws.ts`). */
   ca_aws_region: string | null;
+  /** Init only. */
+  key_algorithm?: KeyAlgorithm;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,11 +117,27 @@ export interface AwsCredentialSelection {
 // ---------------------------------------------------------------------------
 
 export const CERT_TYPES = [
-  { value: "device", label: "Device" },
   { value: "webserver", label: "Web Server" },
+  { value: "device", label: "Device" },
   { value: "vpnclient", label: "VPN Client" },
   { value: "vpnserver", label: "VPN Server" },
 ] as const;
+
+export const KEY_ALGORITHMS = [
+  { value: "ec-p256", label: "EC P-256" },
+  { value: "ec-p384", label: "EC P-384" },
+  { value: "rsa-2048", label: "RSA 2048" },
+  { value: "rsa-4096", label: "RSA 4096" },
+] as const;
+
+export type KeyAlgorithm = (typeof KEY_ALGORITHMS)[number]["value"];
+
+/** Mirrors `CertType::default_key_algorithm`: Apple only accepts RSA 2048 CSRs. */
+export function defaultKeyAlgorithm(certType: string): KeyAlgorithm {
+  if (certType === "ca") return "ec-p384";
+  if (certType === "appledev") return "rsa-2048";
+  return "ec-p256";
+}
 
 export interface CertListItem {
   serial: string | null;
@@ -228,8 +246,8 @@ export interface ExternalCertDetail {
 export interface CreateCertRequest {
   cn: string;
   cert_type: string;
-  alt_dns_names?: string[];
-  key_size?: number;
+  alt_names?: string[];
+  key_algorithm?: KeyAlgorithm;
 }
 
 export interface ImportCertRequest {
@@ -251,7 +269,7 @@ export interface InspectCertificateResult {
   serial: string | null;
   not_before: string | null;
   not_after: string | null;
-  alt_dns_names: string[];
+  alt_names: string[];
   key_type: string;
   key_size: number;
   signature_algorithm: string;
@@ -273,12 +291,14 @@ export interface CsrListItem {
   subject: string | null;
   status: string | null;
   created_date: string | null;
+  /** Pending for longer than the backend's `CSR_STALE_DAYS`. */
+  stale: boolean;
 }
 
 export interface DecodeCsrResult {
   cn: string | null;
   subject: string;
-  alt_dns_names: string[];
+  alt_names: string[];
 }
 
 export interface CreateCsrRequest {
@@ -286,8 +306,8 @@ export interface CreateCsrRequest {
   csr_type: string;
   email?: string;
   country?: string;
-  key_size?: number;
-  alt_dns_names?: string[];
+  key_algorithm?: KeyAlgorithm;
+  alt_names?: string[];
 }
 
 export interface CreateCsrResult {
@@ -319,7 +339,7 @@ export interface GenerateCsrFromCertRequest {
 export interface InspectCsrResult {
   cn: string | null;
   subject: string;
-  alt_dns_names: string[];
+  alt_names: string[];
   key_type: string;
   key_size: number;
   signature_algorithm: string;

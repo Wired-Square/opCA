@@ -11,11 +11,11 @@ import {
 } from "../api/dkim";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import { confirmPrivateKeyCopy } from "../utils/confirmPrivateKey";
 import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import PageError from "../components/PageError";
+import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import type { DkimKeyDetail, DkimVerifyResult } from "../api/types";
 import "../styles/pages/cert-info.css";
 import "../styles/pages/dkim.css";
@@ -39,7 +39,7 @@ export default function DkimKeyDetailPage() {
   const [verifyMismatch, setVerifyMismatch] = createSignal<{ expected: string; found: string } | null>(null);
 
   const [chunked, setChunked] = createSignal(false);
-  const [exportingKey, setExportingKey] = createSignal(false);
+  const [showKeyCopy, setShowKeyCopy] = createSignal(false);
 
   const [copiedSelector, markSelectorCopied] = createCopiedSignal();
   const [copiedPublicKey, markPublicKeyCopied] = createCopiedSignal();
@@ -86,27 +86,11 @@ export default function DkimKeyDetailPage() {
     void recordDkimCopy(d.domain, d.selector, "dns_record");
   }
 
-  async function copyPrivateKey() {
-    const d = detail();
-    if (!d) return;
-    const label = `${d.selector}._domainkey.${d.domain}`;
-    if (!(await confirmPrivateKeyCopy(label))) return;
-
-    setError(null);
-    setExportingKey(true);
-    let key = "";
-    try {
-      key = await getDkimPrivateKey(d.domain, d.selector);
-      await writeClipboard(key);
-      markKeyCopied();
-      // No recordDkimCopy() call here: get_dkim_private_key already audits
-      // server-side via state.log_ok.
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      key = "";
-      setExportingKey(false);
-    }
+  async function copyPrivateKey(passphrase?: string) {
+    const d = detail()!;
+    // No recordDkimCopy() here: get_dkim_private_key audits server-side.
+    await writeClipboard(await getDkimPrivateKey(d.domain, d.selector, passphrase));
+    markKeyCopied();
   }
 
   async function handleVerify() {
@@ -246,8 +230,7 @@ export default function DkimKeyDetailPage() {
                     <Availability
                       label="Private Key"
                       available={d().has_private_key}
-                      onCopy={copyPrivateKey}
-                      busy={exportingKey()}
+                      onCopy={() => { setShowKeyCopy(true); }}
                       copied={copiedKey()}
                     />
                     <Availability
@@ -289,6 +272,13 @@ export default function DkimKeyDetailPage() {
               </Show>
 
               <PageError message={error()} class="mt-3" />
+
+              <CopyPrivateKeyDialog
+                open={showKeyCopy()}
+                label={`${d().selector}._domainkey.${d().domain}`}
+                onClose={() => setShowKeyCopy(false)}
+                onCopy={copyPrivateKey}
+              />
 
               <Show when={success()}>
                 <p class="page-success mt-3">{success()}</p>

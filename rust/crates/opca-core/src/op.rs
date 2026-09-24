@@ -697,9 +697,9 @@ pub fn check_cli_available() -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Run a read-only `op` command without an existing `Op` instance and parse its
-/// JSON — for callers that have no vault to scope to, such as the connect
-/// screen's pickers and the settings account resolver.
+/// Run an `op` command without an existing `Op` instance and parse its JSON —
+/// for callers that have no vault to scope to, such as the connect screen's
+/// pickers and the settings account resolver.
 fn op_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<T, OpcaError> {
     let bin = check_cli_available().ok_or(OpcaError::CliNotFound)?;
 
@@ -716,6 +716,16 @@ fn op_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<T, OpcaError
 /// Run `op vault list`, optionally against a specific account.
 pub fn list_vaults_standalone(account: Option<&str>) -> Result<Vec<VaultInfo>, OpcaError> {
     let mut args = vec!["vault", "list", "--format=json"];
+    if let Some(acct) = account {
+        args.push("--account");
+        args.push(acct);
+    }
+    op_json(&args)
+}
+
+/// Run `op vault create`, optionally against a specific account.
+pub fn create_vault_standalone(name: &str, account: Option<&str>) -> Result<VaultInfo, OpcaError> {
+    let mut args = vec!["vault", "create", name, "--format=json"];
     if let Some(acct) = account {
         args.push("--account");
         args.push(acct);

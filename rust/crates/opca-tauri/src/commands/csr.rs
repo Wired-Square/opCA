@@ -9,6 +9,7 @@ use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::StoreAction;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{CertLookup, CsrLookup, CsrRecord};
+use opca_core::services::san;
 use opca_core::utils::datetime::{now_utc_str, DateTimeFormat};
 
 use crate::commands::dto::{
@@ -31,6 +32,7 @@ fn record_to_list_item(r: &CsrRecord) -> CsrListItem {
         subject: r.subject.clone(),
         status: r.status.clone(),
         created_date: r.created_date.clone(),
+        stale: r.is_stale(chrono::Utc::now()),
     }
 }
 
@@ -87,33 +89,14 @@ fn cert_issuer_subject(cert: &X509) -> String {
         .join(", ")
 }
 
-/// Extract Subject Alternative Names (DNS entries) from a CSR.
+/// The CSR's SANs, minus the CN (which the CA adds back at signing).
 fn csr_sans(csr: &X509Req) -> Vec<String> {
-    let csr_text = csr
-        .to_text()
-        .map(|v| String::from_utf8_lossy(&v).to_string())
-        .unwrap_or_default();
-    extract_dns_sans_from_text(&csr_text, csr_cn(csr).as_deref())
-}
-
-/// Pull DNS SAN entries out of an OpenSSL `-text` style dump. The dump format
-/// is shared between certificates and CSRs, so this helper serves both.
-fn extract_dns_sans_from_text(text: &str, cn: Option<&str>) -> Vec<String> {
-    let mut sans = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.contains("DNS:") && !trimmed.starts_with("X509v3") {
-            for part in trimmed.split(',') {
-                let part = part.trim();
-                if let Some(dns) = part.strip_prefix("DNS:") {
-                    if cn != Some(dns) && !sans.contains(&dns.to_string()) {
-                        sans.push(dns.to_string());
-                    }
-                }
-            }
-        }
-    }
-    sans
+    let cn = csr_cn(csr);
+    san::of_csr(csr)
+        .iter()
+        .map(ToString::to_string)
+        .filter(|name| cn.as_ref() != Some(name))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +111,7 @@ pub async fn decode_csr(csr_pem: String) -> Result<DecodeCsrResult, String> {
     Ok(DecodeCsrResult {
         cn: csr_cn(&csr),
         subject: csr_subject_string(&csr),
-        alt_dns_names: csr_sans(&csr),
+        alt_names: csr_sans(&csr),
     })
 }
 
@@ -150,6 +133,22 @@ pub async fn list_csrs(
         .map_err(|e| e.to_string())?;
 
     Ok(records.iter().map(record_to_list_item).collect())
+}
+
+#[tauri::command]
+pub async fn delete_csr(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    info!("[tauri] delete_csr: id={id}");
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let record = ca.delete_csr(id).map_err(|e| {
+        state.log_err("delete_csr", Some(e.to_string()));
+        e.to_string()
+    })?;
+    state.log_ok(
+        "delete_csr",
+        Some(format!("Deleted CSR '{}'", record.cn.unwrap_or_default())),
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -208,14 +207,14 @@ pub async fn create_csr(
 
     let bundle_config = CertBundleConfig {
         cn: Some(request.cn.clone()),
-        key_size: request.key_size,
+        key_algorithm: request.key_algorithm,
         org: ca_config.org,
         ou: ca_config.ou,
         email: request.email.clone().or(ca_config.email),
         city: ca_config.city,
         state: ca_config.state,
         country,
-        alt_dns_names: request.alt_dns_names.clone(),
+        alt_names: request.alt_names.clone(),
         next_serial: ca_config.next_serial,
         ca_days: ca_config.days,
     };
@@ -564,13 +563,10 @@ pub async fn inspect_csr(csr_pem: String) -> Result<InspectCsrResult, String> {
 
     let signature_algorithm = signature_algorithm_from_text(&text_dump);
 
-    let cn = csr_cn(&csr);
-    let alt_dns_names = extract_dns_sans_from_text(&text_dump, cn.as_deref());
-
     Ok(InspectCsrResult {
-        cn,
+        cn: csr_cn(&csr),
+        alt_names: csr_sans(&csr),
         subject: x509_name_to_rdn_string(csr.subject_name()),
-        alt_dns_names,
         key_type,
         key_size,
         signature_algorithm,
@@ -613,7 +609,7 @@ pub async fn generate_csr_from_cert(
         .map_err(|e| e.to_string())?
         .ok_or("External certificate item not found in 1Password")?;
 
-    bundle.regenerate_key_and_csr().map_err(|e| {
+    bundle.regenerate_key_and_csr(None).map_err(|e| {
         state.log_err("generate_csr_from_cert", Some(e.to_string()));
         e.to_string()
     })?;

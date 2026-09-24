@@ -3,6 +3,12 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use chrono::{DateTime, Duration, Utc};
+
+use crate::constants::CSR_STALE_DAYS;
+use crate::services::cert::KeyAlgorithm;
+use crate::utils::datetime::{self, DateTimeFormat};
+
 /// Certificate status values stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CertStatus {
@@ -126,6 +132,18 @@ pub struct CsrRecord {
     pub csr_pem: Option<String>,
 }
 
+impl CsrRecord {
+    /// Pending for longer than `CSR_STALE_DAYS`. An unparseable date is never stale.
+    pub fn is_stale(&self, now: DateTime<Utc>) -> bool {
+        self.status.as_deref() == Some("Pending")
+            && self
+                .created_date
+                .as_deref()
+                .and_then(|d| datetime::parse_datetime(d, DateTimeFormat::Compact).ok())
+                .is_some_and(|created| now - created > Duration::days(CSR_STALE_DAYS))
+    }
+}
+
 /// CA configuration (singleton row in `config` table).
 ///
 /// Serial fields are stored as `TEXT` in the database but exposed as `i64`
@@ -138,6 +156,9 @@ pub struct CaConfig {
     /// CA certificate validity in days — used only during init, not persisted.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ca_days: Option<i64>,
+    /// CA key algorithm — used only during init, not persisted.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub key_algorithm: Option<KeyAlgorithm>,
     pub next_serial: Option<i64>,
     pub next_crl_serial: Option<i64>,
     pub org: Option<String>,

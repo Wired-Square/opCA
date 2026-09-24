@@ -3785,6 +3785,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tokio",
  "wiredai-mcp",
+ "zeroize",
 ]
 
 [[package]]

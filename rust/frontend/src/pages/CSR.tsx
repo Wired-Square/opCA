@@ -13,7 +13,10 @@ import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
 import PageError from "../components/PageError";
-import { CERT_TYPES } from "../api/types";
+import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
+import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
+import DeleteCsrDialog from "../components/DeleteCsrDialog";
+import SanInput from "../components/SanInput";
 import type {
   CsrListItem,
   CreateCsrResult,
@@ -36,6 +39,7 @@ export default function CSR() {
   const [csrs, { refetch }] = createResource<CsrListItem[]>(() => listCsrs());
   const [search, setSearch] = createSignal("");
   const [selected, setSelected] = createSignal<CsrListItem | null>(null);
+  const [deleting, setDeleting] = createSignal<CsrListItem | null>(null);
   const [detail, setDetail] = createSignal<CreateCsrResult | null>(null);
   const [loadingDetail, setLoadingDetail] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -44,11 +48,11 @@ export default function CSR() {
   // Create form
   const [cn, setCn] = createSignal("");
   const [csrType, setCsrType] = createSignal("webserver");
+  const [keyAlgorithm, setKeyAlgorithm] = createSignal<KeyAlgorithm>(defaultKeyAlgorithm("webserver"));
   const [email, setEmail] = createSignal("");
   const [creating, setCreating] = createSignal(false);
   const [createError, setCreateError] = createSignal<string | null>(null);
   const [createResult, setCreateResult] = createSignal<CreateCsrResult | null>(null);
-  const [sanInput, setSanInput] = createSignal("");
   const [sans, setSans] = createSignal<string[]>([]);
 
   // Sign form
@@ -176,18 +180,6 @@ export default function CSR() {
     }
   }
 
-  function addSan() {
-    const value = sanInput().trim();
-    if (value && !sans().includes(value)) {
-      setSans([...sans(), value]);
-      setSanInput("");
-    }
-  }
-
-  function removeSan(index: number) {
-    setSans(sans().filter((_, i) => i !== index));
-  }
-
   async function handleCreate(e: Event) {
     e.preventDefault();
     const c = cn().trim();
@@ -205,7 +197,8 @@ export default function CSR() {
         cn: c,
         csr_type: csrType(),
         email: email().trim() || undefined,
-        alt_dns_names: sans().length > 0 ? sans() : undefined,
+        key_algorithm: keyAlgorithm(),
+        alt_names: sans().length > 0 ? sans() : undefined,
       });
       setCreateResult(result);
       setCn("");
@@ -234,7 +227,7 @@ export default function CSR() {
       const result = await decodeCsr(pem);
       setDecoded(result);
       setSignCn(result.cn ?? "");
-      setSignSans([...result.alt_dns_names]);
+      setSignSans([...result.alt_names]);
     } catch (err) {
       setSignError(String(err));
     } finally {
@@ -379,6 +372,9 @@ export default function CSR() {
                           <span class={statusClass(csr.status)}>
                             {csr.status ?? "\u2014"}
                           </span>
+                          <Show when={csr.stale}>
+                            <span class="status-badge status-stale" title="Pending for over 30 days">stale</span>
+                          </Show>
                         </td>
                         <td class="mono">{csr.created_date ?? "\u2014"}</td>
                       </tr>
@@ -403,6 +399,9 @@ export default function CSR() {
                     {importOpen() ? "Cancel Import" : "Import Signed Cert"}
                   </button>
                 </Show>
+                <button class="btn-danger" onClick={() => setDeleting(sel())}>
+                  Delete
+                </button>
               </div>
             )}
           </Show>
@@ -507,12 +506,20 @@ export default function CSR() {
 
             <div class="form-group">
               <label class="form-label">Certificate Type</label>
-              <select value={csrType()} onChange={(e) => setCsrType(e.currentTarget.value)}>
+              <select
+                value={csrType()}
+                onChange={(e) => {
+                  setCsrType(e.currentTarget.value);
+                  setKeyAlgorithm(defaultKeyAlgorithm(e.currentTarget.value));
+                }}
+              >
                 <For each={CSR_TYPES}>
                   {(t) => <option value={t.value}>{t.label}</option>}
                 </For>
               </select>
             </div>
+
+            <KeyAlgorithmSelect value={keyAlgorithm()} onChange={setKeyAlgorithm} />
 
             <div class="form-group">
               <label class="form-label">Email (optional)</label>
@@ -528,39 +535,7 @@ export default function CSR() {
               />
             </div>
 
-            <div class="form-group">
-              <label class="form-label">Subject Alternative Names</label>
-              <div class="san-input-row">
-                <input
-                  type="text"
-                  placeholder="e.g. alt.example.com"
-                  value={sanInput()}
-                  onInput={(e) => setSanInput(e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); addSan(); }
-                  }}
-                  autocomplete="off"
-                  autocorrect="off"
-                  autocapitalize="off"
-                  spellcheck={false}
-                />
-                <button type="button" class="btn-ghost" onClick={addSan}>Add</button>
-              </div>
-              <Show when={sans().length > 0}>
-                <div class="san-list">
-                  <For each={sans()}>
-                    {(san, i) => (
-                      <span class="san-tag">
-                        {san}
-                        <button type="button" class="san-remove" onClick={() => removeSan(i())}>
-                          &times;
-                        </button>
-                      </span>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
+            <SanInput values={sans()} onChange={setSans} />
 
             <PageError message={createError()} />
 
@@ -784,11 +759,11 @@ export default function CSR() {
                 </div>
                 <div class="form-group">
                   <label class="form-label">Subject Alternative Names</label>
-                  <Show when={r().alt_dns_names.length > 0} fallback={
+                  <Show when={r().alt_names.length > 0} fallback={
                     <p class="text-muted text-sm">No alternative names.</p>
                   }>
                     <div class="san-list">
-                      <For each={r().alt_dns_names}>
+                      <For each={r().alt_names}>
                         {(san) => <span class="san-tag">{san}</span>}
                       </For>
                     </div>
@@ -813,6 +788,17 @@ export default function CSR() {
         </div>
       </Show>
 
+
+      <DeleteCsrDialog
+        csr={deleting()}
+        onClose={() => setDeleting(null)}
+        onDone={() => {
+          setSelected(null);
+          setDetail(null);
+          setImportOpen(false);
+          refetch();
+        }}
+      />
     </div>
   );
 }

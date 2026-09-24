@@ -22,6 +22,10 @@ export async function listCsrs(
   return tauriInvoke<CsrListItem[]>("list_csrs", { status: status ?? null });
 }
 
+export async function deleteCsr(id: number): Promise<void> {
+  return withLock("delete_csr", () => tauriInvoke<void>("delete_csr", { id }));
+}
+
 export async function getCsrInfo(cn: string): Promise<CreateCsrResult> {
   return tauriInvoke<CreateCsrResult>("get_csr_info", { cn });
 }

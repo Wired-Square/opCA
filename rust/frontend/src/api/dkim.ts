@@ -38,8 +38,9 @@ export async function backfillDkim(
 export async function getDkimPrivateKey(
   domain: string,
   selector: string,
+  passphrase?: string,
 ): Promise<string> {
-  return tauriInvoke<string>("get_dkim_private_key", { domain, selector });
+  return tauriInvoke<string>("get_dkim_private_key", { domain, selector, passphrase: passphrase ?? null });
 }
 
 /** Audit-log a clipboard copy of a non-secret DKIM artefact. */

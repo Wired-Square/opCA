@@ -66,6 +66,16 @@ Organised by concern under [src/](../rust/crates/opca-core/src):
     layer calls into.
   - [cert.rs](../rust/crates/opca-core/src/services/cert.rs) —
     per-certificate bundle operations (build, sign, import/export, inspect).
+    `KeyAlgorithm` (`ec-p256`, `ec-p384`, `rsa-2048`, `rsa-4096`) picks the key;
+    `CertType::default_key_algorithm` gives EC P-256 for leaves, EC P-384 for the
+    CA and RSA 2048 for Apple developer CSRs, and a rekey keeps the existing
+    family unless given an algorithm (`rekey_cert`, `bulk_rekey_certs` and
+    `opca cert rekey --key` take one). `signing_digest` uses SHA-384 for P-384 keys, SHA-256 otherwise, and
+    `keyEncipherment` is only set on RSA leaves.
+  - [san.rs](../rust/crates/opca-core/src/services/san.rs) — Subject
+    Alternative Names: `SubjectAltName` (DNS, IP, email, URI) parses and
+    validates user input, and `of_certificate` / `of_csr` read them back from
+    the extension. The frontend's `utils/san.ts` mirrors its parsing rules.
   - [database/](../rust/crates/opca-core/src/services/database) — in-memory
     SQLite (`rusqlite`) holding the CA config and every issued/external
     certificate, CSR, CRL metadata record, and OpenVPN template/profile. The
@@ -109,7 +119,7 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 | OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key, server config, and the named templates (canonical store; mirrored into the `openvpn_template` table for fast reads) |
 | Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type) |
 | External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
-| CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests |
+| CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests, with their private key. Deleting a pending CSR (`CertificateAuthority::delete_csr`) archives it |
 | VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial, `generated`) is also written to the `openvpn_profile` table and persisted, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. A profile can be **registered without generating** (`generated = 0`, no document yet) and produced later via Regenerate; such rows surface as Needs Regen. Legacy profiles may still be titled `VPN_<cn>`. |
 | DKIM | `<selector>._domainkey.<domain>` | Secure Note | DKIM key pair and metadata |
 | Lock | `CA_Lock` | Secure Note | Advisory lock for concurrent-write safety |
@@ -307,6 +317,12 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
   - `fresh_cert_pems` — one-shot cache of a just-issued certificate's PEM
     (keyed by serial), so the detail page can show a freshly renewed/rekeyed
     cert without re-reading its bundle from 1Password.
+  - `preloaded_key` — the private key of the certificate open in a detail
+    page (one slot, zeroised, keyed by item title, never a CA's), filled by
+    the page's backfill so copying the key needs no second 1Password fetch.
+    Cleared when the page unmounts (`forget_preloaded_key`) and whenever the
+    CA is dropped (connect, disconnect, vault restore). Key exports take an
+    optional passphrase and return encrypted PKCS#8.
 - [commands/](../rust/crates/opca-tauri/src/commands) — one module per
   feature area (`ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
   `vault`, `lock`, `connect`, `dashboard`, `files`, `logs`, `update`). Each

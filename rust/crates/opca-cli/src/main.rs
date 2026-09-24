@@ -6,6 +6,7 @@ use clap::{Args, Parser, Subcommand};
 
 use opca_core::constants::{EXIT_FATAL, EXIT_OK, EXIT_VALIDATION_ERROR};
 use opca_core::error::OpcaError;
+use opca_core::services::cert::KeyAlgorithm;
 
 // ---------------------------------------------------------------------------
 // CLI definition
@@ -142,6 +143,10 @@ pub enum CaAction {
         /// URL where the CRL can be found
         #[arg(long)]
         crl_url: Option<String>,
+
+        /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default ec-p384)
+        #[arg(long)]
+        key: Option<KeyAlgorithm>,
     },
 
     /// Import a Certificate Authority from file
@@ -289,7 +294,7 @@ pub enum CertAction {
     },
 
     /// Rekey a x509 certificate (renew with a new private key)
-    Rekey(CertIdentifier),
+    Rekey(CertRekeyArgs),
 
     /// Renew a x509 certificate
     Renew(CertIdentifier),
@@ -319,6 +324,10 @@ pub struct CertCreateArgs {
     /// Alternate CN
     #[arg(long = "alt")]
     pub alt: Vec<String>,
+
+    /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default ec-p256)
+    #[arg(long)]
+    pub key: Option<KeyAlgorithm>,
 }
 
 #[derive(Args)]
@@ -369,6 +378,16 @@ pub struct CertIdentifier {
     /// Serial number of the certificate
     #[arg(short = 's', long, group = "cert_id")]
     pub serial: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CertRekeyArgs {
+    #[command(flatten)]
+    pub id: CertIdentifier,
+
+    /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default: keep the current one)
+    #[arg(long)]
+    pub key: Option<KeyAlgorithm>,
 }
 
 #[derive(Args)]
@@ -460,6 +479,17 @@ pub enum CsrAction {
         /// Country code (defaults to CA config if available)
         #[arg(long)]
         country: Option<String>,
+
+        /// Key algorithm: ec-p256, ec-p384, rsa-2048 or rsa-4096 (default rsa-2048 for appledev)
+        #[arg(long)]
+        key: Option<KeyAlgorithm>,
+    },
+
+    /// Delete a CSR, archiving its private key if it is still pending
+    Delete {
+        /// Common Name of the CSR
+        #[arg(short = 'n', long)]
+        cn: String,
     },
 
     /// Import a signed certificate into an existing CSR entry

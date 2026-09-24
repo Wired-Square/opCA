@@ -1,6 +1,6 @@
 import type { useNavigate } from "@solidjs/router";
 import { rekeyCert, renewCert } from "./certs";
-import type { CertListItem } from "./types";
+import type { CertListItem, KeyAlgorithm } from "./types";
 import type { KebabItem } from "../components/KebabMenu";
 
 /** How a certificate is named in confirmations and result messages. Shared so
@@ -46,8 +46,12 @@ export function certKebabItems(
 /** Rekey `serial` and navigate to the new cert, surfacing its new key + cert.
  * The backend persist (1Password + private store) already happened in
  * `rekey_cert`, so there's nothing more to sync here. */
-export async function rekeyAndGo(navigate: Navigate, serial: string): Promise<void> {
-  const result = await rekeyCert(serial);
+export async function rekeyAndGo(
+  navigate: Navigate,
+  serial: string,
+  keyAlgorithm: KeyAlgorithm | null,
+): Promise<void> {
+  const result = await rekeyCert(serial, keyAlgorithm);
   navigate(`/certs/${result.serial}?freshFrom=${serial}&op=rekey`);
 }
 

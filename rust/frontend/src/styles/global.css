@@ -189,6 +189,38 @@ input::placeholder {
   color: var(--text-tertiary);
 }
 
+input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px var(--error-tint);
+}
+
+.form-hint {
+  margin: 6px 0 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.form-hint.is-valid   { color: var(--success); }
+.form-hint.is-invalid { color: var(--error); }
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
 /* ── Utility ───────────────────────────────────────────────────────── */
 .text-accent  { color: var(--accent); }
 .text-success { color: var(--success); }
@@ -424,7 +456,8 @@ input::placeholder {
 }
 
 .status-ignored,
-.status-superseded {
+.status-superseded,
+.status-stale {
   color: var(--text-secondary);
   background: var(--neutral-tint);
   border: 1px solid var(--neutral-edge);
@@ -523,6 +556,14 @@ input::placeholder {
   border-radius: var(--radius-md);
   font-size: 0.8125rem;
   color: var(--text-primary);
+}
+
+.san-kind {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .san-remove {

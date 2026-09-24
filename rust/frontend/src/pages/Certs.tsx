@@ -15,6 +15,7 @@ import CertStatusBadge from "../components/CertStatusBadge";
 import KebabMenu, { type KebabItem } from "../components/KebabMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
+import RekeyDialog from "../components/RekeyDialog";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
@@ -22,7 +23,7 @@ import PageError from "../components/PageError";
 import { createSelection } from "../utils/selection";
 import { createActionResult } from "../utils/actionResult";
 import { createAction, type ActionMessages } from "../utils/action";
-import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult } from "../api/types";
+import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult, KeyAlgorithm } from "../api/types";
 import "../styles/pages/certs.css";
 
 type BulkAction = "rekey" | "renew" | "revoke" | "ignore";
@@ -122,11 +123,12 @@ export default function Certs() {
   const [generateError, setGenerateError] = createSignal<string | null>(null);
 
   // Per-row certificate actions (kebab menu). Rekey/Renew navigate away to the
-  // new cert; Revoke/Ignore use shared dialogs; Unignore acts immediately.
+  // new cert; Rekey/Revoke/Ignore use shared dialogs; Unignore acts immediately.
   const outcome = createActionResult();
   const action = createAction(outcome);
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
+  const [rekeyTarget, setRekeyTarget] = createSignal<CertListItem | null>(null);
 
   // --- Bulk multi-select (Local tab) ---------------------------------------
   // Selection is keyed by serial and auto-clears on every list reload (old
@@ -151,12 +153,12 @@ export default function Certs() {
         !c.ignored_at && !c.superseded_by,
     );
 
-  async function runBulk(reason: string) {
+  async function runBulk(reason: string, keyAlgorithm: KeyAlgorithm | null) {
     const serials = selectedSerials();
     if (serials.length === 0) return;
     let results: BulkCertResult[];
     switch (bulkAction()) {
-      case "rekey": results = await bulkRekeyCerts(serials); break;
+      case "rekey": results = await bulkRekeyCerts(serials, keyAlgorithm); break;
       case "renew": results = await bulkRenewCerts(serials); break;
       case "revoke": results = await bulkRevokeCerts(serials); break;
       case "ignore": results = await bulkIgnoreCerts(serials, reason); break;
@@ -171,7 +173,6 @@ export default function Certs() {
   const bulkDialogConfig = () => {
     const n = selectedSerials().length;
     switch (bulkAction()) {
-      case "rekey": return { title: "Rekey Certificates", message: `Rekey ${n} certificate(s)? Each gets a fresh key and a new serial.`, confirmLabel: "Rekey", actingLabel: "Rekeying…", danger: false, requireReason: false };
       case "renew": return { title: "Renew Certificates", message: `Renew ${n} certificate(s)? Each is reissued at a new serial.`, confirmLabel: "Renew", actingLabel: "Renewing…", danger: false, requireReason: false };
       case "revoke": return { title: "Revoke Certificates", message: `Revoke ${n} certificate(s)? This cannot be undone.`, confirmLabel: "Revoke", actingLabel: "Revoking…", danger: true, requireReason: false };
       case "ignore": return { title: "Ignore Certificates", message: `Stop counting ${n} certificate(s) toward expiry alerts. Provide a reason for the audit trail.`, confirmLabel: "Confirm Ignore", actingLabel: "Ignoring…", danger: false, requireReason: true };
@@ -198,13 +199,13 @@ export default function Certs() {
     const serial = cert.serial;
     const label = certLabel(cert);
     // Wrap a row action: no-op without a serial, otherwise run it through the
-    // list-level banner. Rekey and renew report no success — they navigate away
+    // list-level banner. Renew reports no success — it navigates away
     // to a page that says so via its fresh-banner.
     const act = (messages: ActionMessages<void>, fn: () => Promise<void>) => () => {
       if (serial) void action.run(messages, fn);
     };
     return certKebabItems(cert, {
-      onRekey: act({ failure: "Rekey failed" }, async () => { await backfillTypeIfMissing(cert); await rekeyAndGo(navigate, serial!); }),
+      onRekey: () => setRekeyTarget(cert),
       onRenew: act({ failure: "Renew failed" }, async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
       onRevoke: () => setRevokeTarget(cert),
       onIgnore: () => setIgnoreTarget(cert),
@@ -578,11 +579,11 @@ export default function Certs() {
 
               <div class="form-group">
                 <label class="form-label">Subject Alternative Names</label>
-                <Show when={r().alt_dns_names.length > 0} fallback={
+                <Show when={r().alt_names.length > 0} fallback={
                   <p class="text-muted text-sm">No alternative names.</p>
                 }>
                   <div class="san-list">
-                    <For each={r().alt_dns_names}>
+                    <For each={r().alt_names}>
                       {(san) => <span class="san-tag">{san}</span>}
                     </For>
                   </div>
@@ -623,8 +624,29 @@ export default function Certs() {
         onDone={() => { const c = revokeTarget(); if (c) { outcome.report(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
+      <RekeyDialog
+        open={!!rekeyTarget()}
+        title="Rekey Certificate"
+        message={<>Rekey <span class="mono">{certLabel(rekeyTarget() ?? {})}</span>? It gets a fresh key and a new serial.</>}
+        onClose={() => setRekeyTarget(null)}
+        onConfirm={async (keyAlgorithm) => {
+          const cert = rekeyTarget();
+          if (!cert?.serial) return;
+          await backfillTypeIfMissing(cert);
+          await rekeyAndGo(navigate, cert.serial, keyAlgorithm);
+        }}
+      />
+
+      <RekeyDialog
+        open={bulkAction() === "rekey"}
+        title="Rekey Certificates"
+        message={`Rekey ${selectedSerials().length} certificate(s)? Each gets a fresh key and a new serial.`}
+        onClose={() => setBulkAction(null)}
+        onConfirm={(keyAlgorithm) => runBulk("", keyAlgorithm)}
+      />
+
       <ConfirmDialog
-        open={!!bulkAction()}
+        open={!!bulkAction() && bulkAction() !== "rekey"}
         title={bulkDialogConfig().title}
         message={bulkDialogConfig().message}
         confirmLabel={bulkDialogConfig().confirmLabel}
@@ -632,7 +654,7 @@ export default function Certs() {
         danger={bulkDialogConfig().danger}
         requireReason={bulkDialogConfig().requireReason}
         onClose={() => setBulkAction(null)}
-        onConfirm={runBulk}
+        onConfirm={(reason) => runBulk(reason, null)}
       />
 
     </div>
