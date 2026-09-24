@@ -1,15 +1,16 @@
-import { createSignal, Show, For, onMount, type JSX } from "solid-js";
+import { createMemo, createResource, createSignal, Show, For, onMount, type JSX } from "solid-js";
 import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { listAccounts, accountValue, accountLabel } from "../api/accounts";
-import { createVault } from "../api/vaults";
-import type { AccountInfo } from "../api/types";
+import { createVault, listVaults } from "../api/vaults";
+import type { AccountInfo, VaultInfo } from "../api/types";
 import { setAppState, type VaultState } from "../stores/app";
 import { themeMode, toggleTheme } from "../stores/theme";
 import { availableUpdate, fetchUpdate } from "../stores/update";
 import Icon from "../components/Icon";
+import Spinner from "../components/Spinner";
 import Popover, { PopoverOption } from "../components/Popover";
 import "../styles/pages/connect.css";
 
@@ -116,9 +117,7 @@ function PickerField(props: {
             </button>
           )}
         </Show>
-        {/* Gated on `toggle` as well as `open`, so forgetting the last saved
-            login closes the menu instead of leaving an empty box behind. */}
-        <Show when={props.open && props.toggle}>
+        <Show when={props.open}>
           <Popover anchor={fieldEl} matchWidth role="listbox" onClose={props.onClose}>
             {props.children}
           </Popover>
@@ -161,6 +160,33 @@ export default function Connect() {
   const [opCli, setOpCli] = createSignal<OpCliStatus | null>(null);
   const [creating, setCreating] = createSignal(false);
 
+  // `op vault list` is slow and may prompt for sign-in, so each account's
+  // vaults are fetched when the dropdown first opens for it, then reused.
+  const vaultLists = new Map<string, Promise<VaultInfo[]>>();
+  function vaultsIn(acct: string) {
+    let listing = vaultLists.get(acct);
+    if (!listing) {
+      listing = listVaults(acct || null);
+      vaultLists.set(acct, listing);
+      listing.catch(() => vaultLists.delete(acct));
+    }
+    return listing;
+  }
+  const [listedAccount, setListedAccount] = createSignal<string>();
+  const [vaults, { refetch: retryVaults }] = createResource(listedAccount, vaultsIn);
+  const unsavedVaults = createMemo(() => {
+    if (vaults.state !== "ready") return [];
+    const acct = listedAccount() || null;
+    return vaults().filter((v) => !saved().some((l) => l.vault === v.name && l.account === acct));
+  });
+
+  function openVaults() {
+    const acct = account().trim();
+    if (acct === listedAccount() && vaults.error) retryVaults();
+    else setListedAccount(acct);
+    setOpenDropdown("vault");
+  }
+
   onMount(async () => {
     setSaved(loadSavedLogins());
     fetchUpdate();
@@ -175,8 +201,11 @@ export default function Connect() {
     setAccounts(configured);
   });
 
-  const toggle = (which: Dropdown) =>
-    setOpenDropdown((current) => (current === which ? null : which));
+  function toggle(which: Dropdown) {
+    if (openDropdown() === which) setOpenDropdown(null);
+    else if (which === "vault") openVaults();
+    else setOpenDropdown(which);
+  }
 
   function selectLogin(login: SavedLogin) {
     setVault(login.vault);
@@ -257,9 +286,9 @@ export default function Connect() {
             placeholder="e.g. Private CA"
             value={vault()}
             onInput={(v) => { setVault(v); setOpenDropdown(null); }}
-            onFocus={() => !creating() && saved().length > 0 && setOpenDropdown("vault")}
+            onFocus={() => !creating() && saved().length > 0 && openVaults()}
             autofocus
-            toggle={!creating() && saved().length > 0 ? { glyph: "↻", label: "Show saved vaults" } : undefined}
+            toggle={creating() ? undefined : { glyph: "▾", label: "Show vaults" }}
             open={openDropdown() === "vault"}
             onToggle={() => toggle("vault")}
             onClose={() => setOpenDropdown(null)}
@@ -283,6 +312,18 @@ export default function Connect() {
                 </DropdownItem>
               )}
             </For>
+            <For each={unsavedVaults()}>
+              {(v) => <DropdownItem primary={v.name} onSelect={() => { setVault(v.name); setOpenDropdown(null); }} />}
+            </For>
+            <Show when={vaults.loading}>
+              <div class="popover-note"><Spinner message="Loading vaults…" small /></div>
+            </Show>
+            <Show when={vaults.error}>
+              {(err) => <div class="popover-note popover-error">{errorMessage(err())}</div>}
+            </Show>
+            <Show when={vaults.state === "ready" && vaults().length === 0}>
+              <div class="popover-note">No vaults found</div>
+            </Show>
           </PickerField>
 
           <PickerField

@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   certificate leaves the list; a revoked serial stays on the CRL until it expires. A valid
   certificate must be revoked first, and the CA certificate cannot be deleted.
 - `opca ca init --create-vault` creates the vault first, refusing a name that is already taken.
+- The connect screen's vault field lists the chosen account's vaults alongside saved logins.
 
 ### Changed
 

@@ -429,11 +429,14 @@ A single-page SolidJS app. Key conventions:
   vaults are steered to CA initialisation; broken vaults to the dashboard
   with an error banner.
 - [pages/Connect.tsx](../frontend/src/pages/Connect.tsx) picks the vault
-  from previously-used logins (localStorage) and the account from
-  `list_accounts` — `op account list`, which reads local CLI config and so
-  works signed out. Both dropdowns run before there is a connection, alongside
-  `check_op_cli`; a failure just hides the picker. The account field takes the
-  sign-in address, falling back to that account's UUID when two configured
+  from previously-used logins (localStorage) or the account's vaults, and the
+  account from `list_accounts` — `op account list`, which reads local CLI
+  config and so works signed out. Both dropdowns run before there is a
+  connection, alongside `check_op_cli`; a failure just hides the account
+  picker. The vault list is `list_vaults` (`op vault list`, which needs a
+  sign-in), fetched when the dropdown opens and kept per account value, so
+  typing never lists and a failure retries on the next open. The account field
+  takes the sign-in address, falling back to that account's UUID when two configured
   accounts share an address (see `accountValue` in
   [api/accounts.ts](../frontend/src/api/accounts.ts)) — `op --account`
   cannot resolve a shared address. Which form it sends is purely an `op`
