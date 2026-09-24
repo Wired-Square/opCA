@@ -30,7 +30,7 @@
 }
 
 .log-entry:nth-child(odd) {
-  background: var(--bg-elevated);
+  background: var(--bg-stripe);
 }
 
 .log-entry.log-error {

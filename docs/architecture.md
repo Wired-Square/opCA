@@ -443,7 +443,9 @@ The CSP forbids static inline styles, so all styling lives in
 [styles/](../frontend/src/styles) and refers to tokens rather than
 literals. Colours that differ by theme are defined in
 [styles/theme.ts](../frontend/src/styles/theme.ts) (`darkTheme` /
-`lightTheme`), which the `theme` store writes onto `:root`. Everything that
+`lightTheme`), which the `theme` store writes onto `:root`, along with a
+`data-theme` attribute that sets `color-scheme` so native controls follow the
+app's theme rather than the OS appearance. Everything that
 does not vary by theme is a static `:root` variable in
 [styles/global.css](../frontend/src/styles/global.css): status tints and
 edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
