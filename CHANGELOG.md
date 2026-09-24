@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A CA with no private store failed every database sync with "Unsupported storage
+  scheme": an unset or cleared store read back as an empty store, not as unset. The same
+  applied to the public and backup stores.
 - The vault lock always recorded its holder as `unknown`, so "vault is locked by …"
   could not say who held it.
 - A missing CA or vault surfaced as a raw `op` error: current `op` says "isn't an item"

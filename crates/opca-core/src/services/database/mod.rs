@@ -257,6 +257,11 @@ impl CertificateAuthorityDB {
 // Config methods
 // ---------------------------------------------------------------------------
 
+/// `insert_config` stores an unset field as `""`, which must not read back as a configured store.
+fn non_blank(value: Option<String>) -> Option<String> {
+    value.filter(|v| !v.trim().is_empty())
+}
+
 impl CertificateAuthorityDB {
     /// Retrieve all CA configuration attributes.
     pub fn get_config(&self) -> Result<CaConfig, OpcaError> {
@@ -293,10 +298,10 @@ impl CertificateAuthorityDB {
                 days: row.get(10)?,
                 crl_days: row.get(11)?,
                 schema_version: row.get(12)?,
-                ca_public_store: row.get(13)?,
-                ca_private_store: row.get(14)?,
-                ca_backup_store: row.get(15)?,
-                ca_aws_region: row.get(16)?,
+                ca_public_store: non_blank(row.get(13)?),
+                ca_private_store: non_blank(row.get(14)?),
+                ca_backup_store: non_blank(row.get(15)?),
+                ca_aws_region: non_blank(row.get(16)?),
             })
         })?;
 

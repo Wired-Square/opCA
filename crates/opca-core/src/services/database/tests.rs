@@ -106,6 +106,30 @@ fn test_update_config() {
 }
 
 #[test]
+fn unset_and_cleared_stores_read_back_as_none() {
+    let db = test_db();
+    let config = db.get_config().unwrap();
+    assert_eq!(config.ca_public_store, None);
+    assert_eq!(config.ca_private_store, None);
+    assert_eq!(config.ca_backup_store, None);
+    assert_eq!(config.ca_aws_region, None);
+
+    db.update_config(&CaConfig {
+        ca_private_store: Some("s3://bucket".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(db.get_config().unwrap().ca_private_store.as_deref(), Some("s3://bucket"));
+
+    db.update_config(&CaConfig {
+        ca_private_store: Some(" ".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(db.get_config().unwrap().ca_private_store, None);
+}
+
+#[test]
 fn test_update_config_serial_conversion() {
     let db = test_db();
     db.update_config(&CaConfig {
