@@ -414,10 +414,11 @@ A single-page SolidJS app. Key conventions:
   [api/accounts.ts](../frontend/src/api/accounts.ts)) — `op --account`
   cannot resolve a shared address. Which form it sends is purely an `op`
   concern; `settings.rs` canonicalises them all (see AWS credentials above).
-  Its create mode calls the connectionless `create_new_vault` (core
-  `create_new_vault_standalone`), which refuses a name or ID already in
-  `op vault list` because `op` allows duplicate names, then connects and
-  lands on `/ca`, where the empty vault opens the Init tab.
+  Its create mode calls `create_vault` (core `create_vault_standalone`), which
+  needs no connection and refuses a name or ID already in `op vault list`
+  because `op` allows duplicate names, then connects and lands on `/ca`, where
+  the empty vault opens the Init tab. `VaultPicker` creates vaults the same
+  way, in the connected account.
 - [api/](../frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
   [api/tauri.ts](../frontend/src/api/tauri.ts). `tauriInvoke` normalises

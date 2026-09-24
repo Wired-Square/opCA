@@ -3,9 +3,9 @@ import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
 import { invoke } from "@tauri-apps/api/core";
 import Connect from "../pages/Connect";
 
-const createNewVault = vi.hoisted(() => vi.fn());
+const createVault = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
-vi.mock("../api/vaults", async (actual) => ({ ...(await actual<object>()), createNewVault }));
+vi.mock("../api/vaults", async (actual) => ({ ...(await actual<object>()), createVault }));
 vi.mock("../api/accounts", async (actual) => ({
   ...(await actual<object>()),
   listAccounts: vi.fn(async () => []),
@@ -34,15 +34,15 @@ describe("Connect create mode", () => {
   });
 
   it("creates the vault, connects to it and opens the CA page", async () => {
-    createNewVault.mockResolvedValue({ id: "v1", name: "New CA" });
+    createVault.mockResolvedValue({ id: "v1", name: "New CA" });
     createVaultNamed("New CA");
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/ca"));
-    expect(createNewVault).toHaveBeenCalledWith("New CA", null);
+    expect(createVault).toHaveBeenCalledWith("New CA", null);
     expect(mockInvoke).toHaveBeenCalledWith("connect", { vault: "New CA", account: null });
   });
 
   it("shows the refusal and does not connect when the vault exists", async () => {
-    createNewVault.mockRejectedValue(new Error("Vault already exists: New CA"));
+    createVault.mockRejectedValue(new Error("Vault already exists: New CA"));
     createVaultNamed("New CA");
     expect(await screen.findByRole("alert")).toHaveTextContent("Vault already exists: New CA");
     expect(mockInvoke).not.toHaveBeenCalledWith("connect", expect.anything());

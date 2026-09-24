@@ -3,7 +3,7 @@ import { useNavigate } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { listAccounts, accountValue, accountLabel } from "../api/accounts";
-import { createNewVault } from "../api/vaults";
+import { createVault } from "../api/vaults";
 import type { AccountInfo } from "../api/types";
 import { setAppState, type VaultState } from "../stores/app";
 import { themeMode, toggleTheme } from "../stores/theme";
@@ -208,7 +208,7 @@ export default function Connect() {
 
     try {
       const name = creating()
-        ? (await createNewVault(vault(), account() || null)).name
+        ? (await createVault(vault(), account() || null)).name
         : vault();
       const info = await invoke<ConnectionInfo>("connect", {
         vault: name,

@@ -1,6 +1,7 @@
 import { Show, For, createSignal } from "solid-js";
 import { listVaults, createVault } from "../api/vaults";
 import Spinner from "./Spinner";
+import { appState } from "../stores/app";
 import Popover, { PopoverOption } from "./Popover";
 import type { VaultInfo } from "../api/types";
 import "../styles/components/vault-picker.css";
@@ -69,7 +70,7 @@ export default function VaultPicker(props: VaultPickerProps) {
     setCreating(true);
     setCreateError(null);
     try {
-      const vault = await createVault(name);
+      const vault = await createVault(name, appState.account);
       setNewVaultName("");
       setShowCreate(false);
       selectVault(vault.name);

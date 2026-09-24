@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Creating a vault from the vault picker now also refuses a name that is already taken.
 - **Web Server** is the default type on **Create Certificate**.
 - Copying a certificate's private key is immediate: the key is kept from when the page
   loaded, in memory only, and dropped when you leave the page.

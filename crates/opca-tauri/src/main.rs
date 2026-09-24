@@ -86,7 +86,6 @@ fn main() {
             commands::connect::list_vaults,
             commands::connect::list_accounts,
             commands::connect::create_vault,
-            commands::connect::create_new_vault,
             commands::connect::check_vault_state,
             commands::connect::check_op_cli,
             commands::lock::acquire_lock,

@@ -105,29 +105,15 @@ pub async fn list_accounts() -> Result<Vec<AccountInfo>, String> {
     op::list_accounts_standalone().map_err(|e| e.to_string())
 }
 
+/// Works before connecting, so the connect screen can start a CA in a new vault.
 #[tauri::command]
 pub async fn create_vault(
     state: State<'_, AppState>,
     name: String,
-) -> Result<VaultInfo, String> {
-    info!("[tauri] create_vault: name='{name}'");
-    let result = state.with_op(|op| {
-        op.vault_create(&name).map_err(|e| e.to_string())
-    })?;
-
-    state.log_ok("create_vault", Some(format!("Created vault '{name}'")));
-    Ok(result)
-}
-
-/// Create a vault from the connect screen, before any connection exists.
-#[tauri::command]
-pub async fn create_new_vault(
-    state: State<'_, AppState>,
-    name: String,
     account: Option<String>,
 ) -> Result<VaultInfo, String> {
-    info!("[tauri] create_new_vault: name='{name}' account={account:?}");
-    let result = op::create_new_vault_standalone(&name, account.as_deref()).map_err(|e| e.to_string())?;
+    info!("[tauri] create_vault: name='{name}' account={account:?}");
+    let result = op::create_vault_standalone(&name, account.as_deref()).map_err(|e| e.to_string())?;
     state.log_ok("create_vault", Some(format!("Created vault '{}'", result.name)));
     Ok(result)
 }

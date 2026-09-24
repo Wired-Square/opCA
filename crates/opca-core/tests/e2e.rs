@@ -442,8 +442,7 @@ fn t50_vault_backup_restore() {
 
     // --- Create a new empty vault for restore ---
     let restore_vault_name = format!("{}-restore", s.vault);
-    let restore_info = op_src
-        .vault_create(&restore_vault_name)
+    let restore_info = create_vault_standalone(&restore_vault_name, test_account().as_deref())
         .expect("restore vault create failed");
     eprintln!(
         "[e2e] Created restore vault: {} (id={})",

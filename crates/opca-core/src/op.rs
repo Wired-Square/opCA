@@ -636,14 +636,6 @@ impl<R: CommandRunner> Op<R> {
         Ok(out.stdout)
     }
 
-    /// Create a new 1Password vault and return its metadata.
-    pub fn vault_create(&self, name: &str) -> Result<VaultInfo, OpcaError> {
-        let out = self.checked(&["vault", "create", name, "--format=json"], None)?;
-        let vault: VaultInfo = serde_json::from_str(&out.stdout)
-            .map_err(|e| OpcaError::CliError(format!("Failed to parse vault create output: {e}")))?;
-        Ok(vault)
-    }
-
     /// Permanently delete a 1Password vault. (The `op` CLI has no vault-archive
     /// flag — `op vault delete` rejects `--archive` — so this is a hard delete.)
     pub fn vault_delete(&self, name: &str) -> Result<(), OpcaError> {
@@ -725,23 +717,19 @@ pub fn list_vaults_standalone(account: Option<&str>) -> Result<Vec<VaultInfo>, O
     op_json(&args)
 }
 
-/// Run `op vault create`, optionally against a specific account.
+/// Create a vault, optionally in a specific account, refusing a name already
+/// in use: `op` itself allows duplicates.
 pub fn create_vault_standalone(name: &str, account: Option<&str>) -> Result<VaultInfo, OpcaError> {
+    let name = name.trim();
+    if vault_name_taken(&list_vaults_standalone(account)?, name) {
+        return Err(OpcaError::VaultAlreadyExists(name.to_string()));
+    }
     let mut args = vec!["vault", "create", name, "--format=json"];
     if let Some(acct) = account {
         args.push("--account");
         args.push(acct);
     }
     op_json(&args)
-}
-
-/// Create a vault, refusing a name already in use: `op` itself allows duplicates.
-pub fn create_new_vault_standalone(name: &str, account: Option<&str>) -> Result<VaultInfo, OpcaError> {
-    let name = name.trim();
-    if vault_name_taken(&list_vaults_standalone(account)?, name) {
-        return Err(OpcaError::VaultAlreadyExists(name.to_string()));
-    }
-    create_vault_standalone(name, account)
 }
 
 fn vault_name_taken(vaults: &[VaultInfo], name: &str) -> bool {
