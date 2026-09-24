@@ -904,8 +904,9 @@ pub async fn list_openvpn_profiles(
     let profiles = db.query_all_openvpn_profiles().map_err(|e| e.to_string())?;
 
     // Index cert types once (by serial and by CN) so profile rows resolve their
-    // type with map lookups instead of a SQL query each.
-    let certs = db.query_all_certs().map_err(|e| e.to_string())?;
+    // type with map lookups instead of a SQL query each. Deleted certs stay in,
+    // since a profile can still pin one.
+    let certs = db.query_all_certs_including_deleted().map_err(|e| e.to_string())?;
     let mut type_by_serial: HashMap<&str, &str> = HashMap::new();
     let mut type_by_cn: HashMap<&str, &str> = HashMap::new();
     for c in &certs {

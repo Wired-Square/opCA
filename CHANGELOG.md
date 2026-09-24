@@ -102,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   switches to that vault so trying again connects, rather than refusing the name as taken.
 - CA initialisation and configuration fields are labelled for screen readers.
 - CLI certificate warnings no longer read `Warning: Warning:`.
+- An OpenVPN profile whose certificate was deleted now shows its Client or Server type.
 
 ### Removed
 

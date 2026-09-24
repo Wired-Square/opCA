@@ -297,6 +297,18 @@ fn test_count_certs() {
     assert_eq!(db.count_certs().unwrap(), 2);
 }
 
+#[test]
+fn only_the_including_deleted_query_returns_a_deleted_cert() {
+    let mut db = test_db();
+    db.add_cert(&make_cert("100", "a.example.com", "20301231235959Z")).unwrap();
+    db.add_cert(&make_cert("101", "b.example.com", "20301231235959Z")).unwrap();
+    db.mark_cert_deleted("100").unwrap();
+
+    let serials = |certs: Vec<CertRecord>| certs.into_iter().map(|c| c.serial).collect::<Vec<_>>();
+    assert_eq!(serials(db.query_all_certs().unwrap()), ["101"]);
+    assert_eq!(serials(db.query_all_certs_including_deleted().unwrap()), ["100", "101"]);
+}
+
 // -----------------------------------------------------------------------
 // External certificates
 // -----------------------------------------------------------------------

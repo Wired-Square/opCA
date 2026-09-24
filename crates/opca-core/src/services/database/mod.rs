@@ -631,20 +631,21 @@ impl CertificateAuthorityDB {
 
     /// Return all CA-issued certificate records.
     pub fn query_all_certs(&self) -> Result<Vec<CertRecord>, OpcaError> {
-        let mut stmt = self.conn.prepare(
-            &format!(
-                "SELECT {CERT_COLUMNS} FROM certificate_authority
-                 WHERE deleted_at IS NULL ORDER BY CAST(serial AS INTEGER)"
-            ),
-        )?;
+        self.select_certs("WHERE deleted_at IS NULL")
+    }
 
+    /// Return all CA-issued certificate records, deleted ones included.
+    pub fn query_all_certs_including_deleted(&self) -> Result<Vec<CertRecord>, OpcaError> {
+        self.select_certs("")
+    }
+
+    fn select_certs(&self, filter: &str) -> Result<Vec<CertRecord>, OpcaError> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {CERT_COLUMNS} FROM certificate_authority {filter}
+             ORDER BY CAST(serial AS INTEGER)"
+        ))?;
         let rows = stmt.query_map([], Self::row_to_cert)?;
-
-        let mut certs = Vec::new();
-        for row in rows {
-            certs.push(row?);
-        }
-        Ok(certs)
+        rows.collect::<Result<_, _>>().map_err(Into::into)
     }
 
     fn row_to_cert(row: &rusqlite::Row<'_>) -> rusqlite::Result<CertRecord> {
@@ -1386,7 +1387,7 @@ impl CertificateAuthorityDB {
             now + chrono::Duration::days(EXPIRY_CAUTION_DAYS);
 
         // Process CA-issued certificates
-        let certs = self.fetch_all_ca_certs()?;
+        let certs = self.query_all_certs_including_deleted()?;
 
         // First pass: for each CN, find the serial of the current valid replacement
         // (not expired, not revoked, not ignored, not about to be revoked in this
@@ -1643,21 +1644,6 @@ impl CertificateAuthorityDB {
         }
 
         (VpnProfileStatus::Current, None)
-    }
-
-    /// Fetch all rows from `certificate_authority` (internal helper).
-    fn fetch_all_ca_certs(&self) -> Result<Vec<CertRecord>, OpcaError> {
-        let mut stmt = self.conn.prepare(
-            &format!("SELECT {CERT_COLUMNS} FROM certificate_authority"),
-        )?;
-
-        let rows = stmt.query_map([], Self::row_to_cert)?;
-
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row?);
-        }
-        Ok(results)
     }
 
     /// Fetch all rows from `external_certificate` (internal helper).
