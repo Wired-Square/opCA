@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 13;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 14;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v13 — current)
+// Table DDL (v14 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -54,7 +54,8 @@ pub const CREATE_CA_TABLE: &str = "
         ignored_reason TEXT,
         ignored_note TEXT,
         has_private_key INTEGER,
-        has_chain INTEGER
+        has_chain INTEGER,
+        deleted_at TEXT
     )
 ";
 
@@ -408,8 +409,21 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v12→v13: {e}")))?;
 
         version = 13;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 13, ok: true });
+    }
+
+    // v13 → v14: soft-delete certificates. The row stays so a deleted revoked
+    // serial remains on the CRL until it expires.
+    if version == 13 {
+        conn.execute_batch(
+            "ALTER TABLE certificate_authority ADD COLUMN deleted_at TEXT;
+             UPDATE config SET schema_version = 14 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v13→v14: {e}")))?;
+
+        version = 14;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 14, ok: true });
     }
 
     info.migrated = true;

@@ -92,6 +92,8 @@ pub struct CertificateAuthorityDB {
     /// problem counts, the notification Lambda) subtract this set so an
     /// acknowledged cert stops nagging, without altering what the list shows.
     pub certs_ignored: HashSet<String>,
+    /// Overlay set of soft-deleted certs, which stay in their status bucket.
+    pub certs_deleted: HashSet<String>,
     /// Expired certs whose CN matches a currently-valid cert — excluded from
     /// `certs_expired` because the replacement covers them.
     pub certs_superseded: HashSet<String>,
@@ -139,6 +141,7 @@ impl CertificateAuthorityDB {
             certs_revoked: HashSet::new(),
             certs_valid: HashSet::new(),
             certs_ignored: HashSet::new(),
+            certs_deleted: HashSet::new(),
             certs_superseded: HashSet::new(),
             replacements: HashMap::new(),
             valid_cn_to_serial: HashMap::new(),
@@ -176,6 +179,7 @@ impl CertificateAuthorityDB {
             certs_revoked: HashSet::new(),
             certs_valid: HashSet::new(),
             certs_ignored: HashSet::new(),
+            certs_deleted: HashSet::new(),
             certs_superseded: HashSet::new(),
             replacements: HashMap::new(),
             valid_cn_to_serial: HashMap::new(),
@@ -421,6 +425,11 @@ impl CertificateAuthorityDB {
 // Certificate CRUD
 // ---------------------------------------------------------------------------
 
+const CERT_COLUMNS: &str = "serial, cn, title, status, expiry_date, revocation_date, subject,
+    cert_type, not_before, key_type, key_size, issuer, san,
+    ignored_at, ignored_by, ignored_reason, ignored_note,
+    has_private_key, has_chain, deleted_at";
+
 impl CertificateAuthorityDB {
     /// Add a certificate record to the database.
     pub fn add_cert(&mut self, record: &CertRecord) -> Result<(), OpcaError> {
@@ -429,9 +438,9 @@ impl CertificateAuthorityDB {
                 (serial, cn, title, status, expiry_date, revocation_date, subject,
                  cert_type, not_before, key_type, key_size, issuer, san,
                  ignored_at, ignored_by, ignored_reason, ignored_note,
-                 has_private_key, has_chain)
+                 has_private_key, has_chain, deleted_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19)",
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             rusqlite::params![
                 record.serial,
                 record.cn,
@@ -452,6 +461,7 @@ impl CertificateAuthorityDB {
                 record.ignored_note,
                 record.has_private_key,
                 record.has_chain,
+                record.deleted_at,
             ],
         )?;
         self.dirty = true;
@@ -467,8 +477,8 @@ impl CertificateAuthorityDB {
                 not_before = ?8, key_type = ?9, key_size = ?10,
                 issuer = ?11, san = ?12,
                 ignored_at = ?13, ignored_by = ?14, ignored_reason = ?15, ignored_note = ?16,
-                has_private_key = ?17, has_chain = ?18
-             WHERE serial = ?19",
+                has_private_key = ?17, has_chain = ?18, deleted_at = ?19
+             WHERE serial = ?20",
             rusqlite::params![
                 record.cn,
                 record.title,
@@ -488,6 +498,7 @@ impl CertificateAuthorityDB {
                 record.ignored_note,
                 record.has_private_key,
                 record.has_chain,
+                record.deleted_at,
                 record.serial,
             ],
         )?;
@@ -557,6 +568,25 @@ impl CertificateAuthorityDB {
         Ok(())
     }
 
+    /// Hide a certificate from listings. The row stays for the CRL and VPN profile status.
+    pub fn mark_cert_deleted(&mut self, serial: &str) -> Result<(), OpcaError> {
+        let now = crate::utils::datetime::now_utc_str(
+            crate::utils::datetime::DateTimeFormat::Openssl,
+        );
+        let rows = self.conn.execute(
+            "UPDATE certificate_authority SET deleted_at = ?1
+             WHERE serial = ?2 AND deleted_at IS NULL",
+            rusqlite::params![now, serial],
+        )?;
+
+        if rows == 0 {
+            return Err(OpcaError::CertificateNotFound(serial.to_string()));
+        }
+
+        self.dirty = true;
+        Ok(())
+    }
+
     /// Search for a certificate by serial, CN, or title.
     pub fn query_cert(
         &self,
@@ -576,11 +606,7 @@ impl CertificateAuthorityDB {
         };
 
         let sql = format!(
-            "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
-                    cert_type, not_before, key_type, key_size, issuer, san,
-                    ignored_at, ignored_by, ignored_reason, ignored_note,
-                    has_private_key, has_chain
-             FROM certificate_authority WHERE {where_col} = ?1{valid_clause}"
+            "SELECT {CERT_COLUMNS} FROM certificate_authority WHERE {where_col} = ?1{valid_clause}"
         );
 
         let mut stmt = self.conn.prepare(&sql)?;
@@ -596,7 +622,7 @@ impl CertificateAuthorityDB {
     /// Count the number of CA-issued certificates.
     pub fn count_certs(&self) -> Result<i64, OpcaError> {
         let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM certificate_authority",
+            "SELECT COUNT(*) FROM certificate_authority WHERE deleted_at IS NULL",
             [],
             |row| row.get(0),
         )?;
@@ -606,11 +632,10 @@ impl CertificateAuthorityDB {
     /// Return all CA-issued certificate records.
     pub fn query_all_certs(&self) -> Result<Vec<CertRecord>, OpcaError> {
         let mut stmt = self.conn.prepare(
-            "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
-                    cert_type, not_before, key_type, key_size, issuer, san,
-                    ignored_at, ignored_by, ignored_reason, ignored_note,
-                    has_private_key, has_chain
-             FROM certificate_authority ORDER BY CAST(serial AS INTEGER)"
+            &format!(
+                "SELECT {CERT_COLUMNS} FROM certificate_authority
+                 WHERE deleted_at IS NULL ORDER BY CAST(serial AS INTEGER)"
+            ),
         )?;
 
         let rows = stmt.query_map([], Self::row_to_cert)?;
@@ -643,6 +668,7 @@ impl CertificateAuthorityDB {
             ignored_note: row.get(16)?,
             has_private_key: row.get(17)?,
             has_chain: row.get(18)?,
+            deleted_at: row.get(19)?,
         })
     }
 }
@@ -1344,6 +1370,7 @@ impl CertificateAuthorityDB {
         self.certs_revoked.clear();
         self.certs_valid.clear();
         self.certs_ignored.clear();
+        self.certs_deleted.clear();
         self.certs_superseded.clear();
         self.replacements.clear();
         self.valid_cn_to_serial.clear();
@@ -1454,6 +1481,9 @@ impl CertificateAuthorityDB {
             // status plus an "ignored" chip).
             if cert.ignored_at.is_some() {
                 self.certs_ignored.insert(cert.serial.clone());
+            }
+            if cert.deleted_at.is_some() {
+                self.certs_deleted.insert(cert.serial.clone());
             }
 
             if expired {
@@ -1618,11 +1648,7 @@ impl CertificateAuthorityDB {
     /// Fetch all rows from `certificate_authority` (internal helper).
     fn fetch_all_ca_certs(&self) -> Result<Vec<CertRecord>, OpcaError> {
         let mut stmt = self.conn.prepare(
-            "SELECT serial, cn, title, status, expiry_date, revocation_date, subject,
-                    cert_type, not_before, key_type, key_size, issuer, san,
-                    ignored_at, ignored_by, ignored_reason, ignored_note,
-                    has_private_key, has_chain
-             FROM certificate_authority",
+            &format!("SELECT {CERT_COLUMNS} FROM certificate_authority"),
         )?;
 
         let rows = stmt.query_map([], Self::row_to_cert)?;

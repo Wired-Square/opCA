@@ -41,7 +41,7 @@ impl FromStr for CertStatus {
 }
 
 /// A CA-issued certificate record (`certificate_authority` table).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CertRecord {
     pub serial: String,
     pub cn: Option<String>,
@@ -60,7 +60,7 @@ pub struct CertRecord {
     pub ignored_at: Option<String>,
     /// `email (name)` of the 1Password user who set the ignore.
     pub ignored_by: Option<String>,
-    /// One of: `renewed`, `rekeyed`, `manual`.
+    /// One of: `renewed`, `rekeyed`, `manual`, `deleted`.
     pub ignored_reason: Option<String>,
     /// Optional free-text note; for auto-ignores, carries `"replaced by <new_serial>"`.
     pub ignored_note: Option<String>,
@@ -70,6 +70,7 @@ pub struct CertRecord {
     pub has_private_key: Option<bool>,
     /// Whether an issuer chain is stored alongside this cert in 1Password.
     pub has_chain: Option<bool>,
+    pub deleted_at: Option<String>,
 }
 
 /// Reason a certificate was ignored. `Manual` comes from the UI's "Ignore"
@@ -81,6 +82,7 @@ pub enum IgnoreReason {
     Manual,
     Renewed,
     Rekeyed,
+    Deleted,
 }
 
 impl IgnoreReason {
@@ -89,6 +91,7 @@ impl IgnoreReason {
             IgnoreReason::Manual => "manual",
             IgnoreReason::Renewed => "renewed",
             IgnoreReason::Rekeyed => "rekeyed",
+            IgnoreReason::Deleted => "deleted",
         }
     }
 }

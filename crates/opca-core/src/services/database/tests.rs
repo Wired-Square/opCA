@@ -42,6 +42,7 @@ fn make_cert(serial: &str, cn: &str, expiry: &str) -> CertRecord {
         ignored_note: None,
         has_private_key: Some(true),
         has_chain: Some(false),
+        deleted_at: None,
     }
 }
 
@@ -1141,7 +1142,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 8); // v5→v6 … v11→v12, v12→v13
+    assert_eq!(info.steps.len(), 9); // v5→v6 … v12→v13, v13→v14
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1153,7 +1154,7 @@ COMMIT;
     let local = db
         .query_cert(&CertLookup::Cn("local.example.com".to_string()), false)
         .unwrap();
-    assert!(local.is_some());
+    assert!(local.is_some_and(|c| c.deleted_at.is_none()));
 
     // External cert (had issuer set) should have been migrated
     assert_eq!(db.count_external_certs().unwrap(), 1);
@@ -1241,6 +1242,7 @@ fn test_iterdump_null_handling() {
         ignored_note: None,
         has_private_key: None,
         has_chain: None,
+        deleted_at: None,
     };
     db.add_cert(&cert).unwrap();
 
@@ -1271,6 +1273,7 @@ fn test_iterdump_single_quote_escaping() {
         ignored_note: None,
         has_private_key: None,
         has_chain: None,
+        deleted_at: None,
     };
     db.add_cert(&cert).unwrap();
 

@@ -1412,10 +1412,38 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         Ok(())
     }
 
-    /// Delete a certificate bundle from 1Password.
-    pub fn delete_certbundle(&mut self, item_title: &str, archive: bool) -> Result<(), OpcaError> {
-        self.op.delete_item(item_title, archive)?;
-        Ok(())
+    /// Delete a revoked or expired certificate: archive its item and hide its
+    /// row. A valid one must be revoked first, so delete cannot bypass the CRL.
+    pub fn delete_certificate(&mut self, serial: &str) -> Result<CertRecord, OpcaError> {
+        info!("[ca] deleting certificate {serial}");
+        let db = self.ca_database.as_mut().ok_or(OpcaError::CaNotFound)?;
+        db.process_ca_database(None, true)?;
+        let cert = db
+            .query_cert(&CertLookup::Serial(serial.to_string()), false)?
+            .filter(|c| c.deleted_at.is_none())
+            .ok_or_else(|| OpcaError::CertificateNotFound(serial.to_string()))?;
+        if cert.cert_type.as_deref() == Some("ca") {
+            return Err(OpcaError::Other("The CA certificate cannot be deleted".into()));
+        }
+        if !matches!(cert.status.as_deref(), Some("Revoked" | "Expired")) {
+            return Err(OpcaError::Other(format!(
+                "Certificate {serial} is still valid; revoke it before deleting"
+            )));
+        }
+
+        if let Some(title) = cert.title.as_deref() {
+            match self.op.delete_item(title, true) {
+                Ok(_) | Err(OpcaError::ItemNotFound(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+
+        if cert.ignored_at.is_none() {
+            db.ignore_cert(serial, IgnoreReason::Deleted, &local_user(), None)?;
+        }
+        db.mark_cert_deleted(serial)?;
+        self.store_ca_database()?;
+        Ok(cert)
     }
 
     // -----------------------------------------------------------------------
@@ -1851,6 +1879,7 @@ fn format_db_item(
         ignored_note: None,
         has_private_key: Some(bundle.private_key.is_some()),
         has_chain: Some(bundle.chain.as_ref().is_some_and(|c| !c.is_empty())),
+        deleted_at: None,
     })
 }
 
@@ -2548,6 +2577,91 @@ mod tests {
         assert_eq!(deletes[0][2], "CSR_pending.example.com");
         assert!(deletes[0].contains(&"--archive".to_string()));
         assert!(ca.ca_database.as_ref().unwrap().query_all_csrs(None).unwrap().is_empty());
+    }
+
+    fn ca_with_cert_rows() -> CertificateAuthority<crate::testutil::MockRunner> {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let db = ca.ca_database.as_mut().unwrap();
+        for (serial, cert_type, expiry, revoked) in [
+            ("1", "ca", "20351231235959Z", false),
+            ("2", "webserver", "20351231235959Z", false),
+            ("3", "webserver", "20351231235959Z", true),
+            ("4", "webserver", "20200101000000Z", false),
+        ] {
+            db.add_cert(&CertRecord {
+                serial: serial.to_string(),
+                cn: Some(format!("host{serial}.example.com")),
+                title: Some(format!("CRT_{serial}_host{serial}.example.com")),
+                status: Some(if revoked { "Revoked" } else { "Valid" }.to_string()),
+                expiry_date: Some(expiry.to_string()),
+                revocation_date: revoked.then(|| "20250101000000Z".to_string()),
+                cert_type: Some(cert_type.to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        ca
+    }
+
+    #[test]
+    fn deleting_refuses_the_ca_and_valid_certificates() {
+        let mut ca = ca_with_cert_rows();
+        assert!(ca.delete_certificate("1").is_err());
+        assert!(ca.delete_certificate("2").is_err());
+        assert!(ca.op.runner().calls().iter().all(|c| c[..2] != ["item", "delete"]));
+        assert_eq!(ca.ca_database.as_ref().unwrap().count_certs().unwrap(), 4);
+    }
+
+    #[test]
+    fn a_deleted_revoked_certificate_is_archived_hidden_and_still_on_the_crl() {
+        let mut ca = ca_with_cert_rows();
+        ca.delete_certificate("3").unwrap();
+
+        let deletes: Vec<_> = ca.op.runner().calls().into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
+        assert_eq!(deletes.len(), 1);
+        assert_eq!(deletes[0][2], "CRT_3_host3.example.com");
+        assert!(deletes[0].contains(&"--archive".to_string()));
+
+        let db = ca.ca_database.as_mut().unwrap();
+        let listed: Vec<_> = db.query_all_certs().unwrap().into_iter().map(|c| c.serial).collect();
+        assert_eq!(listed, ["1", "2", "4"]);
+        let row = db.query_cert(&CertLookup::Serial("3".into()), false).unwrap().unwrap();
+        assert!(row.deleted_at.is_some());
+        assert_eq!(row.ignored_reason.as_deref(), Some("deleted"));
+
+        db.process_ca_database(None, true).unwrap();
+        assert!(db.certs_revoked.contains("3") && db.certs_deleted.contains("3"));
+        let bundle = ca.ca_bundle.as_ref().unwrap();
+        let pem = build_crl(
+            bundle.certificate.as_ref().unwrap(),
+            bundle.private_key.as_ref().unwrap(),
+            1,
+            30,
+            &db.certs_revoked,
+            db,
+        )
+        .unwrap();
+        let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
+        let revoked: Vec<_> = crl
+            .get_revoked()
+            .unwrap()
+            .iter()
+            .map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string())
+            .collect();
+        assert_eq!(revoked, ["3"]);
+
+        assert!(matches!(ca.delete_certificate("3"), Err(OpcaError::CertificateNotFound(_))));
+    }
+
+    #[test]
+    fn deleting_an_expired_certificate_tolerates_a_missing_item() {
+        let mut ca = ca_with_cert_rows();
+        ca.op = crate::testutil::mock_op(vec![crate::testutil::err_output(
+            "[ERROR] \"CRT_4_host4.example.com\" isn't an item in the \"CA\" vault.",
+        )]);
+        ca.delete_certificate("4").unwrap();
+        let db = ca.ca_database.as_ref().unwrap();
+        assert!(db.query_all_certs().unwrap().iter().all(|c| c.serial != "4"));
     }
 
     #[test]
