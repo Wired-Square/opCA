@@ -30,7 +30,9 @@ one whose `thisUpdate` has passed, but only if its CRL number is higher than the
 CRL's, so it never rolls back. A batch with any unreadable, unnumbered or wrongly signed CRL
 is refused as a whole and reported. The existing CRL checks then run on the published CRL.
 While a batch is present, "CRL will expire soon" fires at 3 days (or `CRL_DAYS`, if lower),
-which a weekly release never reaches. Without a batch object the Lambda behaves as before.
+which a weekly release never reaches. The Lambda reads the batch setting from the CA database
+dump: with batches off it ignores any batch object, so a batch left behind is never released.
+With batches on and no readable batch, it alerts and runs the usual CRL checks.
 
 `notification/aws_lambda_test.py` runs the same handler with your own credentials, so it
 releases a due CRL to the public bucket too.
@@ -38,9 +40,9 @@ releases a due CRL to the public bucket too.
 ### Lambda IAM policy
 
 Least privilege; replace the bucket names and keys with the Lambda's environment values.
-No `s3:ListBucket` is granted, so a missing batch reads as `AccessDenied`, which the Lambda
-treats as "no batch". If the private bucket uses SSE-KMS, the role also needs `kms:Decrypt`
-on its key.
+No `s3:ListBucket` is granted, so a missing batch reads as `AccessDenied`; either way the
+Lambda reports the batch as missing or unreadable. If the private bucket uses SSE-KMS, the
+role also needs `kms:Decrypt` on its key.
 
 ```json
 {

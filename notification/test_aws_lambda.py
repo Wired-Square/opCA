@@ -83,11 +83,20 @@ def make_pem_ca_and_crl(kind, now, crl_expires_in=timedelta(days=30), crl_signer
     )
 
 
-def make_db(db_path):
+PRE_V15 = object()
+
+
+def make_db(db_path, crl_batch_enabled=None):
     conn = sqlite3.connect(db_path)
+    if crl_batch_enabled is PRE_V15:
+        conn.execute('CREATE TABLE config (id)')
+    else:
+        conn.execute('CREATE TABLE config (id, crl_batch_enabled)')
+        conn.execute('INSERT INTO config VALUES (1, ?)', (crl_batch_enabled,))
     conn.execute('CREATE TABLE certificate_authority '
                  '(serial, cn, expiry_date, issuer, revocation_date, ignored_at)')
     conn.execute('CREATE TABLE external_certificate (serial, cn, expiry_date, issuer, status)')
+    conn.commit()
     conn.close()
 
 
@@ -190,9 +199,9 @@ def run_lambda(aws_lambda, monkeypatch, tmp_path):
         monkeypatch.setattr(aws_lambda, var, value)
 
     db_path = tmp_path / 'ca.sqlite'
-    make_db(db_path)
 
-    def run(ca_pem, crl_pem, batch_pem=None, put_error=None):
+    def run(ca_pem, crl_pem, batch_pem=None, put_error=None, crl_batch_enabled=1):
+        make_db(db_path, crl_batch_enabled)
         objects = {
             ('private', 'ca.sqlite'): db_path.read_bytes(),
             ('public', 'ca.crt'): ca_pem.encode(),
@@ -233,16 +242,30 @@ def published_number(s3):
     return crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number
 
 
+@pytest.mark.parametrize('crl_batch_enabled', [None, 0, PRE_V15])
+def test_batch_is_ignored_while_batches_are_off(aws_lambda, run_lambda, tmp_path, crl_batch_enabled):
+    ca_pem, published, batch = ca_and_batch(aws_lambda, 'p256', t0_days_ago=15)
+
+    msg, warning, s3 = run_lambda(ca_pem, published, batch, crl_batch_enabled=crl_batch_enabled)
+
+    assert s3.puts == []
+    assert (msg, warning) == run_checks(aws_lambda, tmp_path, ca_pem, published)
+    assert 'CRL Batch' not in msg
+
+
 @pytest.mark.parametrize('error_code', ['NoSuchKey', 'AccessDenied'])
-def test_no_batch_behaves_as_before(aws_lambda, run_lambda, tmp_path, monkeypatch, error_code):
+def test_missing_batch_alerts_while_batches_are_on(aws_lambda, run_lambda, tmp_path, monkeypatch, error_code):
     ca_pem, crl_pem = make_pem_ca_and_crl('p256', aws_lambda.now, crl_expires_in=timedelta(days=5))
     monkeypatch.setattr(FakeS3, 'missing',
                         lambda self, operation: ClientError({'Error': {'Code': error_code}}, operation))
 
     msg, warning, s3 = run_lambda(ca_pem, crl_pem)
 
-    assert (msg, warning) == run_checks(aws_lambda, tmp_path, ca_pem, crl_pem)
+    checks_msg, _ = run_checks(aws_lambda, tmp_path, ca_pem, crl_pem)
+    assert msg.startswith(checks_msg)
+    assert '❌ *CRL batches are on but [pending-crl/crl-batch.pem] is missing or unreadable*' in msg
     assert 'CRL will expire soon' in msg
+    assert warning
     assert s3.puts == []
 
 

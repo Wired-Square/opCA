@@ -50,6 +50,14 @@ def ca_database_handler(file, query):
 
     return rows
 
+def crl_batch_enabled(db_path):
+    try:
+        rows = ca_database_handler(db_path, 'SELECT crl_batch_enabled FROM config')
+    except sqlite3.OperationalError:
+        # A dump older than schema v15 has no flag: batches off.
+        return False
+    return bool(rows and rows[0][0])
+
 def concat_msg(msg):
     print(msg)
 
@@ -357,10 +365,14 @@ def lambda_handler(event, context):
     db_data = get_s3_item(bucket=private_bucket, key=db_key, path=local_db_path)
     ca_cert_data = get_s3_item(bucket=public_bucket, key=ca_cert_key)
     crl_data = get_s3_item(bucket=public_bucket, key=crl_key)
-    batch_pem = get_pending_crl_batch()
 
-    if batch_pem is None:
+    if not crl_batch_enabled(db_data['path']):
         msg, warning = run_tests(ca_cert_data, crl_data, db_data)
+    elif (batch_pem := get_pending_crl_batch()) is None:
+        msg, warning = run_tests(ca_cert_data, crl_data, db_data)
+        msg += concat_msg('\n*CRL Batch*')
+        msg += concat_msg(f'  ❌ *CRL batches are on but [{pending_crl_key}] is missing or unreadable*')
+        warning = True
     else:
         release, batch_msg, batch_warning = release_due_crl(
             ca_cert_data['content'], batch_pem, crl_data['content'])
