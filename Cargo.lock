@@ -3783,6 +3783,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-shell",
+ "tempfile",
  "tokio",
  "wiredai-mcp",
  "zeroize",

@@ -257,6 +257,15 @@ notification Lambda) can publish fresh CRLs while the desktop is closed:
   app's error says whether regenerating or uploading failed. With no private
   store configured, generating refuses before signing anything.
 - `rsync://` and `sftp://` stores need the `pending-crl/` directory to exist.
+- In the app, the CA page's Stores tab has the toggle; `update_ca_config`
+  refuses turning it on without a private store (`check_crl_batch_update`, which
+  `opca database config-set` shares; `generate_crl` refuses with the same error). `get_crl_info`, `backfill_crl`, `generate_crl` and
+  `get_dashboard` carry `crl_batch_enabled` and a `crl_batch` status (number
+  range, due CRL, signed until, unreleased of N, `low_cover` under
+  `CRL_BATCH_LOW_COVER` = 2), only while batches are on: the Lambda ignores a
+  leftover record once they are off. The CRL page shows it; the dashboard shows
+  a CRL Batch tile and judges CRL expiry (warning and action item) by its
+  signed-until rather than CRL 0's `nextUpdate`.
 
 ### AWS credentials
 
@@ -427,8 +436,8 @@ immediately, without waiting for an unrelated write op (revoke, sign, CRL
 generate) to flush the change.
 
 The DTO surfaces both a reshaped CA status (value + expiry + graduated
-warning) and a mirrored CRL status (next_update + graduated warning from
-`assess_crl_expiry`), along with a `pending_csrs` count and an
+warning) and a mirrored CRL status (next_update, or a batch's signed-until,
++ graduated warning from `assess_crl_expiry`), along with a `pending_csrs` count and an
 `action_items: Vec<ActionItemDto>` list. Action items carry a stable `id`,
 severity, human-readable message, button label, and an `action` token that
 the frontend dispatches on (`regenerate_and_upload_crl`, `regenerate_crl`,

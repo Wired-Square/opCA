@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   closed. A failed upload is reported rather than skipped. The first CRL is stored as usual;
   `opca crl info` shows the batch's cover. Needs a private store. Database schema v15.
 
+- **CRL batches in the app.** A **Pre-signed CRL batches** toggle on the CA page's Stores tab,
+  refused without a private store (as `opca database config-set` now is). The CRL page shows
+  the batch's numbers, due CRL, signed-until and how many are still unreleased; the dashboard
+  adds a CRL Batch tile that warns once fewer than two are left, and judges the CRL expiry
+  warning by the batch's signed-until.
+
 - **Start a new CA from the connect screen.** **New CA in a new vault…** creates the
   1Password vault, refusing a name that is already taken, then opens CA initialisation.
 - **CA Days** on the CA initialisation form sets the CA certificate's own lifetime,

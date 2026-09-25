@@ -120,6 +120,32 @@ pub fn assess_crl_expiry(next_update: DateTime<Utc>, now: DateTime<Utc>) -> CrlE
     }
 }
 
+/// Where a CA in batch mode uploads its CRL batch; `None` when batches are off.
+fn crl_batch_uri(config: &CaConfig) -> Result<Option<String>, OpcaError> {
+    match (config.crl_batch_enabled, config.ca_private_store.as_deref()) {
+        (Some(true), Some(store)) => {
+            Ok(Some(format!("{}/{}", store.trim_end_matches('/'), DEFAULT_STORAGE_CONF.crl_batch_file)))
+        }
+        (Some(true), None) => Err(OpcaError::Storage(
+            "CRL batches need a private store: set one or turn CRL batches off".into(),
+        )),
+        _ => Ok(None),
+    }
+}
+
+/// Refuse a config update that would leave CRL batches on without a private store.
+pub fn check_crl_batch_update(current: &CaConfig, updates: &CaConfig) -> Result<(), OpcaError> {
+    crl_batch_uri(&CaConfig {
+        crl_batch_enabled: updates.crl_batch_enabled.or(current.crl_batch_enabled),
+        ca_private_store: match &updates.ca_private_store {
+            Some(store) => Some(store.clone()).filter(|s| !s.trim().is_empty()),
+            None => current.ca_private_store.clone(),
+        },
+        ..CaConfig::default()
+    })
+    .map(drop)
+}
+
 /// A reason a certificate about to be issued may not work everywhere it is used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CertIssuanceWarning {
@@ -927,17 +953,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         db.process_ca_database(None, false)?;
 
         let ca_config = db.get_config()?;
-        let batch_uri = match (ca_config.crl_batch_enabled, ca_config.ca_private_store.as_deref()) {
-            (Some(true), Some(store)) => {
-                Some(format!("{}/{}", store.trim_end_matches('/'), DEFAULT_STORAGE_CONF.crl_batch_file))
-            }
-            (Some(true), None) => {
-                return Err(OpcaError::Storage(
-                    "CRL batches need a private store: set one or turn CRL batches off".into(),
-                ))
-            }
-            _ => None,
-        };
+        let batch_uri = crl_batch_uri(&ca_config)?;
 
         let ca_bundle = self.ca_bundle.as_ref()
             .ok_or_else(|| OpcaError::CaNotFound)?;
@@ -2789,6 +2805,18 @@ mod tests {
         let numbers: Vec<_> = uploaded_batch(&dir).iter().map(extract_crl_number).collect();
         assert_eq!(numbers, [6, 7, 8, 9, 10].map(Some));
         assert_eq!(ca.ca_database.as_ref().unwrap().get_crl_batch().unwrap().unwrap().first_number, 6);
+    }
+
+    #[test]
+    fn a_config_update_cannot_leave_batches_on_without_a_private_store() {
+        let on = CaConfig { crl_batch_enabled: Some(true), ..CaConfig::default() };
+        let store = |s: &str| CaConfig { ca_private_store: Some(s.into()), ..CaConfig::default() };
+
+        assert!(check_crl_batch_update(&CaConfig::default(), &on).is_err());
+        assert!(check_crl_batch_update(&CaConfig { ca_private_store: Some(" ".into()), ..on.clone() }, &store(" ")).is_err());
+        assert!(check_crl_batch_update(&store("rsync:///ca"), &on).is_ok());
+        assert!(check_crl_batch_update(&CaConfig { ca_private_store: Some("rsync:///ca".into()), ..on.clone() }, &store("")).is_err());
+        assert!(check_crl_batch_update(&on, &CaConfig { crl_batch_enabled: Some(false), ..CaConfig::default() }).is_ok());
     }
 
     #[test]

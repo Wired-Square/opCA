@@ -27,6 +27,8 @@ pub struct DashboardData {
     pub revoked_certs: usize,
     pub pending_csrs: usize,
     pub has_public_store: bool,
+    pub crl_batch_enabled: bool,
+    pub crl_batch: Option<CrlBatchDto>,
     pub action_items: Vec<ActionItemDto>,
 }
 
@@ -568,6 +570,20 @@ pub struct CrlInfo {
     /// `None` = fast path hasn't been confirmed against 1Password yet;
     /// `Some(true)` = the document was found; `Some(false)` = it was not.
     pub has_crl: Option<bool>,
+    pub crl_batch_enabled: bool,
+    pub crl_batch: Option<CrlBatchDto>,
+}
+
+/// The last pre-signed CRL batch and how far it covers now.
+#[derive(Debug, Serialize)]
+pub struct CrlBatchDto {
+    pub first_number: i64,
+    pub last_number: i64,
+    pub due_number: i64,
+    pub signed_until: String,
+    pub remaining: i64,
+    pub count: i64,
+    pub low_cover: bool,
 }
 
 #[derive(Debug, Serialize)]

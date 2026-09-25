@@ -5,6 +5,8 @@ pub mod cert;
 mod cert_tests;
 pub mod connect;
 pub mod crl;
+#[cfg(test)]
+mod crl_tests;
 pub mod csr;
 pub mod dashboard;
 pub mod database;

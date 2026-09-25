@@ -11,6 +11,7 @@ import { createAction } from "../utils/action";
 import type {
   ActionItem,
   ActionKind,
+  CrlBatch,
   CrlInfo,
   DashboardData,
 } from "../api/types";
@@ -162,9 +163,13 @@ export default function Dashboard() {
                 status={crlStatusLabel(d())}
                 tone={crlStatusTone(d())}
                 detailPrefix="next update"
-                detailDate={d().crl_present ? d().crl_next_update : null}
+                detailDate={d().crl_present && !d().crl_batch ? d().crl_next_update : null}
                 warning={d().crl_expiry_warning}
               />
+
+              <Show when={d().crl_batch_enabled}>
+                <CrlBatchTile batch={d().crl_batch} onClick={() => navigate("/crl")} />
+              </Show>
 
               <div
                 class="stat-card stat-card-clickable"
@@ -232,5 +237,30 @@ function StatTile(props: {
       <span class="stat-label">{props.label}</span>
       <span class={`stat-value ${props.valueClass ?? ""}`}>{props.value}</span>
     </div>
+  );
+}
+
+function CrlBatchTile(props: { batch: CrlBatch | null; onClick: () => void }) {
+  return (
+    <Show
+      when={props.batch}
+      fallback={
+        <StatusBubble label="CRL Batch" status="Not signed" onClick={props.onClick}>
+          <span class="stat-card-detail">Generate the CRL to sign one</span>
+        </StatusBubble>
+      }
+    >
+      {(b) => (
+        <StatusBubble
+          label="CRL Batch"
+          status={`${b().remaining} of ${b().count} unreleased`}
+          tone={b().low_cover ? "warning" : "success"}
+          detailPrefix="signed until"
+          detailDate={b().signed_until}
+          warning={b().low_cover ? { level: "prominent", message: "Re-sign soon: fewer than 2 left to release" } : null}
+          onClick={props.onClick}
+        />
+      )}
+    </Show>
   );
 }

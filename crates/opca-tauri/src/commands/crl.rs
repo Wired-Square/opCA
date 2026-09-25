@@ -1,23 +1,27 @@
+use chrono::Utc;
 use log::{debug, info, warn};
 use openssl::x509::X509Crl;
 use tauri::State;
 
+use opca_core::constants::CRL_BATCH_LOW_COVER;
 use opca_core::services::ca::{crl_metadata_from, crl_to_text, parse_crl_metadata};
-use opca_core::services::database::CrlMetadata;
+use opca_core::services::database::{CertificateAuthorityDB, CrlMetadata};
+use opca_core::utils::datetime::{format_datetime, DateTimeFormat};
 
-use crate::commands::dto::{CrlInfo, InspectCrlResult};
+use crate::commands::dto::{CrlBatchDto, CrlInfo, InspectCrlResult};
 use crate::commands::inspect_helpers::signature_algorithm_from_text;
 use crate::state::AppState;
 
 /// Project the database CRL metadata (and optionally the just-fetched PEM)
-/// into the wire DTO. Pulls the three near-duplicate constructions in
-/// `get_crl_info`, `backfill_crl`, and `generate_crl` into one place.
+/// into the wire DTO, with the store and batch state beside it.
 fn make_crl_info(
+    db: &CertificateAuthorityDB,
     metadata: Option<CrlMetadata>,
     crl_pem: Option<String>,
-    has_public_store: bool,
     has_crl: Option<bool>,
-) -> CrlInfo {
+) -> Result<CrlInfo, String> {
+    let config = db.get_config().unwrap_or_default();
+    let crl_batch_enabled = config.crl_batch_enabled == Some(true);
     let (issuer, last_update, next_update, crl_number, revoked_count) = match metadata {
         Some(m) => (
             m.issuer,
@@ -28,16 +32,38 @@ fn make_crl_info(
         ),
         None => (None, None, None, None, 0),
     };
-    CrlInfo {
+    Ok(CrlInfo {
         issuer,
         last_update,
         next_update,
         crl_number,
         revoked_count,
         crl_pem,
-        has_public_store,
+        has_public_store: config.ca_public_store.is_some(),
         has_crl,
+        crl_batch_enabled,
+        crl_batch: crl_batch_dto(db, crl_batch_enabled)?,
+    })
+}
+
+/// The Lambda ignores a batch while batches are off, so a leftover record covers nothing.
+pub(crate) fn crl_batch_dto(db: &CertificateAuthorityDB, enabled: bool) -> Result<Option<CrlBatchDto>, String> {
+    if !enabled {
+        return Ok(None);
     }
+    let batch = db.get_crl_batch().map_err(|e| e.to_string())?;
+    Ok(batch.map(|batch| {
+        let status = batch.status(Utc::now());
+        CrlBatchDto {
+            first_number: batch.first_number,
+            last_number: batch.first_number + batch.count - 1,
+            due_number: status.due_number,
+            signed_until: format_datetime(status.signed_until, DateTimeFormat::Openssl),
+            remaining: status.remaining,
+            count: status.count,
+            low_cover: status.remaining < CRL_BATCH_LOW_COVER,
+        }
+    }))
 }
 
 /// Fast path: CRL detail purely from the local SQLite mirror, no vault
@@ -51,12 +77,7 @@ pub async fn get_crl_info(state: State<'_, AppState>) -> Result<CrlInfo, String>
     let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
 
     let metadata = db.get_crl_metadata().map_err(|e| e.to_string())?;
-    let has_public_store = db
-        .get_config()
-        .map(|c| c.ca_public_store.is_some())
-        .unwrap_or(false);
-
-    Ok(make_crl_info(metadata, None, has_public_store, None))
+    make_crl_info(db, metadata, None, None)
 }
 
 /// Slow path: fetch the CRL PEM from 1Password. If the local DB row is
@@ -72,10 +93,6 @@ pub async fn backfill_crl(state: State<'_, AppState>) -> Result<CrlInfo, String>
 
     let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     let mut metadata = db.get_crl_metadata().map_err(|e| e.to_string())?;
-    let has_public_store = db
-        .get_config()
-        .map(|c| c.ca_public_store.is_some())
-        .unwrap_or(false);
     let has_crl = Some(crl_pem.is_some());
 
     if metadata.is_none() {
@@ -84,7 +101,7 @@ pub async fn backfill_crl(state: State<'_, AppState>) -> Result<CrlInfo, String>
         }
     }
 
-    Ok(make_crl_info(metadata, crl_pem, has_public_store, has_crl))
+    make_crl_info(db, metadata, crl_pem, has_crl)
 }
 
 #[tauri::command]
@@ -123,17 +140,7 @@ pub async fn generate_crl(state: State<'_, AppState>) -> Result<CrlInfo, String>
 
     let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     let metadata = db.get_crl_metadata().map_err(|e| e.to_string())?;
-    let has_public_store = db
-        .get_config()
-        .map(|c| c.ca_public_store.is_some())
-        .unwrap_or(false);
-
-    Ok(make_crl_info(
-        metadata,
-        Some(crl_pem),
-        has_public_store,
-        Some(true),
-    ))
+    make_crl_info(db, metadata, Some(crl_pem), Some(true))
 }
 
 #[tauri::command]

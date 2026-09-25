@@ -1,6 +1,6 @@
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner};
-use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
 use opca_core::services::database::CaConfig;
 
 use crate::app::AppContext;
@@ -98,6 +98,7 @@ fn handle_config_set<R: CommandRunner>(
             .ca_database
             .as_ref()
             .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
+        check_crl_batch_update(&db.get_config()?, &updates)?;
         db.update_config(&updates)?;
     }
 

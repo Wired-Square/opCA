@@ -245,7 +245,8 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
                 onChange={(v) => set("days", v ? parseInt(v) : null)} type="number"
                 warning={caDaysOverAppleLimit(merged().days)} />
               <FormField label="CRL Days" value={String(merged().crl_days ?? "")}
-                onChange={(v) => set("crl_days", v ? parseInt(v) : null)} type="number" />
+                onChange={(v) => set("crl_days", v ? parseInt(v) : null)} type="number"
+                hint={merged().crl_batch_enabled ? "Not used while CRL batches are on." : null} />
               <FormField label="CA URL" value={merged().ca_url} onChange={(v) => set("ca_url", v)} />
               <FormField label="CRL URL" value={merged().crl_url} onChange={(v) => set("crl_url", v)} />
             </div>
@@ -316,6 +317,24 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <FormField label="AWS Region" value={merged().ca_aws_region}
                 onChange={(v) => set("ca_aws_region", v)} />
             </div>
+
+            <label class="checkbox-row mt-3">
+              <input
+                type="checkbox"
+                checked={!!merged().crl_batch_enabled}
+                disabled={!merged().crl_batch_enabled && !merged().ca_private_store}
+                onChange={(e) => setForm((f) => ({ ...f, crl_batch_enabled: e.currentTarget.checked }))}
+              />
+              Pre-signed CRL batches
+            </label>
+            <p class="form-hint">
+              Signs five CRLs a week apart into the private store for the notification Lambda to
+              release. Needs a private store and the updated Lambda (see docs/crl-batches.md):
+              without them the CRL lapses 10 days after it is generated.
+            </p>
+            <Show when={!merged().ca_private_store}>
+              <p class="form-hint is-warning">CRL batches need a private store.</p>
+            </Show>
 
             <ActionResultLine outcome={outcome} />
 
@@ -821,6 +840,7 @@ function FormField(props: {
   value: string | null | undefined;
   onChange: (value: string) => void;
   type?: string;
+  hint?: string | null;
   warning?: string | null;
 }) {
   const id = createUniqueId();
@@ -837,6 +857,9 @@ function FormField(props: {
         autocapitalize="off"
         spellcheck={false}
       />
+      <Show when={props.hint}>
+        <p class="form-hint">{props.hint}</p>
+      </Show>
       <Show when={props.warning}>
         <p class="form-hint is-warning" role="status">{props.warning}</p>
       </Show>

@@ -48,6 +48,8 @@ export interface DashboardData {
   revoked_certs: number;
   pending_csrs: number;
   has_public_store: boolean;
+  crl_batch_enabled: boolean;
+  crl_batch: CrlBatch | null;
   action_items: ActionItem[];
 }
 
@@ -91,6 +93,7 @@ export interface CaConfig {
   /** AWS region for s3:// stores and Route53. Shared CA config — the AWS
    * credential itself is per-user (see `api/aws.ts`). */
   ca_aws_region: string | null;
+  crl_batch_enabled?: boolean | null;
   /** Init only. */
   key_algorithm?: KeyAlgorithm;
   /** Init only. */
@@ -529,6 +532,20 @@ export interface CrlInfo {
   /** `true` once the slow backfill has confirmed the CRL exists in
    * 1Password. `null` on the fast path. */
   has_crl: boolean | null;
+  crl_batch_enabled: boolean;
+  crl_batch: CrlBatch | null;
+}
+
+/** The last pre-signed CRL batch and how far it covers now. */
+export interface CrlBatch {
+  first_number: number;
+  last_number: number;
+  due_number: number;
+  signed_until: string;
+  remaining: number;
+  count: number;
+  /** Fewer than two CRLs left to release. */
+  low_cover: boolean;
 }
 
 export interface InspectCrlResult {

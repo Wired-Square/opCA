@@ -4,7 +4,7 @@ use log::{info, warn, error, debug};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use opca_core::op::ShellRunner;
-use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
 use opca_core::services::database::CaConfig;
 use opca_core::services::storage::{
     get_aws_credentials, needs_aws_credentials, storage_from_uri_with_creds,
@@ -79,6 +79,8 @@ pub async fn update_ca_config(
     {
         let db = ca.ca_database.as_ref()
             .ok_or("Database not loaded")?;
+        let current = db.get_config().map_err(|e| e.to_string())?;
+        check_crl_batch_update(&current, &updates).map_err(|e| e.to_string())?;
         db.update_config(&updates).map_err(|e| e.to_string())?;
     }
 

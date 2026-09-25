@@ -9,6 +9,7 @@ use opca_core::utils::datetime::{self, DateTimeFormat};
 use crate::commands::dto::{
     ActionItemDto, CaExpiryWarningDto, CrlExpiryWarningDto, DashboardData,
 };
+use crate::commands::crl::crl_batch_dto;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -53,40 +54,22 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
     let crl_metadata = db_ref.get_crl_metadata().map_err(|e| e.to_string())?;
     let config = db_ref.get_config().ok();
     let has_public_store = config.as_ref().is_some_and(|c| c.ca_public_store.is_some());
+    let crl_batch_enabled = config.as_ref().is_some_and(|c| c.crl_batch_enabled == Some(true));
     let cert_days = config.and_then(|c| c.days);
+    let crl_batch = crl_batch_dto(db_ref, crl_batch_enabled)?;
 
     let crl_next_update = crl_metadata.as_ref().and_then(|m| m.next_update.clone());
     let crl_present = crl_next_update.is_some();
 
-    // Assess CRL expiry from the stored next_update
-    let crl_warning_raw = crl_next_update.as_deref().and_then(|s| {
-        datetime::parse_datetime(s, DateTimeFormat::Openssl)
-            .ok()
-            .map(|dt| assess_crl_expiry(dt, Utc::now()))
-    });
-
-    let crl_expiry_warning = match crl_warning_raw.as_ref() {
-        Some(CrlExpiryWarning::Critical { days_remaining }) => Some(CrlExpiryWarningDto {
-            level: "critical".to_string(),
-            days_remaining: Some(*days_remaining),
-            message: format!("CRL expires in {days_remaining} days"),
-        }),
-        Some(CrlExpiryWarning::Prominent { days_remaining }) => Some(CrlExpiryWarningDto {
-            level: "prominent".to_string(),
-            days_remaining: Some(*days_remaining),
-            message: format!("CRL expires in {days_remaining} days"),
-        }),
-        Some(CrlExpiryWarning::Expired { days_overdue }) => Some(CrlExpiryWarningDto {
-            level: "expired".to_string(),
-            days_remaining: Some(-(*days_overdue)),
-            message: if *days_overdue == 0 {
-                "CRL has expired today".to_string()
-            } else {
-                format!("CRL expired {days_overdue} days ago")
-            },
-        }),
-        Some(CrlExpiryWarning::None) | None => None,
+    // A batch's later CRLs are released without the app, so the batch's end is what lapses.
+    let (crl_subject, crl_cover_end) = match &crl_batch {
+        Some(batch) => ("CRL batch", Some(batch.signed_until.clone())),
+        None => ("CRL", crl_next_update.clone()),
     };
+    let crl_expiry_warning = crl_cover_end
+        .as_deref()
+        .and_then(|s| datetime::parse_datetime(s, DateTimeFormat::Openssl).ok())
+        .and_then(|dt| crl_expiry_warning_dto(&assess_crl_expiry(dt, Utc::now()), crl_subject));
 
     // Force a rescan so passage-of-time expirations are detected even if the
     // database wasn't mutated since last call. Persist to 1Password when the
@@ -131,7 +114,7 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
 
     let action_items = build_action_items(
         &ca_warning_raw,
-        crl_warning_raw.as_ref(),
+        crl_expiry_warning.as_ref(),
         has_public_store,
         cert_days,
         expired_certs,
@@ -154,15 +137,34 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         revoked_certs,
         pending_csrs,
         has_public_store,
+        crl_batch_enabled,
+        crl_batch,
         action_items,
     })
+}
+
+fn crl_expiry_warning_dto(warning: &CrlExpiryWarning, subject: &str) -> Option<CrlExpiryWarningDto> {
+    let (level, days_remaining, message) = match *warning {
+        CrlExpiryWarning::Expired { days_overdue: 0 } => ("expired", 0, format!("{subject} has expired today")),
+        CrlExpiryWarning::Expired { days_overdue } => {
+            ("expired", -days_overdue, format!("{subject} expired {days_overdue} days ago"))
+        }
+        CrlExpiryWarning::Critical { days_remaining } => {
+            ("critical", days_remaining, format!("{subject} expires in {days_remaining} days"))
+        }
+        CrlExpiryWarning::Prominent { days_remaining } => {
+            ("prominent", days_remaining, format!("{subject} expires in {days_remaining} days"))
+        }
+        CrlExpiryWarning::None => return None,
+    };
+    Some(CrlExpiryWarningDto { level: level.to_string(), days_remaining: Some(days_remaining), message })
 }
 
 /// Build the dashboard's action-items list. Rules are centralised here so the
 /// frontend only needs to dispatch on `action`.
 fn build_action_items(
     ca_warning: &CaExpiryWarning,
-    crl_warning: Option<&CrlExpiryWarning>,
+    crl_warning: Option<&CrlExpiryWarningDto>,
     has_public_store: bool,
     cert_days: Option<i64>,
     expired_certs: usize,
@@ -171,29 +173,8 @@ fn build_action_items(
     let mut items = Vec::new();
 
     // CRL: expired / critical / prominent all warrant a regenerate action.
-    let (crl_severity, crl_message) = match crl_warning {
-        Some(CrlExpiryWarning::Expired { days_overdue }) => Some((
-            "critical",
-            if *days_overdue == 0 {
-                "CRL has expired today".to_string()
-            } else {
-                format!("CRL expired {days_overdue} days ago")
-            },
-        )),
-        Some(CrlExpiryWarning::Critical { days_remaining }) => Some((
-            "critical",
-            format!("CRL expires in {days_remaining} days"),
-        )),
-        Some(CrlExpiryWarning::Prominent { days_remaining }) => Some((
-            "warning",
-            format!("CRL expires in {days_remaining} days"),
-        )),
-        _ => None,
-    }
-    .map(|(sev, msg)| (sev.to_string(), msg))
-    .unzip();
-
-    if let (Some(severity), Some(message)) = (crl_severity, crl_message) {
+    if let Some(warning) = crl_warning {
+        let severity = if warning.level == "prominent" { "warning" } else { "critical" };
         let (action, button_label) = if has_public_store {
             ("regenerate_and_upload_crl", "Regenerate & Upload CRL")
         } else {
@@ -201,8 +182,8 @@ fn build_action_items(
         };
         items.push(ActionItemDto {
             id: "crl_regenerate".to_string(),
-            severity,
-            message,
+            severity: severity.to_string(),
+            message: warning.message.clone(),
             button_label: button_label.to_string(),
             action: action.to_string(),
         });

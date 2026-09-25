@@ -24,6 +24,13 @@ import "../styles/pages/crl.css";
 
 type Tab = "detail" | "inspect";
 
+function generatedMessage(crl: CrlInfo): string {
+  const batch = crl.crl_batch;
+  return batch
+    ? `CRLs #${batch.first_number}–${batch.last_number} signed and uploaded to the private store`
+    : `CRL #${crl.crl_number ?? "?"} generated`;
+}
+
 export default function CRL() {
   const [info, { refetch, mutate }] = createResource<CrlInfo>(getCrlInfo);
   const [tab, setTab] = createSignal<Tab>("detail");
@@ -66,7 +73,7 @@ export default function CRL() {
   function handleGenerate() {
     publish.dismiss();
     return generate.run(
-      { success: (crl) => `CRL #${crl.crl_number ?? "?"} generated`, failure: "Generate failed" },
+      { success: generatedMessage, failure: "Generate failed" },
       async () => {
         const generated = await generateCrl();
         mutate(generated);
@@ -199,6 +206,42 @@ export default function CRL() {
                   </div>
                 </div>
               </div>
+
+              <Show when={d().crl_batch_enabled}>
+                <p class="text-muted text-sm mt-2">
+                  CRL batches are on: generating signs five CRLs a week apart, each valid for
+                  10 days, and uploads them to the private store for the notification Lambda to
+                  release. CRL Days does not apply.
+                </p>
+              </Show>
+
+              <Show when={d().crl_batch}>
+                {(b) => (
+                  <>
+                    <h3 class="section-heading">Pre-signed Batch</h3>
+                    <div class="detail-grid">
+                      <div class="detail-row">
+                        <span class="detail-label">CRL Numbers</span>
+                        <span class="detail-value">{b().first_number}–{b().last_number}</span>
+                      </div>
+                      <div class="detail-row">
+                        <span class="detail-label">Due CRL</span>
+                        <span class="detail-value">{b().due_number}</span>
+                      </div>
+                      <div class="detail-row">
+                        <span class="detail-label">Signed Until</span>
+                        <span class="detail-value mono">{formatDate(b().signed_until)}</span>
+                      </div>
+                      <div class="detail-row">
+                        <span class="detail-label">Unreleased</span>
+                        <span class="detail-value" classList={{ "text-warning": b().low_cover }}>
+                          {b().remaining} of {b().count}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </Show>
 
               <Show when={d().crl_pem}>
                 <div class="pem-section">

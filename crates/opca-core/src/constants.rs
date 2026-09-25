@@ -88,6 +88,8 @@ pub const DEFAULT_STORAGE_CONF: StorageConf = StorageConf {
 pub const CRL_BATCH_PERIOD_DAYS: i64 = 7;
 pub const CRL_BATCH_WINDOW_DAYS: i64 = 10;
 pub const CRL_BATCH_SIZE: i64 = 5;
+/// Fewer unreleased CRLs than this is low cover (the Lambda alerts at the same point).
+pub const CRL_BATCH_LOW_COVER: i64 = 2;
 
 /// 1Password CLI binary name.
 pub const OP_BIN: &str = "op";
