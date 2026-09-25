@@ -65,6 +65,7 @@ resolv-retry infinite
 nobind
 persist-key
 persist-tun
+remote-cert-tls server
 cipher {{{{ op://{vault}/{ovpn}/server/cipher }}}}
 auth {{{{ op://{vault}/{ovpn}/server/auth }}}}
 verb 3
