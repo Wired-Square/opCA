@@ -110,7 +110,7 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
     let expired_certs = db.certs_expired.difference(&db.certs_ignored).count();
     let expiring_certs = db.certs_expires_soon.difference(&db.certs_ignored).count();
     let warning_certs = db.certs_expires_warning.difference(&db.certs_ignored).count();
-    let revoked_certs = db.certs_revoked.difference(&db.certs_deleted).count();
+    let revoked_certs = db.crl_entries().map_err(|e| e.to_string())?.len();
 
     let pending_csrs = db
         .query_all_csrs(Some("Pending"))

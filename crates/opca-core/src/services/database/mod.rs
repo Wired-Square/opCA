@@ -92,8 +92,6 @@ pub struct CertificateAuthorityDB {
     /// problem counts, the notification Lambda) subtract this set so an
     /// acknowledged cert stops nagging, without altering what the list shows.
     pub certs_ignored: HashSet<String>,
-    /// Overlay set of soft-deleted certs, which stay in their status bucket.
-    pub certs_deleted: HashSet<String>,
     /// Expired certs whose CN matches a currently-valid cert — excluded from
     /// `certs_expired` because the replacement covers them.
     pub certs_superseded: HashSet<String>,
@@ -141,7 +139,6 @@ impl CertificateAuthorityDB {
             certs_revoked: HashSet::new(),
             certs_valid: HashSet::new(),
             certs_ignored: HashSet::new(),
-            certs_deleted: HashSet::new(),
             certs_superseded: HashSet::new(),
             replacements: HashMap::new(),
             valid_cn_to_serial: HashMap::new(),
@@ -179,7 +176,6 @@ impl CertificateAuthorityDB {
             certs_revoked: HashSet::new(),
             certs_valid: HashSet::new(),
             certs_ignored: HashSet::new(),
-            certs_deleted: HashSet::new(),
             certs_superseded: HashSet::new(),
             replacements: HashMap::new(),
             valid_cn_to_serial: HashMap::new(),
@@ -1364,7 +1360,6 @@ impl CertificateAuthorityDB {
         self.certs_revoked.clear();
         self.certs_valid.clear();
         self.certs_ignored.clear();
-        self.certs_deleted.clear();
         self.certs_superseded.clear();
         self.replacements.clear();
         self.valid_cn_to_serial.clear();
@@ -1475,9 +1470,6 @@ impl CertificateAuthorityDB {
             // status plus an "ignored" chip).
             if cert.ignored_at.is_some() {
                 self.certs_ignored.insert(cert.serial.clone());
-            }
-            if cert.deleted_at.is_some() {
-                self.certs_deleted.insert(cert.serial.clone());
             }
 
             if expired {

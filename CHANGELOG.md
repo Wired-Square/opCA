@@ -124,6 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   of non-ASCII letters (`Café` vs `CAFÉ`).
 - Opening the OpenVPN page on a CA with no OpenVPN templates no longer asks 1Password for
   them on every visit.
+- The Dashboard's Revoked tile counts what the CRL carries, so a deleted revoked certificate
+  still counts until it expires.
 - Revoking in the app, singly or in bulk, now regenerates and stores the CRL, as
   `opca cert revoke` does; a bulk revoke regenerates it once. Uploading it to the public
   store is still a separate step.

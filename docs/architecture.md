@@ -216,8 +216,8 @@ also gives the stored CRL revoked count): removing an unexpired one
 would silently un-revoke it. `query_all_certs` and `count_certs` skip deleted
 rows (certificate list, bulk selection, CLI, dashboard total), while
 `process_ca_database`, `query_cert` and `query_all_certs_including_deleted`
-still see them, so the CRL and VPN profile status and type keep working; a
-`certs_deleted` overlay lets the dashboard's revoked count leave them out.
+still see them, so the CRL, the dashboard's revoked count and VPN profile
+status and type keep working.
 In the app, `canDeleteCert` in
 `api/certActions.ts` gates the kebab and bulk Delete; the CLI has
 `opca cert delete -s <serial>`, or `-n <cn>` when exactly one of that CN's

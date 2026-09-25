@@ -2615,7 +2615,7 @@ mod tests {
         assert_eq!(row.ignored_reason.as_deref(), Some("deleted"));
 
         db.process_ca_database(None, true).unwrap();
-        assert!(db.certs_revoked.contains("3") && db.certs_deleted.contains("3"));
+        assert!(db.certs_revoked.contains("3"));
         assert_eq!(crl_serials(&ca.generate_crl().unwrap()), ["3"]);
 
         assert!(matches!(ca.delete_certificate("3"), Err(OpcaError::CertificateNotFound(_))));
