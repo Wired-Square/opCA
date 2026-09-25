@@ -418,9 +418,24 @@ pub async fn revoke_cert(
             state.log_err("revoke_cert", Some(e.to_string()));
             e.to_string()
         })?;
+    regenerate_crl_after_revoke(&state, "revoke_cert", ca)?;
 
-    state.log_ok("revoke_cert", Some(format!("Revoked certificate {}", serial)));
+    state.log_ok("revoke_cert", Some(format!("Revoked certificate {serial} and regenerated the CRL")));
     Ok(true)
+}
+
+/// Store a fresh CRL once revocations are in, as the CLI does; publishing it stays a separate step.
+fn regenerate_crl_after_revoke(
+    state: &AppState,
+    label: &str,
+    ca: &mut CertificateAuthority<Runner>,
+) -> Result<(), String> {
+    ca.generate_crl().map(drop).map_err(|e| {
+        let message = format!("Revoked, but regenerating the CRL failed: {e}");
+        warn!("[tauri] {label}: {message}");
+        state.log_err(label, Some(message.clone()));
+        message
+    })
 }
 
 #[tauri::command]
@@ -622,9 +637,15 @@ pub async fn bulk_revoke_certs<R: Runtime>(
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
-    run_bulk_cert_op(&app, &state, serials, "bulk_revoke", "Revoking", |ca, serial| {
+    let results = run_bulk_cert_op(&app, &state, serials, "bulk_revoke", "Revoking", |ca, serial| {
         ca.revoke_certificate(&CertLookup::Serial(serial.to_string())).map(|_| None)
-    })
+    })?;
+    if results.iter().any(|r| r.ok) {
+        let mut conn = state.ensure_ca()?;
+        let ca = conn.ca.as_mut().ok_or("CA not available")?;
+        regenerate_crl_after_revoke(&state, "bulk_revoke", ca)?;
+    }
+    Ok(results)
 }
 
 #[tauri::command]

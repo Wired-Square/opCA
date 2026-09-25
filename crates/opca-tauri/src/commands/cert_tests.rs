@@ -26,6 +26,55 @@ fn deleted_at(h: &Harness, serial: &str) -> Option<String> {
     conn.db().unwrap().query_cert(&CertLookup::Serial(serial.into()), false).unwrap().unwrap().deleted_at
 }
 
+fn crl_stores(h: &Harness) -> usize {
+    h.op_calls(&["document", "edit", "CRL"]).len()
+}
+
+fn crl_serials(h: &Harness) -> Vec<String> {
+    let state = h.state();
+    let conn = state.conn.lock().unwrap();
+    let pem = conn.ca.as_ref().unwrap().crl.clone().unwrap();
+    let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
+    let mut serials: Vec<_> = crl
+        .get_revoked()
+        .unwrap()
+        .iter()
+        .map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string())
+        .collect();
+    serials.sort();
+    serials
+}
+
+#[test]
+fn revoke_cert_regenerates_and_stores_the_crl() {
+    let h = Harness::with_ca(vec![], handler());
+    let serial = issue_revoked(&h, "www.example.com");
+
+    assert_eq!(crl_stores(&h), 1);
+    assert_eq!(crl_serials(&h), [serial.as_str()]);
+    let log = h.last_log();
+    assert_eq!(log.detail, Some(format!("Revoked certificate {serial} and regenerated the CRL")));
+}
+
+#[test]
+fn bulk_revoke_regenerates_the_crl_once_for_the_batch() {
+    let h = Harness::with_ca(vec![], handler());
+    let serials = [issue(&h, "a.example.com"), issue(&h, "b.example.com")];
+
+    let results = h.invoke("bulk_revoke_certs", json!({ "serials": serials })).unwrap();
+
+    assert!(results.as_array().unwrap().iter().all(|r| r["ok"] == true), "{results}");
+    assert_eq!(crl_stores(&h), 1);
+    assert_eq!(crl_serials(&h), serials);
+}
+
+#[test]
+fn bulk_revoke_leaves_the_crl_alone_when_nothing_was_revoked() {
+    let h = Harness::with_ca(vec![], handler());
+    h.invoke("bulk_revoke_certs", json!({ "serials": ["99"] })).unwrap();
+    assert_eq!(crl_stores(&h), 0);
+}
+
 #[test]
 fn create_cert_returns_the_list_item_and_stores_the_bundle_and_the_database() {
     let h = Harness::with_ca(vec![], handler());

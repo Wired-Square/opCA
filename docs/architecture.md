@@ -596,14 +596,17 @@ list) is handed over in router `state`, which is transient by design.
 ## Lifecycle of a typical operation
 
 1. User clicks **Revoke** on a certificate in the webview.
-2. The SolidJS page calls `revokeCertificate()` in `api/certs.ts`.
-3. `withLock("cert_revoke", …)` acquires `CA_Lock` via `acquire_lock`.
-4. The page invokes `revoke_certificate` — a `#[tauri::command]` handler.
+2. The SolidJS page calls `revokeCert()` in `api/certs.ts`.
+3. `withLock("revoke_cert", …)` acquires `CA_Lock` via `acquire_lock`.
+4. The page invokes `revoke_cert` — a `#[tauri::command]` handler.
 5. The handler calls `AppState::ensure_ca()` to get (or lazily load) the CA.
-6. `CertificateAuthority::revoke_certificate` mutates the SQLite DB,
-   regenerates the CRL, and enqueues the writes (`store_item`,
-   `store_document`).
-7. The queue flushes — each queued op becomes an `op` CLI invocation.
+6. `CertificateAuthority::revoke_certificate` marks the cert revoked in the
+   SQLite DB and stores `CA_Database`; the handler then calls `generate_crl`,
+   which signs a new CRL (next CRL Number, Authority Key Identifier) and stores
+   the `CRL` document and the database. Bulk revoke regenerates once after the
+   batch. Uploading the CRL to the public store stays a separate action, as in
+   the CLI.
+7. Each store becomes an `op` CLI invocation.
 8. The handler serialises the result; the frontend updates its view.
 9. `withLock` releases `CA_Lock` in its `finally` clause, then fires
    `sync_private_store` (fire-and-forget) to back the DB up off the lock.
