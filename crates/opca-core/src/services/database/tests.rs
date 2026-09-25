@@ -131,6 +131,19 @@ fn unset_and_cleared_stores_read_back_as_none() {
 }
 
 #[test]
+fn unset_and_blank_subject_fields_and_urls_read_back_as_none() {
+    let mut db = CertificateAuthorityDB::new(&CaConfig { country: Some(String::new()), ..Default::default() }).unwrap();
+    db.update_config(&CaConfig { crl_url: Some(" ".to_string()), ..Default::default() }).unwrap();
+
+    let c = db.get_config().unwrap();
+    let fields = [c.org, c.ou, c.email, c.city, c.state, c.country, c.ca_url, c.crl_url];
+    assert!(fields.iter().all(Option::is_none), "{fields:?}");
+
+    assert_eq!(db.increment_serial(SerialType::Crl, None).unwrap(), 1, "a blank counter starts at 1");
+    assert_eq!(db.increment_serial(SerialType::Cert, None).unwrap(), 1);
+}
+
+#[test]
 fn test_update_config_serial_conversion() {
     let db = test_db();
     db.update_config(&CaConfig {

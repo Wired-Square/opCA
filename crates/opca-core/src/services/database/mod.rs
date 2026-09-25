@@ -261,7 +261,7 @@ impl CertificateAuthorityDB {
 // Config methods
 // ---------------------------------------------------------------------------
 
-/// `insert_config` stores an unset field as `""`, which must not read back as a configured store.
+/// `insert_config` stores an unset field as `""`, which must read back as unset.
 fn non_blank(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
 }
@@ -291,14 +291,14 @@ impl CertificateAuthorityDB {
                 next_crl_serial: next_crl_serial
                     .as_deref()
                     .and_then(|s| s.trim().parse::<i64>().ok()),
-                org: row.get(2)?,
-                ou: row.get(3)?,
-                email: row.get(4)?,
-                city: row.get(5)?,
-                state: row.get(6)?,
-                country: row.get(7)?,
-                ca_url: row.get(8)?,
-                crl_url: row.get(9)?,
+                org: non_blank(row.get(2)?),
+                ou: non_blank(row.get(3)?),
+                email: non_blank(row.get(4)?),
+                city: non_blank(row.get(5)?),
+                state: non_blank(row.get(6)?),
+                country: non_blank(row.get(7)?),
+                ca_url: non_blank(row.get(8)?),
+                crl_url: non_blank(row.get(9)?),
                 days: row.get(10)?,
                 crl_days: row.get(11)?,
                 schema_version: row.get(12)?,
@@ -374,7 +374,7 @@ impl CertificateAuthorityDB {
     /// If `serial_number` is provided and is greater than the current counter,
     /// the counter jumps to that value before incrementing.
     ///
-    /// Returns the current serial number (before increment).
+    /// Returns the current serial number (before increment); a blank counter starts at 1.
     pub fn increment_serial(
         &mut self,
         serial_type: SerialType,
@@ -393,15 +393,8 @@ impl CertificateAuthorityDB {
 
         let mut current_value = raw
             .as_deref()
-            .and_then(|s| {
-                let trimmed = s.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    trimmed.parse::<i64>().ok()
-                }
-            })
-            .unwrap_or(0);
+            .and_then(|s| s.trim().parse::<i64>().ok())
+            .unwrap_or(1);
 
         // Bump forward if caller supplies an explicit serial
         if let Some(sn) = serial_number {

@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A CA with no private store failed every database sync with "Unsupported storage
   scheme": an unset or cleared store read back as an empty store, not as unset. The same
   applied to the public and backup stores.
+- A CA initialised in the app with a blank subject field could not issue certificates
+  ("string too short"): the blank read back as an empty value rather than unset. Blank
+  fields are now treated as unset, including on existing CAs, and the CRL number starts
+  at 1.
 - Light theme: checkboxes followed the macOS appearance and rendered black in dark mode,
   and detail rows and the Activity Log lost their alternating stripes.
 - The vault lock always recorded its holder as `unknown`, so "vault is locked by …"

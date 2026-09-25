@@ -504,34 +504,30 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 
                         // CRL Distribution Points
                         if let Some(ref crl_url) = ca_config.crl_url {
-                            if !crl_url.is_empty() {
-                                let ctx = builder.x509v3_context(Some(ca_cert), None);
-                                #[allow(deprecated)]
-                                let cdp = openssl::x509::X509Extension::new_nid(
-                                    None,
-                                    Some(&ctx),
-                                    Nid::CRL_DISTRIBUTION_POINTS,
-                                    &format!("URI:{crl_url}"),
-                                )
-                                .map_err(|e| OpcaError::Crypto(format!("CDP: {e}")))?;
-                                builder.append_extension(cdp)?;
-                            }
+                            let ctx = builder.x509v3_context(Some(ca_cert), None);
+                            #[allow(deprecated)]
+                            let cdp = openssl::x509::X509Extension::new_nid(
+                                None,
+                                Some(&ctx),
+                                Nid::CRL_DISTRIBUTION_POINTS,
+                                &format!("URI:{crl_url}"),
+                            )
+                            .map_err(|e| OpcaError::Crypto(format!("CDP: {e}")))?;
+                            builder.append_extension(cdp)?;
                         }
 
                         // Authority Information Access
                         if let Some(ref ca_url) = ca_config.ca_url {
-                            if !ca_url.is_empty() {
-                                let ctx = builder.x509v3_context(Some(ca_cert), None);
-                                #[allow(deprecated)]
-                                let aia = openssl::x509::X509Extension::new_nid(
-                                    None,
-                                    Some(&ctx),
-                                    Nid::INFO_ACCESS,
-                                    &format!("caIssuers;URI:{ca_url}"),
-                                )
-                                .map_err(|e| OpcaError::Crypto(format!("AIA: {e}")))?;
-                                builder.append_extension(aia)?;
-                            }
+                            let ctx = builder.x509v3_context(Some(ca_cert), None);
+                            #[allow(deprecated)]
+                            let aia = openssl::x509::X509Extension::new_nid(
+                                None,
+                                Some(&ctx),
+                                Nid::INFO_ACCESS,
+                                &format!("caIssuers;URI:{ca_url}"),
+                            )
+                            .map_err(|e| OpcaError::Crypto(format!("AIA: {e}")))?;
+                            builder.append_extension(aia)?;
                         }
                     }
                     _ => {}
