@@ -199,7 +199,7 @@ fn build_action_items(
         });
     }
 
-    if let Some(days) = cert_days.filter(|&d| d > APPLE_TLS_MAX_DAYS.into()) {
+    if let Some(days) = cert_days.filter(|&d| d > i64::from(APPLE_TLS_MAX_DAYS)) {
         items.push(ActionItemDto {
             id: "cert_days_over_apple_limit".to_string(),
             severity: "info".to_string(),
