@@ -708,6 +708,9 @@ The deployed Lambda authenticates with its execution role. For local runs,
 credentials the same way OPCA does — `op item get` against the item selected in
 **CA → Stores** — so no AWS CLI is needed. Source `environment.sh` first: the
 handler reads its configuration from the environment at import time.
+Offline unit tests live in
+[notification/test_aws_lambda.py](../notification/test_aws_lambda.py)
+(`python -m pytest notification/test_aws_lambda.py`, Python ≥ 3.12).
 
 The Lambda stays in Python because it is a tiny, infrequent cron job with no
 1Password dependency — keeping it separate from the desktop app means the

@@ -13,7 +13,6 @@ import urllib3
 from botocore.exceptions import ClientError
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import padding
 from datetime import datetime, timedelta, timezone
 
 
@@ -67,7 +66,7 @@ def find_expiring_certificates(certificates, days):
             expiring_certs['expiring'] = True
             expiring_certs['certs'][serial] = {'cn': cn, 'expiry': expiry_str}
             prefix = f'[EXT:{issuer}] ' if issuer else ''
-            msg += f'    [{serial}] {prefix}{cn} - Expiries in {timestamp_until(expiry_date)['friendly']}\n'
+            msg += f'    [{serial}] {prefix}{cn} - Expires in {timestamp_until(expiry_date)['friendly']}\n'
 
     expiring_certs['msg'] = msg
 
@@ -195,18 +194,15 @@ def run_tests(ca_cert_data, crl_data, db_data):
 
     # Check CRL signature
     try:
-        ca_cert.public_key().verify(
-            crl.signature,
-            crl.tbs_certlist_bytes,
-            padding.PKCS1v15(),  # or use crl.signature_hash_algorithm.padding if available
-            crl.signature_hash_algorithm,
-        )
-
-        msg += concat_msg('  ✅ CRL is valid and signature is correct')
-
+        crl_error = None if crl.is_signature_valid(ca_cert.public_key()) else 'signature does not match the CA certificate'
     except Exception as e:
+        crl_error = e
+
+    if crl_error:
         warning = True
-        msg += concat_msg(f'  ❌ *CRL validation failed: {e}*')
+        msg += concat_msg(f'  ❌ *CRL validation failed: {crl_error}*')
+    else:
+        msg += concat_msg('  ✅ CRL is valid and signature is correct')
 
     # File age check
     if crl_file_age['days'] > days:
@@ -220,7 +216,8 @@ def run_tests(ca_cert_data, crl_data, db_data):
         warning = True
         msg += concat_msg(f'  ❌️ *CRL Next Update is in the past [{crl_expiry_friendly}]*')
     elif crl_next_update - now <= timedelta(crl_days):
-        msg += concat_msg(f'  ⚠️ *CRL will expire soon [{crl_expiry_friendly}]')
+        warning = True
+        msg += concat_msg(f'  ⚠️ *CRL will expire soon [{crl_expiry_friendly}]*')
     else:
         msg += concat_msg(f'  ✅ CRL Next Update is in the future [{crl_expiry_friendly}]')
 
@@ -250,12 +247,9 @@ def send_slack_notification(username, message, webhook_url, warning=False):
 
     return response.status
 
-def timestamp_diff(last_modified):
+def split_duration(delta):
     """
-    Return the number of days, hours and minutes between now and a last_modified timestamp
-
-    Args:
-        last_modified (datetime.datetime)
+    Return a timedelta as whole days, hours and minutes, each carrying its sign
 
     Returns:
         dict: {
@@ -265,61 +259,24 @@ def timestamp_diff(last_modified):
             "friendly": str
         }
     """
-    age = now - last_modified.replace(tzinfo=timezone.utc)
-
-    total_seconds = int(age.total_seconds())
-
-    age_hours, remainder = divmod(total_seconds - age.days * 86400, 3600)
-    age_minutes = remainder // 60
-
-    friendly_age = f'{age.days} days, {age_hours} hours, {age_minutes} minutes'
+    total_seconds = int(delta.total_seconds())
+    sign = -1 if total_seconds < 0 else 1
+    whole_days, remainder = divmod(abs(total_seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes = remainder // 60
 
     return {
-        'days': age.days,
-        'hours': age_hours,
-        'minutes': age_minutes,
-        'friendly': friendly_age,
+        'days': sign * whole_days,
+        'hours': sign * hours,
+        'minutes': sign * minutes,
+        'friendly': f'{"-" if sign < 0 else ""}{whole_days} days, {hours} hours, {minutes} minutes',
     }
+
+def timestamp_diff(last_modified):
+    return split_duration(now - last_modified.replace(tzinfo=timezone.utc))
 
 def timestamp_until(expiry_time):
-    """
-    Return the number of days, hours and minutes until an expiry timestamp
-
-    Args:
-        expiry_time (datetime.datetime)
-
-    Returns:
-        dict: {
-            "days": int,
-            "hours": int,
-            "minutes": int,
-            "friendly": str
-        }
-    """
-    delta = expiry_time.replace(tzinfo=timezone.utc) - now
-
-    total_seconds = int(delta.total_seconds())
-
-    sign = ''
-    if total_seconds < 0:
-        total_seconds = abs(total_seconds)
-        sign = '-'
-
-    age_days = delta.days
-    if age_days < 0:
-        days = abs(days)
-
-    age_hours, remainder = divmod(total_seconds - age_days * 86400, 3600)
-    age_minutes = remainder // 60
-
-    friendly_age = f'{sign}{age_days} days, {age_hours} hours, {age_minutes} minutes'
-
-    return {
-        'days': age_days,
-        'hours': age_hours,
-        'minutes': age_minutes,
-        'friendly': friendly_age,
-    }
+    return split_duration(expiry_time.replace(tzinfo=timezone.utc) - now)
 
 def lambda_handler(event, context):
     db_data = get_s3_item(bucket=private_bucket, key=db_key, path=local_db_path)

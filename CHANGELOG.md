@@ -70,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - CRLs now carry a CRL Number and an Authority Key Identifier, both required by RFC 5280.
   The number matches the one shown on the CRL page and goes up by one per CRL.
+- Notification Lambda: an EC CA always reported "CRL validation failed", the Lambda crashed
+  instead of alerting once the CRL's Next Update had passed, and a CRL about to expire did
+  not raise the warning icon. Redeploy the Lambda to pick these up.
 - A CA initialised in the app could not issue its first certificate ("UNIQUE constraint
   failed"): it reused the CA certificate's serial. The app now starts serials at 1, as
   `opca ca init` does.
