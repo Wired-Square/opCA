@@ -68,6 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `rsync://` uploads could silently skip replacing a file of the same size uploaded within
+  the same second.
 - CRLs now carry a CRL Number and an Authority Key Identifier, both required by RFC 5280.
   The number matches the one shown on the CRL page and goes up by one per CRL.
 - Notification Lambda: an EC CA always reported "CRL validation failed", the Lambda crashed

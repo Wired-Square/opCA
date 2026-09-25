@@ -77,8 +77,9 @@ impl StorageBackend for StorageRsync {
 
         let tmp_path = tmp.path().to_string_lossy().to_string();
 
+        // rsync's size-and-mtime quick check would skip a same-size re-upload within a second.
         let output = Command::new("rsync")
-            .args(["-avz", &tmp_path, &destination])
+            .args(["-avz", "--ignore-times", &tmp_path, &destination])
             .output()
             .map_err(|e| OpcaError::Storage(format!("Failed to run rsync: {e}")))?;
 
