@@ -257,6 +257,11 @@ notification Lambda) can publish fresh CRLs while the desktop is closed:
   app's error says whether regenerating or uploading failed. With no private
   store configured, generating refuses before signing anything.
 - `rsync://` and `sftp://` stores need the `pending-crl/` directory to exist.
+- The Lambda releases the due CRL (see *Lambda notification*). OpenVPN servers
+  pull the published CRL with
+  [contrib/openvpn-crl-fetch.sh](../contrib/openvpn-crl-fetch.sh); operator
+  setup (IAM, `PENDING_CRL_KEY`, systemd/cron) is in
+  [crl-batches.md](crl-batches.md).
 - In the app, the CA page's Stores tab has the toggle; `update_ca_config`
   refuses turning it on without a private store (`check_crl_batch_update`, which
   `opca database config-set` shares; `generate_crl` refuses with the same error). `get_crl_info`, `backfill_crl`, `generate_crl` and
@@ -702,8 +707,8 @@ The Lambda reads the artefacts OPCA uploads through its storage backends:
 - In batch mode, each CRL generation also uploads the pre-signed batch to the
   private bucket at `pending-crl/crl-batch.pem`.
 
-The Lambda never talks to 1Password and never touches private keys — it only
-needs the already-published database dump, CA certificate, and CRL.
+The Lambda never talks to 1Password and holds no key. Its one write is
+releasing a due batch CRL to the public `CRL_KEY`.
 
 ### What it checks
 
@@ -722,7 +727,14 @@ downloads and calls `run_tests`, which reports on:
   `cryptography`.
 - **CRL file age** — age of the S3 object vs. `DAYS`.
 - **CRL `nextUpdate`** — already-expired is flagged as an error; within
-  `CRL_DAYS` is flagged as a warning.
+  `CRL_DAYS` is flagged as a warning (in batch mode, within 3 days or
+  `CRL_DAYS` if lower).
+- **CRL batch** — only while `config.crl_batch_enabled` is on in the dump:
+  verifies every CRL in the batch against the CA certificate, publishes the one
+  with the latest `thisUpdate` ≤ now if its CRL number is above the published
+  one (never rolls back; one bad CRL refuses the batch), and warns when fewer
+  than 2 are unreleased or the batch can't be read. Off, the batch is never
+  fetched.
 
 Results are concatenated into a single Slack-formatted message. Any failing
 check sets a `warning` flag that switches the Slack bot icon from
@@ -740,6 +752,7 @@ for the canonical list. Key ones:
 | `CRL_DAYS` | Threshold for CRL `nextUpdate` warnings |
 | `PRIVATE_BUCKET`, `DB_KEY`, `LOCAL_DB_PATH` | Where the CA database dump lives in S3 and where to stage it |
 | `PUBLIC_BUCKET`, `CA_CERT_KEY`, `CRL_KEY` | Where the published CA cert and CRL live |
+| `PENDING_CRL_KEY` | Batch object in the private bucket, including the store's prefix (default `pending-crl/crl-batch.pem`) |
 | `SLACK_USER`, `SLACK_URL` | Slack bot identity and webhook |
 
 The deployed Lambda authenticates with its execution role. For local runs,

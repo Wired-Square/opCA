@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   adds a CRL Batch tile that warns once fewer than two are left, and judges the CRL expiry
   warning by the batch's signed-until.
 
+- **Notification Lambda releases CRL batches.** While the CA has batches on, it publishes the
+  CRL that is due after verifying the whole batch against the CA certificate, never rolls
+  back, and warns when fewer than two CRLs are left or the batch can't be read. New
+  `PENDING_CRL_KEY` setting; IAM policy in `docs/crl-batches.md`.
+
+- **`contrib/openvpn-crl-fetch.sh`** fetches the published CRL for an OpenVPN server. It
+  verifies the CRL and swaps it in atomically, keeps the old file on any failure, and alerts
+  through Slack or a non-zero exit when a fetch fails or the CRL expires within 3 days.
+  systemd and cron examples are in `docs/crl-batches.md`.
+
 - **Start a new CA from the connect screen.** **New CA in a new vault…** creates the
   1Password vault, refusing a name that is already taken, then opens CA initialisation.
 - **CA Days** on the CA initialisation form sets the CA certificate's own lifetime,
