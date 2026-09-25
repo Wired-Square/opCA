@@ -74,12 +74,20 @@ pub const DEFAULT_KEY_SIZE: KeySizeDefaults = KeySizeDefaults {
 pub struct StorageConf {
     pub ca_cert_file: &'static str,
     pub crl_file: &'static str,
+    /// Private-store key of the pre-signed CRL batch.
+    pub crl_batch_file: &'static str,
 }
 
 pub const DEFAULT_STORAGE_CONF: StorageConf = StorageConf {
     ca_cert_file: "ca.crt",
     crl_file: "crl.pem",
+    crl_batch_file: "pending-crl/crl-batch.pem",
 };
+
+/// Pre-signed CRL batches: CRL `i` is valid from `T0 + i·PERIOD` for `WINDOW`.
+pub const CRL_BATCH_PERIOD_DAYS: i64 = 7;
+pub const CRL_BATCH_WINDOW_DAYS: i64 = 10;
+pub const CRL_BATCH_SIZE: i64 = 5;
 
 /// 1Password CLI binary name.
 pub const OP_BIN: &str = "op";

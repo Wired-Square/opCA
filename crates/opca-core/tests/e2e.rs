@@ -14,7 +14,7 @@
 
 use std::sync::Mutex;
 
-use opca_core::constants::DEFAULT_OP_CONF;
+use opca_core::constants::{DEFAULT_OP_CONF, DEFAULT_STORAGE_CONF};
 use opca_core::op::{create_vault_standalone, CommandRunner, Op};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertType, KeyAlgorithm};
@@ -468,6 +468,64 @@ fn t31_crl_verify() {
 
     assert!(crl_pem.contains("BEGIN X509 CRL"));
     eprintln!("[e2e] CRL verified from vault ({} bytes)", crl_pem.len());
+}
+
+fn crl_batch(path: &std::path::Path) -> Vec<openssl::x509::X509Crl> {
+    std::fs::read_to_string(path)
+        .expect("CRL batch not uploaded")
+        .split_inclusive("-----END X509 CRL-----\n")
+        .map(|pem| openssl::x509::X509Crl::from_pem(pem.as_bytes()).expect("parse batch CRL"))
+        .collect()
+}
+
+#[test]
+fn t32_crl_batch_generate_and_revoke() {
+    skip_unless_integration!();
+
+    let state = STATE.lock().unwrap();
+    let s = state.as_ref().expect("t01 must run first");
+    let store = tempfile::tempdir().expect("temp store");
+    std::fs::create_dir(store.path().join("pending-crl")).unwrap();
+    let batch_path = store.path().join(DEFAULT_STORAGE_CONF.crl_batch_file);
+    let mut ca = CertificateAuthority::retrieve(make_op(&s.vault)).expect("CA retrieve failed");
+    let set_batches = |ca: &mut CertificateAuthority<_>, on: bool, store: String| {
+        ca.ca_database.as_ref().unwrap()
+            .update_config(&CaConfig { crl_batch_enabled: Some(on), ca_private_store: Some(store), ..CaConfig::default() })
+            .unwrap();
+        ca.store_ca_database().unwrap();
+    };
+    set_batches(&mut ca, true, format!("rsync://{}", store.path().display()));
+
+    let stored = ca.generate_crl().expect("batch generate failed");
+    let first = crl_batch(&batch_path);
+    assert_eq!(first.len(), 5);
+    assert_eq!(stored.as_bytes(), first[0].to_pem().unwrap());
+
+    let (bundle, _) = ca
+        .generate_certificate_bundle(
+            CertType::VpnClient,
+            "e2e-batch",
+            opca_core::services::cert::CertBundleConfig { cn: Some("e2e-batch".into()), ..Default::default() },
+            None,
+        )
+        .expect("create e2e-batch failed");
+    let serial = bundle.get_certificate_attrib("serial").unwrap().unwrap();
+    assert!(ca.revoke_certificate(&CertLookup::Serial(serial.clone())).unwrap());
+    ca.generate_crl().expect("re-sign on revoke failed");
+
+    let resigned = crl_batch(&batch_path);
+    let number = |crl: &openssl::x509::X509Crl| opca_core::services::ca::crl_metadata_from(crl).crl_number.unwrap();
+    assert_eq!(number(&resigned[0]), number(&first[4]) + 1);
+    let revoked = |crl: &openssl::x509::X509Crl| -> Vec<String> {
+        crl.get_revoked().into_iter().flatten().map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string()).collect()
+    };
+    assert!(resigned.iter().all(|crl| revoked(crl).contains(&serial)));
+    let reloaded = CertificateAuthority::retrieve(make_op(&s.vault)).expect("CA retrieve failed");
+    let batch = reloaded.ca_database.as_ref().unwrap().get_crl_batch().unwrap().expect("batch recorded");
+    assert_eq!(batch.first_number, number(&resigned[0]));
+
+    set_batches(&mut ca, false, String::new());
+    eprintln!("[e2e] CRL batch signed and re-signed after revoking {serial}");
 }
 
 #[test]

@@ -96,11 +96,7 @@ fn handle_init<R: CommandRunner>(
         crl_url,
         days: Some(days),
         crl_days: Some(crl_days),
-        schema_version: None,
-        ca_public_store: None,
-        ca_private_store: None,
-        ca_backup_store: None,
-        ca_aws_region: None,
+        ..CaConfig::default()
     };
 
     with_lock(app, "ca_init", |app| {

@@ -1,6 +1,8 @@
+use chrono::Utc;
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner};
 use opca_core::services::ca::parse_crl_metadata;
+use opca_core::utils::datetime::{format_datetime, DateTimeFormat};
 
 use crate::app::{with_lock, AppContext};
 use crate::output;
@@ -26,6 +28,10 @@ fn handle_create<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaEr
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
         let crl_pem = ca.generate_crl()?;
         output::print_result("CRL generation", true);
+        let db = ca.ca_database.as_ref().ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
+        if db.get_crl_batch()?.is_some() {
+            output::print_result("CRL batch upload to the private store", true);
+        }
         print!("{crl_pem}");
         Ok(())
     })
@@ -81,6 +87,19 @@ fn handle_info<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaErro
         "Revoked Certificates",
         &metadata.revoked_count.map(|n| n.to_string()).unwrap_or_else(|| "0".to_string()),
     );
+
+    let db = ca.ca_database.as_ref().ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
+    if let Some(batch) = db.get_crl_batch()? {
+        let status = batch.status(Utc::now());
+        output::subtitle("Pre-signed CRL Batch");
+        output::info(
+            "CRL Numbers",
+            &format!("{}–{}", batch.first_number, batch.first_number + batch.count - 1),
+        );
+        output::info("Due CRL", &status.due_number.to_string());
+        output::info("Signed Until", &format_datetime(status.signed_until, DateTimeFormat::Text));
+        output::info("Unreleased", &format!("{} of {}", status.remaining, status.count));
+    }
 
     // Parse revoked entries from JSON if available
     if let Some(ref json) = metadata.revoked_json {

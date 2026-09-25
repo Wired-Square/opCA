@@ -181,6 +181,9 @@ pub struct CaConfig {
     /// AWS region for `s3://` stores and Route53. Shared CA config — the AWS
     /// credential itself is per-user local state (see `crate::settings`).
     pub ca_aws_region: Option<String>,
+    /// Sign a batch of staggered CRLs for the private store instead of one
+    /// `crl_days` CRL. Off unless set: needs the releasing Lambda.
+    pub crl_batch_enabled: Option<bool>,
 }
 
 /// A DKIM key entry (`dkim_key` table). Mirrors the small set of metadata
@@ -222,6 +225,49 @@ pub struct CrlMetadata {
     pub crl_number: Option<i64>,
     pub revoked_count: Option<i64>,
     pub revoked_json: Option<String>,
+}
+
+/// The last pre-signed CRL batch (singleton row, `id=1`). Its own parameters
+/// are recorded so later constant changes can't misreport it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CrlBatch {
+    pub t0: DateTime<Utc>,
+    pub period_days: i64,
+    pub window_days: i64,
+    pub count: i64,
+    pub first_number: i64,
+}
+
+/// How far a CRL batch covers at a given moment.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CrlBatchStatus {
+    /// The CRL the releaser should have published: greatest `thisUpdate` ≤ now.
+    pub due_number: i64,
+    /// The batch's last `nextUpdate`.
+    pub signed_until: DateTime<Utc>,
+    /// CRLs whose `thisUpdate` is still in the future.
+    pub remaining: i64,
+    pub count: i64,
+}
+
+impl CrlBatch {
+    pub fn this_update(&self, index: i64) -> DateTime<Utc> {
+        self.t0 + Duration::days(index * self.period_days)
+    }
+
+    pub fn next_update(&self, index: i64) -> DateTime<Utc> {
+        self.this_update(index) + Duration::days(self.window_days)
+    }
+
+    pub fn status(&self, now: DateTime<Utc>) -> CrlBatchStatus {
+        let released = (0..self.count).filter(|&i| self.this_update(i) <= now).count() as i64;
+        CrlBatchStatus {
+            due_number: self.first_number + (released - 1).max(0),
+            signed_until: self.next_update(self.count - 1),
+            remaining: self.count - released,
+            count: self.count,
+        }
+    }
 }
 
 /// OpenVPN template record.

@@ -1,4 +1,5 @@
 use super::*;
+use chrono::TimeZone;
 
 /// Helper to create a fresh database with sensible defaults.
 fn test_db() -> CertificateAuthorityDB {
@@ -1167,7 +1168,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 9); // v5→v6 … v12→v13, v13→v14
+    assert_eq!(info.steps.len(), 10); // v5→v6 … v13→v14, v14→v15
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1193,7 +1194,65 @@ COMMIT;
 
     // New tables should exist and be queryable
     assert!(db.get_crl_metadata().unwrap().is_none());
+    assert!(db.get_crl_batch().unwrap().is_none());
     assert!(db.query_all_openvpn_templates().unwrap().is_empty());
+}
+
+#[test]
+fn a_v14_dump_imports_with_crl_batches_off() {
+    let db = test_db();
+    db.conn
+        .execute_batch(
+            "DROP TABLE crl_batch;
+             ALTER TABLE config DROP COLUMN crl_batch_enabled;
+             UPDATE config SET schema_version = 14 WHERE id = 1;",
+        )
+        .unwrap();
+    let v14_sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(&v14_sql).unwrap();
+
+    assert_eq!((info.from_version, info.steps.len()), (14, 1));
+    let config = db.get_config().unwrap();
+    assert_eq!((config.schema_version, config.crl_batch_enabled), (Some(15), None));
+    assert!(db.get_crl_batch().unwrap().is_none());
+    assert_eq!(config.org.as_deref(), Some("Test Org"));
+}
+
+#[test]
+fn the_crl_batch_flag_and_record_survive_export_and_import() {
+    let db = test_db();
+    let batch = CrlBatch {
+        t0: Utc.with_ymd_and_hms(2026, 9, 25, 1, 2, 3).unwrap(),
+        period_days: 7,
+        window_days: 10,
+        count: 5,
+        first_number: 11,
+    };
+    db.update_config(&CaConfig { crl_batch_enabled: Some(true), ..Default::default() }).unwrap();
+    db.upsert_crl_batch(&batch).unwrap();
+
+    let (db, _) = CertificateAuthorityDB::from_sql_dump(&String::from_utf8(db.export_database().unwrap()).unwrap()).unwrap();
+
+    assert_eq!(db.get_config().unwrap().crl_batch_enabled, Some(true));
+    assert_eq!(db.get_crl_batch().unwrap(), Some(batch));
+    db.clear_crl_batch().unwrap();
+    assert!(db.get_crl_batch().unwrap().is_none());
+}
+
+#[test]
+fn a_batch_reports_the_due_crl_its_cover_and_what_is_left_to_release() {
+    let t0 = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let batch = CrlBatch { t0, period_days: 7, window_days: 10, count: 5, first_number: 11 };
+    let signed_until = t0 + chrono::Duration::days(38);
+    let at = |days: i64| batch.status(t0 + chrono::Duration::days(days));
+
+    assert_eq!(batch.status(t0 - chrono::Duration::hours(1)).remaining, 5);
+    assert_eq!((at(0).due_number, at(0).remaining), (11, 4));
+    assert_eq!((at(13).due_number, at(13).remaining), (12, 3));
+    assert_eq!((at(14).due_number, at(14).remaining), (13, 2));
+    assert_eq!((at(40).due_number, at(40).remaining), (15, 0));
+    assert!([0, 13, 40].iter().all(|&d| at(d).signed_until == signed_until && at(d).count == 5));
 }
 
 #[test]

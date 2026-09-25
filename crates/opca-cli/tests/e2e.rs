@@ -549,6 +549,60 @@ fn t33_ca_list() {
     );
 }
 
+fn crl_batch(path: &std::path::Path) -> Vec<openssl::x509::X509Crl> {
+    std::fs::read_to_string(path)
+        .expect("CRL batch not uploaded")
+        .split_inclusive("-----END X509 CRL-----\n")
+        .map(|pem| openssl::x509::X509Crl::from_pem(pem.as_bytes()).expect("parse batch CRL"))
+        .collect()
+}
+
+fn revoked_count(crl: &openssl::x509::X509Crl) -> usize {
+    crl.get_revoked().map_or(0, |r| r.len())
+}
+
+fn crl_number(crl: &openssl::x509::X509Crl) -> i64 {
+    opca_core::services::ca::crl_metadata_from(crl).crl_number.expect("CRL Number")
+}
+
+#[test]
+fn t34_crl_batch() {
+    skip_unless_integration!();
+    bail_if_failed!();
+    let state = get_state();
+    let s = state.as_ref().expect("t01 must run first");
+    let store = s.tmp_dir.join("private-store");
+    std::fs::create_dir_all(store.join("pending-crl")).unwrap();
+    let batch_path = store.join("pending-crl/crl-batch.pem");
+    let store_conf = format!("ca_private_store=rsync://{}", store.display());
+
+    assert_ok(&run_opca(s, &["database", "config-set", "--conf", "crl_batch_enabled=true", "--conf", &store_conf]), "enable CRL batches");
+    let output = run_opca(s, &["crl", "create"]);
+    assert_ok(&output, "crl create (batch)");
+    assert!(combined_output(&output).contains("CRL batch upload to the private store: OK"));
+    let first = crl_batch(&batch_path);
+    assert_eq!(first.len(), 5);
+
+    let info = combined_output(&run_opca(s, &["crl", "info"]));
+    assert!(info.contains("Pre-signed CRL Batch") && info.contains("Unreleased: 4 of 5"), "{info}");
+
+    assert_ok(&run_opca(s, &["cert", "create", "-t", "vpnclient", "-n", "batch-cert"]), "cert create batch-cert");
+    assert_ok(&run_opca(s, &["cert", "revoke", "-n", "batch-cert"]), "cert revoke batch-cert (batch)");
+    let resigned = crl_batch(&batch_path);
+    assert_eq!(resigned.len(), 5);
+    assert!(resigned.iter().all(|crl| revoked_count(crl) == revoked_count(&first[0]) + 1));
+    assert_eq!(crl_number(&resigned[0]), crl_number(&first[4]) + 1);
+
+    assert_ok(
+        &run_opca(s, &["database", "config-set", "--conf", "crl_batch_enabled=false", "--conf", "ca_private_store="]),
+        "disable CRL batches",
+    );
+    let output = run_opca(s, &["crl", "create"]);
+    assert_ok(&output, "crl create (single)");
+    assert!(!combined_output(&output).contains("CRL batch upload"));
+    eprintln!("[e2e] CRL batch signed, re-signed on revoke, and turned off");
+}
+
 // ---------------------------------------------------------------------------
 // OpenVPN tests
 // ---------------------------------------------------------------------------

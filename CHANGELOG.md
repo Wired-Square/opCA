@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Pre-signed CRL batches (opt-in, core and CLI).** With `crl_batch_enabled` on
+  (`opca database config-set --conf crl_batch_enabled=true`), generating the CRL, and every
+  revoke, signs five CRLs a week apart, each valid for 10 days, and uploads them to
+  `pending-crl/crl-batch.pem` in the private store, so they can be released while the app is
+  closed. A failed upload is reported rather than skipped. The first CRL is stored as usual;
+  `opca crl info` shows the batch's cover. Needs a private store. Database schema v15.
+
 - **Start a new CA from the connect screen.** **New CA in a new vault…** creates the
   1Password vault, refusing a name that is already taken, then opens CA initialisation.
 - **CA Days** on the CA initialisation form sets the CA certificate's own lifetime,

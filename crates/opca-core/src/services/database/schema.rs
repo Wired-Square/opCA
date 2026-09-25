@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 14;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 15;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v14 — current)
+// Table DDL (v15 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -30,7 +30,8 @@ pub const CREATE_CONFIG_TABLE: &str = "
         ca_public_store TEXT,
         ca_private_store TEXT,
         ca_backup_store TEXT,
-        ca_aws_region TEXT
+        ca_aws_region TEXT,
+        crl_batch_enabled INTEGER
     )
 ";
 
@@ -103,6 +104,17 @@ pub const CREATE_CRL_METADATA_TABLE: &str = "
         crl_number INTEGER,
         revoked_count INTEGER DEFAULT 0,
         revoked_json TEXT
+    )
+";
+
+pub const CREATE_CRL_BATCH_TABLE: &str = "
+    CREATE TABLE IF NOT EXISTS crl_batch (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        t0 TEXT NOT NULL,
+        period_days INTEGER NOT NULL,
+        window_days INTEGER NOT NULL,
+        count INTEGER NOT NULL,
+        first_number INTEGER NOT NULL
     )
 ";
 
@@ -422,8 +434,22 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v13→v14: {e}")))?;
 
         version = 14;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 14, ok: true });
+    }
+
+    // v14 → v15: opt-in pre-signed CRL batches and the record of the last one.
+    if version == 14 {
+        conn.execute_batch(CREATE_CRL_BATCH_TABLE)
+            .map_err(|e| OpcaError::SchemaMigration(format!("v14→v15 crl_batch: {e}")))?;
+        conn.execute_batch(
+            "ALTER TABLE config ADD COLUMN crl_batch_enabled INTEGER;
+             UPDATE config SET schema_version = 15 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v14→v15: {e}")))?;
+
+        version = 15;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 15, ok: true });
     }
 
     info.migrated = true;

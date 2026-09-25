@@ -424,14 +424,20 @@ pub async fn revoke_cert(
     Ok(true)
 }
 
-/// Store a fresh CRL once revocations are in, as the CLI does; publishing it stays a separate step.
+/// Store a fresh CRL once revocations are in, as the CLI does; publishing it stays a separate
+/// step, except that a CRL batch goes to the private store at once.
 fn regenerate_crl_after_revoke(
     state: &AppState,
     label: &str,
     ca: &mut CertificateAuthority<Runner>,
 ) -> Result<(), String> {
     ca.generate_crl().map(drop).map_err(|e| {
-        let message = format!("Revoked, but regenerating the CRL failed: {e}");
+        let message = match e {
+            OpcaError::CrlBatchUpload(cause) => format!(
+                "Revoked and re-signed the CRL batch, but uploading it to the private store failed: {cause}"
+            ),
+            e => format!("Revoked, but regenerating the CRL failed: {e}"),
+        };
         warn!("[tauri] {label}: {message}");
         state.log_err(label, Some(message.clone()));
         message

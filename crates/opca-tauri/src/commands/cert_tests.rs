@@ -1,4 +1,4 @@
-use opca_core::services::database::CertLookup;
+use opca_core::services::database::{CaConfig, CertLookup};
 use opca_core::testutil::err_output;
 use serde_json::{json, Value};
 
@@ -54,6 +54,30 @@ fn revoke_cert_regenerates_and_stores_the_crl() {
     assert_eq!(crl_serials(&h), [serial.as_str()]);
     let log = h.last_log();
     assert_eq!(log.detail, Some(format!("Revoked certificate {serial} and regenerated the CRL")));
+}
+
+fn enable_crl_batches(h: &Harness, private_store: Option<String>) {
+    let state = h.state();
+    let conn = state.conn.lock().unwrap();
+    conn.db()
+        .unwrap()
+        .update_config(&CaConfig { crl_batch_enabled: Some(true), ca_private_store: private_store, ..CaConfig::default() })
+        .unwrap();
+}
+
+#[test]
+fn a_revoke_says_whether_regenerating_or_uploading_the_crl_batch_failed() {
+    let h = Harness::with_ca(vec![], handler());
+    let serials = [issue(&h, "a.example.com"), issue(&h, "b.example.com")];
+
+    enable_crl_batches(&h, None);
+    let err = h.invoke("revoke_cert", json!({ "serial": serials[0] })).unwrap_err();
+    assert!(err.as_str().unwrap().starts_with("Revoked, but regenerating the CRL failed"), "{err}");
+
+    enable_crl_batches(&h, Some("rsync:///nonexistent-opca-store".into()));
+    let err = h.invoke("revoke_cert", json!({ "serial": serials[1] })).unwrap_err();
+    assert!(err.as_str().unwrap().starts_with("Revoked and re-signed the CRL batch, but uploading it"), "{err}");
+    assert_eq!(h.last_log().detail.as_deref(), err.as_str());
 }
 
 #[test]

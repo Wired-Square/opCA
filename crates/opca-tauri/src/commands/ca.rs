@@ -278,6 +278,7 @@ pub(crate) fn ca_config_to_dto(config: &CaConfig) -> CaConfigDto {
         ca_private_store: config.ca_private_store.clone(),
         ca_backup_store: config.ca_backup_store.clone(),
         ca_aws_region: config.ca_aws_region.clone(),
+        crl_batch_enabled: config.crl_batch_enabled,
         key_algorithm: None,
         cn: None,
         ca_days: None,
@@ -306,5 +307,6 @@ fn dto_to_ca_config(dto: &CaConfigDto) -> CaConfig {
         ca_private_store: dto.ca_private_store.clone(),
         ca_backup_store: dto.ca_backup_store.clone(),
         ca_aws_region: dto.ca_aws_region.clone(),
+        crl_batch_enabled: dto.crl_batch_enabled,
     }
 }

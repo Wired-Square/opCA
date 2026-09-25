@@ -78,9 +78,10 @@ Organised by concern under [src/](../crates/opca-core/src):
     the extension. The frontend's `utils/san.ts` mirrors its parsing rules.
   - [database/](../crates/opca-core/src/services/database) — in-memory
     SQLite (`rusqlite`) holding the CA config and every issued/external
-    certificate, CSR, CRL metadata record, and OpenVPN template/profile. The
-    whole DB is serialised and persisted as the `CA_Database` document in
-    1Password. A schema-version field drives automatic migrations.
+    certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
+    template/profile. The whole DB is serialised and persisted as the
+    `CA_Database` document in 1Password. A schema-version field drives
+    automatic, forward-only migrations (currently v15).
   - [command_queue.rs](../crates/opca-core/src/services/command_queue.rs)
     — batches write operations (`store_item`, `store_document`, `rename`,
     `delete`) in memory. Duplicate writes to the same target are collapsed so
@@ -115,7 +116,7 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 |---|---|---|---|
 | CA | `CA` | Secure Note | CA certificate, private key, subject, validity, serial counters |
 | Database | `CA_Database` | Document | SQLite dump of every tracked cert/CSR/CRL/VPN record |
-| CRL | `CRL` | Document | Latest published Certificate Revocation List |
+| CRL | `CRL` | Document | Latest Certificate Revocation List; in batch mode, the first CRL of the current batch |
 | OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key, server config, and the named templates (canonical store; mirrored into the `openvpn_template` table for fast reads) |
 | Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type). Deleting a revoked or expired cert (`CertificateAuthority::delete_certificate`) archives it; see [Deleted certificates](#deleted-certificates) |
 | External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
@@ -230,6 +231,32 @@ not. There are dedicated `Expiring Soon`, `Ignored`, and `Superseded` filters;
 the `Expiring Soon` filter excludes ignored certs so it matches the dashboard's
 expiring count. The same `Valid`/`Expiring Soon`/`Expired` rendering is shared
 between the list and the cert detail page via the `CertStatusBadge` component.
+
+### Pre-signed CRL batches
+
+Off by default, per CA (`crl_batch_enabled` in `config`, schema v15; `opca
+database config-set --conf crl_batch_enabled=true`). Off, `generate_crl` signs
+one CRL valid for `crl_days`. On, it signs a batch so a key-less releaser (the
+notification Lambda) can publish fresh CRLs while the desktop is closed:
+
+- CRL *i* of N = 5 has `thisUpdate = T0 + i·7 d` and `nextUpdate = thisUpdate +
+  10 d` (`CRL_BATCH_*` in `constants.rs`), numbered upward from the next CRL
+  serial; the counter advances by N, so a re-sign numbers above the last batch.
+- CRL 0 (`thisUpdate` = now) is stored as the `CRL` item and in
+  `crl_metadata`, as a single CRL would be.
+- The batch's T0, period, window, size and first number go in the `crl_batch`
+  table. `CrlBatch::status(now)` derives the due CRL (greatest `thisUpdate` ≤
+  now), signed-until (the last `nextUpdate`) and how many are unreleased.
+  `opca crl info` shows them. Generating with batches off deletes the record.
+- The batch is uploaded as one object, the PEM CRLs concatenated in number
+  order, to `<private store>/pending-crl/crl-batch.pem`, replacing the last
+  one whole. The upload happens inside `generate_crl`, after the `CRL` item and
+  database are stored, and a failure is returned as `CrlBatchUpload`: an
+  unuploaded re-sign would leave the pre-revocation batch being released.
+  Revoking (app, bulk and CLI) regenerates, so it re-signs and uploads too; the
+  app's error says whether regenerating or uploading failed. With no private
+  store configured, generating refuses before signing anything.
+- `rsync://` and `sftp://` stores need the `pending-crl/` directory to exist.
 
 ### AWS credentials
 
@@ -605,7 +632,8 @@ list) is handed over in router `state`, which is transient by design.
    which signs a new CRL (next CRL Number, Authority Key Identifier) and stores
    the `CRL` document and the database. Bulk revoke regenerates once after the
    batch. Uploading the CRL to the public store stays a separate action, as in
-   the CLI.
+   the CLI; in batch mode the re-signed batch goes to the private store before
+   the handler returns (see [Pre-signed CRL batches](#pre-signed-crl-batches)).
 7. Each store becomes an `op` CLI invocation.
 8. The handler serialises the result; the frontend updates its view.
 9. `withLock` releases `CA_Lock` in its `finally` clause, then fires
@@ -662,6 +690,8 @@ The Lambda reads the artefacts OPCA uploads through its storage backends:
   CLI `Database › Upload` flow (`s3://…/db_key`).
 - `CA` certificate and the `CRL` are uploaded to a **public** S3 bucket via
   the `CA › Upload` and `CRL › Upload` flows.
+- In batch mode, each CRL generation also uploads the pre-signed batch to the
+  private bucket at `pending-crl/crl-batch.pem`.
 
 The Lambda never talks to 1Password and never touches private keys — it only
 needs the already-published database dump, CA certificate, and CRL.

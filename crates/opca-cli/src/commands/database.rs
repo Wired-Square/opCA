@@ -78,6 +78,11 @@ fn handle_config_set<R: CommandRunner>(
             "ca_private_store" => updates.ca_private_store = Some(value),
             "ca_backup_store" => updates.ca_backup_store = Some(value),
             "ca_aws_region" => updates.ca_aws_region = Some(value),
+            "crl_batch_enabled" => {
+                updates.crl_batch_enabled = Some(value.parse::<bool>().map_err(|_| {
+                    OpcaError::Other(format!("Invalid boolean for '{key}': {value} (use true or false)"))
+                })?);
+            }
             _ => {
                 return Err(OpcaError::Other(format!(
                     "Unknown configuration key: '{key}'"
@@ -207,4 +212,5 @@ fn print_config(config: &CaConfig) {
     field("Private Store", &config.ca_private_store);
     field("Backup Store", &config.ca_backup_store);
     field("AWS Region", &config.ca_aws_region);
+    output::info("CRL Batches", if config.crl_batch_enabled == Some(true) { "on" } else { "off" });
 }

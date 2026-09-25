@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use chrono::Utc;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::OpcaError;
 use crate::utils::datetime::{self, DateTimeFormat};
@@ -124,6 +124,7 @@ impl CertificateAuthorityDB {
         conn.execute_batch(schema::CREATE_CSR_TABLE)?;
         conn.execute_batch(schema::CREATE_EXTERNAL_CERT_TABLE)?;
         conn.execute_batch(schema::CREATE_CRL_METADATA_TABLE)?;
+        conn.execute_batch(schema::CREATE_CRL_BATCH_TABLE)?;
         conn.execute_batch(schema::CREATE_OPENVPN_TEMPLATE_TABLE)?;
         conn.execute_batch(schema::CREATE_OPENVPN_PROFILE_TABLE)?;
         conn.execute_batch(schema::CREATE_DKIM_TABLE)?;
@@ -231,6 +232,7 @@ impl CertificateAuthorityDB {
         push_field!(ca_private_store, "ca_private_store", str);
         push_field!(ca_backup_store, "ca_backup_store", str);
         push_field!(ca_aws_region, "ca_aws_region", str);
+        push_field!(crl_batch_enabled, "crl_batch_enabled", int);
 
         let col_list = columns.join(", ");
         let placeholders = (0..columns.len())
@@ -268,7 +270,8 @@ impl CertificateAuthorityDB {
         let mut stmt = self.conn.prepare(
             "SELECT next_serial, next_crl_serial, org, ou, email, city, state, country,
                     ca_url, crl_url, days, crl_days, schema_version,
-                    ca_public_store, ca_private_store, ca_backup_store, ca_aws_region
+                    ca_public_store, ca_private_store, ca_backup_store, ca_aws_region,
+                    crl_batch_enabled
              FROM config LIMIT 1",
         )?;
 
@@ -302,6 +305,7 @@ impl CertificateAuthorityDB {
                 ca_private_store: non_blank(row.get(14)?),
                 ca_backup_store: non_blank(row.get(15)?),
                 ca_aws_region: non_blank(row.get(16)?),
+                crl_batch_enabled: row.get(17)?,
             })
         })?;
 
@@ -353,6 +357,7 @@ impl CertificateAuthorityDB {
         maybe_update!(ca_private_store, "ca_private_store", str);
         maybe_update!(ca_backup_store, "ca_backup_store", str);
         maybe_update!(ca_aws_region, "ca_aws_region", str);
+        maybe_update!(crl_batch_enabled, "crl_batch_enabled", int);
 
         if set_clauses.is_empty() {
             return Ok(());
@@ -1035,6 +1040,49 @@ impl CertificateAuthorityDB {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
+    }
+}
+
+impl CertificateAuthorityDB {
+    pub fn upsert_crl_batch(&self, batch: &CrlBatch) -> Result<(), OpcaError> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO crl_batch (id, t0, period_days, window_days, count, first_number)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                datetime::format_datetime(batch.t0, DateTimeFormat::Openssl),
+                batch.period_days,
+                batch.window_days,
+                batch.count,
+                batch.first_number,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_crl_batch(&self) -> Result<(), OpcaError> {
+        self.conn.execute("DELETE FROM crl_batch", [])?;
+        Ok(())
+    }
+
+    pub fn get_crl_batch(&self) -> Result<Option<CrlBatch>, OpcaError> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT t0, period_days, window_days, count, first_number FROM crl_batch WHERE id = 1",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .optional()?;
+        row.map(|(t0, period_days, window_days, count, first_number)| {
+            Ok(CrlBatch {
+                t0: datetime::parse_datetime(&t0, DateTimeFormat::Openssl)?,
+                period_days,
+                window_days,
+                count,
+                first_number,
+            })
+        })
+        .transpose()
     }
 }
 

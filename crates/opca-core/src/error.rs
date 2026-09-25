@@ -77,6 +77,9 @@ pub enum OpcaError {
     #[error("Storage error: {0}")]
     Storage(String),
 
+    #[error("The re-signed CRL batch was not uploaded to the private store: {0}")]
+    CrlBatchUpload(String),
+
     // ---- Backup errors ----
     #[error("Invalid backup format: {0}")]
     BackupFormat(String),

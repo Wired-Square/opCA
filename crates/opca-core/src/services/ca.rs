@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SubsecRound, Utc};
 use foreign_types::ForeignType;
 use log::{debug, error, info};
 use openssl::asn1::Asn1Time;
@@ -20,7 +20,10 @@ use openssl::x509::{X509Builder, X509Req, X509};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::constants::{OpConf, DEFAULT_OP_CONF, DEFAULT_STORAGE_CONF};
+use crate::constants::{
+    OpConf, CRL_BATCH_PERIOD_DAYS, CRL_BATCH_SIZE, CRL_BATCH_WINDOW_DAYS, DEFAULT_OP_CONF,
+    DEFAULT_STORAGE_CONF,
+};
 use crate::error::OpcaError;
 use crate::op::{CommandRunner, Op, StoreAction};
 use crate::services::cert::{
@@ -28,7 +31,7 @@ use crate::services::cert::{
     KeyAlgorithm, APPLE_TLS_MAX_DAYS,
 };
 use crate::services::database::models::{
-    CaConfig, CertLookup, CertRecord, CrlEntry, CrlMetadata, CsrLookup, CsrRecord,
+    CaConfig, CertLookup, CertRecord, CrlBatch, CrlEntry, CrlMetadata, CsrLookup, CsrRecord,
     ExternalCertRecord, IgnoreReason, SerialType,
 };
 use crate::services::database::CertificateAuthorityDB;
@@ -915,7 +918,8 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         Ok(())
     }
 
-    /// Generate a CRL, store it in 1Password, and optionally upload.
+    /// Sign the CRL (in batch mode, a batch) and store the first as the `CRL` item.
+    /// A batch is uploaded before returning, or the old batch would hide a revocation.
     pub fn generate_crl(&mut self) -> Result<String, OpcaError> {
         info!("[ca] generating CRL");
         let db = self.ca_database.as_mut()
@@ -923,8 +927,17 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         db.process_ca_database(None, false)?;
 
         let ca_config = db.get_config()?;
-        let crl_days = ca_config.crl_days.unwrap_or(30) as u32;
-        let crl_serial = db.increment_serial(SerialType::Crl, None)?;
+        let batch_uri = match (ca_config.crl_batch_enabled, ca_config.ca_private_store.as_deref()) {
+            (Some(true), Some(store)) => {
+                Some(format!("{}/{}", store.trim_end_matches('/'), DEFAULT_STORAGE_CONF.crl_batch_file))
+            }
+            (Some(true), None) => {
+                return Err(OpcaError::Storage(
+                    "CRL batches need a private store: set one or turn CRL batches off".into(),
+                ))
+            }
+            _ => None,
+        };
 
         let ca_bundle = self.ca_bundle.as_ref()
             .ok_or_else(|| OpcaError::CaNotFound)?;
@@ -934,46 +947,49 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             .ok_or_else(|| OpcaError::Crypto("CA private key not available".into()))?;
 
         let entries = db.crl_entries()?;
-        let crl_pem = build_crl(ca_cert, ca_key, crl_serial, crl_days, &entries)?;
+        let (window_days, count) = match batch_uri {
+            Some(_) => (CRL_BATCH_WINDOW_DAYS, CRL_BATCH_SIZE),
+            None => (ca_config.crl_days.unwrap_or(30), 1),
+        };
+        let first_number = db.increment_serial(SerialType::Crl, None)?;
+        let batch = CrlBatch {
+            t0: Utc::now().trunc_subsecs(0),
+            period_days: CRL_BATCH_PERIOD_DAYS,
+            window_days,
+            count,
+            first_number,
+        };
+        let crls = (0..batch.count)
+            .map(|i| build_crl(ca_cert, ca_key, first_number + i, batch.this_update(i), batch.next_update(i), &entries))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        self.crl = Some(crl_pem.clone());
+        if batch_uri.is_some() {
+            db.update_config(&CaConfig {
+                next_crl_serial: Some(first_number + batch.count),
+                ..CaConfig::default()
+            })?;
+            db.upsert_crl_batch(&batch)?;
+        } else {
+            db.clear_crl_batch()?;
+        }
+        db.upsert_crl_metadata(&parse_crl_metadata(&crls[0])?)?;
 
-        // Persist CRL metadata to the database
-        let issuer = ca_cert
-            .subject_name()
-            .entries()
-            .map(|e| {
-                let sn = e.object().nid().short_name().unwrap_or("?");
-                let val = e.data().as_utf8().map(|s| s.to_string()).unwrap_or_default();
-                format!("{sn}={val}")
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let now = Asn1Time::days_from_now(0)?;
-        let next = Asn1Time::days_from_now(crl_days)?;
-
-        db.upsert_crl_metadata(&CrlMetadata {
-            issuer: Some(issuer),
-            last_update: asn1_time_to_openssl_str(&now),
-            next_update: asn1_time_to_openssl_str(&next),
-            crl_number: Some(crl_serial),
-            revoked_count: Some(entries.len() as i64),
-            revoked_json: None,
-        })?;
-
-        // Store CRL in 1Password
         self.op.store_document(
             self.op_config.crl_title,
             self.op_config.crl_filename,
-            &crl_pem,
+            &crls[0],
             StoreAction::Auto,
             None,
         )?;
-
+        self.crl = Some(crls[0].clone());
         self.store_ca_database()?;
 
-        Ok(crl_pem)
+        if let Some(uri) = batch_uri {
+            self.upload_content(crls.concat().as_bytes(), &uri)
+                .map_err(|e| OpcaError::CrlBatchUpload(e.to_string()))?;
+        }
+
+        Ok(crls[0].clone())
     }
 
     // -----------------------------------------------------------------------
@@ -1908,7 +1924,8 @@ fn build_crl(
     ca_cert: &X509,
     ca_key: &openssl::pkey::PKey<openssl::pkey::Private>,
     crl_number: i64,
-    crl_days: u32,
+    this_update: DateTime<Utc>,
+    next_update: DateTime<Utc>,
     entries: &[CrlEntry],
 ) -> Result<String, OpcaError> {
     use openssl::x509::X509Crl;
@@ -1937,8 +1954,8 @@ fn build_crl(
             "set CRL issuer",
         )?;
 
-        let last_update = Asn1Time::days_from_now(0)?;
-        let next_update = Asn1Time::days_from_now(crl_days)?;
+        let last_update = Asn1Time::from_unix(this_update.timestamp())?;
+        let next_update = Asn1Time::from_unix(next_update.timestamp())?;
         check(openssl_sys::X509_CRL_set1_lastUpdate(crl_ptr, last_update.as_ptr()), "set CRL lastUpdate")?;
         check(openssl_sys::X509_CRL_set1_nextUpdate(crl_ptr, next_update.as_ptr()), "set CRL nextUpdate")?;
 
@@ -2387,15 +2404,30 @@ mod tests {
         assert!(text.contains("Key Encipherment"));
     }
 
+    fn at(timestamp: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(timestamp, 0).unwrap()
+    }
+
+    fn validity(crl: &openssl::x509::X509Crl) -> (DateTime<Utc>, DateTime<Utc>) {
+        let epoch = Asn1Time::from_unix(0).unwrap();
+        let seconds = |t: &openssl::asn1::Asn1TimeRef| {
+            let d = epoch.diff(t).unwrap();
+            at(i64::from(d.days) * 86_400 + i64::from(d.secs))
+        };
+        (seconds(crl.last_update()), seconds(crl.next_update().unwrap()))
+    }
+
     #[test]
-    fn test_build_crl_empty() {
+    fn a_crl_carries_the_validity_window_it_is_given() {
         let ca_bundle = make_ca_bundle();
         let ca_cert = ca_bundle.certificate.as_ref().unwrap();
         let ca_key = ca_bundle.private_key.as_ref().unwrap();
+        let (this_update, next_update) = (at(1_900_000_000), at(1_900_000_000 + 10 * 86_400));
 
-        let pem = build_crl(ca_cert, ca_key, 1, 30, &[]).unwrap();
-        assert!(pem.contains("BEGIN X509 CRL"));
-        assert!(pem.contains("END X509 CRL"));
+        let pem = build_crl(ca_cert, ca_key, 1, this_update, next_update, &[]).unwrap();
+
+        let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
+        assert_eq!(validity(&crl), (this_update, next_update));
     }
 
     fn ca_with_key(algorithm: KeyAlgorithm) -> CertificateAuthority<crate::testutil::MockRunner> {
@@ -2483,7 +2515,7 @@ mod tests {
         let ca = ca_with_key(KeyAlgorithm::EcP384);
         let bundle = ca.ca_bundle.as_ref().unwrap();
         let key = bundle.private_key.as_ref().unwrap();
-        let pem = build_crl(bundle.certificate.as_ref().unwrap(), key, 1, 30, &[]).unwrap();
+        let pem = build_crl(bundle.certificate.as_ref().unwrap(), key, 1, Utc::now(), Utc::now(), &[]).unwrap();
         let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
         assert!(crl.verify(key).unwrap());
     }
@@ -2693,6 +2725,112 @@ mod tests {
         let hex = ski.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":");
         let text = crl_to_text(&crl).unwrap();
         assert!(text.contains("X509v3 Authority Key Identifier") && text.contains(&hex), "{text}");
+    }
+
+    fn batch_ca(store: Option<&str>) -> CertificateAuthority<crate::testutil::MockRunner> {
+        let ca = ca_with_cert_rows();
+        ca.ca_database.as_ref().unwrap().update_config(&CaConfig {
+            crl_batch_enabled: Some(true),
+            ca_private_store: store.map(str::to_string),
+            ..CaConfig::default()
+        })
+        .unwrap();
+        ca
+    }
+
+    /// A local private store the rsync backend can write the batch into.
+    fn private_store() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("pending-crl")).unwrap();
+        let uri = format!("rsync://{}", dir.path().display());
+        (dir, uri)
+    }
+
+    fn uploaded_batch(dir: &tempfile::TempDir) -> Vec<openssl::x509::X509Crl> {
+        let pem = std::fs::read_to_string(dir.path().join(DEFAULT_STORAGE_CONF.crl_batch_file)).unwrap();
+        pem.split_inclusive("-----END X509 CRL-----\n")
+            .map(|one| openssl::x509::X509Crl::from_pem(one.as_bytes()).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_batch_is_staggered_numbered_upward_uploaded_and_led_by_the_stored_crl() {
+        let (dir, uri) = private_store();
+        let mut ca = batch_ca(Some(&uri));
+
+        let stored = ca.generate_crl().unwrap();
+
+        let crls = uploaded_batch(&dir);
+        let key = ca.ca_bundle.as_ref().unwrap().private_key.clone().unwrap();
+        let db = ca.ca_database.as_ref().unwrap();
+        let batch = db.get_crl_batch().unwrap().unwrap();
+        assert_eq!((batch.count, batch.period_days, batch.window_days, batch.first_number), (5, 7, 10, 1));
+        assert_eq!(crls.len(), 5);
+        for (i, crl) in crls.iter().enumerate() {
+            let i = i as i64;
+            assert_eq!(extract_crl_number(crl), Some(1 + i));
+            assert_eq!(validity(crl), (batch.t0 + chrono::Duration::days(7 * i), batch.t0 + chrono::Duration::days(7 * i + 10)));
+            assert_eq!(crl_serials(&String::from_utf8(crl.to_pem().unwrap()).unwrap()), ["3"]);
+            assert!(crl.verify(&key).unwrap());
+        }
+        assert_eq!(stored.as_bytes(), crls[0].to_pem().unwrap());
+        assert_eq!(db.get_crl_metadata().unwrap().unwrap().crl_number, Some(1));
+        assert_eq!(db.get_config().unwrap().next_crl_serial, Some(6));
+    }
+
+    #[test]
+    fn re_signing_a_batch_numbers_it_above_the_last_one() {
+        let (dir, uri) = private_store();
+        let mut ca = batch_ca(Some(&uri));
+        ca.generate_crl().unwrap();
+
+        ca.generate_crl().unwrap();
+
+        let numbers: Vec<_> = uploaded_batch(&dir).iter().map(extract_crl_number).collect();
+        assert_eq!(numbers, [6, 7, 8, 9, 10].map(Some));
+        assert_eq!(ca.ca_database.as_ref().unwrap().get_crl_batch().unwrap().unwrap().first_number, 6);
+    }
+
+    #[test]
+    fn batch_mode_without_a_private_store_is_refused_before_anything_is_signed() {
+        let mut ca = batch_ca(None);
+
+        let err = ca.generate_crl().unwrap_err();
+
+        assert!(matches!(err, OpcaError::Storage(ref m) if m.contains("private store")), "{err}");
+        let db = ca.ca_database.as_ref().unwrap();
+        assert_eq!(db.get_config().unwrap().next_crl_serial, None);
+        assert!(db.get_crl_metadata().unwrap().is_none());
+        assert!(ca.op.runner().calls().is_empty());
+    }
+
+    #[test]
+    fn a_failed_batch_upload_says_so_after_the_crl_is_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ca = batch_ca(Some(&format!("rsync://{}/missing", dir.path().display())));
+
+        let err = ca.generate_crl().unwrap_err();
+
+        assert!(matches!(err, OpcaError::CrlBatchUpload(_)), "{err}");
+        assert!(ca.crl.is_some());
+        assert_eq!(ca.ca_database.as_ref().unwrap().get_config().unwrap().next_crl_serial, Some(6));
+    }
+
+    #[test]
+    fn with_batches_off_one_crl_lasts_crl_days_and_any_old_batch_record_goes() {
+        let (_dir, uri) = private_store();
+        let mut ca = batch_ca(Some(&uri));
+        ca.generate_crl().unwrap();
+        let db = ca.ca_database.as_ref().unwrap();
+        db.update_config(&CaConfig { crl_batch_enabled: Some(false), crl_days: Some(30), ..CaConfig::default() }).unwrap();
+
+        let pem = ca.generate_crl().unwrap();
+
+        let (this_update, next_update) = validity(&openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap());
+        assert_eq!(next_update - this_update, chrono::Duration::days(30));
+        let db = ca.ca_database.as_ref().unwrap();
+        assert!(db.get_crl_batch().unwrap().is_none());
+        assert_eq!(db.get_config().unwrap().next_crl_serial, Some(7));
     }
 
     #[test]

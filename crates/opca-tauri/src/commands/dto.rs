@@ -108,6 +108,7 @@ pub struct CaConfigDto {
     pub ca_private_store: Option<String>,
     pub ca_backup_store: Option<String>,
     pub ca_aws_region: Option<String>,
+    pub crl_batch_enabled: Option<bool>,
     /// Init only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_algorithm: Option<KeyAlgorithm>,
