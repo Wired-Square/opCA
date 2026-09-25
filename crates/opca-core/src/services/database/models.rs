@@ -206,6 +206,13 @@ pub struct DkimSync {
     pub changed: bool,
 }
 
+/// A certificate a CRL lists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrlEntry {
+    pub serial: String,
+    pub revocation_date: String,
+}
+
 /// CRL cache metadata (singleton row, `id=1`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrlMetadata {

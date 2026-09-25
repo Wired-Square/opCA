@@ -65,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- CRLs now carry a CRL Number and an Authority Key Identifier, both required by RFC 5280.
+  The number matches the one shown on the CRL page and goes up by one per CRL.
 - A CA initialised in the app could not issue its first certificate ("UNIQUE constraint
   failed"): it reused the CA certificate's serial. The app now starts serials at 1, as
   `opca ca init` does.

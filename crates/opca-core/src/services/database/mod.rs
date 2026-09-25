@@ -1562,6 +1562,23 @@ impl CertificateAuthorityDB {
         Ok(db_changed)
     }
 
+    /// What the CRL lists, per the last [`process_ca_database`]: every unexpired revoked
+    /// cert with a revocation date, deleted ones included. The CRL's entries and its
+    /// stored `revoked_count` both come from here.
+    pub fn crl_entries(&self) -> Result<Vec<CrlEntry>, OpcaError> {
+        let mut entries = Vec::with_capacity(self.certs_revoked.len());
+        for serial in &self.certs_revoked {
+            let revocation_date = self
+                .query_cert(&CertLookup::Serial(serial.clone()), false)?
+                .and_then(|c| c.revocation_date)
+                .filter(|d| !d.is_empty());
+            if let Some(revocation_date) = revocation_date {
+                entries.push(CrlEntry { serial: serial.clone(), revocation_date });
+            }
+        }
+        Ok(entries)
+    }
+
     /// Derive an OpenVPN profile's lifecycle status from its pinned cert serial
     /// (and CN, for legacy rows with no serial) versus the live classification
     /// produced by the most recent [`process_ca_database`]. Returns the status

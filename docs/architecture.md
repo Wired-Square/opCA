@@ -211,7 +211,8 @@ is not Revoked or Expired, so it can never bypass revocation. It archives the
 item (`op item delete --archive`, tolerating a missing one), sets
 `deleted_at` (schema v14) and, unless already ignored, `ignored_at` with
 reason `deleted`, so the Lambda stops alerting with no change of its own. The
-row stays because `build_crl` reads revoked rows: removing an unexpired one
+row stays because the CRL is built from revoked rows (`crl_entries`, which
+also gives the stored CRL revoked count): removing an unexpired one
 would silently un-revoke it. `query_all_certs` and `count_certs` skip deleted
 rows (certificate list, bulk selection, CLI, dashboard total), while
 `process_ca_database`, `query_cert` and `query_all_certs_including_deleted`

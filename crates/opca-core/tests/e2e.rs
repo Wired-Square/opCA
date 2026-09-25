@@ -447,6 +447,9 @@ fn t30_crl_generate() {
         "deleted revoked serial {} must stay on the CRL: {revoked:?}",
         s.deleted_serial
     );
+    let stored = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().expect("CRL metadata");
+    let parsed = opca_core::services::ca::parse_crl_metadata(&crl_pem).unwrap();
+    assert_eq!((parsed.crl_number, stored.revoked_count), (stored.crl_number, Some(revoked.len() as i64)));
     eprintln!("[e2e] CRL generated ({} bytes)", crl_pem.len());
 }
 

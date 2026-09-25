@@ -28,8 +28,8 @@ use crate::services::cert::{
     KeyAlgorithm, APPLE_TLS_MAX_DAYS,
 };
 use crate::services::database::models::{
-    CaConfig, CertLookup, CertRecord, CrlMetadata, CsrLookup, CsrRecord, ExternalCertRecord,
-    IgnoreReason, SerialType,
+    CaConfig, CertLookup, CertRecord, CrlEntry, CrlMetadata, CsrLookup, CsrRecord,
+    ExternalCertRecord, IgnoreReason, SerialType,
 };
 use crate::services::database::CertificateAuthorityDB;
 use crate::services::san;
@@ -933,15 +933,8 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let ca_key = ca_bundle.private_key.as_ref()
             .ok_or_else(|| OpcaError::Crypto("CA private key not available".into()))?;
 
-        // Build CRL
-        let crl_pem = build_crl(
-            ca_cert,
-            ca_key,
-            crl_serial,
-            crl_days,
-            &db.certs_revoked,
-            db,
-        )?;
+        let entries = db.crl_entries()?;
+        let crl_pem = build_crl(ca_cert, ca_key, crl_serial, crl_days, &entries)?;
 
         self.crl = Some(crl_pem.clone());
 
@@ -965,7 +958,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             last_update: asn1_time_to_openssl_str(&now),
             next_update: asn1_time_to_openssl_str(&next),
             crl_number: Some(crl_serial),
-            revoked_count: Some(db.certs_revoked.len() as i64),
+            revoked_count: Some(entries.len() as i64),
             revoked_json: None,
         })?;
 
@@ -1914,96 +1907,101 @@ impl IntoExternal for CertRecord {
 fn build_crl(
     ca_cert: &X509,
     ca_key: &openssl::pkey::PKey<openssl::pkey::Private>,
-    _crl_number: i64,
+    crl_number: i64,
     crl_days: u32,
-    revoked_serials: &std::collections::HashSet<String>,
-    db: &CertificateAuthorityDB,
+    entries: &[CrlEntry],
 ) -> Result<String, OpcaError> {
     use openssl::x509::X509Crl;
+
+    fn check(rc: std::os::raw::c_int, what: &str) -> Result<(), OpcaError> {
+        if rc == 1 {
+            Ok(())
+        } else {
+            Err(OpcaError::Crypto(format!("Failed to {what}")))
+        }
+    }
+
+    let number = BigNum::from_dec_str(&crl_number.to_string())?.to_asn1_integer()?;
+    let aki = authority_key_identifier(ca_cert)?;
 
     unsafe {
         let crl_ptr = openssl_sys::X509_CRL_new();
         if crl_ptr.is_null() {
             return Err(OpcaError::Crypto("Failed to create X509_CRL".into()));
         }
+        let crl = X509Crl::from_ptr(crl_ptr);
 
-        // Set version to v2 (value 1)
-        if openssl_sys::X509_CRL_set_version(crl_ptr, 1) != 1 {
-            openssl_sys::X509_CRL_free(crl_ptr);
-            return Err(OpcaError::Crypto("Failed to set CRL version".into()));
-        }
+        check(openssl_sys::X509_CRL_set_version(crl_ptr, 1), "set CRL version")?;
+        check(
+            openssl_sys::X509_CRL_set_issuer_name(crl_ptr, openssl_sys::X509_get_subject_name(ca_cert.as_ptr())),
+            "set CRL issuer",
+        )?;
 
-        // Set issuer
-        if openssl_sys::X509_CRL_set_issuer_name(crl_ptr, openssl_sys::X509_get_subject_name(ca_cert.as_ptr())) != 1 {
-            openssl_sys::X509_CRL_free(crl_ptr);
-            return Err(OpcaError::Crypto("Failed to set CRL issuer".into()));
-        }
-
-        // Set lastUpdate and nextUpdate
         let last_update = Asn1Time::days_from_now(0)?;
         let next_update = Asn1Time::days_from_now(crl_days)?;
+        check(openssl_sys::X509_CRL_set1_lastUpdate(crl_ptr, last_update.as_ptr()), "set CRL lastUpdate")?;
+        check(openssl_sys::X509_CRL_set1_nextUpdate(crl_ptr, next_update.as_ptr()), "set CRL nextUpdate")?;
 
-        if openssl_sys::X509_CRL_set1_lastUpdate(crl_ptr, last_update.as_ptr()) != 1 {
-            openssl_sys::X509_CRL_free(crl_ptr);
-            return Err(OpcaError::Crypto("Failed to set CRL lastUpdate".into()));
-        }
-        if openssl_sys::X509_CRL_set1_nextUpdate(crl_ptr, next_update.as_ptr()) != 1 {
-            openssl_sys::X509_CRL_free(crl_ptr);
-            return Err(OpcaError::Crypto("Failed to set CRL nextUpdate".into()));
-        }
+        for entry in entries {
+            let serial = BigNum::from_dec_str(&entry.serial)
+                .map_err(|e| OpcaError::Crypto(format!("Revoked serial: {e}")))?
+                .to_asn1_integer()?;
+            let revoked_at = Asn1Time::from_str_x509(&entry.revocation_date)?;
 
-        // Add revoked certificates
-        for serial_str in revoked_serials {
-            let record = db.query_cert(&CertLookup::Serial(serial_str.clone()), false)?;
-            if let Some(record) = record {
-                if let Some(ref rev_date_str) = record.revocation_date {
-                    let serial_bn = BigNum::from_dec_str(serial_str)
-                        .map_err(|e| OpcaError::Crypto(format!("Revoked serial: {e}")))?;
-                    let serial_asn1 = serial_bn.to_asn1_integer()?;
-                    let rev_time = Asn1Time::from_str_x509(rev_date_str)?;
+            let revoked_ptr = openssl_sys::X509_REVOKED_new();
+            if revoked_ptr.is_null() {
+                return Err(OpcaError::Crypto("Failed to create X509_REVOKED".into()));
+            }
+            openssl_sys::X509_REVOKED_set_serialNumber(revoked_ptr, serial.as_ptr());
+            openssl_sys::X509_REVOKED_set_revocationDate(revoked_ptr, revoked_at.as_ptr());
 
-                    let revoked_ptr = openssl_sys::X509_REVOKED_new();
-                    if revoked_ptr.is_null() {
-                        openssl_sys::X509_CRL_free(crl_ptr);
-                        return Err(OpcaError::Crypto("Failed to create X509_REVOKED".into()));
-                    }
-
-                    openssl_sys::X509_REVOKED_set_serialNumber(
-                        revoked_ptr,
-                        serial_asn1.as_ptr() as *mut _,
-                    );
-                    openssl_sys::X509_REVOKED_set_revocationDate(
-                        revoked_ptr,
-                        rev_time.as_ptr() as *mut _,
-                    );
-
-                    // add0 takes ownership of revoked_ptr
-                    if openssl_sys::X509_CRL_add0_revoked(crl_ptr, revoked_ptr) != 1 {
-                        openssl_sys::X509_REVOKED_free(revoked_ptr);
-                        openssl_sys::X509_CRL_free(crl_ptr);
-                        return Err(OpcaError::Crypto("Failed to add revoked entry".into()));
-                    }
-                }
+            // add0 takes ownership of revoked_ptr only on success
+            if openssl_sys::X509_CRL_add0_revoked(crl_ptr, revoked_ptr) != 1 {
+                openssl_sys::X509_REVOKED_free(revoked_ptr);
+                return Err(OpcaError::Crypto("Failed to add revoked entry".into()));
             }
         }
-
-        // Sort the revoked entries
         openssl_sys::X509_CRL_sort(crl_ptr);
 
-        // Sign
+        check(
+            openssl_sys::X509_CRL_add1_ext_i2d(crl_ptr, openssl_sys::NID_crl_number, number.as_ptr().cast(), 0, 0),
+            "add CRL Number",
+        )?;
+        if let Some(aki) = aki {
+            check(openssl_sys::X509_CRL_add_ext(crl_ptr, aki.as_ptr(), -1), "add Authority Key Identifier")?;
+        }
+
         let md = signing_digest(ca_key).as_ptr();
-        if openssl_sys::X509_CRL_sign(crl_ptr, ca_key.as_ptr() as *mut _, md) == 0 {
-            openssl_sys::X509_CRL_free(crl_ptr);
+        if openssl_sys::X509_CRL_sign(crl_ptr, ca_key.as_ptr(), md) == 0 {
             return Err(OpcaError::Crypto("Failed to sign CRL".into()));
         }
 
-        // Convert to the safe wrapper and get PEM
-        let crl = X509Crl::from_ptr(crl_ptr);
-        let pem = crl.to_pem()?;
-
-        String::from_utf8(pem)
+        String::from_utf8(crl.to_pem()?)
             .map_err(|e| OpcaError::Crypto(format!("CRL PEM not UTF-8: {e}")))
     }
+}
+
+/// The CRL's Authority Key Identifier: the CA's subject key identifier as `keyIdentifier`
+/// (RFC 5280 §5.2.1). `None` for an imported CA certificate that carries no SKI.
+fn authority_key_identifier(
+    ca_cert: &X509,
+) -> Result<Option<openssl::x509::X509Extension>, OpcaError> {
+    use openssl::asn1::{Asn1Object, Asn1OctetString};
+
+    let Some(ski) = ca_cert.subject_key_id() else {
+        return Ok(None);
+    };
+    let key_id = ski.as_slice();
+    let len = u8::try_from(key_id.len())
+        .ok()
+        .filter(|&n| n < 126)
+        .ok_or_else(|| OpcaError::Crypto("CA subject key identifier too long".into()))?;
+    // SEQUENCE { [0] IMPLICIT OCTET STRING keyIdentifier }
+    let der = [&[0x30, len + 2, 0x80, len][..], key_id].concat();
+
+    let oid = Asn1Object::from_str("2.5.29.35")?;
+    let der = Asn1OctetString::new_from_bytes(&der)?;
+    Ok(Some(openssl::x509::X509Extension::new_from_der(&oid, false, &der)?))
 }
 
 /// Compute SHA-256 hex digest.
@@ -2395,15 +2393,7 @@ mod tests {
         let ca_cert = ca_bundle.certificate.as_ref().unwrap();
         let ca_key = ca_bundle.private_key.as_ref().unwrap();
 
-        let ca_config = CaConfig {
-            next_serial: Some(2),
-            days: Some(365),
-            ..CaConfig::default()
-        };
-        let db = CertificateAuthorityDB::new(&ca_config).unwrap();
-        let revoked = std::collections::HashSet::new();
-
-        let pem = build_crl(ca_cert, ca_key, 1, 30, &revoked, &db).unwrap();
+        let pem = build_crl(ca_cert, ca_key, 1, 30, &[]).unwrap();
         assert!(pem.contains("BEGIN X509 CRL"));
         assert!(pem.contains("END X509 CRL"));
     }
@@ -2493,8 +2483,7 @@ mod tests {
         let ca = ca_with_key(KeyAlgorithm::EcP384);
         let bundle = ca.ca_bundle.as_ref().unwrap();
         let key = bundle.private_key.as_ref().unwrap();
-        let db = ca.ca_database.as_ref().unwrap();
-        let pem = build_crl(bundle.certificate.as_ref().unwrap(), key, 1, 30, &Default::default(), db).unwrap();
+        let pem = build_crl(bundle.certificate.as_ref().unwrap(), key, 1, 30, &[]).unwrap();
         let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
         assert!(crl.verify(key).unwrap());
     }
@@ -2627,26 +2616,100 @@ mod tests {
 
         db.process_ca_database(None, true).unwrap();
         assert!(db.certs_revoked.contains("3") && db.certs_deleted.contains("3"));
-        let bundle = ca.ca_bundle.as_ref().unwrap();
-        let pem = build_crl(
-            bundle.certificate.as_ref().unwrap(),
-            bundle.private_key.as_ref().unwrap(),
-            1,
-            30,
-            &db.certs_revoked,
-            db,
-        )
-        .unwrap();
-        let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
-        let revoked: Vec<_> = crl
-            .get_revoked()
-            .unwrap()
-            .iter()
-            .map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string())
-            .collect();
-        assert_eq!(revoked, ["3"]);
+        assert_eq!(crl_serials(&ca.generate_crl().unwrap()), ["3"]);
 
         assert!(matches!(ca.delete_certificate("3"), Err(OpcaError::CertificateNotFound(_))));
+    }
+
+    fn crl_serials(pem: &str) -> Vec<String> {
+        let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
+        crl.get_revoked()
+            .map(|stack| {
+                stack.iter().map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string()).collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn the_stored_revoked_count_is_the_crls_entry_count() {
+        let mut ca = ca_with_cert_rows();
+        let db = ca.ca_database.as_mut().unwrap();
+        for (serial, expiry, revocation_date) in [
+            ("5", "20200101000000Z", Some("20190101000000Z")),
+            ("6", "20351231235959Z", None),
+        ] {
+            db.add_cert(&CertRecord {
+                serial: serial.to_string(),
+                status: Some("Revoked".to_string()),
+                expiry_date: Some(expiry.to_string()),
+                revocation_date: revocation_date.map(str::to_string),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        ca.delete_certificate("3").unwrap();
+
+        let listed = crl_serials(&ca.generate_crl().unwrap());
+
+        assert_eq!(listed, ["3"], "deleted stays listed; expired or undated revoked certs don't");
+        let metadata = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().unwrap();
+        assert_eq!(metadata.revoked_count, Some(listed.len() as i64));
+    }
+
+    fn crl_extension(crl: &openssl::x509::X509Crl, nid: Nid) -> (bool, Vec<u8>) {
+        unsafe {
+            let idx = openssl_sys::X509_CRL_get_ext_by_NID(crl.as_ptr(), nid.as_raw(), -1);
+            assert!(idx >= 0, "no {:?} extension", nid.short_name());
+            let ext = openssl_sys::X509_CRL_get_ext(crl.as_ptr(), idx);
+            let data = <openssl::asn1::Asn1StringRef as foreign_types::ForeignTypeRef>::from_ptr(
+                openssl_sys::X509_EXTENSION_get_data(ext).cast(),
+            );
+            (openssl_sys::X509_EXTENSION_get_critical(ext) == 1, data.as_slice().to_vec())
+        }
+    }
+
+    #[test]
+    fn each_crl_carries_the_next_crl_number_and_the_one_it_records() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        for expected in [1, 2] {
+            let crl = openssl::x509::X509Crl::from_pem(ca.generate_crl().unwrap().as_bytes()).unwrap();
+            assert_eq!(crl_extension(&crl, Nid::CRL_NUMBER), (false, vec![0x02, 0x01, expected as u8]));
+            assert_eq!(extract_crl_number(&crl), Some(expected));
+            let metadata = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().unwrap();
+            assert_eq!(metadata.crl_number, Some(expected));
+        }
+        assert_eq!(ca.ca_database.as_ref().unwrap().get_config().unwrap().next_crl_serial, Some(3));
+    }
+
+    #[test]
+    fn a_crl_names_its_signing_key_by_the_cas_subject_key_identifier() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP384);
+        let crl = openssl::x509::X509Crl::from_pem(ca.generate_crl().unwrap().as_bytes()).unwrap();
+        let ski = ca.ca_bundle.as_ref().unwrap().certificate.as_ref().unwrap().subject_key_id().unwrap().as_slice().to_vec();
+
+        let (critical, der) = crl_extension(&crl, Nid::AUTHORITY_KEY_IDENTIFIER);
+        assert!(!critical);
+        assert_eq!(der, [&[0x30, 22, 0x80, 20][..], &ski].concat());
+        let hex = ski.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":");
+        let text = crl_to_text(&crl).unwrap();
+        assert!(text.contains("X509v3 Authority Key Identifier") && text.contains(&hex), "{text}");
+    }
+
+    #[test]
+    fn a_ca_with_only_a_common_name_can_issue() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let config = ca.ca_database.as_ref().unwrap().get_config().unwrap();
+        let leaf = CertBundleConfig {
+            cn: Some("www.example.com".to_string()),
+            org: config.org,
+            ou: config.ou,
+            email: config.email,
+            city: config.city,
+            state: config.state,
+            country: config.country,
+            ..CertBundleConfig::default()
+        };
+        ca.generate_certificate_bundle(CertType::WebServer, "www.example.com", leaf, None).unwrap();
     }
 
     #[test]
