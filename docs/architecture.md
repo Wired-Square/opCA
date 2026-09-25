@@ -121,7 +121,7 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 | External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
 | CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests, with their private key. Deleting a pending CSR (`CertificateAuthority::delete_csr`) archives it |
 | VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial, `generated`) is also written to the `openvpn_profile` table and persisted, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. A profile can be **registered without generating** (`generated = 0`, no document yet) and produced later via Regenerate; such rows surface as Needs Regen. Legacy profiles may still be titled `VPN_<cn>`. |
-| DKIM | `<selector>._domainkey.<domain>` | Secure Note | DKIM key pair and metadata |
+| DKIM | `DKIM_<domain>_<selector>` | Secure Note | DKIM key pair and metadata; the public key is published at `<selector>._domainkey.<domain>` |
 | Lock | `CA_Lock` | Secure Note | Advisory lock for concurrent-write safety |
 
 ### Why a shadow SQLite database?
