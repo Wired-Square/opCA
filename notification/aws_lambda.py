@@ -8,11 +8,13 @@
 import boto3
 import os
 import json
+import re
 import sqlite3
 import urllib3
 from botocore.exceptions import ClientError
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.serialization import Encoding
 from datetime import datetime, timedelta, timezone
 
 
@@ -24,10 +26,15 @@ db_key = os.environ.get('DB_KEY')
 public_bucket = os.environ.get('PUBLIC_BUCKET')
 ca_cert_key = os.environ.get('CA_CERT_KEY')
 crl_key = os.environ.get('CRL_KEY')
+pending_crl_key = os.environ.get('PENDING_CRL_KEY', 'pending-crl/crl-batch.pem')
 local_db_path = os.environ.get('LOCAL_DB_PATH')
 local_crl_path = os.environ.get('LOCAL_CRL_PATH')
 slack_user = os.environ.get('SLACK_USER')
 slack_url = os.environ.get('SLACK_URL')
+
+PEM_CRL = re.compile(r'-----BEGIN X509 CRL-----.+?-----END X509 CRL-----', re.DOTALL)
+# Batch CRLs are replaced 3 days (W - P) before nextUpdate; less left means a release is overdue.
+BATCH_CRL_WARN_DAYS = 3
 
 
 def ca_database_handler(file, query):
@@ -113,7 +120,75 @@ def get_s3_item(bucket, key, path=None, encoding='utf-8'):
         print(f'Failed to retrieve S3 object: {e}')
         raise
 
-def run_tests(ca_cert_data, crl_data, db_data):
+def get_pending_crl_batch():
+    try:
+        return get_s3_item(bucket=private_bucket, key=pending_crl_key)['content']
+    except ClientError as e:
+        # Without s3:ListBucket a missing key reads as AccessDenied, not NoSuchKey.
+        if e.response['Error']['Code'] in ('NoSuchKey', 'AccessDenied'):
+            return None
+        raise
+
+def crl_number(crl):
+    try:
+        return crl.extensions.get_extension_for_class(x509.CRLNumber).value.crl_number
+    except x509.ExtensionNotFound:
+        return None
+
+def is_signed_by(crl, public_key):
+    try:
+        return crl.is_signature_valid(public_key)
+    except Exception:
+        return False
+
+def release_due_crl(ca_cert_pem, batch_pem, published_crl_pem):
+    """
+    Return (PEM to publish or None, message, warning): the latest due batch CRL if it is
+    newer than the published one. Any unsigned or unnumbered CRL refuses the whole batch.
+    """
+    msg = concat_msg('\n*CRL Batch*')
+    ca_public_key = x509.load_pem_x509_certificate(ca_cert_pem.encode('utf-8')).public_key()
+
+    try:
+        batch = [x509.load_pem_x509_crl(pem.encode('utf-8')) for pem in PEM_CRL.findall(batch_pem)]
+    except ValueError as e:
+        return None, msg + concat_msg(f'  ❌ *CRL batch refused: {e}*'), True
+    if not batch:
+        return None, msg + concat_msg('  ❌ *CRL batch refused: it holds no CRLs*'), True
+
+    bad = [str(crl_number(crl)) for crl in batch
+           if crl_number(crl) is None or not is_signed_by(crl, ca_public_key)]
+    if bad:
+        return None, msg + concat_msg(
+            f'  ❌ *CRL batch refused: CRL {", ".join(bad)} not signed by the CA certificate or unnumbered*'), True
+
+    published = crl_number(x509.load_pem_x509_crl(published_crl_pem.encode('utf-8')))
+    published = -1 if published is None else published
+    due = [crl for crl in batch if crl.last_update_utc <= now]
+    release = None
+
+    if not due:
+        msg += concat_msg('  ✅ No batch CRL is due yet')
+    else:
+        latest = max(due, key=lambda crl: crl.last_update_utc)
+        if crl_number(latest) > published:
+            release = latest.public_bytes(Encoding.PEM).decode('utf-8')
+            msg += concat_msg(f'  ✅ Releasing CRL #{crl_number(latest)}')
+        else:
+            msg += concat_msg(f'  ✅ Published CRL #{published} is current')
+
+    unreleased = len(batch) - len(due)
+    cover = timestamp_until(max(crl.next_update_utc for crl in batch))['friendly']
+    warning = unreleased < 2
+    if warning:
+        msg += concat_msg(f'  ⚠️ *Only {unreleased} unreleased CRLs left, cover ends in [{cover}]. '
+                          'Re-sign the batch in opCA.*')
+    else:
+        msg += concat_msg(f'  ✅ {unreleased} unreleased CRLs, cover ends in [{cover}]')
+
+    return release, msg, warning
+
+def run_tests(ca_cert_data, crl_data, db_data, crl_warn_days=None):
     ca_cert_pem = ca_cert_data['content']
     ca_cert = x509.load_pem_x509_certificate(ca_cert_pem.encode('utf-8'), backend=default_backend())
 
@@ -215,7 +290,7 @@ def run_tests(ca_cert_data, crl_data, db_data):
     if crl_next_update < now:
         warning = True
         msg += concat_msg(f'  ❌️ *CRL Next Update is in the past [{crl_expiry_friendly}]*')
-    elif crl_next_update - now <= timedelta(crl_days):
+    elif crl_next_update - now <= timedelta(crl_days if crl_warn_days is None else crl_warn_days):
         warning = True
         msg += concat_msg(f'  ⚠️ *CRL will expire soon [{crl_expiry_friendly}]*')
     else:
@@ -282,8 +357,23 @@ def lambda_handler(event, context):
     db_data = get_s3_item(bucket=private_bucket, key=db_key, path=local_db_path)
     ca_cert_data = get_s3_item(bucket=public_bucket, key=ca_cert_key)
     crl_data = get_s3_item(bucket=public_bucket, key=crl_key)
+    batch_pem = get_pending_crl_batch()
 
-    msg, warning = run_tests(ca_cert_data, crl_data, db_data)
+    if batch_pem is None:
+        msg, warning = run_tests(ca_cert_data, crl_data, db_data)
+    else:
+        release, batch_msg, batch_warning = release_due_crl(
+            ca_cert_data['content'], batch_pem, crl_data['content'])
+        if release:
+            try:
+                boto3.client('s3').put_object(Bucket=public_bucket, Key=crl_key, Body=release.encode('utf-8'))
+                crl_data = {'content': release, 'last_modified': now}
+            except ClientError as e:
+                batch_warning = True
+                batch_msg += concat_msg(f'  ❌ *Publishing the released CRL failed: {e}*')
+        msg, warning = run_tests(ca_cert_data, crl_data, db_data, min(crl_days, BATCH_CRL_WARN_DAYS))
+        msg += batch_msg
+        warning = warning or batch_warning
 
     notification_status = send_slack_notification(slack_user, msg, slack_url, warning)
 
