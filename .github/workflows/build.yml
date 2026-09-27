@@ -49,7 +49,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     env:
-      # cargo resolves the optional, private wiredai-mcp even with the mcp feature off;
+      # cargo resolves the optional, private wslib-ai-mcp even with the mcp feature off;
       # its own fetcher cannot use the agent, git can.
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
@@ -57,10 +57,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Load the lib-wiredai-rs deploy key
+      - name: Load the wslib-ai-rs deploy key
         uses: webfactory/ssh-agent@v0.10.0
         with:
-          ssh-private-key: ${{ secrets.LIB_WIREDAI_RS_DEPLOYMENT_KEY }}
+          ssh-private-key: ${{ secrets.LIBWS_AI_DEPLOYMENT_KEY }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

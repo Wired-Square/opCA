@@ -93,7 +93,7 @@ This starts the SolidJS dev server on `localhost:5173` with hot-reload and launc
 with a dev-only MCP server on `127.0.0.1:8790` (URL and token in `target/mcp.json`) for driving
 the UI. `npm run tauri dev` starts the same window without it.
 
-Every build, with or without the MCP server, fetches the private `lib-wiredai-rs` over SSH, so it needs
+Every build, with or without the MCP server, fetches the private `wslib-ai-rs` over SSH, so it needs
 a GitHub SSH key with access to it.
 
 ---

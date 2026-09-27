@@ -404,7 +404,7 @@ The `mcp` cargo feature (on in `npm run tauri:dev`) compiles
 `127.0.0.1:${OPCA_MCP_PORT:-8790}` behind a bearer token (`OPCA_MCP_TOKEN`, or
 random), and writes `{url, token}` to `target/mcp.json` (0600). Combining
 `mcp` with a release build is a `compile_error!`, so no shipped binary carries
-it. The server comes from the private `lib-wiredai-rs` (`wiredai-mcp`, over
+it. The server comes from the private `wslib-ai-rs` (`wslib-ai-mcp`, over
 ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
 
 - **Read tools** — `app_status` and `list_certs` read `AppState` and never call
@@ -412,7 +412,7 @@ ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
 - **UI tools** — `navigate`, `set_theme`, `resize_window`. The app is changed
   only through the UI under test.
 - **DOM tools** — `query`, `wait_for` (read-only), `click`, `type`, `press`,
-  from `wiredai-mcp`'s `dom` feature via `impl DomBridge for OpcaTools`.
+  from `wslib-ai-mcp`'s `dom` feature via `impl DomBridge for OpcaTools`.
   `query` reports every element matching a CSS selector (optionally filtered
   by visible text) with its form state, rect, whether it sits wholly in the
   viewport, and the overflow ancestor clipping it.
@@ -424,7 +424,7 @@ Everything except `resize_window` crosses a bridge: the server emits
 and `set_theme` and hands the DOM ops to
 [harness/domOps.ts](../frontend/src/harness/domOps.ts), vendored
 byte-for-byte from the library (a Rust test compares it with
-`wiredai_mcp::dom::OPS_TS`). Both are imported only under
+`wslib_ai_mcp::dom::OPS_TS`). Both are imported only under
 `import.meta.env.DEV`, so they are absent from `frontend/dist`. `click`
 dispatches pointerdown → mousedown → mouseup → click so outside-click dismissal
 is exercised.

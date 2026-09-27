@@ -1,17 +1,18 @@
 use std::time::Duration;
 
-use wiredai_mcp::rmcp;
+use wslib_ai_mcp::rmcp;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
+use rmcp::schemars::{self, JsonSchema};
 use rmcp::{ErrorData, tool, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, LogicalSize, Manager};
-use wiredai_mcp::dom::{self, DomBridge, BRIDGE_TIMEOUT};
-use wiredai_mcp::result::{ok_json, tool_error};
-use wiredai_mcp::router::mark_read_only;
-use wiredai_mcp::server::ServerIdentity;
+use wslib_ai_mcp::dom::{self, DomBridge, BRIDGE_TIMEOUT};
+use wslib_ai_mcp::result::{ok_json, tool_error};
+use wslib_ai_mcp::router::mark_read_only;
+use wslib_ai_mcp::server::ServerIdentity;
 
 use super::bridge;
 use crate::commands::cert::cert_items;
@@ -58,29 +59,25 @@ impl DomBridge for OpcaTools {
     }
 }
 
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
+#[derive(Deserialize, Serialize, JsonSchema)]
 struct NavigateParams {
     /// App route, e.g. `/certs`.
     path: String,
 }
 
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-#[schemars(crate = "rmcp::schemars")]
 enum ThemeMode {
     Dark,
     Light,
 }
 
-#[derive(Deserialize, Serialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
+#[derive(Deserialize, Serialize, JsonSchema)]
 struct ThemeParams {
     mode: ThemeMode,
 }
 
-#[derive(Deserialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
+#[derive(Deserialize, JsonSchema)]
 struct SizeParams {
     /// Inner width in logical pixels.
     width: f64,

@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use log::{info, warn};
 use tauri::AppHandle;
-use wiredai_mcp::CancellationToken;
-use wiredai_mcp::http::{self, HttpConfig};
-use wiredai_mcp::server::ToolServer;
+use wslib_ai_mcp::CancellationToken;
+use wslib_ai_mcp::http::{self, HttpConfig};
+use wslib_ai_mcp::server::ToolServer;
 
 use tools::OpcaTools;
 

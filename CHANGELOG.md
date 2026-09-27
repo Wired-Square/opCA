@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The MCP dev harness now comes from the private `wslib-ai-rs` (`wslib-ai-mcp` v0.1.1), the
+  renamed `lib-wiredai-rs`. CI loads the `LIBWS_AI_DEPLOYMENT_KEY` deploy key.
+
 ## [0.102.0] - 2026-09-25
 
 ### Added
