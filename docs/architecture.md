@@ -413,6 +413,17 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
 The shell is intentionally thin: no PKI logic lives here, only glue between
 the webview and `opca-core`.
 
+### Holding a quit during 1Password work
+
+[quit_guard.rs](../crates/opca-tauri/src/quit_guard.rs) keeps the app from
+exiting part-way through an `op` operation. `AppState::is_busy` is true while
+the `conn` mutex (held by every `op` call) or `private_store_lock` is held. An
+`ExitRequested` or window `CloseRequested` arriving then is prevented, the
+frontend is sent `quit-pending` (shown as a notice), and a watcher exits once
+the app is idle. macOS's predefined Quit terminates without an event that can
+be held, so the app menu's Quit is replaced with a custom Cmd+Q item routed
+through the same check. A forced quit or the Dock's Quit still bypass it.
+
 ### Database recovery
 
 `detect_vault_state` parses the downloaded `CA_Database`; if it can't be

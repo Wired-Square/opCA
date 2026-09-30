@@ -2,6 +2,7 @@ import { Show, createEffect, onMount, type ParentProps } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
 import { appState } from "./stores/app";
 import { initOperationListener } from "./stores/operation";
+import { initQuitListener, quitPending } from "./stores/quit";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
@@ -18,6 +19,7 @@ export default function App(props: ParentProps) {
 
   onMount(() => {
     initOperationListener();
+    initQuitListener();
     if (import.meta.env.DEV) import("./harness/bridge").then((m) => m.startHarnessBridge(navigate));
   });
 
@@ -58,11 +60,20 @@ export default function App(props: ParentProps) {
   // Inside the layout, so a page crash leaves the sidebar and header usable.
   const outlet = () => <RouteErrorBoundary>{props.children}</RouteErrorBoundary>;
 
+  const quitNotice = () => (
+    <Show when={quitPending()}>
+      <p class="page-warning" role="status">
+        Finishing a 1Password operation — opCA will quit as soon as it's done.
+      </p>
+    </Show>
+  );
+
   return (
-    <Show when={!isConnectPage()} fallback={outlet()}>
+    <Show when={!isConnectPage()} fallback={<>{quitNotice()}{outlet()}</>}>
       <Sidebar />
       <div class="main-area">
         <Header />
+        {quitNotice()}
         <main class="content">{outlet()}</main>
       </div>
       <DatabaseRecoveryDialog />

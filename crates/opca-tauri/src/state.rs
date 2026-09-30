@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{info, warn};
@@ -68,6 +69,12 @@ pub struct AppState {
     /// Why the connected vault's `CA_Database` could not be loaded, shown by
     /// the recovery dialog.
     pub database_error: Mutex<Option<String>>,
+    /// A quit is waiting for in-flight 1Password work (see `quit_guard`).
+    pub quit_pending: AtomicBool,
+}
+
+fn is_held<T>(mutex: &Mutex<T>) -> bool {
+    matches!(mutex.try_lock(), Err(TryLockError::WouldBlock))
 }
 
 struct PreloadedKey {
@@ -76,6 +83,12 @@ struct PreloadedKey {
 }
 
 impl AppState {
+    /// Whether a 1Password operation is running: every `op` call holds the
+    /// connection, and the private-store upload holds its own lock.
+    pub fn is_busy(&self) -> bool {
+        is_held(&self.conn) || is_held(&self.private_store_lock)
+    }
+
     /// Ensure the CA is loaded, lazily retrieving it from 1Password on first call.
     ///
     /// Returns a `MutexGuard<Connection>` so the caller holds the lock for the
@@ -210,6 +223,7 @@ impl Default for AppState {
             fresh_cert_pems: Mutex::new(HashMap::new()),
             preloaded_key: Mutex::new(None),
             database_error: Mutex::new(None),
+            quit_pending: AtomicBool::new(false),
         }
     }
 }
@@ -233,5 +247,18 @@ mod tests {
         let mut conn = state.conn.lock().unwrap();
         state.replace_connection(&mut conn, Connection::default());
         assert!(state.action_log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn busy_while_the_connection_or_private_store_upload_is_held() {
+        let state = AppState::default();
+        assert!(!state.is_busy());
+
+        let conn = state.conn.lock().unwrap();
+        assert!(state.is_busy());
+        drop(conn);
+
+        let _upload = state.private_store_lock.lock().unwrap();
+        assert!(state.is_busy());
     }
 }

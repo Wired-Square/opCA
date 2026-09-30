@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   1Password, leaving a `CA_Database` that couldn't be loaded. Documents are now
   passed to `op` as a file, and a failed write to `op` is reported instead of
   ignored.
+- Quitting or closing the window while a 1Password operation is running no longer
+  cuts it short: opCA says it's finishing and quits once the operation is done.
+  Quitting mid-save is what truncated the database above.
 
 ## [0.102.0] - 2026-09-25
 

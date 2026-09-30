@@ -3,6 +3,7 @@
 mod commands;
 #[cfg(feature = "mcp")]
 mod mcp;
+mod quit_guard;
 mod state;
 #[cfg(test)]
 mod test_harness;
@@ -193,10 +194,18 @@ fn main() {
         ])
         .setup(|_app| {
             info!("opCA v{} starting", env!("CARGO_PKG_VERSION"));
+            #[cfg(target_os = "macos")]
+            quit_guard::install_quit_menu(_app.handle())?;
             #[cfg(feature = "mcp")]
             mcp::start(_app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run opCA desktop application");
+        .on_menu_event(|app, event| {
+            if event.id() == quit_guard::QUIT_MENU_ID {
+                quit_guard::request_quit(app);
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("failed to build opCA desktop application")
+        .run(quit_guard::on_run_event);
 }
