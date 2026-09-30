@@ -39,6 +39,9 @@ pub enum OpcaError {
     #[error("Schema migration failed: {0}")]
     SchemaMigration(String),
 
+    #[error("CA database is unreadable: {0}")]
+    DatabaseUnreadable(String),
+
     // ---- 1Password errors ----
     #[error("Vault not found: {0}")]
     VaultNotFound(String),

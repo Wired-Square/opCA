@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use opca_core::op::ShellRunner;
 use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
 use opca_core::services::database::CaConfig;
+use opca_core::services::local_backup::LocalBackup;
 use opca_core::services::storage::{
     get_aws_credentials, needs_aws_credentials, storage_from_uri_with_creds,
 };
@@ -106,7 +107,8 @@ pub async fn init_ca(
     let ca_config = dto_to_ca_config(&config);
 
     match CertificateAuthority::init(op, &ca_config) {
-        Ok(ca) => {
+        Ok(mut ca) => {
+            ca.local_backup = LocalBackup::if_enabled(ca.op.account());
             conn.ca = Some(ca);
             conn.op = None;
             state.log_ok("init_ca", Some("Certificate Authority initialised".to_string()));

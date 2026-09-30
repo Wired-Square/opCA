@@ -8,6 +8,7 @@ import PageError from "../components/PageError";
 import { ActionResultBanner } from "../components/ResultBanner";
 import { createActionResult } from "../utils/actionResult";
 import { createAction } from "../utils/action";
+import { setRecoveryOpen } from "../components/DatabaseRecoveryDialog";
 import type {
   ActionItem,
   ActionKind,
@@ -43,7 +44,10 @@ function crlStatusTone(d: DashboardData): StatusTone {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [data, { refetch }] = createResource<DashboardData>(getDashboard);
+  const [data, { refetch }] = createResource(
+    () => appState.vaultState !== "database_unreadable" && appState.vaultState,
+    getDashboard,
+  );
   const [pending, setPending] = createSignal<string | null>(null);
   const outcome = createActionResult();
   const action = createAction(outcome);
@@ -108,6 +112,18 @@ export default function Dashboard() {
             </button>
             <button class="btn-ghost" onClick={() => navigate("/vault?tab=restore")}>
               Restore from Backup
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={appState.vaultState === "database_unreadable"}>
+        <div class="dashboard-notice dashboard-notice-error">
+          <p>This vault's CA database can't be read.</p>
+          <p class="text-muted">It may have been damaged by an incomplete save. Restore it from a local backup to continue.</p>
+          <div class="notice-actions">
+            <button class="btn-primary" onClick={() => setRecoveryOpen(true)}>
+              Restore from Local Backup
             </button>
           </div>
         </div>

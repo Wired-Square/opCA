@@ -1,4 +1,5 @@
 pub mod aws;
+pub mod backup;
 pub mod ca;
 pub mod cert;
 #[cfg(test)]

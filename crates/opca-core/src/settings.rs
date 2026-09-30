@@ -27,15 +27,33 @@ use crate::op::{self, AccountInfo};
 const SETTINGS_DIR: &str = "opca";
 /// Settings file name.
 const SETTINGS_FILE: &str = "settings.json";
+/// Local database backups, under the settings directory.
+const BACKUPS_DIR: &str = "backups";
 /// Key used when the account cannot be identified at all.
 const DEFAULT_ACCOUNT_KEY: &str = "default";
 
 /// Local settings for the current user.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Settings {
     /// 1Password user UUID → item ID of that operator's AWS access key.
     #[serde(default)]
     aws_credential_items: BTreeMap<String, String>,
+    /// Copy the CA database to [`backups_dir`] on every save.
+    #[serde(default = "enabled")]
+    local_backup_enabled: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            aws_credential_items: BTreeMap::new(),
+            local_backup_enabled: true,
+        }
+    }
+}
+
+fn enabled() -> bool {
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +166,7 @@ fn signed_in_user() -> Option<&'static str> {
 /// *shorthand*, which `op account list` does not report, lands here), and to
 /// `"default"` when there is no identifier and no readable session. Neither
 /// fails — they only stop converging.
-fn account_key(account: Option<&str>) -> String {
+pub fn account_key(account: Option<&str>) -> String {
     match account.map(str::trim).filter(|a| !a.is_empty()) {
         Some(acct) => canonical_key(acct).unwrap_or_else(|| acct.to_lowercase()),
         None => signed_in_user()
@@ -210,13 +228,22 @@ fn migrate(settings: &mut Settings, canonical: impl Fn(&str) -> Option<String>) 
     }
 }
 
+/// opCA's per-user directory, holding the settings file and local backups.
+fn data_dir() -> Result<PathBuf, OpcaError> {
+    Ok(dirs::config_dir()
+        .ok_or_else(|| OpcaError::Other("Could not determine the user config directory".into()))?
+        .join(SETTINGS_DIR))
+}
+
 /// Path to the settings file. Reading must not create anything, so the
 /// parent directory is created by [`save`] instead.
 pub fn settings_path() -> Result<PathBuf, OpcaError> {
-    Ok(dirs::config_dir()
-        .ok_or_else(|| OpcaError::Other("Could not determine the user config directory".into()))?
-        .join(SETTINGS_DIR)
-        .join(SETTINGS_FILE))
+    Ok(data_dir()?.join(SETTINGS_FILE))
+}
+
+/// Where local CA database backups are kept.
+pub fn backups_dir() -> Result<PathBuf, OpcaError> {
+    Ok(data_dir()?.join(BACKUPS_DIR))
 }
 
 /// Load settings, falling back to defaults when the file is missing or
@@ -287,6 +314,17 @@ pub fn set_aws_credential_item(
         None => settings.aws_credential_items.remove(&key),
     };
 
+    save(&settings)
+}
+
+/// Whether every CA database save also writes a local backup. On by default.
+pub fn local_backup_enabled() -> bool {
+    load().local_backup_enabled
+}
+
+pub fn set_local_backup_enabled(enabled: bool) -> Result<(), OpcaError> {
+    let mut settings = load();
+    settings.local_backup_enabled = enabled;
     save(&settings)
 }
 
@@ -370,6 +408,7 @@ mod tests {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
+            ..Settings::default()
         }
     }
 
@@ -482,5 +521,15 @@ mod tests {
     fn test_settings_tolerates_missing_keys() {
         let parsed: Settings = serde_json::from_str("{}").unwrap();
         assert!(parsed.aws_credential_items.is_empty());
+    }
+
+    #[test]
+    fn test_local_backup_is_on_unless_turned_off() {
+        let existing: Settings = serde_json::from_str(r#"{"aws_credential_items":{}}"#).unwrap();
+        assert!(existing.local_backup_enabled);
+        assert!(Settings::default().local_backup_enabled);
+
+        let off: Settings = serde_json::from_str(r#"{"local_backup_enabled":false}"#).unwrap();
+        assert!(!off.local_backup_enabled);
     }
 }

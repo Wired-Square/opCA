@@ -7,7 +7,9 @@ use zeroize::Zeroizing;
 use opca_core::op::Op;
 use opca_core::services::ca::{CertIssuanceWarning, CertificateAuthority};
 use opca_core::services::cert::CertificateBundle;
+use opca_core::error::OpcaError;
 use opca_core::services::database::CertificateAuthorityDB;
+use opca_core::services::local_backup::LocalBackup;
 use opca_core::vault_lock::VaultLock;
 
 use crate::commands::dto::LogEntry;
@@ -63,6 +65,9 @@ pub struct AppState {
     /// The private key of the certificate open in a detail page, kept from
     /// its backfill so copying it skips a second 1Password round-trip.
     preloaded_key: Mutex<Option<PreloadedKey>>,
+    /// Why the connected vault's `CA_Database` could not be loaded, shown by
+    /// the recovery dialog.
+    pub database_error: Mutex<Option<String>>,
 }
 
 struct PreloadedKey {
@@ -84,13 +89,17 @@ impl AppState {
             let op = conn.op.clone().ok_or("Not connected")?;
 
             info!("[tauri] loading CA from 1Password");
-            let ca = CertificateAuthority::retrieve(op)
+            let mut ca = CertificateAuthority::retrieve(op)
                 .map_err(|e| {
                     warn!("[tauri] failed to load CA: {e}");
+                    if let OpcaError::DatabaseUnreadable(msg) = &e {
+                        *self.database_error.lock().expect("mutex poisoned") = Some(msg.clone());
+                    }
                     self.log_err("retrieve_ca", Some(e.to_string()));
                     e.to_string()
                 })?;
             self.log_ok("retrieve_ca", Some("CA loaded from 1Password".to_string()));
+            ca.local_backup = LocalBackup::if_enabled(ca.op.account());
             conn.ca = Some(ca);
             conn.op = None;
         }
@@ -103,6 +112,7 @@ impl AppState {
     pub fn replace_connection(&self, conn: &mut Connection, next: Connection) {
         *conn = next;
         self.forget_preloaded_key();
+        *self.database_error.lock().expect("mutex poisoned") = None;
         self.action_log.lock().expect("mutex poisoned — a prior operation panicked").clear();
     }
 
@@ -199,6 +209,7 @@ impl Default for AppState {
             last_private_store_sync: Mutex::new(None),
             fresh_cert_pems: Mutex::new(HashMap::new()),
             preloaded_key: Mutex::new(None),
+            database_error: Mutex::new(None),
         }
     }
 }

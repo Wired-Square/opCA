@@ -15,6 +15,8 @@ use crate::op::{CommandOutput, CommandRunner, Op};
 pub struct MockRunner {
     responses: Arc<Mutex<Vec<CommandOutput>>>,
     calls: Arc<Mutex<Vec<Vec<String>>>>,
+    inputs: Arc<Mutex<Vec<Option<String>>>>,
+    file_args: Arc<Mutex<Vec<String>>>,
 }
 
 impl MockRunner {
@@ -22,12 +24,25 @@ impl MockRunner {
         Self {
             responses: Arc::new(Mutex::new(responses)),
             calls: Arc::default(),
+            inputs: Arc::default(),
+            file_args: Arc::default(),
         }
     }
 
     /// Return all recorded call argument lists.
     pub fn calls(&self) -> Vec<Vec<String>> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// Return the stdin passed to each call.
+    pub fn inputs(&self) -> Vec<Option<String>> {
+        self.inputs.lock().unwrap().clone()
+    }
+
+    /// Return the contents of every argument that named an existing file,
+    /// read at call time (temp files are gone once the call returns).
+    pub fn file_args(&self) -> Vec<String> {
+        self.file_args.lock().unwrap().clone()
     }
 }
 
@@ -36,13 +51,17 @@ impl CommandRunner for MockRunner {
         &self,
         _bin: &str,
         args: &[&str],
-        _input: Option<&str>,
+        input: Option<&str>,
         _env_vars: Option<&HashMap<String, String>>,
     ) -> Result<CommandOutput, OpcaError> {
         self.calls
             .lock()
             .unwrap()
             .push(args.iter().map(|s| s.to_string()).collect());
+        self.inputs.lock().unwrap().push(input.map(String::from));
+        self.file_args.lock().unwrap().extend(
+            args.iter().filter_map(|a| std::fs::read_to_string(a).ok()),
+        );
 
         let mut responses = self.responses.lock().unwrap();
         if responses.is_empty() {

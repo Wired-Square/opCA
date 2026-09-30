@@ -119,7 +119,7 @@ function formatCountdown(target: Date, nowMs: number): string {
  *   < 365d:   "X months ago"
  *   >= 1y:    "X years, X months ago" or "X years ago"
  */
-function formatTimeAgo(target: Date, nowMs: number): string {
+export function formatTimeAgo(target: Date, nowMs: number): string {
   const diffMs = nowMs - target.getTime();
   if (diffMs < 0) return formatCountdown(target, nowMs);
 
@@ -221,6 +221,19 @@ export function formatDate(
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    timeZoneName: "short",
+  });
+}
+
+/** Full local date and time, e.g. "Tue 29 Sep 2026, 11:57 pm AEST". */
+export function formatLocalDateTime(date: Date): string {
+  return date.toLocaleString("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
     timeZoneName: "short",
   });
 }

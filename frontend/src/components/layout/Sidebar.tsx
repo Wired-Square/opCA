@@ -78,6 +78,7 @@ export default function Sidebar() {
           {(item) => {
             const disabled = () =>
               appState.vaultState === "invalid_ca" ||
+              appState.vaultState === "database_unreadable" ||
               (item.gated && !hasCA());
             return (
               <A

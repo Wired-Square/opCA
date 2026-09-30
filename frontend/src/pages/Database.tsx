@@ -1,16 +1,19 @@
 import { Show, For, createSignal, createResource, type Resource } from "solid-js";
 import { getDatabaseInfo, getActionLog } from "../api/database";
 import { uploadCaDatabase } from "../api/ca";
+import { errorMessage } from "../api/tauri";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
-import type { DatabaseInfo, LogEntry } from "../api/types";
+import type { DatabaseInfo, LocalBackupsInfo, LogEntry } from "../api/types";
 import { ActionResultBanner } from "../components/ResultBanner";
 import PageError from "../components/PageError";
 import { createActionResult } from "../utils/actionResult";
 import { createPublishFlow } from "../utils/publishFlow";
+import BackupAge from "../components/BackupAge";
+import { getLocalBackups, openLocalBackupsFolder, setLocalBackupEnabled } from "../api/localBackups";
 import "../styles/pages/database.css";
 
-type Tab = "log" | "statistics" | "config";
+type Tab = "log" | "statistics" | "config" | "backups";
 
 export default function Database() {
   const [tab, setTab] = createSignal<Tab>("log");
@@ -81,6 +84,10 @@ export default function Database() {
           class={`tab-btn ${tab() === "config" ? "tab-active" : ""}`}
           onClick={() => setTab("config")}
         >Configuration</button>
+        <button
+          class={`tab-btn ${tab() === "backups" ? "tab-active" : ""}`}
+          onClick={() => setTab("backups")}
+        >Local Backups</button>
       </div>
 
       <div class="tab-content">
@@ -92,6 +99,9 @@ export default function Database() {
         </Show>
         <Show when={tab() === "config"}>
           <ConfigTab info={info} />
+        </Show>
+        <Show when={tab() === "backups"}>
+          <BackupsTab />
         </Show>
       </div>
 
@@ -166,6 +176,87 @@ function ConfigTab(props: { info: Resource<DatabaseInfo> }) {
             <Row label="Private Store" value={d().config.ca_private_store} mono />
             <Row label="Backup Store" value={d().config.ca_backup_store} mono />
           </div>
+        )}
+      </Show>
+    </>
+  );
+}
+
+function BackupsTab() {
+  const [backups, { refetch }] = createResource<LocalBackupsInfo>(getLocalBackups);
+  const [error, setError] = createSignal<string | null>(null);
+
+  async function run(action: () => Promise<void>) {
+    setError(null);
+    try {
+      await action();
+      refetch();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  return (
+    <>
+      <PageError message={error() ?? backups.error} />
+
+      <Show when={backups()} fallback={<Spinner message="Loading…" />}>
+        {(b) => (
+          <>
+            <p class="text-muted text-sm mb-3">
+              Each database save also writes a copy to this computer. The newest 30 are kept, so a damaged copy in
+              1Password can be restored without the private store.
+            </p>
+            <div class="detail-grid">
+              <div class="detail-row">
+                <span class="detail-label">Automatic Backups</span>
+                <label class="form-check">
+                  <input
+                    type="checkbox"
+                    checked={b().enabled}
+                    onChange={(e) => run(() => setLocalBackupEnabled(e.currentTarget.checked))}
+                  />
+                  {b().enabled ? "On" : "Off"}
+                </label>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Last Backup</span>
+                <span class="detail-value">
+                  <Show when={b().backups[0]} fallback={"\u2014"}>
+                    {(newest) => <BackupAge takenAt={newest().taken_at} />}
+                  </Show>
+                </span>
+              </div>
+              <Row label="Folder" value={b().dir} mono />
+            </div>
+            <div class="form-actions">
+              <button class="btn-ghost" onClick={() => run(openLocalBackupsFolder)}>Open Folder</button>
+            </div>
+
+            <Show when={b().backups.length > 0}>
+              <h4 class="section-heading">Backups</h4>
+              <div class="data-table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Taken</th>
+                      <th>Certificates</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={b().backups}>
+                      {(backup) => (
+                        <tr>
+                          <td><BackupAge takenAt={backup.taken_at} /></td>
+                          <td>{backup.cert_count ?? "unreadable"}</td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </Show>
+          </>
         )}
       </Show>
     </>

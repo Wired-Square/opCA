@@ -37,6 +37,9 @@ export default function Header() {
             <Match when={appState.vaultState === "invalid_ca"}>
               <span class="header-badge header-badge-error">invalid CA</span>
             </Match>
+            <Match when={appState.vaultState === "database_unreadable"}>
+              <span class="header-badge header-badge-error">database unreadable</span>
+            </Match>
           </Switch>
         </Show>
       </div>

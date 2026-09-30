@@ -154,18 +154,24 @@ impl CertificateAuthorityDB {
     ///
     /// Automatically runs schema migrations if the dump is from an older version.
     pub fn from_sql_dump(data: &str) -> Result<(Self, MigrationInfo), OpcaError> {
-        let conn = Connection::open_in_memory()?;
-        conn.execute_batch(data)?;
+        let unreadable = |e: OpcaError| OpcaError::DatabaseUnreadable(e.to_string());
 
-        // Read current schema version
-        let version: i64 = conn.query_row(
-            "SELECT schema_version FROM config LIMIT 1",
-            [],
-            |row| row.get(0),
-        )?;
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(data).map_err(|e| unreadable(e.into()))?;
+        // A dump cut off between statements parses cleanly but never reaches
+        // its COMMIT, leaving the transaction open.
+        if !conn.is_autocommit() {
+            return Err(OpcaError::DatabaseUnreadable(
+                "dump is incomplete (no COMMIT)".into(),
+            ));
+        }
+
+        let version: i64 = conn
+            .query_row("SELECT schema_version FROM config LIMIT 1", [], |row| row.get(0))
+            .map_err(|e| unreadable(e.into()))?;
 
         let info = schema::migrate(&conn, version)?;
-        Self::create_indexes(&conn)?;
+        Self::create_indexes(&conn).map_err(unreadable)?;
 
         let db = Self {
             conn,

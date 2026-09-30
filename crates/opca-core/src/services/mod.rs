@@ -3,6 +3,7 @@ pub mod ca;
 pub mod cert;
 pub mod command_queue;
 pub mod database;
+pub mod local_backup;
 pub mod route53;
 pub mod san;
 pub mod storage;

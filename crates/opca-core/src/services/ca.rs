@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, SubsecRound, Utc};
 use foreign_types::ForeignType;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use openssl::asn1::Asn1Time;
 use openssl::bn::BigNum;
 use openssl::nid::Nid;
@@ -36,6 +36,7 @@ use crate::services::database::models::{
 };
 use crate::services::database::CertificateAuthorityDB;
 use crate::services::san;
+use crate::services::local_backup::{self, BackupSource, LocalBackup};
 use crate::services::storage;
 use crate::utils::datetime::{self, DateTimeFormat};
 
@@ -220,6 +221,8 @@ pub struct CertificateAuthority<R: CommandRunner> {
     pub ca_bundle: Option<CertificateBundle>,
     pub ca_database: Option<CertificateAuthorityDB>,
     pub crl: Option<String>,
+    /// Written on every database save when set; see [`LocalBackup`].
+    pub local_backup: Option<LocalBackup>,
 }
 
 /// A self-contained snapshot for uploading the CA database to the private
@@ -263,6 +266,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             ca_bundle: Some(bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         };
 
         ca.store_certbundle_internal(false, None, None, true)?;
@@ -301,6 +305,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             ca_bundle: Some(bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         };
 
         ca.store_certbundle_internal(false, None, None, true)?;
@@ -336,6 +341,64 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             ca_bundle: Some(bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
+        })
+    }
+
+    /// Replace an unreadable `CA_Database` with a local backup's dump.
+    ///
+    /// Refuses a backup taken from another vault, or whose CA row does not
+    /// match this vault's CA certificate. The unreadable 1Password copy is
+    /// saved to `unreadable_copy_to` before being overwritten.
+    pub fn restore_from_backup(
+        op: Op<R>,
+        backup_contents: &str,
+        unreadable_copy_to: &LocalBackup,
+    ) -> Result<Self, OpcaError> {
+        let op_config = DEFAULT_OP_CONF;
+
+        if let (Some(source), Some(vault_id)) = (local_backup::read_source(backup_contents), &op.vault_id) {
+            if source.vault_id.as_ref().is_some_and(|id| id != vault_id) {
+                return Err(OpcaError::Other(format!(
+                    "Backup is from vault {:?}, not the connected vault {:?}",
+                    source.vault, op.vault
+                )));
+            }
+        }
+
+        let sql = local_backup::strip_header(backup_contents);
+        let (mut db, _migration) = CertificateAuthorityDB::from_sql_dump(sql)?;
+
+        let bundle = Self::retrieve_certbundle_static(&op, &op_config, op_config.ca_title)?
+            .ok_or(OpcaError::CaNotFound)?;
+        let ca_serial = bundle.get_certificate_attrib("serial")?;
+        let ca_row = db.query_cert(&CertLookup::Title(op_config.ca_title.into()), false)?;
+        if ca_row.is_none_or(|row| Some(row.serial) != ca_serial) {
+            return Err(OpcaError::Other(
+                "Backup belongs to a different CA than this vault's CA certificate".into(),
+            ));
+        }
+
+        if let Ok(current) = op.get_document(op_config.ca_database_title) {
+            unreadable_copy_to.write_unreadable(&BackupSource::of(&op), &current)?;
+        }
+
+        op.store_document(
+            op_config.ca_database_title,
+            op_config.ca_database_filename,
+            sql,
+            StoreAction::Edit,
+            None,
+        )?;
+        db.download_fingerprint = Some(sha256_hex(sql.as_bytes()));
+
+        Ok(Self {
+            op,
+            op_config,
+            ca_bundle: Some(bundle),
+            ca_database: Some(db),
+            crl: None,
+            local_backup: None,
         })
     }
 
@@ -372,6 +435,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             ca_bundle: Some(bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         };
 
         ca.do_rebuild_database()?;
@@ -1500,6 +1564,14 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let sql_bytes = db.export_database()?;
         let sql_text = String::from_utf8_lossy(&sql_bytes).to_string();
 
+        // Before the 1Password write, so a failed or damaged store still
+        // leaves a good local copy.
+        if let Some(backup) = &self.local_backup {
+            if let Err(e) = backup.write(&BackupSource::of(&self.op), &sql_text) {
+                warn!("[ca] local database backup failed: {e}");
+            }
+        }
+
         // Use Auto — during init/rebuild the document doesn't exist yet,
         // while during normal operation it does. Auto checks existence first.
         self.op.store_document(
@@ -2167,6 +2239,7 @@ fn extract_crl_number(crl: &openssl::x509::X509Crl) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
+    use crate::testutil::ok_output;
 
     fn make_ca_bundle() -> CertificateBundle {
         let config = CertBundleConfig {
@@ -2185,6 +2258,82 @@ mod tests {
         let mut bundle = CertificateBundle::generate(CertType::Ca, "CA", config).unwrap();
         bundle.self_sign_ca().unwrap();
         bundle
+    }
+
+    fn ca_item_json(bundle: &CertificateBundle) -> String {
+        serde_json::json!({ "fields": [
+            { "label": "certificate", "value": bundle.certificate_pem().unwrap() },
+            { "label": "private_key", "value": bundle.private_key_pem().unwrap() },
+            { "label": "type", "value": "ca" },
+        ]})
+        .to_string()
+    }
+
+    /// A backup file, as `LocalBackup` writes it, whose `CA` row has `ca_serial`.
+    fn backup_contents(ca_serial: &str, vault_id: &str) -> (tempfile::TempDir, LocalBackup, String) {
+        let mut db = CertificateAuthorityDB::new(&CaConfig::default()).unwrap();
+        let ca_row: CertRecord = serde_json::from_value(serde_json::json!({
+            "serial": ca_serial, "cn": "Test CA", "title": "CA", "status": "Valid",
+        }))
+        .unwrap();
+        db.add_cert(&ca_row).unwrap();
+        let sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalBackup::new(dir.path(), "user-uuid", 5);
+        let source = BackupSource { vault: "TestVault".into(), vault_id: Some(vault_id.into()) };
+        let path = store.write(&source, &sql).unwrap().unwrap();
+        let contents = std::fs::read_to_string(path).unwrap();
+        (dir, store, contents)
+    }
+
+    #[test]
+    fn restore_from_backup_stores_dump_and_keeps_unreadable_copy() {
+        let bundle = make_ca_bundle();
+        let serial = bundle.get_certificate_attrib("serial").unwrap().unwrap();
+        let (_dir, store, contents) = backup_contents(&serial, "vault-a");
+        let mut op = crate::testutil::mock_op(vec![
+            ok_output(&ca_item_json(&bundle)),
+            ok_output("BEGIN TRANSACTION;\nCREATE TABLE csr ("),
+            ok_output(""),
+        ]);
+        op.vault_id = Some("vault-a".into());
+
+        let ca = CertificateAuthority::restore_from_backup(op, &contents, &store).unwrap();
+
+        let source = BackupSource::of(&ca.op);
+        let kept: Vec<_> = std::fs::read_dir(store.dir_for(&source)).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with("-unreadable.sql"))
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(ca.op.runner().file_args().last().unwrap(), local_backup::strip_header(&contents));
+    }
+
+    #[test]
+    fn restore_from_backup_refuses_backup_from_another_vault() {
+        let (_dir, store, contents) = backup_contents("1", "vault-a");
+        let mut op = crate::testutil::mock_op(vec![]);
+        op.vault_id = Some("vault-b".into());
+
+        let result = CertificateAuthority::restore_from_backup(op, &contents, &store);
+
+        assert!(result.is_err_and(|e| e.to_string().contains("not the connected vault")));
+    }
+
+    #[test]
+    fn restore_from_backup_refuses_backup_of_another_ca() {
+        let bundle = make_ca_bundle();
+        let (_dir, store, contents) = backup_contents("999999", "vault-a");
+        let mut op = crate::testutil::mock_op(vec![ok_output(&ca_item_json(&bundle))]);
+        op.vault_id = Some("vault-a".into());
+
+        let result = CertificateAuthority::restore_from_backup(op, &contents, &store);
+
+        assert!(result.is_err_and(|e| e.to_string().contains("different CA")));
+        assert_eq!(std::fs::read_dir(store.dir_for(&BackupSource {
+            vault: "TestVault".into(), vault_id: Some("vault-a".into()),
+        })).unwrap().count(), 1);
     }
 
     #[test]
@@ -2273,6 +2422,7 @@ mod tests {
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         };
 
         let signed = ca.sign_certificate(&csr, &CertType::Device, 365).unwrap();
@@ -2322,6 +2472,7 @@ mod tests {
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         };
 
         let signed = ca.sign_certificate(&csr, &CertType::WebServer, 365).unwrap();
@@ -2366,6 +2517,7 @@ mod tests {
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         };
 
         let signed = ca.sign_certificate(&csr, &CertType::VpnClient, 365).unwrap();
@@ -2410,6 +2562,7 @@ mod tests {
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         };
 
         let signed = ca.sign_certificate(&csr, &CertType::VpnServer, 365).unwrap();
@@ -2468,6 +2621,7 @@ mod tests {
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
             crl: None,
+            local_backup: None,
         }
     }
 

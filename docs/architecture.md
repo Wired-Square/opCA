@@ -81,7 +81,18 @@ Organised by concern under [src/](../crates/opca-core/src):
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v15).
+    automatic, forward-only migrations (currently v15). A dump that fails to
+    parse or never reaches its `COMMIT` (truncated) is rejected as
+    `OpcaError::DatabaseUnreadable`.
+  - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
+    rolling local copies of the SQL dump, written by `store_ca_database()` on
+    every save while `local_backup_enabled` (a [settings.rs](../crates/opca-core/src/settings.rs)
+    field, default on). Stored under the settings directory at
+    `backups/<account key>/<vault id>/ca-database-<UTC timestamp>.sql`, keyed by
+    the same canonical account key as the AWS credential selection; the first
+    line is a SQL comment recording the account key, vault name and vault ID.
+    Identical consecutive dumps are skipped and the newest 30 are kept. The
+    timestamp in the filename (not the mtime) is the backup's age.
   - [command_queue.rs](../crates/opca-core/src/services/command_queue.rs)
     — batches write operations (`store_item`, `store_document`, `rename`,
     `delete`) in memory. Duplicate writes to the same target are collapsed so
@@ -342,8 +353,11 @@ The frontend wraps write calls in `withLock()` in
 [api/tauri.ts](../frontend/src/api/tauri.ts) so the lock lifetime always
 matches a single logical operation.
 
-`store_ca_database()` persists the SQLite dump to the canonical `CA_Database`
-1Password document only. The slower **private-store** copy (e.g. the `s3://`
+`store_ca_database()` first writes the local backup (when enabled; a failure
+only logs a warning), then persists the SQLite dump to the canonical
+`CA_Database` 1Password document. Documents are handed to `op` as a temp-file
+path, never piped: piping without an explicit `-` made `op` keep only the first
+64 KiB pipe buffer, silently truncating larger databases. The slower **private-store** copy (e.g. the `s3://`
 backup, which fetches AWS creds and PUTs) is *not* uploaded inline — that would
 hold the `AppState.conn` mutex and stall reads (cert/profile lists). Instead
 `withLock()` fires the `sync_private_store` command fire-and-forget after each
@@ -387,8 +401,10 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
     Cleared when the page unmounts (`forget_preloaded_key`) and whenever the
     CA is dropped (connect, disconnect, vault restore). Key exports take an
     optional passphrase and return encrypted PKCS#8.
+  - `database_error` — why the connected vault's `CA_Database` couldn't be
+    loaded, shown by the recovery dialog. Cleared with the connection.
 - [commands/](../crates/opca-tauri/src/commands) — one module per
-  feature area (`ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
+  feature area (`aws`, `backup`, `ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
   `vault`, `lock`, `connect`, `dashboard`, `files`, `logs`, `update`). Each
   module exposes `#[tauri::command]` async functions that deserialise DTOs,
   call into `opca-core`, and return serialisable results. DTO shapes are
@@ -396,6 +412,20 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
 
 The shell is intentionally thin: no PKI logic lives here, only glue between
 the webview and `opca-core`.
+
+### Database recovery
+
+`detect_vault_state` parses the downloaded `CA_Database`; if it can't be
+loaded the vault state is `database_unreadable` (alongside `valid_ca`,
+`empty_vault`, `invalid_ca`), and `ensure_ca()` keeps the session connected.
+The frontend opens `DatabaseRecoveryDialog`, which lists the vault's local
+backups (age first, then exact local time; copies over 7 days old are flagged)
+and, after a confirm step that spells out the age, calls `restore_local_backup`
+under `withLock`. `CertificateAuthority::restore_from_backup` refuses a backup
+from another vault ID or whose `CA` row serial doesn't match the vault's CA
+certificate, saves the unreadable 1Password copy as `…-unreadable.sql` (never
+listed or pruned), then stores the backup's dump as `CA_Database`. The CLI
+reports the newest local backup and its age instead.
 
 ### Dev-only MCP server
 

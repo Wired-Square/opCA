@@ -4,6 +4,7 @@ use tauri::State;
 
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::{self, AccountInfo, Op, VaultInfo};
+use opca_core::services::database::CertificateAuthorityDB;
 
 use crate::state::{AppState, Connection, Runner};
 
@@ -12,6 +13,7 @@ use crate::state::{AppState, Connection, Runner};
 /// - `valid_ca`    – CA item and database exist and can be retrieved
 /// - `empty_vault` – the vault contains no items at all
 /// - `invalid_ca`  – vault has items but no valid CA (non-CA vault or corrupt CA)
+/// - `database_unreadable` – CA exists but its `CA_Database` dump can't be loaded
 #[derive(Debug, Clone, Serialize)]
 pub struct ConnectionInfo {
     pub connected: bool,
@@ -20,14 +22,23 @@ pub struct ConnectionInfo {
     pub vault_state: String,
 }
 
-/// Determine the vault state by probing 1Password.
-fn detect_vault_state(op: &Op<Runner>) -> String {
+/// Determine the vault state by probing 1Password, recording why the
+/// database is unreadable (if it is) for the recovery dialog.
+fn detect_vault_state(state: &AppState, op: &Op<Runner>) -> String {
     let ca_exists = op.item_exists(DEFAULT_OP_CONF.ca_title);
+    let mut database_error = state.database_error.lock().expect("mutex poisoned");
+    *database_error = None;
 
     if ca_exists {
-        // CA item exists — check that the database document is also retrievable.
         match op.get_document(DEFAULT_OP_CONF.ca_database_title) {
-            Ok(_) => "valid_ca".to_string(),
+            Ok(sql) => match CertificateAuthorityDB::from_sql_dump(&sql) {
+                Ok(_) => "valid_ca".to_string(),
+                Err(e) => {
+                    warn!("[tauri] CA database unreadable: {e}");
+                    *database_error = Some(e.to_string());
+                    "database_unreadable".to_string()
+                }
+            },
             Err(_) => "invalid_ca".to_string(),
         }
     } else {
@@ -52,7 +63,7 @@ pub async fn connect(
         e.to_string()
     })?;
 
-    let vault_state = detect_vault_state(&op);
+    let vault_state = detect_vault_state(&state, &op);
 
     let info = ConnectionInfo {
         connected: true,
@@ -117,7 +128,7 @@ pub async fn create_vault(
 /// Re-check the vault state (e.g. after CA init/import/restore).
 #[tauri::command]
 pub async fn check_vault_state(state: State<'_, AppState>) -> Result<String, String> {
-    state.with_op(|op| Ok(detect_vault_state(op)))
+    state.with_op(|op| Ok(detect_vault_state(&state, op)))
 }
 
 /// Check whether the 1Password CLI binary is available on PATH.

@@ -638,3 +638,30 @@ export interface ConnectionInfo {
   account: string | null;
   vault_state: string;
 }
+
+// ---------------------------------------------------------------------------
+// Local database backups
+// ---------------------------------------------------------------------------
+
+export interface BackupSource {
+  account: string | null;
+  vault: string;
+  vault_id: string | null;
+}
+
+export interface LocalBackupEntry {
+  path: string;
+  /** RFC 3339 UTC, taken from the backup's filename. */
+  taken_at: string;
+  size: number;
+  source: BackupSource | null;
+  /** Null when the backup itself can't be loaded. */
+  cert_count: number | null;
+}
+
+export interface LocalBackupsInfo {
+  enabled: boolean;
+  dir: string;
+  backups: LocalBackupEntry[];
+  database_error: string | null;
+}

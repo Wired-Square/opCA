@@ -7,10 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Automatic local database backups**, on by default. Every database save also
+  writes the dump to this computer (newest 30 kept per vault), recording which
+  account and vault it came from. Toggle it and see the backups under
+  **Database → Local Backups**.
+- **Database recovery**: when a vault's CA database can't be read, opCA offers
+  to restore it from a local backup, showing how old each backup is and
+  confirming before overwriting. Backups from a different vault or CA are
+  refused, and the unreadable copy is kept locally.
+
 ### Changed
 
 - The MCP dev harness now comes from the private `wslib-ai-rs` (`wslib-ai-mcp` v0.1.1), the
   renamed `lib-wiredai-rs`. CI loads the `LIBWS_AI_DEPLOYMENT_KEY` deploy key.
+
+### Fixed
+
+- A CA database larger than 64 KiB was **silently truncated** when saved to
+  1Password, leaving a `CA_Database` that couldn't be loaded. Documents are now
+  passed to `op` as a file, and a failed write to `op` is reported instead of
+  ignored.
 
 ## [0.102.0] - 2026-09-25
 

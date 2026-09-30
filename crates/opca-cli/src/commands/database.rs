@@ -2,6 +2,7 @@ use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner};
 use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
 use opca_core::services::database::CaConfig;
+use opca_core::services::local_backup::LocalBackup;
 
 use crate::app::AppContext;
 use crate::output;
@@ -152,6 +153,7 @@ fn handle_rebuild<R: CommandRunner>(
 
     let op = app.take_op()?;
     let mut ca = CertificateAuthority::rebuild_database(op, &config)?;
+    ca.local_backup = LocalBackup::if_enabled(ca.op.account());
     ca.store_ca_database()?;
     output::print_result("Database rebuilt and stored", true);
     app.ca = Some(ca);

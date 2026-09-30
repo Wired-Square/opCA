@@ -120,5 +120,6 @@ fn test_ca(runner: MockRunner) -> CertificateAuthority<MockRunner> {
         ca_bundle: Some(ca_bundle),
         ca_database: Some(db),
         crl: None,
+        local_backup: None,
     }
 }

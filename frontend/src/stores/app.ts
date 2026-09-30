@@ -1,7 +1,12 @@
 import { createStore } from "solid-js/store";
 import { tauriInvoke } from "../api/tauri";
 
-export type VaultState = "disconnected" | "valid_ca" | "empty_vault" | "invalid_ca";
+export type VaultState =
+  | "disconnected"
+  | "valid_ca"
+  | "empty_vault"
+  | "invalid_ca"
+  | "database_unreadable";
 
 export interface AppStore {
   connected: boolean;

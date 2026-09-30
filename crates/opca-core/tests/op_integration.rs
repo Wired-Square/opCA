@@ -9,7 +9,7 @@
 //! Usage:
 //!   OPCA_INTEGRATION_TEST=1 OPCA_TEST_VAULT=MyVault cargo test -p opca-core --test op_integration
 
-use opca_core::op::{list_accounts_standalone, whoami_standalone, Op};
+use opca_core::op::{list_accounts_standalone, whoami_standalone, Op, StoreAction};
 
 /// Return the test vault name from `OPCA_TEST_VAULT`, or a sensible default.
 fn test_vault() -> String {
@@ -89,4 +89,26 @@ fn item_exists_returns_false_for_nonexistent() {
     skip_unless_integration!();
     let op = Op::new(test_vault(), test_account(), None).unwrap();
     assert!(!op.item_exists("__nonexistent_item_99999__"));
+}
+
+#[test]
+fn op_new_learns_vault_id() {
+    skip_unless_integration!();
+    let op = Op::new(test_vault(), test_account(), None).unwrap();
+    assert!(op.vault_id.is_some());
+}
+
+#[test]
+fn store_document_keeps_documents_larger_than_a_pipe_buffer() {
+    skip_unless_integration!();
+    let op = Op::new(test_vault(), test_account(), None).unwrap();
+    let title = format!("__opca_large_doc_{}__", std::process::id());
+    let content: String = (0..4000).map(|i| format!("INSERT INTO t VALUES({i});\n")).collect();
+    assert!(content.len() > 64 * 1024);
+
+    op.store_document(&title, "large.sql", &content, StoreAction::Create, None).unwrap();
+    let stored = op.get_document(&title);
+    op.delete_item(&title, false).unwrap();
+
+    assert_eq!(stored.unwrap(), content);
 }

@@ -1568,3 +1568,32 @@ fn test_sync_dkim_keeps_stored_detail_the_listing_lacks() {
     assert!(!sync.changed);
     assert_eq!(db.query_dkim("example.com", "mail").unwrap().unwrap().key_size, Some(2048));
 }
+
+fn dump_with_certs() -> String {
+    let mut db = test_db();
+    for i in 0..50 {
+        db.add_cert(&make_cert(&format!("{}", 100 + i), &format!("host{i}.example.com"), "20301231235959Z"))
+            .unwrap();
+    }
+    String::from_utf8(db.export_database().unwrap()).unwrap()
+}
+
+#[test]
+fn from_sql_dump_rejects_dump_truncated_mid_statement() {
+    let sql = dump_with_certs();
+    let cut = &sql[..sql.len() / 2];
+    assert!(matches!(
+        CertificateAuthorityDB::from_sql_dump(cut),
+        Err(OpcaError::DatabaseUnreadable(_))
+    ));
+}
+
+#[test]
+fn from_sql_dump_rejects_dump_truncated_on_statement_boundary() {
+    let sql = dump_with_certs();
+    let boundary = sql[..sql.len() / 2].rfind(");\n").unwrap() + 3;
+    assert!(matches!(
+        CertificateAuthorityDB::from_sql_dump(&sql[..boundary]),
+        Err(OpcaError::DatabaseUnreadable(_))
+    ));
+}

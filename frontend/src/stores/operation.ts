@@ -23,6 +23,12 @@ const operationLabels: Record<string, string> = {
   upload_ca_cert: "Uploading CA certificate\u2026",
   upload_ca_database: "Uploading database\u2026",
 
+  // Local backups
+  get_local_backups: "Loading local backups\u2026",
+  set_local_backup_enabled: "Saving backup setting\u2026",
+  open_local_backups_folder: "Opening backups folder\u2026",
+  restore_local_backup: "Restoring database from backup\u2026",
+
   // Certificates
   list_certs: "Loading certificates\u2026",
   list_external_certs: "Loading external certs\u2026",

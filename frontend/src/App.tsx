@@ -5,6 +5,7 @@ import { initOperationListener } from "./stores/operation";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import DatabaseRecoveryDialog, { setRecoveryOpen } from "./components/DatabaseRecoveryDialog";
 import "./styles/pages/app.css";
 
 /** Routes accessible when the vault is empty (no CA). */
@@ -20,6 +21,10 @@ export default function App(props: ParentProps) {
     if (import.meta.env.DEV) import("./harness/bridge").then((m) => m.startHarnessBridge(navigate));
   });
 
+  createEffect(() => {
+    if (appState.connected && appState.vaultState === "database_unreadable") setRecoveryOpen(true);
+  });
+
   // Redirect based on vault state
   createEffect(() => {
     if (!appState.connected) return;
@@ -32,7 +37,7 @@ export default function App(props: ParentProps) {
       return;
     }
 
-    if (state === "invalid_ca") {
+    if (state === "invalid_ca" || state === "database_unreadable") {
       // Only dashboard (shows error message), connect, and log pages allowed
       if (path !== "/" && path !== "/dashboard" && path !== "/log") {
         navigate("/dashboard", { replace: true });
@@ -60,6 +65,7 @@ export default function App(props: ParentProps) {
         <Header />
         <main class="content">{outlet()}</main>
       </div>
+      <DatabaseRecoveryDialog />
 
     </Show>
   );

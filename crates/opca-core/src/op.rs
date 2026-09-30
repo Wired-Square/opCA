@@ -6,6 +6,7 @@
 //! while production code uses [`ShellRunner`] (the default).
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -95,9 +96,11 @@ impl CommandRunner for ShellRunner {
         })?;
 
         if let Some(text) = input {
-            use std::io::Write;
             if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(text.as_bytes()).ok();
+                if let Err(e) = stdin.write_all(text.as_bytes()) {
+                    let _ = child.kill();
+                    return Err(OpcaError::Io(format!("writing stdin to op: {e}")));
+                }
                 drop(stdin); // Close stdin so `op` sees EOF
             }
         }
@@ -243,6 +246,8 @@ pub enum StoreAction {
 pub struct Op<R: CommandRunner = ShellRunner> {
     bin: String,
     pub vault: String,
+    /// Stable 1Password vault ID, unlike the name; learnt at connect.
+    pub vault_id: Option<String>,
     pub account: Option<String>,
     runner: R,
 }
@@ -252,6 +257,7 @@ impl<R: CommandRunner> std::fmt::Debug for Op<R> {
         f.debug_struct("Op")
             .field("bin", &self.bin)
             .field("vault", &self.vault)
+            .field("vault_id", &self.vault_id)
             .field("account", &self.account)
             .finish()
     }
@@ -290,6 +296,7 @@ impl<R: CommandRunner> Op<R> {
         let mut op = Self {
             bin: resolved,
             vault: vault.into().trim().to_string(),
+            vault_id: None,
             account,
             runner,
         };
@@ -314,6 +321,7 @@ impl<R: CommandRunner> Op<R> {
         Self {
             bin: bin.into(),
             vault: vault.into(),
+            vault_id: None,
             account,
             runner,
         }
@@ -424,13 +432,16 @@ impl<R: CommandRunner> Op<R> {
         }
 
         let vault = self.vault.clone();
-        let mut args: Vec<&str> = vec!["vault", "get", &vault];
+        let mut args: Vec<&str> = vec!["vault", "get", &vault, "--format=json"];
         let acct = self.account_args();
         let acct_refs: Vec<&str> = acct.iter().map(|s| s.as_str()).collect();
         args.extend_from_slice(&acct_refs);
 
         let out = self.run_command(&args, None)?;
         if out.success {
+            self.vault_id = serde_json::from_str::<VaultInfo>(&out.stdout)
+                .ok()
+                .map(|v| v.id);
             return Ok(());
         }
 
@@ -605,9 +616,16 @@ impl<R: CommandRunner> Op<R> {
         let vault_flag = format!("--vault={}", op_vault);
         let file_flag = format!("--file-name={}", filename);
 
+        // Piping the content without an explicit `-` let `op` keep only the
+        // first 64 KiB pipe buffer, silently truncating larger documents.
+        let mut content = tempfile::NamedTempFile::new()?;
+        content.write_all(input.as_bytes())?;
+        content.flush()?;
+        let content_path = content.path().to_string_lossy().into_owned();
+
         let out = self.checked(
-            &["document", op_action, &title_arg, &vault_flag, &file_flag],
-            Some(input),
+            &["document", op_action, &title_arg, &content_path, &vault_flag, &file_flag],
+            None,
         )?;
         Ok(out.stdout)
     }
@@ -815,6 +833,20 @@ pub fn map_cli_error(out: &CommandOutput) -> OpcaError {
 mod tests {
     use super::*;
     use crate::testutil::{err_output, mock_op, mock_op_with_account, ok_output};
+
+    #[test]
+    fn store_document_passes_content_as_file_not_stdin() {
+        let op = mock_op(vec![ok_output("")]);
+        let dump = "x".repeat(200 * 1024);
+
+        op.store_document("CA_Database", "ca-db-export.sql", &dump, StoreAction::Edit, None)
+            .unwrap();
+
+        let runner = op.runner();
+        assert_eq!(runner.inputs(), vec![None]);
+        assert_eq!(runner.file_args(), vec![dump]);
+        assert!(runner.calls()[0].contains(&"--file-name=ca-db-export.sql".to_string()));
+    }
 
     // -- mk_url -------------------------------------------------------
 
