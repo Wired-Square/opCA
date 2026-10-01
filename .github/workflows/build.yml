@@ -60,7 +60,7 @@ jobs:
       - name: Load the wslib-ai-rs deploy key
         uses: webfactory/ssh-agent@v0.10.0
         with:
-          ssh-private-key: ${{ secrets.LIBWS_AI_DEPLOYMENT_KEY }}
+          ssh-private-key: ${{ secrets.WSLIB_AI_DEPLOYMENT_KEY }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
