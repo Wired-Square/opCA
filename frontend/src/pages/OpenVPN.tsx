@@ -7,9 +7,12 @@ import {
   generateOpenVpnTa,
   setupOpenVpnServer,
   listOpenVpnTemplates,
-  syncOpenVpnTemplates,
   getOpenVpnTemplate,
   saveOpenVpnTemplate,
+  deleteOpenVpnTemplate,
+  listOpenVpnVaultTemplates,
+  archiveOpenVpnVaultTemplates,
+  keepOpenVpnVaultTemplates,
   listVpnCerts,
   listOpenVpnProfiles,
   generateOpenVpnProfile,
@@ -55,7 +58,7 @@ function profileStatusBadge(p: OpenVpnProfileItem): { cls: string; label: string
   }
 }
 
-type Tab = "profiles" | "config";
+type Tab = "profiles" | "templates" | "config";
 type ProfileFilter = "all" | "client" | "server";
 
 export default function OpenVPN() {
@@ -76,15 +79,23 @@ export default function OpenVPN() {
   // tab re-fetches (the source toggles false→true again).
   const [params, { refetch: refetchParams }] =
     createResource(() => tab() === "config", getOpenVpnParams);
+  const [generatingDh, setGeneratingDh] = createSignal(false);
+  const [generatingTa, setGeneratingTa] = createSignal(false);
+
+  // ── Templates tab state ───────────────────────────────────────
   const [selectedTemplate, setSelectedTemplate] = createSignal("");
   const [templateContent, setTemplateContent] = createSignal("");
   const [loadingTemplate, setLoadingTemplate] = createSignal(false);
   const [acting, setActing] = createSignal(false);
-  const [generatingDh, setGeneratingDh] = createSignal(false);
-  const [generatingTa, setGeneratingTa] = createSignal(false);
-  const [syncing, setSyncing] = createSignal(false);
   const [newTemplateName, setNewTemplateName] = createSignal("");
   const [showNewTemplate, setShowNewTemplate] = createSignal(false);
+  const [confirmDeleteTemplate, setConfirmDeleteTemplate] = createSignal<string | null>(null);
+  // Asks 1Password (slow), so only once the template list — whose load runs
+  // the one-time import — has succeeded and the Templates tab is open.
+  const [vaultTemplates, { mutate: setVaultTemplates }] = createResource(
+    () => tab() === "templates" && templates.state === "ready",
+    listOpenVpnVaultTemplates,
+  );
 
   // ── Profiles tab state ────────────────────────────────────────
   const [profiles, { refetch: refetchProfiles }] =
@@ -221,13 +232,21 @@ export default function OpenVPN() {
     setTab(t);
     setError(null);
     setSuccess(null);
-    if (t === "config") {
-      // params re-fetches itself via its tab-gated source; just refresh
-      // templates (eagerly loaded, so a manual nudge keeps them current).
-      refetchTemplates();
-    } else {
-      refetchProfiles();
-    }
+    // params re-fetches itself via its tab-gated source.
+    if (t === "templates") refetchTemplates();
+    else if (t === "profiles") refetchProfiles();
+  }
+
+  function profilesUsingTemplate(name: string): number {
+    return (profiles() ?? []).filter((p) => p.template === name).length;
+  }
+
+  function deleteTemplateMessage(name: string): string {
+    const n = profilesUsingTemplate(name);
+    const usage = n > 0
+      ? ` ${n} profile(s) were generated from it and will need another template to regenerate.`
+      : "";
+    return `Delete the template '${name}' from the CA database?${usage}`;
   }
 
   function openAdd(cn = "", serial: string | null = null) {
@@ -309,17 +328,42 @@ export default function OpenVPN() {
     }
   }
 
-  async function handleSyncTemplates() {
-    setSyncing(true);
+  async function runDeleteTemplate() {
+    const name = confirmDeleteTemplate();
+    if (!name) return;
+    await deleteOpenVpnTemplate(name);
+    if (selectedTemplate() === name) {
+      setSelectedTemplate("");
+      setTemplateContent("");
+    }
+    await refetchTemplates();
+    setSuccess(`Template '${name}' deleted`);
+  }
+
+  async function handleArchiveVaultTemplates() {
+    setActing(true);
     setError(null);
     try {
-      const n = await syncOpenVpnTemplates();
-      await refetchTemplates();
-      setSuccess(`Synced ${n} template(s) from 1Password`);
+      const n = await archiveOpenVpnVaultTemplates();
+      setVaultTemplates([]);
+      setSuccess(`Archived ${n} template(s) from the 1Password OpenVPN item`);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setSyncing(false);
+      setActing(false);
+    }
+  }
+
+  async function handleKeepVaultTemplates() {
+    setActing(true);
+    setError(null);
+    try {
+      await keepOpenVpnVaultTemplates();
+      setVaultTemplates([]);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setActing(false);
     }
   }
 
@@ -394,6 +438,12 @@ export default function OpenVPN() {
           onClick={() => switchTab("profiles")}
         >
           Profiles
+        </button>
+        <button
+          class={`tab-btn ${tab() === "templates" ? "tab-active" : ""}`}
+          onClick={() => switchTab("templates")}
+        >
+          Templates
         </button>
         <button
           class={`tab-btn ${tab() === "config" ? "tab-active" : ""}`}
@@ -571,34 +621,23 @@ export default function OpenVPN() {
               </div>
             )}
           </Show>
+        </div>
+      </Show>
 
-          <div class="template-section">
-            <div class="template-section-header">
-              <h3>Templates</h3>
-              <button class="btn-ghost" onClick={handleSyncTemplates} disabled={syncing()}>
-                {syncing() ? "Syncing..." : "Refresh"}
-              </button>
-            </div>
-            <div class="template-header">
-              <select
-                class="form-select"
-                value={selectedTemplate()}
-                onChange={(e) => handleLoadTemplate(e.currentTarget.value)}
-              >
-                <option value="">Select template</option>
-                <For each={templates()}>
-                  {(t) => <option value={t.name}>{t.name}</option>}
-                </For>
-              </select>
-              <button
-                class="btn-ghost"
-                onClick={() => setShowNewTemplate(!showNewTemplate())}
-              >
-                New
-              </button>
-            </div>
+      {/* ── Templates Tab ──────────────────────────────────────── */}
+      <Show when={tab() === "templates"}>
+        <div class="tab-content">
+          <Show when={(vaultTemplates() ?? []).length > 0}>
+            <VaultTemplatesNotice
+              names={vaultTemplates() ?? []}
+              acting={acting()}
+              onArchive={handleArchiveVaultTemplates}
+              onKeep={handleKeepVaultTemplates}
+            />
+          </Show>
 
-            <Show when={showNewTemplate()}>
+          <div class="profiles-header">
+            <Show when={showNewTemplate()} fallback={<span />}>
               <div class="new-template-row">
                 <input
                   type="text"
@@ -625,12 +664,56 @@ export default function OpenVPN() {
                 </button>
               </div>
             </Show>
+            <div class="profiles-actions">
+              <button class="btn-ghost" onClick={() => refetchTemplates()} disabled={templates.loading}>
+                Refresh
+              </button>
+              <button class="btn-primary" onClick={() => setShowNewTemplate(true)}>
+                + New
+              </button>
+            </div>
+          </div>
 
-            <Show when={loadingTemplate()}>
-              <Spinner message="Loading template..." />
-            </Show>
+          <Show when={!templates.loading && (templates() ?? []).length === 0}>
+            <p class="text-muted">No templates yet.</p>
+          </Show>
 
-            <Show when={selectedTemplate()}>
+          <Show when={(templates() ?? []).length > 0}>
+            <div class="data-table-wrap templates-table">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Profiles</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={templates()}>
+                    {(t) => (
+                      <tr
+                        class="data-table-row"
+                        classList={{ "data-table-row-selected": selectedTemplate() === t.name }}
+                        onClick={() => handleLoadTemplate(t.name)}
+                      >
+                        <td>{t.name}</td>
+                        <td>{profilesUsingTemplate(t.name)}</td>
+                        <td class="mono">{formatDate(t.updated_date)}</td>
+                      </tr>
+                    )}
+                  </For>
+                </tbody>
+              </table>
+            </div>
+          </Show>
+
+          <Show when={loadingTemplate()}>
+            <Spinner message="Loading template..." />
+          </Show>
+
+          <Show when={selectedTemplate() && !loadingTemplate()}>
+            <div class="template-section">
+              <h3>{selectedTemplate()}</h3>
               <textarea
                 class="template-editor"
                 value={templateContent()}
@@ -645,9 +728,16 @@ export default function OpenVPN() {
                 >
                   {acting() ? "Saving..." : "Save Template"}
                 </button>
+                <button
+                  class="btn-danger"
+                  onClick={() => setConfirmDeleteTemplate(selectedTemplate())}
+                  disabled={acting()}
+                >
+                  Delete
+                </button>
               </div>
-            </Show>
-          </div>
+            </div>
+          </Show>
         </div>
       </Show>
 
@@ -691,6 +781,17 @@ export default function OpenVPN() {
         onConfirm={runConfirmDelete}
       />
 
+      <ConfirmDialog
+        open={!!confirmDeleteTemplate()}
+        title="Delete Template"
+        message={deleteTemplateMessage(confirmDeleteTemplate() ?? "")}
+        confirmLabel="Delete"
+        actingLabel="Deleting…"
+        danger
+        onClose={() => setConfirmDeleteTemplate(null)}
+        onConfirm={runDeleteTemplate}
+      />
+
       {/* ── Feedback ───────────────────────────────────────────── */}
       <PageError message={error()} />
       <Show when={success()}>
@@ -712,6 +813,36 @@ function Row(props: {
       <span class={`detail-value ${props.mono ? "mono" : ""}`}>
         {props.value ?? "—"}
       </span>
+    </div>
+  );
+}
+
+function VaultTemplatesNotice(props: {
+  names: string[];
+  acting: boolean;
+  onArchive: () => void;
+  onKeep: () => void;
+}) {
+  const count = () => props.names.length;
+  return (
+    <div class="result-banner result-banner-success" role="status">
+      <div class="result-banner-head">
+        <span>OpenVPN templates imported into the CA database</span>
+      </div>
+      <p class="result-banner-detail">
+        All {count()} template(s) on the 1Password <code>OpenVPN</code> item are now
+        in the CA database: {props.names.join(", ")}. Archive moves the {count()} old
+        template field(s) into an archived Secure Note that can be restored from
+        1Password's Archive. Keep leaves them on the item for older versions of OPCA.
+      </p>
+      <div class="form-actions">
+        <button class="btn-primary" onClick={props.onArchive} disabled={props.acting}>
+          {props.acting ? "Working..." : `Archive ${count()} template(s)`}
+        </button>
+        <button class="btn-ghost" onClick={props.onKeep} disabled={props.acting}>
+          Keep in 1Password
+        </button>
+      </div>
     </div>
   );
 }

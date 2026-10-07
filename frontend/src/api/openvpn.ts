@@ -39,13 +39,6 @@ export async function listOpenVpnTemplates(): Promise<OpenVpnTemplateItem[]> {
   return tauriInvoke<OpenVpnTemplateItem[]>("list_openvpn_templates");
 }
 
-/** Re-sync the template mirror from 1Password (Configuration tab Refresh). */
-export async function syncOpenVpnTemplates(): Promise<number> {
-  return withLock("sync_templates", () =>
-    tauriInvoke<number>("sync_openvpn_templates"),
-  );
-}
-
 export async function getOpenVpnTemplate(
   name: string,
 ): Promise<OpenVpnTemplateDetail> {
@@ -58,6 +51,30 @@ export async function saveOpenVpnTemplate(
 ): Promise<boolean> {
   return withLock("save_template", () =>
     tauriInvoke<boolean>("save_openvpn_template", { name, content }),
+  );
+}
+
+export async function deleteOpenVpnTemplate(name: string): Promise<boolean> {
+  return withLock("delete_template", () =>
+    tauriInvoke<boolean>("delete_openvpn_template", { name }),
+  );
+}
+
+/** Template fields still on the 1Password OpenVPN item after a successful
+ * import into the CA database; empty once archived or kept. */
+export async function listOpenVpnVaultTemplates(): Promise<string[]> {
+  return tauriInvoke<string[]>("list_openvpn_vault_templates");
+}
+
+export async function archiveOpenVpnVaultTemplates(): Promise<number> {
+  return withLock("archive_templates", () =>
+    tauriInvoke<number>("archive_openvpn_vault_templates"),
+  );
+}
+
+export async function keepOpenVpnVaultTemplates(): Promise<void> {
+  return withLock("keep_templates", () =>
+    tauriInvoke<void>("keep_openvpn_vault_templates"),
   );
 }
 

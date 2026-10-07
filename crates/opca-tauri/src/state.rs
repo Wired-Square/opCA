@@ -30,7 +30,6 @@ pub type Runner = opca_core::testutil::MockRunner;
 pub struct Connection {
     pub op: Option<Op<Runner>>,
     pub ca: Option<CertificateAuthority<Runner>>,
-    pub openvpn_templates_seeded: bool,
 }
 
 impl Connection {

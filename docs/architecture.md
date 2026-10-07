@@ -76,12 +76,16 @@ Organised by concern under [src/](../crates/opca-core/src):
     Alternative Names: `SubjectAltName` (DNS, IP, email, URI) parses and
     validates user input, and `of_certificate` / `of_csr` read them back from
     the extension. The frontend's `utils/san.ts` mirrors its parsing rules.
+  - [openvpn.rs](../crates/opca-core/src/services/openvpn.rs) — OpenVPN
+    client-profile templates, stored canonically in the `openvpn_template`
+    table, plus the starter template and the one-time move of templates off
+    the 1Password `OpenVPN` item (see *OpenVPN templates* below).
   - [database/](../crates/opca-core/src/services/database) — in-memory
     SQLite (`rusqlite`) holding the CA config and every issued/external
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v15). A dump that fails to
+    automatic, forward-only migrations (currently v16). A dump that fails to
     parse or never reaches its `COMMIT` (truncated) is rejected as
     `OpcaError::DatabaseUnreadable`.
   - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
@@ -128,7 +132,7 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 | CA | `CA` | Secure Note | CA certificate, private key, subject, validity, serial counters |
 | Database | `CA_Database` | Document | SQLite dump of every tracked cert/CSR/CRL/VPN record |
 | CRL | `CRL` | Document | Latest Certificate Revocation List; in batch mode, the first CRL of the current batch |
-| OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key, server config, and the named templates (canonical store; mirrored into the `openvpn_template` table for fast reads) |
+| OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key and server config. Templates live in the `openvpn_template` table; older versions kept them here as `template.<name>` fields (see *OpenVPN templates*) |
 | Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type). Deleting a revoked or expired cert (`CertificateAuthority::delete_certificate`) archives it; see [Deleted certificates](#deleted-certificates) |
 | External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
 | CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests, with their private key. Deleting a pending CSR (`CertificateAuthority::delete_csr`) archives it |
@@ -144,16 +148,39 @@ every query, and re-serialises it to the `CA_Database` document whenever the
 catalogue changes. The dump is keyed by a `download_fingerprint` so stale
 local state is detected on reconnect.
 
-The same mirror pattern backs DKIM keys, OpenVPN templates, and OpenVPN profile
-records: the 1Password items remain canonical, but each is shadowed in a table
-(`dkim_key`, `openvpn_template`, `openvpn_profile`) so list/detail views read
-from SQLite instead of spawning `op`. On first read of an empty table the
-command seeds it from 1Password (reconciling deletions); thereafter every
-mutation upserts the row and calls `store_ca_database()` to persist. The OpenVPN
-page is Profiles-first — a generated profile's record lands in the DB on create
-(it previously lived only in memory and vanished on restart), and the template
-dropdown is served from the mirror so it is populated immediately rather than
-waiting on a lazy `op` fetch.
+The same mirror pattern backs DKIM keys and OpenVPN profile records: the
+1Password items remain canonical, but each is shadowed in a table (`dkim_key`,
+`openvpn_profile`) so list/detail views read from SQLite instead of spawning
+`op`. On first read of an empty table the command seeds it from 1Password
+(reconciling deletions); thereafter every mutation upserts the row and calls
+`store_ca_database()` to persist. The OpenVPN page is Profiles-first — a
+generated profile's record lands in the DB on create (it previously lived only
+in memory and vanished on restart).
+
+### OpenVPN templates
+
+Templates are not secret — they hold `op://` references that `op inject`
+resolves when a profile is generated — so the `openvpn_template` table is their
+only store, and the TLS-auth key, DH parameters and server settings stay on the
+`OpenVPN` item. Older versions kept templates as `template.<name>` fields on that
+item. `config.openvpn_template_import` (v16) tracks moving them, per CA:
+
+1. **Not imported** — the first template operation (list, get, save, delete,
+   generate, setup; app or CLI) copies the item's templates into the table,
+   overwriting same-named rows, since the item was canonical until then. Every
+   template operation imports first, so a write can't later be overwritten.
+2. **Awaiting cleanup** — set when the import found templates. The app's
+   OpenVPN › Templates tab confirms the import, re-checking that every template
+   on the item is in the table (copying any an older client added since,
+   without overwriting the table's copy), and asks to **Archive** or **Keep**
+   them. Archive copies the fields to a new `OpenVPN_Templates_<timestamp>`
+   Secure Note, archives that note (1Password archives whole items, and the
+   `OpenVPN` item can't be archived as it holds the keys), then removes the
+   fields from `OpenVPN` — in that order, so a failure never loses a template.
+   Keep leaves them for older clients.
+3. **Settled** — after either choice, or when there was nothing to import.
+   Older clients still read and write the item's fields, so their template edits
+   aren't seen by this version.
 
 ### Status classification vs. problem suppression
 

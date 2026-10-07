@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 15;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 16;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v15 — current)
+// Table DDL (v16 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -31,7 +31,8 @@ pub const CREATE_CONFIG_TABLE: &str = "
         ca_private_store TEXT,
         ca_backup_store TEXT,
         ca_aws_region TEXT,
-        crl_batch_enabled INTEGER
+        crl_batch_enabled INTEGER,
+        openvpn_template_import INTEGER
     )
 ";
 
@@ -448,8 +449,22 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v14→v15: {e}")))?;
 
         version = 15;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 15, ok: true });
+    }
+
+    // v15 → v16: the database becomes the canonical store for OpenVPN
+    // templates. The column tracks the one-time import from the 1Password
+    // `OpenVPN` item, which needs `op` and so runs outside this migration.
+    if version == 15 {
+        conn.execute_batch(
+            "ALTER TABLE config ADD COLUMN openvpn_template_import INTEGER;
+             UPDATE config SET schema_version = 16 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v15→v16: {e}")))?;
+
+        version = 16;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 16, ok: true });
     }
 
     info.migrated = true;

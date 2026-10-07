@@ -1169,14 +1169,21 @@ impl CertificateAuthorityDB {
         Ok(rows > 0)
     }
 
-    /// Count OpenVPN templates — used to decide whether the mirror needs seeding.
-    pub fn count_openvpn_template(&self) -> Result<i64, OpcaError> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM openvpn_template",
+    pub fn openvpn_template_import(&self) -> Result<TemplateImport, OpcaError> {
+        let value: Option<i64> = self.conn.query_row(
+            "SELECT openvpn_template_import FROM config WHERE id = 1",
             [],
             |row| row.get(0),
         )?;
-        Ok(count)
+        Ok(TemplateImport::from_column(value))
+    }
+
+    pub fn set_openvpn_template_import(&self, state: TemplateImport) -> Result<(), OpcaError> {
+        self.conn.execute(
+            "UPDATE config SET openvpn_template_import = ?1 WHERE id = 1",
+            [state.to_column()],
+        )?;
+        Ok(())
     }
 }
 
