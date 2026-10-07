@@ -112,3 +112,101 @@ fn store_document_keeps_documents_larger_than_a_pipe_buffer() {
 
     assert_eq!(stored.unwrap(), content);
 }
+
+/// Run `op` directly, for checks the `Op` API has no call for (archived items).
+fn op_cli(args: &[&str]) -> String {
+    let mut cmd = std::process::Command::new("op");
+    cmd.args(args).arg(format!("--vault={}", test_vault()));
+    if let Some(account) = test_account() {
+        cmd.arg(format!("--account={account}"));
+    }
+    let out = cmd.output().unwrap();
+    assert!(out.status.success(), "op {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[test]
+fn openvpn_templates_import_then_archive_without_losing_any() {
+    use opca_core::constants::DEFAULT_OP_CONF;
+    use opca_core::services::ca::CertificateAuthority;
+    use opca_core::services::database::models::CaConfig;
+    use opca_core::services::database::{CertificateAuthorityDB, TemplateImport};
+    use opca_core::services::openvpn;
+
+    skip_unless_integration!();
+    let op = Op::new(test_vault(), test_account(), None).unwrap();
+    // The flow writes the fixed `OpenVPN` and `CA_Database` titles, so never
+    // run it in a vault that holds a real CA.
+    for title in [DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.ca_database_title] {
+        assert!(!op.item_exists(title), "'{title}' already exists in the test vault; use a scratch vault");
+    }
+
+    let multi_line = "client\ndev tun\nremote {{ op://v/OpenVPN/server/hostname }} 1194";
+    op.store_item(
+        DEFAULT_OP_CONF.openvpn_title,
+        Some(&[
+            "server.hostname[text]=vpn.example.com",
+            &format!("template.default[text]={multi_line}"),
+            "template.tcp[text]=client\nproto tcp",
+        ]),
+        StoreAction::Create,
+        DEFAULT_OP_CONF.category,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let mut ca = CertificateAuthority {
+        op,
+        op_config: DEFAULT_OP_CONF,
+        ca_bundle: None,
+        ca_database: Some(CertificateAuthorityDB::new(&CaConfig::default()).unwrap()),
+        crl: None,
+        local_backup: None,
+    };
+
+    let result = || {
+        assert_eq!(openvpn::import_templates_from_vault(&mut ca).unwrap(), Some(2));
+        assert_eq!(openvpn::get_template(&mut ca, "default").unwrap().content, multi_line);
+        assert_eq!(openvpn::templates_awaiting_cleanup(&mut ca).unwrap(), vec!["default", "tcp"]);
+
+        assert_eq!(openvpn::archive_vault_templates(&mut ca).unwrap(), 2);
+
+        let item: serde_json::Value =
+            serde_json::from_str(&ca.op.get_item(DEFAULT_OP_CONF.openvpn_title, "json").unwrap()).unwrap();
+        let labels: Vec<&str> = item["fields"].as_array().unwrap().iter()
+            .filter_map(|f| f["label"].as_str()).collect();
+        assert!(labels.contains(&"hostname"), "server settings must survive: {labels:?}");
+        assert!(!labels.contains(&"default") && !labels.contains(&"tcp"), "templates left behind: {labels:?}");
+
+        let archived: serde_json::Value = serde_json::from_str(&op_cli(&[
+            "item", "list", "--include-archive", "--format=json",
+        ]))
+        .unwrap();
+        let note = archived.as_array().unwrap().iter()
+            .find(|i| i["title"].as_str().unwrap_or_default().starts_with("OpenVPN_Templates_"))
+            .expect("archived templates note");
+        assert_eq!(note["state"].as_str(), Some("ARCHIVED"));
+        let note_id = note["id"].as_str().unwrap().to_string();
+        let note: serde_json::Value = serde_json::from_str(&op_cli(&[
+            "item", "get", &note_id, "--include-archive", "--format=json",
+        ]))
+        .unwrap();
+        let default = note["fields"].as_array().unwrap().iter()
+            .find(|f| f["label"] == "default").expect("archived default template");
+        assert_eq!(default["value"].as_str().unwrap().trim(), multi_line);
+
+        assert_eq!(ca.ca_database.as_ref().unwrap().openvpn_template_import().unwrap(), TemplateImport::Settled);
+        note_id
+    };
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(result));
+
+    if let Ok(note_id) = &outcome {
+        op_cli(&["item", "delete", note_id]);
+    }
+    ca.op.delete_item(DEFAULT_OP_CONF.openvpn_title, false).ok();
+    ca.op.delete_item(DEFAULT_OP_CONF.ca_database_title, false).ok();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
