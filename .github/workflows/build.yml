@@ -39,12 +39,20 @@ jobs:
         include:
           - platform: macos-latest
             target: aarch64-apple-darwin
+            os_name: Apple
+            cpu: arm64
           - platform: macos-latest
             target: x86_64-apple-darwin
+            os_name: Apple
+            cpu: x64
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            os_name: Linux
+            cpu: x64
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            os_name: Windows
+            cpu: x64
 
     runs-on: ${{ matrix.platform }}
 
@@ -117,25 +125,33 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
         with:
           args: --target ${{ matrix.target }}
-          # Release is pre-created by create-release job; tauri-action finds it and uploads assets
-          tagName: ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: false
-        if: startsWith(github.ref, 'refs/tags/v')
 
-      - name: Build Tauri app (no release)
-        uses: tauri-apps/tauri-action@v0
+      # Release assets are named opCA_<version>_<Platform>_<CPU>.<ext>; the
+      # .app bundle and its updater tarball aren't shipped.
+      - name: Name installers
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          bundle=target/${{ matrix.target }}/release/bundle
+          mkdir -p dist
+          shopt -s nullglob
+          for file in "$bundle"/dmg/*.dmg "$bundle"/nsis/*.exe "$bundle"/msi/*.msi \
+                      "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb; do
+            cp "$file" "dist/opCA_${version}_${{ matrix.os_name }}_${{ matrix.cpu }}.${file##*.}"
+          done
+          ls -l dist
+          [ -n "$(ls dist)" ] || { echo "No installers found under $bundle"; exit 1; }
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
-        with:
-          args: --target ${{ matrix.target }}
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: gh release upload "${{ github.ref_name }}" dist/* --clobber
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
           name: opca-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/bundle/
+          path: dist/
           if-no-files-found: error

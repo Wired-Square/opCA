@@ -66,12 +66,12 @@ and a [SolidJS](https://www.solidjs.com) frontend.
 Download the latest release for your platform from
 [GitHub Releases](https://github.com/wiredsquare/opCA/releases).
 
-| Platform | Artifact |
+| Platform | Download |
 |---|---|
-| macOS (Apple Silicon) | `.dmg` (aarch64) |
-| macOS (Intel) | `.dmg` (x86_64) |
-| Linux | `.AppImage` / `.deb` |
-| Windows | `.msi` / `.exe` |
+| macOS (Apple Silicon) | `opCA_<version>_Apple_arm64.dmg` |
+| macOS (Intel) | `opCA_<version>_Apple_x64.dmg` |
+| Linux | `opCA_<version>_Linux_x64.AppImage` / `.deb` |
+| Windows | `opCA_<version>_Windows_x64.exe` / `.msi` |
 
 ### Build from Source
 
