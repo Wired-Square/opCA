@@ -68,8 +68,8 @@ Download the latest release for your platform from
 
 | Platform | Download |
 |---|---|
-| macOS (Apple Silicon) | `opCA_<version>_Apple_arm64.dmg` |
-| macOS (Intel) | `opCA_<version>_Apple_x64.dmg` |
+| macOS (Apple Silicon) | `opCA_<version>_macOS_arm64.dmg` |
+| macOS (Intel) | `opCA_<version>_macOS_x64.dmg` |
 | Linux | `opCA_<version>_Linux_x64.AppImage` / `.deb` |
 | Windows | `opCA_<version>_Windows_x64.exe` / `.msi` |
 

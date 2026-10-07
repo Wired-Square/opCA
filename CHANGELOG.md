@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `opca openvpn generate --setup` no longer replaces an existing template of
   the same name, and creates the same starter template as the app.
 - Release downloads are named `opCA_<version>_<Platform>_<CPU>`, e.g.
-  `opCA_0.102.2_Apple_arm64.dmg` or `opCA_0.102.2_Windows_x64.exe`.
+  `opCA_0.102.2_macOS_arm64.dmg` or `opCA_0.102.2_Windows_x64.exe`.
 
 ### Removed
 
