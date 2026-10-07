@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **OpenVPN › Templates tab** for listing, editing, creating and deleting
+  client-profile templates, showing how many profiles use each one.
+
+### Changed
+
+- OpenVPN templates are now stored in the CA database instead of on the
+  1Password `OpenVPN` item. The first time a CA is opened, its existing
+  templates are imported automatically; the Templates tab then confirms the
+  import and offers to archive the old template fields in 1Password (restorable
+  from 1Password's Archive) or keep them for older versions of opCA. The
+  TLS-auth key, DH parameters and server settings stay in 1Password.
+- `opca openvpn generate --setup` no longer replaces an existing template of
+  the same name, and creates the same starter template as the app.
+- Release downloads are named `opCA_<version>_<Platform>_<CPU>`, e.g.
+  `opCA_0.102.2_macOS_arm64.dmg` or `opCA_0.102.2_Windows_x64.exe`.
+
+### Removed
+
+- The Linux `.rpm` package, and the unused macOS `.app.tar.gz` downloads.
+- The OpenVPN Configuration tab's template Refresh (sync from 1Password), which
+  the database store makes unnecessary.
+
 ## [0.102.1] - 2026-09-30
 
 ### Added

@@ -4,6 +4,8 @@ use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::crypto::utils::{generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key};
 use opca_core::error::OpcaError;
 use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
+use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::openvpn;
 
 use crate::app::AppContext;
 use crate::output;
@@ -45,46 +47,24 @@ fn resolve_store_action<R: CommandRunner>(op: &opca_core::op::Op<R>) -> StoreAct
     }
 }
 
-fn build_template_boilerplate(vault: &str) -> String {
-    let ovpn = DEFAULT_OP_CONF.openvpn_title;
-    let ca_title = DEFAULT_OP_CONF.ca_title;
-    let cert_item = DEFAULT_OP_CONF.cert_item;
-    let key_item = DEFAULT_OP_CONF.key_item;
-    let ta_path = DEFAULT_OP_CONF.ta_item.replace('.', "/");
-
-    format!(
-        r#"#
-# Client - {{{{ op://{vault}/$OPCA_USER/cn }}}}
-#
-
-client
-dev tun
-proto udp
-remote {{{{ op://{vault}/{ovpn}/server/hostname }}}} {{{{ op://{vault}/{ovpn}/server/port }}}}
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-remote-cert-tls server
-cipher {{{{ op://{vault}/{ovpn}/server/cipher }}}}
-auth {{{{ op://{vault}/{ovpn}/server/auth }}}}
-verb 3
-key-direction 1
-mssfix 1300
-<ca>
-{{{{ op://{vault}/{ca_title}/{cert_item} }}}}
-</ca>
-<cert>
-{{{{ op://{vault}/$OPCA_USER/{cert_item} }}}}
-</cert>
-<key>
-{{{{ op://{vault}/$OPCA_USER/{key_item} }}}}
-</key>
-<tls-auth>
-{{{{ op://{vault}/{ovpn}/{ta_path} }}}}
-</tls-auth>
-"#
-    )
+/// The loaded CA, with any templates older versions kept on the 1Password
+/// `OpenVPN` item imported into the database.
+fn ca_with_templates<R: CommandRunner>(
+    app: &mut AppContext<R>,
+) -> Result<&mut CertificateAuthority<R>, OpcaError> {
+    app.ensure_ca()?;
+    let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+    if let Some(n) = openvpn::import_templates_from_vault(ca)?.filter(|&n| n > 0) {
+        output::print_result(
+            &format!(
+                "Imported {n} OpenVPN template(s) from 1Password into the CA database. \
+                 The originals remain on the OpenVPN item; archive or keep them from \
+                 the OpenVPN Templates tab in the app."
+            ),
+            true,
+        );
+    }
+    Ok(ca)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -225,15 +205,9 @@ fn handle_generate_profiles<R: CommandRunner>(
         ));
     };
 
+    let template_content = openvpn::get_template(ca_with_templates(app)?, template_name)?.content;
     let op = app.op()?;
     for profile_cn in &cn_list {
-        // Read template
-        let url = op.mk_url(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&format!("template/{template_name}")),
-        );
-        let template_content = op.read_item(&url)?;
-
         // Inject with OPCA_USER env var
         let mut env_vars = HashMap::new();
         env_vars.insert("OPCA_USER".to_string(), profile_cn.clone());
@@ -301,10 +275,6 @@ fn handle_setup<R: CommandRunner>(
     attrs.push("server.cipher[text]=aes-256-gcm".to_string());
     attrs.push("server.auth[text]=sha256".to_string());
 
-    // Template
-    let boilerplate = build_template_boilerplate(&op.vault);
-    attrs.push(format!("template.{template_name}[text]={boilerplate}"));
-
     // DH parameters
     let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)?;
     let dh_keysize = verify_dh_params(dh_pem.as_bytes())?;
@@ -335,6 +305,10 @@ fn handle_setup<R: CommandRunner>(
         None,
         None,
     )?;
+
+    if openvpn::add_starter_template(ca_with_templates(app)?, template_name)? {
+        output::print_result(&format!("Template '{template_name}' created"), true);
+    }
 
     output::print_result("OpenVPN server setup complete", true);
     Ok(())
@@ -381,11 +355,7 @@ fn handle_get<R: CommandRunner>(
     }
 
     if let Some(ref name) = template {
-        let url = op.mk_url(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&format!("template/{name}")),
-        );
-        let content = op.read_item(&url)?;
+        let content = openvpn::get_template(ca_with_templates(app)?, name)?.content;
         println!("{}", content.trim());
     }
 

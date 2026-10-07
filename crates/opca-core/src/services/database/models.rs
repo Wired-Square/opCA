@@ -279,6 +279,36 @@ pub struct OpenVpnTemplate {
     pub updated_date: Option<String>,
 }
 
+/// Progress of the one-time move of OpenVPN templates from the 1Password
+/// `OpenVPN` item into the database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplateImport {
+    NotImported,
+    /// Imported, but the old template fields are still on the 1Password item
+    /// until an operator chooses to archive or keep them.
+    AwaitingCleanup,
+    Settled,
+}
+
+impl TemplateImport {
+    pub fn from_column(value: Option<i64>) -> Self {
+        match value {
+            Some(1) => Self::AwaitingCleanup,
+            Some(2) => Self::Settled,
+            _ => Self::NotImported,
+        }
+    }
+
+    pub fn to_column(self) -> Option<i64> {
+        match self {
+            Self::NotImported => None,
+            Self::AwaitingCleanup => Some(1),
+            Self::Settled => Some(2),
+        }
+    }
+}
+
 /// OpenVPN profile registry entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenVpnProfile {

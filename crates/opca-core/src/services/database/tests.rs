@@ -1168,7 +1168,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 10); // v5→v6 … v13→v14, v14→v15
+    assert_eq!(info.steps.len(), 11); // v5→v6 … v14→v15, v15→v16
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1205,6 +1205,7 @@ fn a_v14_dump_imports_with_crl_batches_off() {
         .execute_batch(
             "DROP TABLE crl_batch;
              ALTER TABLE config DROP COLUMN crl_batch_enabled;
+             ALTER TABLE config DROP COLUMN openvpn_template_import;
              UPDATE config SET schema_version = 14 WHERE id = 1;",
         )
         .unwrap();
@@ -1212,11 +1213,39 @@ fn a_v14_dump_imports_with_crl_batches_off() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v14_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (14, 1));
+    assert_eq!((info.from_version, info.steps.len()), (14, 2));
     let config = db.get_config().unwrap();
-    assert_eq!((config.schema_version, config.crl_batch_enabled), (Some(15), None));
+    assert_eq!((config.schema_version, config.crl_batch_enabled), (Some(16), None));
     assert!(db.get_crl_batch().unwrap().is_none());
     assert_eq!(config.org.as_deref(), Some("Test Org"));
+}
+
+#[test]
+fn a_v15_dump_has_not_imported_its_openvpn_templates() {
+    let db = test_db();
+    db.conn
+        .execute_batch(
+            "ALTER TABLE config DROP COLUMN openvpn_template_import;
+             UPDATE config SET schema_version = 15 WHERE id = 1;",
+        )
+        .unwrap();
+    let v15_sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(&v15_sql).unwrap();
+
+    assert_eq!((info.from_version, info.steps.len()), (15, 1));
+    assert_eq!(db.openvpn_template_import().unwrap(), TemplateImport::NotImported);
+}
+
+#[test]
+fn the_openvpn_template_import_state_survives_export_and_import() {
+    let db = test_db();
+    db.set_openvpn_template_import(TemplateImport::AwaitingCleanup).unwrap();
+    let sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+
+    let (db, _) = CertificateAuthorityDB::from_sql_dump(&sql).unwrap();
+
+    assert_eq!(db.openvpn_template_import().unwrap(), TemplateImport::AwaitingCleanup);
 }
 
 #[test]

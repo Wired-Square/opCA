@@ -6,10 +6,13 @@ use tauri::{AppHandle, State};
 
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::crypto::utils::{generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key};
+use opca_core::error::OpcaError;
 use opca_core::op::StoreAction;
+use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::CertType;
 use opca_core::services::database::models::OpenVpnProfile;
 use opca_core::services::database::CertLookup;
+use opca_core::services::openvpn;
 
 use crate::commands::cert::cert_list_item;
 use crate::commands::dto::{
@@ -17,7 +20,7 @@ use crate::commands::dto::{
     OpenVpnProfileItem, OpenVpnServerParams, OpenVpnTemplateDetail, OpenVpnTemplateItem,
     ServerSetupRequest,
 };
-use crate::state::{AppState, Connection, Runner};
+use crate::state::{AppState, Runner};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,39 +56,6 @@ fn read_openvpn_fields(
     Ok((true, fields))
 }
 
-/// Read every template (name + content) from the OpenVPN 1Password item in a
-/// single `get_item` JSON parse. Templates are `[text]` fields under the
-/// "template" section, so each field's value *is* its content — no per-template
-/// `op read` spawn needed (the same optimisation `backfill_dkim` uses).
-fn read_openvpn_templates(op: &opca_core::op::Op<Runner>) -> Result<Vec<(String, String)>, String> {
-    let title = DEFAULT_OP_CONF.openvpn_title;
-    if !op.item_exists(title) {
-        return Ok(Vec::new());
-    }
-
-    let json_str = op
-        .get_item(title, "json")
-        .map_err(|e| e.to_string())?;
-
-    let item: serde_json::Value =
-        serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
-
-    let mut templates = Vec::new();
-    if let Some(arr) = item["fields"].as_array() {
-        for field in arr {
-            let label = field["label"].as_str().unwrap_or_default();
-            let section_label = field["section"]["label"].as_str().unwrap_or_default();
-            if section_label == "template" && !label.is_empty() {
-                let content = field["value"].as_str().unwrap_or_default().trim().to_string();
-                templates.push((label.to_string(), content));
-            }
-        }
-    }
-
-    templates.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(templates)
-}
-
 /// Determine create vs edit action for the OpenVPN item.
 fn resolve_store_action(op: &opca_core::op::Op<Runner>) -> StoreAction {
     if op.item_exists(DEFAULT_OP_CONF.openvpn_title) {
@@ -93,53 +63,6 @@ fn resolve_store_action(op: &opca_core::op::Op<Runner>) -> StoreAction {
     } else {
         StoreAction::Create
     }
-}
-
-/// Build the boilerplate template with op:// references.
-fn build_template_boilerplate(vault: &str) -> String {
-    let ovpn = DEFAULT_OP_CONF.openvpn_title;
-    let ca_title = DEFAULT_OP_CONF.ca_title;
-    let cert_item = DEFAULT_OP_CONF.cert_item;
-    let key_item = DEFAULT_OP_CONF.key_item;
-
-    // ta_item is "tls_authentication.static_key" — op:// uses "/" separator
-    let ta_path = DEFAULT_OP_CONF.ta_item.replace('.', "/");
-
-    format!(
-        r#"#
-# Client - {{{{ op://{vault}/$OPCA_USER/cn }}}}
-#
-
-# Brought to you by Wired Square - www.wiredsquare.com
-
-client
-dev tun
-proto udp
-remote {{{{ op://{vault}/{ovpn}/server/hostname }}}} {{{{ op://{vault}/{ovpn}/server/port }}}}
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-remote-cert-tls server
-cipher {{{{ op://{vault}/{ovpn}/server/cipher }}}}
-auth {{{{ op://{vault}/{ovpn}/server/auth }}}}
-verb 3
-key-direction 1
-mssfix 1300
-<ca>
-{{{{ op://{vault}/{ca_title}/{cert_item} }}}}
-</ca>
-<cert>
-{{{{ op://{vault}/$OPCA_USER/{cert_item} }}}}
-</cert>
-<key>
-{{{{ op://{vault}/$OPCA_USER/{key_item} }}}}
-</key>
-<tls-auth>
-{{{{ op://{vault}/{ovpn}/{ta_path} }}}}
-</tls-auth>
-"#
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -310,12 +233,6 @@ pub async fn setup_openvpn_server(
             attrs.push("server.auth[text]=sha256".to_string());
         }
 
-        // Template — only add if this specific template doesn't exist
-        if !fields.contains_key(&template_name) {
-            let boilerplate = build_template_boilerplate(&op.vault);
-            attrs.push(format!("template.{template_name}[text]={boilerplate}"));
-        }
-
         // DH parameters — generate if missing
         if !fields.contains_key("dh_parameters") {
             let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)
@@ -360,9 +277,7 @@ pub async fn setup_openvpn_server(
         Ok(())
     })?;
 
-    // Mirror the (possibly newly created) template into the DB so it shows up
-    // in the picker without a manual refresh.
-    do_sync_openvpn_templates(&state, &mut *state.ensure_ca()?)?;
+    with_ca(&state, "setup_openvpn", |ca| openvpn::add_starter_template(ca, &template_name))?;
 
     state.log_ok(
         "setup_openvpn",
@@ -371,80 +286,25 @@ pub async fn setup_openvpn_server(
     get_openvpn_params(state).await
 }
 
-/// Pull every template field out of the OpenVPN 1Password item and mirror it
-/// into the `openvpn_template` table, reconciling deletions, then persist the
-/// DB. Mirrors `do_sync_dkim_keys` — used once when the table is first found
-/// empty, and behind the Configuration tab's Refresh button.
-fn do_sync_openvpn_templates(state: &AppState, conn: &mut Connection) -> Result<usize, String> {
-    info!("[tauri] sync_openvpn_templates");
+/// Run `f` against the loaded CA, logging a failure under `action`.
+fn with_ca<T>(
+    state: &AppState,
+    action: &str,
+    f: impl FnOnce(&mut CertificateAuthority<Runner>) -> Result<T, OpcaError>,
+) -> Result<T, String> {
+    let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
-
-    let found = read_openvpn_templates(&ca.op)?;
-
-    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
-    let mut changed = false;
-    for (name, content) in &found {
-        db.upsert_openvpn_template(name, content, None)
-            .map_err(|e| e.to_string())?;
-        changed = true;
-    }
-
-    // Reconcile deletions: drop DB rows whose template field no longer exists
-    // on the 1Password item.
-    let live: std::collections::HashSet<&str> =
-        found.iter().map(|(n, _)| n.as_str()).collect();
-    for existing in db.query_all_openvpn_templates().map_err(|e| e.to_string())? {
-        if !live.contains(existing.name.as_str()) {
-            db.delete_openvpn_template(&existing.name)
-                .map_err(|e| e.to_string())?;
-            changed = true;
-        }
-    }
-
-    // Only re-upload the DB when the mirror actually moved. A CA with no
-    // templates would otherwise upload on every Profiles load (the table stays
-    // empty, so the sync-on-empty fires each time).
-    if changed {
-        ca.store_ca_database().map_err(|e| {
-            state.log_err("sync_openvpn_templates", Some(e.to_string()));
-            e.to_string()
-        })?;
-    }
-
-    conn.openvpn_templates_seeded = true;
-    Ok(found.len())
+    f(ca).map_err(|e| {
+        state.log_err(action, Some(e.to_string()));
+        e.to_string()
+    })
 }
 
-/// Re-sync templates from 1Password (Configuration tab Refresh).
-#[tauri::command]
-pub async fn sync_openvpn_templates(state: State<'_, AppState>) -> Result<usize, String> {
-    let count = do_sync_openvpn_templates(&state, &mut *state.ensure_ca()?)?;
-    state.log_ok(
-        "sync_templates",
-        Some(format!("Synced {count} OpenVPN template(s) from 1Password")),
-    );
-    Ok(count)
-}
-
-/// List templates from the local DB mirror (no `op` round-trip). An empty
-/// mirror is seeded from 1Password so the dropdown is populated immediately —
-/// the lazy `op`-backed fetch was what left the picker empty on a deep-link —
-/// but only once per connection, as a CA with no templates stays empty.
 #[tauri::command]
 pub async fn list_openvpn_templates(
     state: State<'_, AppState>,
 ) -> Result<Vec<OpenVpnTemplateItem>, String> {
-    let mut conn = state.ensure_ca()?;
-    if !conn.openvpn_templates_seeded
-        && conn.db()?.count_openvpn_template().map_err(|e| e.to_string())? == 0
-    {
-        do_sync_openvpn_templates(&state, &mut conn)?;
-    }
-
-    Ok(conn
-        .db()?
-        .query_all_openvpn_templates()
-        .map_err(|e| e.to_string())?
+    Ok(with_ca(&state, "list_templates", openvpn::list_templates)?
         .into_iter()
         .map(|t| OpenVpnTemplateItem {
             name: t.name,
@@ -453,42 +313,19 @@ pub async fn list_openvpn_templates(
         .collect())
 }
 
-/// Read a specific template's content from the local DB mirror, falling back to
-/// 1Password if the row is missing (e.g. created by an older client).
 #[tauri::command]
 pub async fn get_openvpn_template(
     state: State<'_, AppState>,
     name: String,
 ) -> Result<OpenVpnTemplateDetail, String> {
-    {
-        let conn = state.ensure_ca()?;
-        if let Some(t) = conn.db()?.get_openvpn_template(&name).map_err(|e| e.to_string())? {
-            return Ok(OpenVpnTemplateDetail {
-                name: t.name,
-                content: t.content,
-                updated_date: t.updated_date,
-            });
-        }
-    }
-
-    state.with_op(|op| {
-        let url = op.mk_url(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&format!("template/{name}")),
-        );
-        let content = op
-            .read_item(&url)
-            .map_err(|e| format!("Template '{name}' not found: {e}"))?;
-
-        Ok(OpenVpnTemplateDetail {
-            name,
-            content: content.trim().to_string(),
-            updated_date: None,
-        })
+    let t = with_ca(&state, "get_template", |ca| openvpn::get_template(ca, &name))?;
+    Ok(OpenVpnTemplateDetail {
+        name: t.name,
+        content: t.content,
+        updated_date: t.updated_date,
     })
 }
 
-/// Save template content to the OpenVPN 1Password item and the DB mirror.
 #[tauri::command]
 pub async fn save_openvpn_template(
     state: State<'_, AppState>,
@@ -503,35 +340,50 @@ pub async fn save_openvpn_template(
     }
 
     info!("[tauri] save_openvpn_template: name='{name}'");
-    let mut conn = state.ensure_ca()?;
-    let ca = conn.ca.as_mut().ok_or("CA not available")?;
-
-    let attrs = vec![format!("template.{name}[text]={content}")];
-    let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-    ca.op
-        .store_item(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&attr_refs),
-            StoreAction::Edit,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )
-        .map_err(|e| format!("Failed to save template: {e}"))?;
-
-    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
-    db.upsert_openvpn_template(&name, &content, None)
-        .map_err(|e| e.to_string())?;
-    ca.store_ca_database().map_err(|e| {
-        state.log_err("save_template", Some(e.to_string()));
-        e.to_string()
-    })?;
-
-    state.log_ok(
-        "save_template",
-        Some(format!("Saved OpenVPN template '{name}'")),
-    );
+    with_ca(&state, "save_template", |ca| openvpn::save_template(ca, &name, &content))?;
+    state.log_ok("save_template", Some(format!("Saved OpenVPN template '{name}'")));
     Ok(true)
+}
+
+#[tauri::command]
+pub async fn delete_openvpn_template(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<bool, String> {
+    info!("[tauri] delete_openvpn_template: name='{name}'");
+    let deleted = with_ca(&state, "delete_template", |ca| openvpn::delete_template(ca, &name))?;
+    if deleted {
+        state.log_ok("delete_template", Some(format!("Deleted OpenVPN template '{name}'")));
+    }
+    Ok(deleted)
+}
+
+/// Names of the template fields still on the 1Password `OpenVPN` item after a
+/// successful import, each confirmed present in the database. Empty when
+/// there is nothing to ask the operator about.
+#[tauri::command]
+pub async fn list_openvpn_vault_templates(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    with_ca(&state, "import_templates", openvpn::templates_awaiting_cleanup)
+}
+
+#[tauri::command]
+pub async fn archive_openvpn_vault_templates(state: State<'_, AppState>) -> Result<usize, String> {
+    let n = with_ca(&state, "archive_templates", openvpn::archive_vault_templates)?;
+    state.log_ok(
+        "archive_templates",
+        Some(format!("Archived {n} OpenVPN template(s) from the 1Password OpenVPN item")),
+    );
+    Ok(n)
+}
+
+#[tauri::command]
+pub async fn keep_openvpn_vault_templates(state: State<'_, AppState>) -> Result<(), String> {
+    with_ca(&state, "keep_templates", openvpn::keep_vault_templates)?;
+    state.log_ok(
+        "keep_templates",
+        Some("Kept the old OpenVPN templates on the 1Password OpenVPN item".to_string()),
+    );
+    Ok(())
 }
 
 /// List valid VPN certificates (cert_type "vpnclient" or "vpnserver", status
@@ -667,29 +519,10 @@ fn do_generate_openvpn_profile(
 
     let title = profile_title(cn, serial);
 
-    // Template content comes from the local DB mirror (no `op` round-trip);
-    // fall back to 1Password for templates not yet synced into the DB.
-    let db_template_content: Option<String> = {
-        let conn = state.ensure_ca()?;
-        conn.db()?
-            .get_openvpn_template(template_name)
-            .map_err(|e| e.to_string())?
-            .map(|t| t.content)
-    };
+    let template_content =
+        with_ca(state, "generate_profile", |ca| openvpn::get_template(ca, template_name))?.content;
 
     state.with_op(|op| {
-        let template_content = match db_template_content {
-            Some(content) => content,
-            None => {
-                let url = op.mk_url(
-                    DEFAULT_OP_CONF.openvpn_title,
-                    Some(&format!("template/{template_name}")),
-                );
-                op.read_item(&url)
-                    .map_err(|e| format!("Failed to read template '{template_name}': {e}"))?
-            }
-        };
-
         // Inject op:// references with OPCA_USER pointing at the resolved item.
         let mut env_vars = HashMap::new();
         env_vars.insert("OPCA_USER".to_string(), opca_user.clone());

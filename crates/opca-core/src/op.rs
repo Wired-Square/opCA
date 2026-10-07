@@ -585,9 +585,9 @@ impl<R: CommandRunner> Op<R> {
                         "OPCA expects op v2 assignment syntax only; do not use '--field'.".into(),
                     ));
                 }
-                if !attrib.contains('=') {
+                if !attrib.contains('=') && !attrib.ends_with("[delete]") {
                     return Err(OpcaError::CliError(format!(
-                        "Invalid attribute token {:?}. Expected 'label=value'.",
+                        "Invalid attribute token {:?}. Expected 'label=value' or 'label[delete]'.",
                         attrib
                     )));
                 }
