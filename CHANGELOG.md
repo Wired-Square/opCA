@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Code Signing certificate type** (`codesigning`) for signing things like
+  RAUC update bundles: a critical `codeSigning` extended key usage,
+  `digitalSignature` key usage only, and no SAN.
+
 ## [0.102.2] - 2026-10-07
 
 ### Added

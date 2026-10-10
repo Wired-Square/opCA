@@ -582,6 +582,16 @@ impl<R: CommandRunner> CertificateAuthority<R> {
                             .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
                         builder.append_extension(eku)?;
                     }
+                    CertType::CodeSigning => {
+                        builder.append_extension(leaf_key_usage(false)?)?;
+
+                        let eku = ExtendedKeyUsage::new()
+                            .critical()
+                            .code_signing()
+                            .build()
+                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
+                        builder.append_extension(eku)?;
+                    }
                     CertType::WebServer => {
                         builder.append_extension(leaf_key_usage(rsa_subject)?)?;
 
@@ -2573,6 +2583,53 @@ mod tests {
         assert!(text.contains("Key Encipherment"));
     }
 
+    #[test]
+    fn test_sign_codesigning_certificate() {
+        use openssl::stack::Stack;
+        use openssl::x509::store::X509StoreBuilder;
+        use openssl::x509::{X509PurposeId, X509StoreContext};
+
+        let ca_config = CaConfig {
+            next_serial: Some(2),
+            days: Some(365),
+            crl_url: Some("http://crl.example.com/crl.pem".to_string()),
+            ca_url: Some("http://ca.example.com/ca.crt".to_string()),
+            ..CaConfig::default()
+        };
+        let mut db = CertificateAuthorityDB::new(&ca_config).unwrap();
+        let ca_bundle = make_ca_bundle();
+        let ca_cert = ca_bundle.certificate.clone().unwrap();
+        db.add_cert(&format_db_item(&ca_bundle, "CA", None, None).unwrap()).unwrap();
+        let mut ca = CertificateAuthority {
+            op: crate::testutil::mock_op(vec![]),
+            op_config: DEFAULT_OP_CONF,
+            ca_bundle: Some(ca_bundle),
+            ca_database: Some(db),
+            crl: None,
+            local_backup: None,
+        };
+
+        let signed = sign(&mut ca, CertType::CodeSigning, "ApplianceOS Update Signing", &[], KeyAlgorithm::EcP256);
+
+        let text = text_of(&signed);
+        assert!(text.contains("X509v3 Extended Key Usage: critical\n                Code Signing\n"), "{text}");
+        assert!(text.contains("X509v3 Key Usage: critical\n                Digital Signature\n"), "{text}");
+        assert!(text.contains("CA:FALSE"));
+        assert!(signed.subject_alt_names().is_none());
+        assert!(!text.contains("CRL Distribution Points"));
+        assert!(!text.contains("Authority Information Access"));
+
+        let mut store = X509StoreBuilder::new().unwrap();
+        store.add_cert(ca_cert).unwrap();
+        store.set_purpose(X509PurposeId::CODE_SIGN).unwrap();
+        let store = store.build();
+        let mut ctx = X509StoreContext::new().unwrap();
+        let verified = ctx
+            .init(&store, &signed, &Stack::new().unwrap(), |c| c.verify_cert())
+            .unwrap();
+        assert!(verified, "{}", ctx.error());
+    }
+
     fn at(timestamp: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(timestamp, 0).unwrap()
     }
@@ -3145,6 +3202,7 @@ mod tests {
         assert_eq!(issued_days(3000, CertType::WebServer, None), (825, vec![]));
         assert_eq!(issued_days(3000, CertType::VpnServer, None), (825, vec![]));
         assert_eq!(issued_days(3000, CertType::Device, None), (3000, vec![]));
+        assert_eq!(issued_days(3000, CertType::CodeSigning, None), (3000, vec![]));
         assert_eq!(issued_days(365, CertType::WebServer, None), (365, vec![]));
     }
 

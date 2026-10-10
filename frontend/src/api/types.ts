@@ -128,6 +128,7 @@ export const CERT_TYPES = [
   { value: "device", label: "Device" },
   { value: "vpnclient", label: "VPN Client" },
   { value: "vpnserver", label: "VPN Server" },
+  { value: "codesigning", label: "Code Signing" },
 ] as const;
 
 export const KEY_ALGORITHMS = [
