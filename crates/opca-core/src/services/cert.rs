@@ -31,6 +31,7 @@ use crate::services::san;
 pub enum CertType {
     Ca,
     AppleDev,
+    CodeSigning,
     Device,
     Imported,
     External,
@@ -44,6 +45,7 @@ impl fmt::Display for CertType {
         match self {
             CertType::Ca => write!(f, "ca"),
             CertType::AppleDev => write!(f, "appledev"),
+            CertType::CodeSigning => write!(f, "codesigning"),
             CertType::Device => write!(f, "device"),
             CertType::Imported => write!(f, "imported"),
             CertType::External => write!(f, "external"),
@@ -61,6 +63,7 @@ impl FromStr for CertType {
         match s.to_lowercase().as_str() {
             "ca" => Ok(CertType::Ca),
             "appledev" | "apple_dev" => Ok(CertType::AppleDev),
+            "codesigning" | "code_signing" => Ok(CertType::CodeSigning),
             "device" => Ok(CertType::Device),
             "imported" => Ok(CertType::Imported),
             "external" => Ok(CertType::External),
@@ -1128,6 +1131,7 @@ mod tests {
         assert_eq!(CertType::WebServer.default_key_algorithm(), KeyAlgorithm::EcP256);
         assert_eq!(CertType::Ca.default_key_algorithm(), KeyAlgorithm::EcP384);
         assert_eq!(CertType::AppleDev.default_key_algorithm(), KeyAlgorithm::Rsa2048);
+        assert_eq!(CertType::CodeSigning.default_key_algorithm(), KeyAlgorithm::EcP256);
         let config = CertBundleConfig { key_algorithm: None, ..test_config() };
         let bundle = CertificateBundle::generate(CertType::Device, "d", config).unwrap();
         assert_eq!(bundle.private_key.unwrap().id(), Id::EC);
@@ -1363,6 +1367,7 @@ mod tests {
     fn test_cert_type_display_and_parse() {
         for (s, ct) in [
             ("ca", CertType::Ca),
+            ("codesigning", CertType::CodeSigning),
             ("device", CertType::Device),
             ("vpnclient", CertType::VpnClient),
             ("vpnserver", CertType::VpnServer),

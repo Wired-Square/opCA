@@ -321,7 +321,7 @@ pub struct CertCreateArgs {
     pub file: Option<String>,
 
     /// Certificate type
-    #[arg(short = 't', long, value_parser = ["device", "vpnserver", "vpnclient", "webserver"])]
+    #[arg(short = 't', long, value_parser = ["codesigning", "device", "vpnserver", "vpnclient", "webserver"])]
     pub cert_type: String,
 
     /// Certificate serial number
@@ -540,7 +540,7 @@ pub enum CsrAction {
 
         /// Certificate type
         #[arg(short = 't', long, default_value = "webserver",
-              value_parser = ["appledev", "device", "vpnclient", "vpnserver", "webserver"])]
+              value_parser = ["appledev", "codesigning", "device", "vpnclient", "vpnserver", "webserver"])]
         csr_type: String,
 
         /// CN override
