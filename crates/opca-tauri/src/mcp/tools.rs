@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use wslib_ai_mcp::rmcp;
+use wslib_mcp::rmcp;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
@@ -8,19 +8,20 @@ use rmcp::schemars::{self, JsonSchema};
 use rmcp::{ErrorData, tool, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, LogicalSize, Manager};
-use wslib_ai_mcp::dom::{self, DomBridge, BRIDGE_TIMEOUT};
-use wslib_ai_mcp::result::{ok_json, tool_error};
-use wslib_ai_mcp::router::mark_read_only;
-use wslib_ai_mcp::server::ServerIdentity;
+use tauri::{AppHandle, LogicalSize, Manager, Wry};
+use wslib_mcp::dom::{self, DomBridge, BRIDGE_TIMEOUT};
+use wslib_mcp::result::{ok_json, tool_error};
+use wslib_mcp::router::mark_read_only;
+use wslib_mcp::server::ServerIdentity;
+use wslib_mcp::tauri_bridge::TauriBridge;
 
-use super::bridge;
 use crate::commands::cert::cert_items;
 use crate::state::AppState;
 
 #[derive(Clone)]
 pub struct OpcaTools {
     pub app: AppHandle,
+    pub page: TauriBridge<Wry>,
 }
 
 impl OpcaTools {
@@ -46,7 +47,7 @@ impl OpcaTools {
 
     async fn relay(&self, op: &str, args: impl Serialize) -> Result<CallToolResult, ErrorData> {
         let args = serde_json::to_value(args).expect("tool params serialise");
-        match self.call(op, args, BRIDGE_TIMEOUT).await {
+        match self.page.request(op, args, BRIDGE_TIMEOUT).await {
             Ok(value) => ok_json(value),
             Err(e) => Ok(tool_error(e)),
         }
@@ -55,7 +56,7 @@ impl OpcaTools {
 
 impl DomBridge for OpcaTools {
     async fn call(&self, op: &str, args: Value, timeout: Duration) -> Result<Value, String> {
-        bridge::request(&self.app, op, args, timeout).await
+        self.page.call(op, args, timeout).await
     }
 }
 
@@ -154,6 +155,7 @@ mod tests {
             [
                 ("app_status", true),
                 ("click", false),
+                ("console", true),
                 ("list_certs", true),
                 ("navigate", false),
                 ("press", false),
@@ -169,6 +171,11 @@ mod tests {
 
     #[test]
     fn the_vendored_dom_ops_match_the_library() {
-        assert_eq!(include_str!("../../../../frontend/src/harness/domOps.ts"), dom::OPS_TS);
+        assert_eq!(include_str!("../../../../frontend/src/harness/dom-ops.ts"), dom::OPS_TS);
+    }
+
+    #[test]
+    fn the_vendored_tauri_bridge_matches_the_library() {
+        assert_eq!(include_str!("../../../../frontend/src/harness/tauri-bridge.ts"), wslib_mcp::tauri_bridge::BRIDGE_TS);
     }
 }

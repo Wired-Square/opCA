@@ -57,18 +57,16 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     env:
-      # cargo resolves the optional, private wslib-ai-mcp even with the mcp feature off;
-      # its own fetcher cannot use the agent, git can.
-      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      # cargo resolves the optional wslib-mcp from the private registry even with the mcp feature off.
+      CARGO_REGISTRIES_WIRED_SQUARE_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Load the wslib-ai-rs deploy key
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: ${{ secrets.WSLIB_AI_DEPLOYMENT_KEY }}
+      - name: Read the wslib crates from the registry mirror
+        shell: bash
+        run: cat .cargo/mirror.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

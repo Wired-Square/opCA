@@ -1,4 +1,3 @@
-mod bridge;
 mod tools;
 
 use std::net::SocketAddr;
@@ -8,9 +7,10 @@ use std::time::Duration;
 
 use log::{info, warn};
 use tauri::AppHandle;
-use wslib_ai_mcp::CancellationToken;
-use wslib_ai_mcp::http::{self, HttpConfig};
-use wslib_ai_mcp::server::ToolServer;
+use wslib_mcp::CancellationToken;
+use wslib_mcp::http::{self, HttpConfig};
+use wslib_mcp::server::ToolServer;
+use wslib_mcp::tauri_bridge::TauriBridge;
 
 use tools::OpcaTools;
 
@@ -36,7 +36,7 @@ fn try_start(app: AppHandle) -> Result<(), String> {
     let handoff = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/mcp.json");
     write_handoff(&handoff, &serde_json::json!({ "url": url, "token": token }))?;
 
-    bridge::listen(&app);
+    let page = TauriBridge::new(&app);
     let router = Arc::new(OpcaTools::router());
     let identity = OpcaTools::identity();
     let config = HttpConfig {
@@ -44,7 +44,7 @@ fn try_start(app: AppHandle) -> Result<(), String> {
         allowed_origins: http::loopback_origins(port),
         ..HttpConfig::default()
     };
-    let factory = move || ToolServer::new(OpcaTools { app: app.clone() }, router.clone(), identity.clone());
+    let factory = move || ToolServer::new(OpcaTools { app: app.clone(), page: page.clone() }, router.clone(), identity.clone());
     tauri::async_runtime::spawn(async move {
         if let Err(e) = http::serve(listener, factory, config, CancellationToken::new()).await {
             warn!("[mcp] server stopped: {e}");

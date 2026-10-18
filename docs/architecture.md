@@ -472,27 +472,29 @@ The `mcp` cargo feature (on in `npm run tauri:dev`) compiles
 `127.0.0.1:${OPCA_MCP_PORT:-8790}` behind a bearer token (`OPCA_MCP_TOKEN`, or
 random), and writes `{url, token}` to `target/mcp.json` (0600). Combining
 `mcp` with a release build is a `compile_error!`, so no shipped binary carries
-it. The server comes from the private `wslib-ai-rs` (`wslib-ai-mcp`, over
-ssh); cargo resolves it even with the feature off, so CI loads a deploy key.
+it. The server comes from `wslib-mcp`, published to the private `wired-square`
+cargo registry; cargo resolves it even with the feature off, so CI reads it
+through the registry mirror (`.cargo/mirror.toml`).
 
 - **Read tools** — `app_status` and `list_certs` read `AppState` and never call
   `op` (not even `ensure_ca`).
 - **UI tools** — `navigate`, `set_theme`, `resize_window`. The app is changed
   only through the UI under test.
-- **DOM tools** — `query`, `wait_for` (read-only), `click`, `type`, `press`,
-  from `wslib-ai-mcp`'s `dom` feature via `impl DomBridge for OpcaTools`.
+- **DOM tools** — `query`, `wait_for`, `console` (read-only), `click`, `type`,
+  `press`, from `wslib-mcp`'s `dom` feature via `impl DomBridge for OpcaTools`.
   `query` reports every element matching a CSS selector (optionally filtered
   by visible text) with its form state, rect, whether it sits wholly in the
   viewport, and the overflow ancestor clipping it.
 
-Everything except `resize_window` crosses a bridge: the server emits
-`harness:request {id, op, args}` to the main window and awaits the matching
-`harness:reply`, timing out after 10 s. The webview side,
-[harness/bridge.ts](../frontend/src/harness/bridge.ts), handles `navigate`
-and `set_theme` and hands the DOM ops to
-[harness/domOps.ts](../frontend/src/harness/domOps.ts), vendored
-byte-for-byte from the library (a Rust test compares it with
-`wslib_ai_mcp::dom::OPS_TS`). Both are imported only under
+Everything except `resize_window` crosses `wslib-mcp`'s `tauri-bridge`: its
+`TauriBridge` emits `harness:request {id, op, args}` to the main window and
+awaits the matching `harness:reply`, timing out after 10 s. The webview side is
+[harness/tauri-bridge.ts](../frontend/src/harness/tauri-bridge.ts) and
+[harness/dom-ops.ts](../frontend/src/harness/dom-ops.ts), both vendored
+byte-for-byte from the library (Rust tests compare them with
+`wslib_mcp::tauri_bridge::BRIDGE_TS` and `wslib_mcp::dom::OPS_TS`);
+[harness/start.ts](../frontend/src/harness/start.ts) starts it with the
+`navigate` and `set_theme` app ops. All are imported only under
 `import.meta.env.DEV`, so they are absent from `frontend/dist`. `click`
 dispatches pointerdown → mousedown → mouseup → click so outside-click dismissal
 is exercised.

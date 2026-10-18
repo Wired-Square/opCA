@@ -1,3 +1,5 @@
-[net]
-# wslib-ai-rs is private and fetched over ssh; the git CLI uses the ssh agent.
-git-fetch-with-cli = true
+# The wslib-* crates. Cargo's default provider reads
+# CARGO_REGISTRIES_WIRED_SQUARE_TOKEN, as `Bearer <token>`. Off the network,
+# mirror.toml reads the mirror instead.
+[registries.wired-square]
+index = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"

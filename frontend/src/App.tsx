@@ -20,7 +20,7 @@ export default function App(props: ParentProps) {
   onMount(() => {
     initOperationListener();
     initQuitListener();
-    if (import.meta.env.DEV) import("./harness/bridge").then((m) => m.startHarnessBridge(navigate));
+    if (import.meta.env.DEV) import("./harness/start").then((m) => m.startHarness(navigate));
   });
 
   createEffect(() => {

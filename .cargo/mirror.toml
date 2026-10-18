@@ -1,0 +1,11 @@
+# Where the network cannot reach Forgejo (the gateway image, GitHub Actions),
+# this goes in $CARGO_HOME/config.toml and the read-only mirror stands in for
+# it. Cargo.lock still records Forgejo. The token is
+# CARGO_REGISTRIES_WIRED_SQUARE_MIRROR_TOKEN.
+[source.wired-square-forge]
+registry = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+replace-with = "wired-square-mirror"
+
+[registries.wired-square-mirror]
+index = "sparse+https://crates.wiredsquare.com/"
+credential-provider = "cargo:token"

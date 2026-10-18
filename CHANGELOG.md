@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The MCP dev harness now comes from `wslib-mcp` 0.1.0 on the private
+  `wired-square` cargo registry, replacing the `wslib-ai-mcp` git dependency.
+  It adds a read-only `console` tool for the page's errors and warnings.
+- The harness's Tauri event bridge now comes from `wslib-mcp`'s `tauri-bridge`
+  feature, replacing opCA's own.
+- Builds fetch `wslib-mcp` from the registry instead of over SSH; CI reads it
+  through the registry mirror and no longer loads the `wslib-ai-rs` deploy key.
+
 ## [0.102.3] - 2026-10-10
 
 ### Added
