@@ -217,7 +217,7 @@ pub struct CrlEntry {
 }
 
 /// CRL cache metadata (singleton row, `id=1`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CrlMetadata {
     pub issuer: Option<String>,
     pub last_update: Option<String>,

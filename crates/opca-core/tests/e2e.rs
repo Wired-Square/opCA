@@ -188,8 +188,7 @@ fn t11_ca_retrieve() {
     let org = subject
         .entries_by_nid(openssl::nid::Nid::ORGANIZATIONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string());
+        .and_then(|e| e.data().to_string().ok());
     assert_eq!(org.as_deref(), Some("OPCA E2E Test"));
     let key = cert.public_key().expect("CA public key");
     assert_eq!((key.id(), key.bits()), (openssl::pkey::Id::EC, 384), "new CA must default to EC P-384");

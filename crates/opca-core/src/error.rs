@@ -123,3 +123,15 @@ impl From<openssl::error::ErrorStack> for OpcaError {
         OpcaError::Crypto(err.to_string())
     }
 }
+
+impl From<wslib_crypto::Error> for OpcaError {
+    fn from(err: wslib_crypto::Error) -> Self {
+        OpcaError::Crypto(err.to_string())
+    }
+}
+
+impl From<wslib_crypto_ca::Error> for OpcaError {
+    fn from(err: wslib_crypto_ca::Error) -> Self {
+        OpcaError::Crypto(err.to_string())
+    }
+}

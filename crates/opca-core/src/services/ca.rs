@@ -9,14 +9,7 @@ use chrono::{DateTime, SubsecRound, Utc};
 use foreign_types::ForeignType;
 use log::{debug, error, info, warn};
 use openssl::asn1::Asn1Time;
-use openssl::bn::BigNum;
-use openssl::nid::Nid;
-use openssl::pkey::Id;
-use openssl::x509::extension::{
-    AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
-    SubjectAlternativeName, SubjectKeyIdentifier,
-};
-use openssl::x509::{X509Builder, X509Req, X509};
+use openssl::x509::{X509Req, X509};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -27,18 +20,22 @@ use crate::constants::{
 use crate::error::OpcaError;
 use crate::op::{CommandRunner, Op, StoreAction};
 use crate::services::cert::{
-    asn1_time_to_openssl_str, signing_digest, CertBundleConfig, CertType, CertificateBundle,
-    KeyAlgorithm, APPLE_TLS_MAX_DAYS,
+    crypto_provider, signer_of, CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm,
+    APPLE_TLS_MAX_DAYS,
 };
 use crate::services::database::models::{
     CaConfig, CertLookup, CertRecord, CrlBatch, CrlEntry, CrlMetadata, CsrLookup, CsrRecord,
     ExternalCertRecord, IgnoreReason, SerialType,
 };
 use crate::services::database::CertificateAuthorityDB;
-use crate::services::san;
 use crate::services::local_backup::{self, BackupSource, LocalBackup};
 use crate::services::storage;
 use crate::utils::datetime::{self, DateTimeFormat};
+use wslib_crypto_ca::{
+    Authority, CrlView, Csr, KeyIdentifierMethod, Profile, Revocation, SanPolicy, Serial,
+    Validity, X509_CRL,
+};
+use wslib_crypto_x509::AttributeValue;
 
 /// Identifier for the local user, used as the actor on audit-trail fields
 /// like `ignored_by`. Formatted as `username@hostname` — readable and doesn't
@@ -472,218 +469,20 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             .as_ref()
             .ok_or_else(|| OpcaError::CaNotFound)?;
 
-        // Verify CSR signature
-        let csr_pub = csr
-            .public_key()
-            .map_err(|e| OpcaError::Crypto(format!("CSR public key: {e}")))?;
-        let csr_valid = csr
-            .verify(&csr_pub)
-            .map_err(|e| OpcaError::Crypto(format!("CSR verify: {e}")))?;
-        if !csr_valid {
-            return Err(OpcaError::InvalidCertificate("CSR signature invalid".into()));
-        }
+        let provider = crypto_provider();
+        let csr = Csr::from_der(&csr.to_der()?, provider.signature_verification_algorithms.all)
+            .map_err(|e| OpcaError::InvalidCertificate(format!("CSR: {e}")))?;
 
         let ca_config = db.get_config()?;
-        let serial = db.increment_serial(SerialType::Cert, None)?;
-
-        let serial_bn = BigNum::from_dec_str(&serial.to_string())
-            .map_err(|e| OpcaError::Crypto(format!("Serial: {e}")))?;
-        let serial_asn1 = serial_bn
-            .to_asn1_integer()
-            .map_err(|e| OpcaError::Crypto(format!("Serial ASN1: {e}")))?;
-
-        let not_before = Asn1Time::days_from_now(0)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        let not_after = Asn1Time::days_from_now(days)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-
-        let mut builder = X509Builder::new()
-            .map_err(|e| OpcaError::Crypto(format!("X509 builder: {e}")))?;
-        builder.set_version(2)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        builder.set_subject_name(csr.subject_name())
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        builder.set_issuer_name(ca_cert.subject_name())
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        builder.set_pubkey(&csr_pub)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        builder.set_serial_number(&serial_asn1)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        builder.set_not_before(&not_before)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        builder.set_not_after(&not_after)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-
-        // SKI from subject public key
-        let ski = SubjectKeyIdentifier::new()
-            .build(&builder.x509v3_context(Some(ca_cert), None))
-            .map_err(|e| OpcaError::Crypto(format!("SKI: {e}")))?;
-        builder.append_extension(ski)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-
-        // AKI from CA public key
-        let aki = AuthorityKeyIdentifier::new()
-            .keyid(true)
-            .build(&builder.x509v3_context(Some(ca_cert), None))
-            .map_err(|e| OpcaError::Crypto(format!("AKI: {e}")))?;
-        builder.append_extension(aki)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-
-        // Type-specific extensions
-        match cert_type {
-            CertType::Ca => {
-                let bc = BasicConstraints::new().critical().ca().build()
-                    .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                builder.append_extension(bc)?;
-
-                let ku = KeyUsage::new().critical().key_cert_sign().crl_sign().build()
-                    .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                builder.append_extension(ku)?;
-            }
-            _ => {
-                // Non-CA: BasicConstraints(ca=False)
-                let bc = BasicConstraints::new().build()
-                    .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                builder.append_extension(bc)?;
-                let rsa_subject = csr.public_key().is_ok_and(|k| k.id() == Id::RSA);
-
-                match cert_type {
-                    CertType::AppleDev | CertType::Device => {
-                        builder.append_extension(leaf_key_usage(rsa_subject)?)?;
-
-                        let eku = ExtendedKeyUsage::new()
-                            .client_auth()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(eku)?;
-
-                        // SAN from CSR CN + any CSR SANs
-                        self.add_san_from_csr(&mut builder, csr, ca_cert, true)?;
-                    }
-                    CertType::VpnClient => {
-                        builder.append_extension(leaf_key_usage(false)?)?;
-
-                        let eku = ExtendedKeyUsage::new()
-                            .critical()
-                            .client_auth()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(eku)?;
-
-                        self.add_san_from_csr(&mut builder, csr, ca_cert, false)?;
-                    }
-                    CertType::VpnServer => {
-                        builder.append_extension(leaf_key_usage(rsa_subject)?)?;
-
-                        let eku = ExtendedKeyUsage::new()
-                            .critical()
-                            .server_auth()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(eku)?;
-                    }
-                    CertType::CodeSigning => {
-                        builder.append_extension(leaf_key_usage(false)?)?;
-
-                        let eku = ExtendedKeyUsage::new()
-                            .critical()
-                            .code_signing()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(eku)?;
-                    }
-                    CertType::WebServer => {
-                        builder.append_extension(leaf_key_usage(rsa_subject)?)?;
-
-                        let eku = ExtendedKeyUsage::new()
-                            .server_auth()
-                            .client_auth()
-                            .build()
-                            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-                        builder.append_extension(eku)?;
-
-                        // SAN from CSR
-                        self.add_san_from_csr(&mut builder, csr, ca_cert, true)?;
-
-                        // CRL Distribution Points
-                        if let Some(ref crl_url) = ca_config.crl_url {
-                            let ctx = builder.x509v3_context(Some(ca_cert), None);
-                            #[allow(deprecated)]
-                            let cdp = openssl::x509::X509Extension::new_nid(
-                                None,
-                                Some(&ctx),
-                                Nid::CRL_DISTRIBUTION_POINTS,
-                                &format!("URI:{crl_url}"),
-                            )
-                            .map_err(|e| OpcaError::Crypto(format!("CDP: {e}")))?;
-                            builder.append_extension(cdp)?;
-                        }
-
-                        // Authority Information Access
-                        if let Some(ref ca_url) = ca_config.ca_url {
-                            let ctx = builder.x509v3_context(Some(ca_cert), None);
-                            #[allow(deprecated)]
-                            let aia = openssl::x509::X509Extension::new_nid(
-                                None,
-                                Some(&ctx),
-                                Nid::INFO_ACCESS,
-                                &format!("caIssuers;URI:{ca_url}"),
-                            )
-                            .map_err(|e| OpcaError::Crypto(format!("AIA: {e}")))?;
-                            builder.append_extension(aia)?;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        builder.sign(ca_key, signing_digest(ca_key))
-            .map_err(|e| OpcaError::Crypto(format!("Sign: {e}")))?;
-
-        Ok(builder.build())
-    }
-
-    /// Add a SAN extension carrying the CSR's SANs, led by its CN (as an IP SAN
-    /// if it is one) when `with_cn`. VPN client CNs are people, not hosts.
-    fn add_san_from_csr(
-        &self,
-        builder: &mut X509Builder,
-        csr: &X509Req,
-        ca_cert: &X509,
-        with_cn: bool,
-    ) -> Result<(), OpcaError> {
-        let cn = csr
-            .subject_name()
-            .entries_by_nid(Nid::COMMONNAME)
-            .next()
-            .and_then(|e| e.data().as_utf8().ok())
-            .filter(|_| with_cn)
-            .map(|s| match s.parse() {
-                Ok(ip) => san::SubjectAltName::Ip(ip),
-                Err(_) => san::SubjectAltName::Dns(s.to_string()),
-            });
-
-        let mut names: Vec<san::SubjectAltName> = cn.into_iter().collect();
-        for name in san::of_csr(csr) {
-            if !names.contains(&name) {
-                names.push(name);
-            }
-        }
-        if names.is_empty() {
-            return Ok(());
-        }
-
-        let mut ext = SubjectAlternativeName::new();
-        for name in &names {
-            name.add_to(&mut ext);
-        }
-        let san_ext = ext
-            .build(&builder.x509v3_context(Some(ca_cert), None))
-            .map_err(|e| OpcaError::Crypto(format!("SAN: {e}")))?;
-        builder.append_extension(san_ext)?;
-
-        Ok(())
+        let serial = Serial::try_from(db.increment_serial(SerialType::Cert, None)?)?;
+        let now = Utc::now();
+        let validity = Validity {
+            not_before: now.into(),
+            not_after: (now + chrono::Duration::days(days.into())).into(),
+        };
+        let profile = profile_for(cert_type, csr.has_rsa_key(), &ca_config);
+        let cert = authority_of(ca_cert, ca_key)?.issue(&csr, &profile, &serial, validity)?;
+        Ok(X509::from_der(&cert)?)
     }
 
     // -----------------------------------------------------------------------
@@ -1898,15 +1697,70 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Critical digitalSignature, plus keyEncipherment for RSA keys only: ECDSA
-/// keys cannot encipher, and some TLS stacks reject certs claiming they can.
-fn leaf_key_usage(key_encipherment: bool) -> Result<openssl::x509::X509Extension, OpcaError> {
-    let mut ku = KeyUsage::new();
-    ku.critical().digital_signature();
-    if key_encipherment {
-        ku.key_encipherment();
+fn authority_of(
+    ca_cert: &X509,
+    ca_key: &openssl::pkey::PKey<openssl::pkey::Private>,
+) -> Result<Authority, OpcaError> {
+    Ok(Authority::new(ca_cert.to_der()?.into(), signer_of(ca_key)?, KeyIdentifierMethod::Sha1)?)
+}
+
+/// VPN client CNs are people, not hosts, so only their requested names become SANs.
+/// keyEncipherment is claimed for RSA keys only: some TLS stacks reject ECDSA certs claiming it.
+fn profile_for(cert_type: &CertType, rsa_subject: bool, ca_config: &CaConfig) -> Profile {
+    use wslib_crypto_ca::{BasicConstraints as Bc, Extension};
+    use wslib_crypto_x509::{ExtendedKeyUsage as Eku, KeyUsage as Ku};
+
+    if *cert_type == CertType::Ca {
+        return Profile {
+            basic_constraints: Some(Extension::critical(Bc::Authority { path_length: None })),
+            key_usage: Some(Extension::critical(vec![Ku::KeyCertSign, Ku::CrlSign])),
+            ..Profile::default()
+        };
     }
-    ku.build().map_err(|e| OpcaError::Crypto(format!("{e}")))
+    let key_usage = |key_encipherment: bool| {
+        let mut usages = vec![Ku::DigitalSignature];
+        if key_encipherment {
+            usages.push(Ku::KeyEncipherment);
+        }
+        Some(Extension::critical(usages))
+    };
+    let leaf = Profile {
+        basic_constraints: Some(Extension::non_critical(Bc::EndEntity)),
+        ..Profile::default()
+    };
+    match cert_type {
+        CertType::AppleDev | CertType::Device => Profile {
+            key_usage: key_usage(rsa_subject),
+            extended_key_usage: Some(Extension::non_critical(vec![Eku::ClientAuth])),
+            names: SanPolicy::CommonNameAndRequested,
+            ..leaf
+        },
+        CertType::VpnClient => Profile {
+            key_usage: key_usage(false),
+            extended_key_usage: Some(Extension::critical(vec![Eku::ClientAuth])),
+            names: SanPolicy::Requested,
+            ..leaf
+        },
+        CertType::VpnServer => Profile {
+            key_usage: key_usage(rsa_subject),
+            extended_key_usage: Some(Extension::critical(vec![Eku::ServerAuth])),
+            ..leaf
+        },
+        CertType::CodeSigning => Profile {
+            key_usage: key_usage(false),
+            extended_key_usage: Some(Extension::critical(vec![Eku::CodeSigning])),
+            ..leaf
+        },
+        CertType::WebServer => Profile {
+            key_usage: key_usage(rsa_subject),
+            extended_key_usage: Some(Extension::non_critical(vec![Eku::ServerAuth, Eku::ClientAuth])),
+            names: SanPolicy::CommonNameAndRequested,
+            crl_distribution_points: ca_config.crl_url.iter().cloned().collect(),
+            ca_issuers: ca_config.ca_url.iter().cloned().collect(),
+            ..leaf
+        },
+        _ => leaf,
+    }
 }
 
 /// Convert a `CaConfig` (database model) into a `CertBundleConfig` (cert model).
@@ -2014,10 +1868,6 @@ impl IntoExternal for CertRecord {
     }
 }
 
-/// Build a CRL in PEM format using raw OpenSSL FFI.
-///
-/// The openssl crate (0.10.x) does not expose a CRL builder, so we use
-/// the underlying `openssl-sys` bindings directly.
 fn build_crl(
     ca_cert: &X509,
     ca_key: &openssl::pkey::PKey<openssl::pkey::Private>,
@@ -2026,97 +1876,22 @@ fn build_crl(
     next_update: DateTime<Utc>,
     entries: &[CrlEntry],
 ) -> Result<String, OpcaError> {
-    use openssl::x509::X509Crl;
-
-    fn check(rc: std::os::raw::c_int, what: &str) -> Result<(), OpcaError> {
-        if rc == 1 {
-            Ok(())
-        } else {
-            Err(OpcaError::Crypto(format!("Failed to {what}")))
-        }
-    }
-
-    let number = BigNum::from_dec_str(&crl_number.to_string())?.to_asn1_integer()?;
-    let aki = authority_key_identifier(ca_cert)?;
-
-    unsafe {
-        let crl_ptr = openssl_sys::X509_CRL_new();
-        if crl_ptr.is_null() {
-            return Err(OpcaError::Crypto("Failed to create X509_CRL".into()));
-        }
-        let crl = X509Crl::from_ptr(crl_ptr);
-
-        check(openssl_sys::X509_CRL_set_version(crl_ptr, 1), "set CRL version")?;
-        check(
-            openssl_sys::X509_CRL_set_issuer_name(crl_ptr, openssl_sys::X509_get_subject_name(ca_cert.as_ptr())),
-            "set CRL issuer",
-        )?;
-
-        let last_update = Asn1Time::from_unix(this_update.timestamp())?;
-        let next_update = Asn1Time::from_unix(next_update.timestamp())?;
-        check(openssl_sys::X509_CRL_set1_lastUpdate(crl_ptr, last_update.as_ptr()), "set CRL lastUpdate")?;
-        check(openssl_sys::X509_CRL_set1_nextUpdate(crl_ptr, next_update.as_ptr()), "set CRL nextUpdate")?;
-
-        for entry in entries {
-            let serial = BigNum::from_dec_str(&entry.serial)
-                .map_err(|e| OpcaError::Crypto(format!("Revoked serial: {e}")))?
-                .to_asn1_integer()?;
-            let revoked_at = Asn1Time::from_str_x509(&entry.revocation_date)?;
-
-            let revoked_ptr = openssl_sys::X509_REVOKED_new();
-            if revoked_ptr.is_null() {
-                return Err(OpcaError::Crypto("Failed to create X509_REVOKED".into()));
-            }
-            openssl_sys::X509_REVOKED_set_serialNumber(revoked_ptr, serial.as_ptr());
-            openssl_sys::X509_REVOKED_set_revocationDate(revoked_ptr, revoked_at.as_ptr());
-
-            // add0 takes ownership of revoked_ptr only on success
-            if openssl_sys::X509_CRL_add0_revoked(crl_ptr, revoked_ptr) != 1 {
-                openssl_sys::X509_REVOKED_free(revoked_ptr);
-                return Err(OpcaError::Crypto("Failed to add revoked entry".into()));
-            }
-        }
-        openssl_sys::X509_CRL_sort(crl_ptr);
-
-        check(
-            openssl_sys::X509_CRL_add1_ext_i2d(crl_ptr, openssl_sys::NID_crl_number, number.as_ptr().cast(), 0, 0),
-            "add CRL Number",
-        )?;
-        if let Some(aki) = aki {
-            check(openssl_sys::X509_CRL_add_ext(crl_ptr, aki.as_ptr(), -1), "add Authority Key Identifier")?;
-        }
-
-        let md = signing_digest(ca_key).as_ptr();
-        if openssl_sys::X509_CRL_sign(crl_ptr, ca_key.as_ptr(), md) == 0 {
-            return Err(OpcaError::Crypto("Failed to sign CRL".into()));
-        }
-
-        String::from_utf8(crl.to_pem()?)
-            .map_err(|e| OpcaError::Crypto(format!("CRL PEM not UTF-8: {e}")))
-    }
-}
-
-/// The CRL's Authority Key Identifier: the CA's subject key identifier as `keyIdentifier`
-/// (RFC 5280 §5.2.1). `None` for an imported CA certificate that carries no SKI.
-fn authority_key_identifier(
-    ca_cert: &X509,
-) -> Result<Option<openssl::x509::X509Extension>, OpcaError> {
-    use openssl::asn1::{Asn1Object, Asn1OctetString};
-
-    let Some(ski) = ca_cert.subject_key_id() else {
-        return Ok(None);
-    };
-    let key_id = ski.as_slice();
-    let len = u8::try_from(key_id.len())
-        .ok()
-        .filter(|&n| n < 126)
-        .ok_or_else(|| OpcaError::Crypto("CA subject key identifier too long".into()))?;
-    // SEQUENCE { [0] IMPLICIT OCTET STRING keyIdentifier }
-    let der = [&[0x30, len + 2, 0x80, len][..], key_id].concat();
-
-    let oid = Asn1Object::from_str("2.5.29.35")?;
-    let der = Asn1OctetString::new_from_bytes(&der)?;
-    Ok(Some(openssl::x509::X509Extension::new_from_der(&oid, false, &der)?))
+    let revoked = entries
+        .iter()
+        .map(|entry| {
+            let revoked_at = datetime::parse_datetime(&entry.revocation_date, DateTimeFormat::Openssl)?;
+            Ok(Revocation::new(entry.serial.parse()?, revoked_at.into()))
+        })
+        .collect::<Result<Vec<_>, OpcaError>>()?;
+    let number = u64::try_from(crl_number)
+        .map_err(|_| OpcaError::Crypto(format!("CRL number {crl_number} is negative")))?;
+    let der = authority_of(ca_cert, ca_key)?.revocation_list(
+        number,
+        this_update.into(),
+        next_update.into(),
+        &revoked,
+    )?;
+    Ok(wslib_crypto_x509::pem::encode(X509_CRL, &der))
 }
 
 /// Compute SHA-256 hex digest.
@@ -2133,39 +1908,56 @@ pub fn prepare_cert_authority<R: CommandRunner>(op: Op<R>) -> Result<Certificate
 
 /// Parse CRL metadata from a PEM string without needing a full CA instance.
 pub fn parse_crl_metadata(pem: &str) -> Result<CrlMetadata, OpcaError> {
-    use openssl::x509::X509Crl;
-    let crl = X509Crl::from_pem(pem.as_bytes())
+    let view = CrlView::from_pem(pem)
         .map_err(|e| OpcaError::Crypto(format!("Failed to parse CRL PEM: {e}")))?;
-    Ok(crl_metadata_from(&crl))
+    Ok(crl_metadata(&view))
 }
 
-/// Pull metadata out of an already-parsed CRL — saves a redundant
-/// `X509Crl::from_pem` call when the caller (e.g. `inspect_crl`) also needs
-/// the parsed handle for other work.
+/// Metadata of a CRL already parsed by OpenSSL, as `inspect_crl` holds one; all `None` if it does not read.
 pub fn crl_metadata_from(crl: &openssl::x509::X509Crl) -> CrlMetadata {
-    let issuer = crl
-        .issuer_name()
-        .entries()
-        .filter_map(|e| {
-            let sn = e.object().nid().short_name().ok()?;
-            let val = e.data().as_utf8().ok()?;
-            Some(format!("{sn}={val}"))
+    crl.to_der()
+        .ok()
+        .and_then(|der| CrlView::from_der(&der).ok())
+        .map_or_else(CrlMetadata::default, |view| crl_metadata(&view))
+}
+
+fn crl_metadata(view: &CrlView) -> CrlMetadata {
+    let openssl_time =
+        |at: std::time::SystemTime| datetime::format_datetime(at.into(), DateTimeFormat::Openssl);
+    CrlMetadata {
+        issuer: issuer_text(&view.issuer),
+        last_update: Some(openssl_time(view.this_update)),
+        next_update: view.next_update.map(openssl_time),
+        crl_number: view.number.and_then(|n| i64::try_from(n).ok()),
+        revoked_count: Some(view.revoked.len() as i64),
+        revoked_json: None,
+    }
+}
+
+/// OpenSSL's one-line form (`CN=…, C=…, emailAddress=…`), which stored CRL metadata has always held.
+fn issuer_text(name: &[u8]) -> Option<String> {
+    let attributes = wslib_crypto_x509::name_attributes(name).ok()?;
+    let text = attributes
+        .into_iter()
+        .filter_map(|attribute| match attribute.value {
+            AttributeValue::Text(value) => Some(format!("{}={value}", short_name(&attribute.oid))),
+            AttributeValue::Der(_) => None,
         })
         .collect::<Vec<_>>()
         .join(", ");
+    Some(text)
+}
 
-    let last_update = asn1_time_to_openssl_str(crl.last_update());
-    let next_update = crl.next_update().and_then(asn1_time_to_openssl_str);
-    let revoked_count = crl.get_revoked().map(|stack| stack.len() as i64).unwrap_or(0);
-    let crl_number = extract_crl_number(crl);
-
-    CrlMetadata {
-        issuer: Some(issuer),
-        last_update,
-        next_update,
-        crl_number,
-        revoked_count: Some(revoked_count),
-        revoked_json: None,
+fn short_name(oid: &str) -> &str {
+    match oid {
+        "2.5.4.3" => "CN",
+        "2.5.4.6" => "C",
+        "2.5.4.8" => "ST",
+        "2.5.4.7" => "L",
+        "2.5.4.10" => "O",
+        "2.5.4.11" => "OU",
+        "1.2.840.113549.1.9.1" => "emailAddress",
+        other => other,
     }
 }
 
@@ -2202,45 +1994,6 @@ pub fn crl_to_text(crl: &openssl::x509::X509Crl) -> Result<String, OpcaError> {
     }
 }
 
-/// Extract the CRL Number extension value from a parsed CRL.
-fn extract_crl_number(crl: &openssl::x509::X509Crl) -> Option<i64> {
-    unsafe {
-        let crl_ptr = crl.as_ptr();
-        let nid = openssl_sys::NID_crl_number;
-        let idx = openssl_sys::X509_CRL_get_ext_by_NID(crl_ptr, nid, -1);
-        if idx < 0 {
-            return None;
-        }
-        let ext = openssl_sys::X509_CRL_get_ext(crl_ptr, idx);
-        if ext.is_null() {
-            return None;
-        }
-        let octet = openssl_sys::X509_EXTENSION_get_data(ext);
-        if octet.is_null() {
-            return None;
-        }
-        let data_ptr = openssl_sys::ASN1_STRING_get0_data(octet as *const _);
-        let data_len = openssl_sys::ASN1_STRING_length(octet as *const _) as usize;
-        if data_ptr.is_null() || data_len < 3 {
-            return None;
-        }
-        let der = std::slice::from_raw_parts(data_ptr, data_len);
-        // DER: 0x02 (INTEGER tag), length, value bytes
-        if der[0] != 0x02 {
-            return None;
-        }
-        let val_len = der[1] as usize;
-        if der.len() < 2 + val_len {
-            return None;
-        }
-        let mut num: i64 = 0;
-        for &b in &der[2..2 + val_len] {
-            num = (num << 8) | b as i64;
-        }
-        Some(num)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -2248,6 +2001,8 @@ fn extract_crl_number(crl: &openssl::x509::X509Crl) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::san;
+    use openssl::nid::Nid;
     use crate::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
     use crate::testutil::ok_output;
 
@@ -2933,7 +2688,7 @@ mod tests {
         for expected in [1, 2] {
             let crl = openssl::x509::X509Crl::from_pem(ca.generate_crl().unwrap().as_bytes()).unwrap();
             assert_eq!(crl_extension(&crl, Nid::CRL_NUMBER), (false, vec![0x02, 0x01, expected as u8]));
-            assert_eq!(extract_crl_number(&crl), Some(expected));
+            assert_eq!(crl_metadata_from(&crl).crl_number, Some(expected));
             let metadata = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().unwrap();
             assert_eq!(metadata.crl_number, Some(expected));
         }
@@ -2952,6 +2707,26 @@ mod tests {
         let hex = ski.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":");
         let text = crl_to_text(&crl).unwrap();
         assert!(text.contains("X509v3 Authority Key Identifier") && text.contains(&hex), "{text}");
+    }
+
+    #[test]
+    fn the_crl_issuer_keeps_openssls_one_line_form() {
+        let mut name = openssl::x509::X509NameBuilder::new().unwrap();
+        for (nid, value) in [
+            (Nid::COMMONNAME, "Test CA"),
+            (Nid::COUNTRYNAME, "AU"),
+            (Nid::STATEORPROVINCENAME, "VIC"),
+            (Nid::LOCALITYNAME, "Melbourne"),
+            (Nid::ORGANIZATIONNAME, "Test Org"),
+            (Nid::ORGANIZATIONALUNITNAME, "Test Unit"),
+            (Nid::PKCS9_EMAILADDRESS, "ca@example.com"),
+        ] {
+            name.append_entry_by_nid(nid, value).unwrap();
+        }
+        assert_eq!(
+            issuer_text(&name.build().to_der().unwrap()).unwrap(),
+            "CN=Test CA, C=AU, ST=VIC, L=Melbourne, O=Test Org, OU=Test Unit, emailAddress=ca@example.com"
+        );
     }
 
     fn batch_ca(store: Option<&str>) -> CertificateAuthority<crate::testutil::MockRunner> {
@@ -2995,7 +2770,7 @@ mod tests {
         assert_eq!(crls.len(), 5);
         for (i, crl) in crls.iter().enumerate() {
             let i = i as i64;
-            assert_eq!(extract_crl_number(crl), Some(1 + i));
+            assert_eq!(crl_metadata_from(crl).crl_number, Some(1 + i));
             assert_eq!(validity(crl), (batch.t0 + chrono::Duration::days(7 * i), batch.t0 + chrono::Duration::days(7 * i + 10)));
             assert_eq!(crl_serials(&String::from_utf8(crl.to_pem().unwrap()).unwrap()), ["3"]);
             assert!(crl.verify(&key).unwrap());
@@ -3013,7 +2788,7 @@ mod tests {
 
         ca.generate_crl().unwrap();
 
-        let numbers: Vec<_> = uploaded_batch(&dir).iter().map(extract_crl_number).collect();
+        let numbers: Vec<_> = uploaded_batch(&dir).iter().map(|crl| crl_metadata_from(crl).crl_number).collect();
         assert_eq!(numbers, [6, 7, 8, 9, 10].map(Some));
         assert_eq!(ca.ca_database.as_ref().unwrap().get_crl_batch().unwrap().unwrap().first_number, 6);
     }

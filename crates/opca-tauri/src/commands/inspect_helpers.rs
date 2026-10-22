@@ -18,7 +18,7 @@ pub fn x509_name_to_rdn_string(name: &X509NameRef) -> String {
         .filter_map(|e| {
             let nid = e.object().nid();
             let sn = nid.short_name().unwrap_or("??");
-            e.data().as_utf8().ok().map(|v| format!("{sn}={v}"))
+            e.data().to_string().ok().map(|v| format!("{sn}={v}"))
         })
         .collect();
     entries.reverse();

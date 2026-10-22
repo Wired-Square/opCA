@@ -3,13 +3,10 @@
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::ptr;
 use std::str::FromStr;
 
-use foreign_types::ForeignType;
-use openssl::stack::Stack;
-use openssl::x509::extension::SubjectAlternativeName as SanBuilder;
-use openssl::x509::{GeneralName, GeneralNameRef, X509Ref, X509ReqRef};
+use openssl::x509::{GeneralNameRef, X509Ref, X509ReqRef};
+use wslib_crypto_ca::CsrView;
 
 use crate::error::OpcaError;
 
@@ -22,15 +19,6 @@ pub enum SubjectAltName {
 }
 
 impl SubjectAltName {
-    pub fn add_to(&self, builder: &mut SanBuilder) {
-        match self {
-            Self::Dns(v) => builder.dns(v),
-            Self::Ip(ip) => builder.ip(&ip.to_string()),
-            Self::Email(v) => builder.email(v),
-            Self::Uri(v) => builder.uri(v),
-        };
-    }
-
     /// OpenSSL's `DNS:` / `IP:` / `email:` / `URI:` form, as stored in the `san` column.
     pub fn tagged(&self) -> String {
         match self {
@@ -56,6 +44,28 @@ impl SubjectAltName {
             return Some(Self::Email(v.to_string()));
         }
         name.uri().map(|v| Self::Uri(v.to_string()))
+    }
+}
+
+impl From<SubjectAltName> for wslib_crypto_x509::SubjectAltName {
+    fn from(name: SubjectAltName) -> Self {
+        match name {
+            SubjectAltName::Dns(v) => Self::Dns(v),
+            SubjectAltName::Ip(ip) => Self::Ip(ip),
+            SubjectAltName::Email(v) => Self::Email(v),
+            SubjectAltName::Uri(v) => Self::Uri(v),
+        }
+    }
+}
+
+impl From<&wslib_crypto_x509::SubjectAltName> for SubjectAltName {
+    fn from(name: &wslib_crypto_x509::SubjectAltName) -> Self {
+        match name {
+            wslib_crypto_x509::SubjectAltName::Dns(v) => Self::Dns(v.clone()),
+            wslib_crypto_x509::SubjectAltName::Ip(ip) => Self::Ip(*ip),
+            wslib_crypto_x509::SubjectAltName::Email(v) => Self::Email(v.clone()),
+            wslib_crypto_x509::SubjectAltName::Uri(v) => Self::Uri(v.clone()),
+        }
     }
 }
 
@@ -143,24 +153,11 @@ pub fn of_certificate(cert: &X509Ref) -> Vec<SubjectAltName> {
 }
 
 pub fn of_csr(csr: &X509ReqRef) -> Vec<SubjectAltName> {
-    let Ok(extensions) = csr.extensions() else {
-        return Vec::new();
-    };
-    // SAFETY: X509V3_get_d2i returns a newly allocated GENERAL_NAMES (or null),
-    // whose ownership the Stack takes.
-    let names = unsafe {
-        let raw = openssl_sys::X509V3_get_d2i(
-            extensions.as_ptr(),
-            openssl_sys::NID_subject_alt_name,
-            ptr::null_mut(),
-            ptr::null_mut(),
-        );
-        if raw.is_null() {
-            return Vec::new();
-        }
-        Stack::<GeneralName>::from_ptr(raw.cast())
-    };
-    names.iter().filter_map(SubjectAltName::from_general_name).collect()
+    csr.to_der()
+        .ok()
+        .and_then(|der| CsrView::from_der(&der).ok())
+        .map(|csr| csr.names().iter().map(Into::into).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

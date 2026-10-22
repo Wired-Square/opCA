@@ -43,7 +43,7 @@ fn csr_subject_string(csr: &X509Req) -> String {
         .filter_map(|e| {
             let nid = e.object().nid();
             let sn = nid.short_name().unwrap_or("??");
-            e.data().as_utf8().ok().map(|v| format!("{sn}={v}"))
+            e.data().to_string().ok().map(|v| format!("{sn}={v}"))
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -54,8 +54,7 @@ fn csr_cn(csr: &X509Req) -> Option<String> {
     csr.subject_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|e| e.data().to_string().ok())
 }
 
 /// Extract CN from an X509 certificate subject.
@@ -63,8 +62,7 @@ fn cert_cn(cert: &X509) -> Option<String> {
     cert.subject_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|e| e.data().to_string().ok())
 }
 
 /// Extract issuer CN from an X509 certificate.
@@ -72,8 +70,7 @@ fn cert_issuer_cn(cert: &X509) -> Option<String> {
     cert.issuer_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|e| e.data().to_string().ok())
 }
 
 /// Extract issuer subject as a human-readable string from an X509 certificate.
@@ -83,7 +80,7 @@ fn cert_issuer_subject(cert: &X509) -> String {
         .filter_map(|e| {
             let nid = e.object().nid();
             let sn = nid.short_name().unwrap_or("??");
-            e.data().as_utf8().ok().map(|v| format!("{sn}={v}"))
+            e.data().to_string().ok().map(|v| format!("{sn}={v}"))
         })
         .collect::<Vec<_>>()
         .join(", ")

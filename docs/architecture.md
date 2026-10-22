@@ -63,19 +63,32 @@ Organised by concern under [src/](../crates/opca-core/src):
   - [ca.rs](../crates/opca-core/src/services/ca.rs) — the
     `CertificateAuthority` struct. Orchestrates init, sign, revoke, renew,
     rekey, CRL generation, and upload. This is the capstone API the Tauri
-    layer calls into.
+    layer calls into. Issuing and CRLs go through `wslib-crypto-ca` (from the
+    private `wired-square` registry) on the `rustls-openssl` provider:
+    `sign_certificate` verifies the CSR, builds a `Profile` per `CertType`
+    (`profile_for`) and calls `Authority::issue`; `build_crl` calls
+    `Authority::revocation_list`, which writes the Authority Key Identifier
+    before the CRL Number. CRL metadata is read with `CrlView`, its issuer
+    kept in OpenSSL's one-line form (`CN=…, C=…, emailAddress=…`) through
+    `name_attributes`. A SHA-1-signed CSR can be read but not signed: the
+    provider has no SHA-1. `crl_to_text` stays on `openssl-sys`
+    (`X509_CRL_print`).
   - [cert.rs](../crates/opca-core/src/services/cert.rs) —
     per-certificate bundle operations (build, sign, import/export, inspect).
     `KeyAlgorithm` (`ec-p256`, `ec-p384`, `rsa-2048`, `rsa-4096`) picks the key;
     `CertType::default_key_algorithm` gives EC P-256 for leaves, EC P-384 for the
     CA and RSA 2048 for Apple developer CSRs, and a rekey keeps the existing
     family unless given an algorithm (`rekey_cert`, `bulk_rekey_certs` and
-    `opca cert rekey --key` take one). `signing_digest` uses SHA-384 for P-384 keys, SHA-256 otherwise, and
+    `opca cert rekey --key` take one). CSRs are built by
+    `wslib_crypto_ca::build_csr`, the `openssl` key passed as a
+    `wslib_crypto::Signer` (`signer_of`, via PKCS#8); the CA's self-sign and
+    re-sign stay on the `openssl` crate. Signatures use SHA-384 for P-384 keys
+    and SHA-256 otherwise (`signing_digest` on the `openssl` side), and
     `keyEncipherment` is only set on RSA leaves.
   - [san.rs](../crates/opca-core/src/services/san.rs) — Subject
     Alternative Names: `SubjectAltName` (DNS, IP, email, URI) parses and
     validates user input, and `of_certificate` / `of_csr` read them back from
-    the extension. The frontend's `utils/san.ts` mirrors its parsing rules.
+    the extension (`of_csr` through `wslib_crypto_ca::CsrView`). The frontend's `utils/san.ts` mirrors its parsing rules.
   - [openvpn.rs](../crates/opca-core/src/services/openvpn.rs) — OpenVPN
     client-profile templates, stored canonically in the `openvpn_template`
     table, plus the starter template and the one-time move of templates off
