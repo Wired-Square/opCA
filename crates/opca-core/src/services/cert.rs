@@ -12,11 +12,14 @@ use openssl::nid::Nid;
 use openssl::pkey::{HasPublic, Id, PKey, PKeyRef, Private};
 use openssl::rsa::Rsa;
 use openssl::x509::extension::{
-    AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectAlternativeName,
-    SubjectKeyIdentifier,
+    AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier,
 };
-use openssl::x509::{X509Builder, X509NameBuilder, X509Req, X509ReqBuilder, X509};
+use openssl::x509::{X509Builder, X509Req, X509};
+use rustls::crypto::CryptoProvider;
+use rustls_pki_types::PrivateKeyDer;
 use serde::{Deserialize, Serialize};
+use wslib_crypto::Signer;
+use wslib_crypto_ca::Subject;
 
 use crate::error::OpcaError;
 use crate::services::san;
@@ -172,6 +175,15 @@ pub fn signing_digest<T: HasPublic>(key: &PKeyRef<T>) -> MessageDigest {
     } else {
         MessageDigest::sha256()
     }
+}
+
+pub(crate) fn crypto_provider() -> std::sync::Arc<CryptoProvider> {
+    std::sync::Arc::new(rustls_openssl::default_provider())
+}
+
+pub(crate) fn signer_of(key: &PKey<Private>) -> Result<Signer, OpcaError> {
+    let der = key.private_key_to_pkcs8()?;
+    Ok(Signer::new(crypto_provider(), &PrivateKeyDer::Pkcs8(der.into()))?)
 }
 
 // ---------------------------------------------------------------------------
@@ -361,83 +373,23 @@ impl CertificateBundle {
         key: &PKey<Private>,
         config: &CertBundleConfig,
     ) -> Result<X509Req, OpcaError> {
-        let mut name_builder = X509NameBuilder::new()
-            .map_err(|e| OpcaError::Crypto(format!("X509Name builder: {e}")))?;
-
-        name_builder
-            .append_entry_by_nid(Nid::COMMONNAME, cn)
-            .map_err(|e| OpcaError::Crypto(format!("CN: {e}")))?;
-
-        if let Some(ref v) = config.country {
-            name_builder
-                .append_entry_by_nid(Nid::COUNTRYNAME, v)
-                .map_err(|e| OpcaError::Crypto(format!("Country: {e}")))?;
-        }
-        if let Some(ref v) = config.state {
-            name_builder
-                .append_entry_by_nid(Nid::STATEORPROVINCENAME, v)
-                .map_err(|e| OpcaError::Crypto(format!("State: {e}")))?;
-        }
-        if let Some(ref v) = config.city {
-            name_builder
-                .append_entry_by_nid(Nid::LOCALITYNAME, v)
-                .map_err(|e| OpcaError::Crypto(format!("City: {e}")))?;
-        }
-        if let Some(ref v) = config.org {
-            name_builder
-                .append_entry_by_nid(Nid::ORGANIZATIONNAME, v)
-                .map_err(|e| OpcaError::Crypto(format!("Org: {e}")))?;
-        }
-        if let Some(ref v) = config.ou {
-            name_builder
-                .append_entry_by_nid(Nid::ORGANIZATIONALUNITNAME, v)
-                .map_err(|e| OpcaError::Crypto(format!("OU: {e}")))?;
-        }
-        if let Some(ref v) = config.email {
-            name_builder
-                .append_entry_by_nid(Nid::PKCS9_EMAILADDRESS, v)
-                .map_err(|e| OpcaError::Crypto(format!("Email: {e}")))?;
-        }
-
-        let name = name_builder.build();
-
-        let mut req_builder = X509ReqBuilder::new()
-            .map_err(|e| OpcaError::Crypto(format!("X509Req builder: {e}")))?;
-        req_builder
-            .set_version(0)
-            .map_err(|e| OpcaError::Crypto(format!("Set version: {e}")))?;
-        req_builder
-            .set_subject_name(&name)
-            .map_err(|e| OpcaError::Crypto(format!("Set subject: {e}")))?;
-        req_builder
-            .set_pubkey(key)
-            .map_err(|e| OpcaError::Crypto(format!("Set pubkey: {e}")))?;
-
-        if let Some(ref alt_names) = config.alt_names {
-            if !alt_names.is_empty() {
-                let mut ext = SubjectAlternativeName::new();
-                for name in alt_names {
-                    name.parse::<san::SubjectAltName>()?.add_to(&mut ext);
-                }
-                let san_ext = ext.build(&req_builder.x509v3_context(None))
-                    .map_err(|e| OpcaError::Crypto(format!("SAN extension: {e}")))?;
-
-                let mut stack = openssl::stack::Stack::new()
-                    .map_err(|e| OpcaError::Crypto(format!("Extension stack: {e}")))?;
-                stack
-                    .push(san_ext)
-                    .map_err(|e| OpcaError::Crypto(format!("Push SAN: {e}")))?;
-                req_builder
-                    .add_extensions(&stack)
-                    .map_err(|e| OpcaError::Crypto(format!("Add extensions: {e}")))?;
-            }
-        }
-
-        req_builder
-            .sign(key, signing_digest(key))
-            .map_err(|e| OpcaError::Crypto(format!("CSR sign: {e}")))?;
-
-        Ok(req_builder.build())
+        let subject = Subject {
+            common_name: cn.to_string(),
+            country: config.country.clone(),
+            state: config.state.clone(),
+            locality: config.city.clone(),
+            organisation: config.org.clone(),
+            organisational_unit: config.ou.clone(),
+            email: config.email.clone(),
+        };
+        let names = config
+            .alt_names
+            .iter()
+            .flatten()
+            .map(|name| name.parse::<san::SubjectAltName>().map(Into::into))
+            .collect::<Result<Vec<_>, _>>()?;
+        let der = wslib_crypto_ca::build_csr(&signer_of(key)?, &subject, &names)?;
+        Ok(X509Req::from_der(&der)?)
     }
 
     // -----------------------------------------------------------------------
@@ -826,7 +778,7 @@ impl CertificateBundle {
                     .filter_map(|e| {
                         let nid = e.object().nid();
                         let sn = nid.short_name().unwrap_or("??");
-                        e.data().as_utf8().ok().map(|v| format!("{sn}={v}"))
+                        e.data().to_string().ok().map(|v| format!("{sn}={v}"))
                     })
                     .collect();
                 // RFC 4514 order is reversed (leaf-first)
@@ -841,7 +793,7 @@ impl CertificateBundle {
                     .filter_map(|e| {
                         let nid = e.object().nid();
                         let sn = nid.short_name().unwrap_or("??");
-                        e.data().as_utf8().ok().map(|v| format!("{sn}={v}"))
+                        e.data().to_string().ok().map(|v| format!("{sn}={v}"))
                     })
                     .collect();
                 let mut reversed = entries;
@@ -1056,8 +1008,7 @@ fn get_subject_entry(cert: &X509, nid: Nid) -> Option<String> {
     cert.subject_name()
         .entries_by_nid(nid)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|e| e.data().to_string().ok())
 }
 
 /// Extract the CN from a certificate.
@@ -1192,18 +1143,18 @@ mod tests {
             .next()
             .unwrap()
             .data()
-            .as_utf8()
+            .to_string()
             .unwrap();
-        assert_eq!(cn.to_string(), "test.example.com");
+        assert_eq!(cn, "test.example.com");
 
         let org = subject
             .entries_by_nid(Nid::ORGANIZATIONNAME)
             .next()
             .unwrap()
             .data()
-            .as_utf8()
+            .to_string()
             .unwrap();
-        assert_eq!(org.to_string(), "Test Org");
+        assert_eq!(org, "Test Org");
     }
 
     #[test]

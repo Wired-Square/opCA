@@ -332,7 +332,7 @@ fn csr_subject_string(csr: &X509Req) -> String {
         .entries()
         .filter_map(|e| {
             let sn = e.object().nid().short_name().unwrap_or("??");
-            e.data().as_utf8().ok().map(|v| format!("{sn}={v}"))
+            e.data().to_string().ok().map(|v| format!("{sn}={v}"))
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -342,24 +342,21 @@ fn csr_cn(csr: &X509Req) -> Option<String> {
     csr.subject_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|e| e.data().to_string().ok())
 }
 
 fn cert_cn(cert: &X509) -> Option<String> {
     cert.subject_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|e| e.data().to_string().ok())
 }
 
 fn cert_issuer_cn(cert: &X509) -> Option<String> {
     cert.issuer_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|e| e.data().to_string().ok())
 }
 
 fn cert_issuer_subject(cert: &X509) -> String {
@@ -367,7 +364,7 @@ fn cert_issuer_subject(cert: &X509) -> String {
         .entries()
         .filter_map(|e| {
             let sn = e.object().nid().short_name().unwrap_or("??");
-            e.data().as_utf8().ok().map(|v| format!("{sn}={v}"))
+            e.data().to_string().ok().map(|v| format!("{sn}={v}"))
         })
         .collect::<Vec<_>>()
         .join(", ")

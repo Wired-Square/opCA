@@ -22,6 +22,12 @@ rand = "0.9"
 openssl = { version = "0.10", features = ["vendored"] }
 openssl-sys = "0.9"
 foreign-types = "0.3"
+rustls-openssl = "0.4"
+rustls = { version = "0.23", default-features = false }
+rustls-pki-types = "1.12"
+wslib-crypto = { version = "0.1", registry = "wired-square" }
+wslib-crypto-x509 = { version = "0.1.1", registry = "wired-square" }
+wslib-crypto-ca = { version = "0.1", registry = "wired-square" }
 aws-sdk-s3 = "1"
 aws-sdk-route53 = "1"
 aws-credential-types = "1"

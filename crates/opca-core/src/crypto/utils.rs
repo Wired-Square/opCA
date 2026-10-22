@@ -131,8 +131,7 @@ pub fn extract_certificate_cn(cert_bytes: &[u8]) -> Option<String> {
     cert.subject_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|entry| entry.data().as_utf8().ok())
-        .map(|s| s.to_string())
+        .and_then(|entry| entry.data().to_string().ok())
 }
 
 /// Generate a self-signed test certificate for unit tests.
@@ -247,9 +246,9 @@ mod tests {
             .next()
             .unwrap()
             .data()
-            .as_utf8()
+            .to_string()
             .unwrap();
-        assert_eq!(cn.to_string(), "Test CA");
+        assert_eq!(cn, "Test CA");
     }
 
     #[test]

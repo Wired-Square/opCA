@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   feature, replacing opCA's own.
 - Builds fetch `wslib-mcp` from the registry instead of over SSH; CI reads it
   through the registry mirror and no longer loads the `wslib-ai-rs` deploy key.
+- CSRs are now built by `wslib-crypto-ca` 0.1 from the `wired-square`
+  registry, signed through the `rustls-openssl` provider, and a CSR's SANs are
+  read without OpenSSL FFI.
+- Certificates are now issued by `wslib-crypto-ca`, with one profile per
+  certificate type; the extensions issued are unchanged. A SHA-1-signed CSR can
+  still be read, but signing it is refused, as the provider has no SHA-1.
+- CRLs are now built and read by `wslib-crypto-ca` instead of OpenSSL FFI. The
+  CRL now writes the Authority Key Identifier before the CRL Number, and
+  carries one even when an imported CA certificate has no subject key
+  identifier. The stored CRL issuer keeps its one-line `CN=…, C=…` form.
+- `openssl` is now 0.10.81, and subject text is read with `to_string` instead
+  of the deprecated `as_utf8`, so the workspace builds without warnings.
 
 ## [0.102.3] - 2026-10-10
 

@@ -1040,8 +1040,7 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
         .subject_name()
         .entries_by_nid(Nid::COMMONNAME)
         .next()
-        .and_then(|e| e.data().as_utf8().ok())
-        .map(|s| s.to_string());
+        .and_then(|e| e.data().to_string().ok());
 
     let subject = x509_name_to_rdn_string(cert.subject_name());
     let issuer = x509_name_to_rdn_string(cert.issuer_name());
