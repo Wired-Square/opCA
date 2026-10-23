@@ -2876,7 +2876,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -8167,9 +8167,9 @@ dependencies = [
 
 [[package]]
 name = "wslib-1password"
-version = "0.1.0"
+version = "0.1.1"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
-checksum = "8213fdbe7d20abb87905d2f3de896b82e72202e10d786fb61bfb86eca29e14ea"
+checksum = "0d8a77d32fa6fcddbd4d0358945f99804a5fc74c71fcb716c452e846c27af6e2"
 dependencies = [
  "serde",
  "serde_json",

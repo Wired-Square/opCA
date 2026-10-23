@@ -27,7 +27,7 @@ rustls-pki-types = "1.12"
 wslib-crypto = { version = "0.1", registry = "wired-square" }
 wslib-crypto-x509 = { version = "0.1.1", registry = "wired-square" }
 wslib-crypto-ca = { version = "0.1", registry = "wired-square" }
-wslib-1password = { version = "0.1", registry = "wired-square" }
+wslib-1password = { version = "0.1.1", registry = "wired-square" }
 # wslib-1password traces each `op` call; this forwards them to `log`.
 tracing = { version = "0.1", features = ["log"] }
 aws-sdk-s3 = "1"
@@ -40,7 +40,7 @@ dirs = "6"
 whoami = "1"
 
 [dev-dependencies]
-wslib-1password = { version = "0.1", registry = "wired-square", features = ["testing"] }
+wslib-1password = { version = "0.1.1", registry = "wired-square", features = ["testing"] }
 
 [features]
 default = []
