@@ -39,7 +39,7 @@ pub fn dispatch(args: OpenvpnArgs, app: &mut AppContext<ShellRunner>) -> Result<
 
 /// Sets fields of the `OpenVPN` item, creating it when there is none.
 fn store_openvpn<R: Runner>(app: &AppContext<R>, fields: &[Assignment]) -> Result<(), OpcaError> {
-    op::put_item(app.op()?, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
+    op::put_item(app.vault()?, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
 }
 
 fn server_defaults() -> Result<Vec<Assignment>, OpcaError> {
@@ -189,7 +189,7 @@ fn handle_generate_profiles<R: Runner + Clone>(
     };
 
     let template_content = openvpn::get_template(ca_with_templates(app)?, template_name)?.content;
-    let vault = app.op()?;
+    let vault = app.vault()?;
     let dest = match dest_vault {
         Some(name) => vault.op().open_vault(name)?,
         None => vault.clone(),
@@ -259,7 +259,7 @@ fn handle_get<R: Runner>(
         ));
     }
 
-    let vault = app.op()?;
+    let vault = app.vault()?;
     let read = |field: &str| {
         let reference = vault.reference(DEFAULT_OP_CONF.openvpn_title, Some(&field.replace('.', "/")));
         op::read_text(vault, &reference)

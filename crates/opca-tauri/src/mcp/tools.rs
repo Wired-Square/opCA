@@ -92,11 +92,11 @@ impl OpcaTools {
     async fn app_status(&self) -> Result<CallToolResult, ErrorData> {
         let state = self.state();
         let conn = state.conn.lock().expect("mutex poisoned");
-        let op = conn.ca.as_ref().map(|ca| &ca.op).or(conn.op.as_ref());
+        let vault = conn.ca.as_ref().map(|ca| &ca.vault).or(conn.vault.as_ref());
         ok_json(json!({
-            "connected": op.is_some(),
-            "account": op.and_then(|op| op.op().account()),
-            "vault": op.map(|op| &op.info().name),
+            "connected": vault.is_some(),
+            "account": vault.and_then(|vault| vault.op().account()),
+            "vault": vault.map(|vault| &vault.info().name),
             "ca_loaded": conn.ca.is_some(),
         }))
     }

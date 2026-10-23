@@ -21,15 +21,15 @@ pub struct LocalBackupsInfo {
 }
 
 /// The connected account's backup store and the connected vault.
-fn connected_store(op: &Vault<Runner>) -> Result<(LocalBackup, BackupSource), String> {
-    let store = LocalBackup::for_account(op.op().account()).map_err(|e| e.to_string())?;
-    Ok((store, BackupSource::of(op)))
+fn connected_store(vault: &Vault<Runner>) -> Result<(LocalBackup, BackupSource), String> {
+    let store = LocalBackup::for_account(vault.op().account()).map_err(|e| e.to_string())?;
+    Ok((store, BackupSource::of(vault)))
 }
 
 /// Local backups for the connected vault, listed even while backups are off.
 #[tauri::command]
 pub async fn get_local_backups(state: State<'_, AppState>) -> Result<LocalBackupsInfo, String> {
-    let (store, source) = state.with_op(connected_store)?;
+    let (store, source) = state.with_vault(connected_store)?;
     Ok(LocalBackupsInfo {
         enabled: settings::local_backup_enabled(),
         dir: store.dir_for(&source).display().to_string(),
@@ -45,14 +45,14 @@ pub async fn set_local_backup_enabled(state: State<'_, AppState>, enabled: bool)
 
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
     if let Some(ca) = conn.ca.as_mut() {
-        ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
+        ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
     }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn open_local_backups_folder(state: State<'_, AppState>) -> Result<(), String> {
-    let (store, source) = state.with_op(connected_store)?;
+    let (store, source) = state.with_vault(connected_store)?;
     let dir = store.dir_for(&source);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
@@ -79,8 +79,8 @@ pub async fn restore_local_backup(state: State<'_, AppState>, path: String) -> R
     if conn.ca.is_some() {
         return Err("The CA database is already loaded; restore is only offered when it can't be read".into());
     }
-    let op = conn.op.clone().ok_or("Not connected")?;
-    let (store, source) = connected_store(&op)?;
+    let vault = conn.vault.clone().ok_or("Not connected")?;
+    let (store, source) = connected_store(&vault)?;
 
     let path = PathBuf::from(path);
     if !store.owns(&source, &path) {
@@ -88,13 +88,13 @@ pub async fn restore_local_backup(state: State<'_, AppState>, path: String) -> R
     }
     let contents = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
 
-    let mut ca = CertificateAuthority::restore_from_backup(op, &contents, &store).map_err(|e| {
+    let mut ca = CertificateAuthority::restore_from_backup(vault, &contents, &store).map_err(|e| {
         warn!("[tauri] restore_local_backup failed: {e}");
         state.log_err("restore_local_backup", Some(e.to_string()));
         e.to_string()
     })?;
-    ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
-    conn.op = None;
+    ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
+    conn.vault = None;
     conn.ca = Some(ca);
     *state.database_error.lock().expect("mutex poisoned") = None;
 

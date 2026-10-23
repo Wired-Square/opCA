@@ -101,16 +101,16 @@ pub async fn init_ca(
     config: CaConfigDto,
 ) -> Result<(), String> {
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    let op = conn.op.clone().ok_or("Not connected")?;
+    let vault = conn.vault.clone().ok_or("Not connected")?;
 
     info!("[tauri] init_ca");
     let ca_config = dto_to_ca_config(&config);
 
-    match CertificateAuthority::init(op, &ca_config) {
+    match CertificateAuthority::init(vault, &ca_config) {
         Ok(mut ca) => {
-            ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
+            ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
             conn.ca = Some(ca);
-            conn.op = None;
+            conn.vault = None;
             state.log_ok("init_ca", Some("Certificate Authority initialised".to_string()));
             Ok(())
         }

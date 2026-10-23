@@ -39,7 +39,7 @@ pub async fn vault_backup(
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
     emit_progress(&window, "Enumerating vault items\u{2026}");
-    let vb = VaultBackup::new(&ca.op, &ca.op_config);
+    let vb = VaultBackup::new(&ca.vault, &ca.op_config);
     let payload = vb.create_backup().map_err(|e| {
         state.log_err("vault_backup", Some(e.to_string()));
         e.to_string()
@@ -147,7 +147,7 @@ pub async fn vault_restore(
     })?;
 
     emit_progress(&window, "Connecting to 1Password\u{2026}");
-    let op = op::connect(Runner::default(), &vault, account.as_deref()).map_err(|e| {
+    let vault = op::connect(Runner::default(), &vault, account.as_deref()).map_err(|e| {
         state.log_err("vault_restore", Some(e.to_string()));
         e.to_string()
     })?;
@@ -155,24 +155,24 @@ pub async fn vault_restore(
     // Acquire vault lock using the fresh connection
     {
         let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-        lock_guard.acquire(&op, "vault_restore", opca_core::vault_lock::VaultLock::default_ttl())
+        lock_guard.acquire(&vault, "vault_restore", opca_core::vault_lock::VaultLock::default_ttl())
             .map_err(|e| e.to_string())?;
     }
 
     emit_progress(&window, &format!("Restoring {} items\u{2026}", payload.metadata.item_count));
-    let vb = VaultBackup::new(&op, &DEFAULT_OP_CONF);
+    let vb = VaultBackup::new(&vault, &DEFAULT_OP_CONF);
     let on_progress = |item_type: &str, title: &str| {
         emit_progress(&window, &format!("Restoring {}: {}", item_type, title));
     };
     let counts = match vb.restore_backup(&payload, Some(&on_progress)) {
         Ok(c) => {
             let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-            let _ = lock_guard.release(&op);
+            let _ = lock_guard.release(&vault);
             c
         }
         Err(e) => {
             let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-            let _ = lock_guard.release(&op);
+            let _ = lock_guard.release(&vault);
             error!("[tauri] vault_restore failed: {e}");
             state.log_err("vault_restore", Some(e.to_string()));
             return Err(e.to_string());
@@ -184,7 +184,7 @@ pub async fn vault_restore(
 
     // Re-install the fresh connection into state so ensure_ca() works without reconnecting.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    state.replace_connection(&mut conn, Connection { op: Some(op), ..Connection::default() });
+    state.replace_connection(&mut conn, Connection { vault: Some(vault), ..Connection::default() });
 
     state.log_ok(
         "vault_restore",
@@ -228,7 +228,7 @@ pub async fn vault_info(path: String, password: String) -> Result<BackupInfoResu
 #[tauri::command]
 pub async fn vault_default_filename(state: State<'_, AppState>) -> Result<String, String> {
     let vault_name = state
-        .with_op(|op| Ok(op.info().name.clone()))
+        .with_vault(|vault| Ok(vault.info().name.clone()))
         .unwrap_or_else(|_| "vault".to_string());
 
     let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H%M%S");
@@ -266,14 +266,14 @@ pub async fn store_password_in_op(
     md5_hash: Option<String>,
 ) -> Result<(), String> {
     info!("[tauri] store_password_in_op: item='{item_title}'");
-    state.with_op(|op| {
+    state.with_vault(|connected| {
         let mut fields = vec![Assignment::untyped("password", password.as_str())];
         if let Some(hash) = &md5_hash {
             fields.push(Assignment::untyped("md5 hash", hash.as_str()));
         }
         let dest = match vault.as_deref() {
-            Some(name) => op.op().open_vault(name),
-            None => Ok(op.clone()),
+            Some(name) => connected.op().open_vault(name),
+            None => Ok(connected.clone()),
         };
         dest.and_then(|dest| dest.create_item(&item_title, "Password", &fields))
             .map(drop)

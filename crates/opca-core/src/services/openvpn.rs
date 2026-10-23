@@ -108,7 +108,7 @@ pub fn import_templates_from_vault<R: Runner>(
         return Ok(None);
     }
 
-    let found = vault_templates(&ca.op)?;
+    let found = vault_templates(&ca.vault)?;
     let db = database(ca)?;
     for (name, content) in &found {
         db.upsert_openvpn_template(name, content, None)?;
@@ -154,7 +154,7 @@ pub fn templates_awaiting_cleanup<R: Runner>(
         return Ok(Vec::new());
     }
 
-    let found = vault_templates(&ca.op)?;
+    let found = vault_templates(&ca.vault)?;
     if found.is_empty() {
         set_import_state(ca, TemplateImport::Settled)?;
         return Ok(Vec::new());
@@ -172,7 +172,7 @@ pub fn templates_awaiting_cleanup<R: Runner>(
 pub fn archive_vault_templates<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<usize, OpcaError> {
-    let found = vault_templates(&ca.op)?;
+    let found = vault_templates(&ca.vault)?;
     if !found.is_empty() {
         copy_missing_templates(ca, &found)?;
         let openvpn_title = DEFAULT_OP_CONF.openvpn_title;
@@ -192,9 +192,9 @@ pub fn archive_vault_templates<R: Runner>(
             .collect();
 
         // Copy and archive before removing, so a failure part-way never loses a template.
-        let archive = ca.op.create_item(&archive_title, DEFAULT_OP_CONF.category, &copies)?;
-        ca.op.delete_item(&ItemRef::from(&archive))?;
-        ca.op.edit_item(&ItemRef::title(openvpn_title), &removals)?;
+        let archive = ca.vault.create_item(&archive_title, DEFAULT_OP_CONF.category, &copies)?;
+        ca.vault.delete_item(&ItemRef::from(&archive))?;
+        ca.vault.edit_item(&ItemRef::title(openvpn_title), &removals)?;
         info!("[openvpn] archived {} template(s) as '{archive_title}'", found.len());
     }
 
@@ -250,7 +250,7 @@ pub fn add_starter_template<R: Runner>(
     if templates_db(ca)?.get_openvpn_template(name)?.is_some() {
         return Ok(false);
     }
-    let content = template_boilerplate(&ca.op.info().name);
+    let content = template_boilerplate(&ca.vault.info().name);
     save_template(ca, name, &content)?;
     Ok(true)
 }
@@ -285,10 +285,10 @@ mod tests {
         ))
     }
 
-    /// A CA whose `op` answers with `fake`'s script.
+    /// A CA whose `vault` answers with `fake`'s script.
     fn ca(fake: &FakeRunner) -> CertificateAuthority<FakeRunner> {
         CertificateAuthority {
-            op: fake_vault(fake),
+            vault: fake_vault(fake),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: None,
             ca_database: Some(CertificateAuthorityDB::new(&CaConfig::default()).unwrap()),

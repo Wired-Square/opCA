@@ -61,13 +61,13 @@ pub type RestoreCounts = std::collections::HashMap<String, usize>;
 
 /// Create and restore encrypted vault backups.
 pub struct VaultBackup<'a, R: Runner> {
-    op: &'a Vault<R>,
+    vault: &'a Vault<R>,
     op_config: &'a OpConf,
 }
 
 impl<'a, R: Runner> VaultBackup<'a, R> {
-    pub fn new(op: &'a Vault<R>, op_config: &'a OpConf) -> Self {
-        Self { op, op_config }
+    pub fn new(vault: &'a Vault<R>, op_config: &'a OpConf) -> Self {
+        Self { vault, op_config }
     }
 
     // -----------------------------------------------------------------------
@@ -148,7 +148,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
         let metadata = BackupMetadata {
             opca_version: env!("CARGO_PKG_VERSION").to_string(),
             backup_date: datetime::now_utc_str(DateTimeFormat::Openssl),
-            vault_name: self.op.info().name.clone(),
+            vault_name: self.vault.info().name.clone(),
             item_count: items.len(),
         };
 
@@ -167,7 +167,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
         payload: &BackupPayload,
         on_progress: Option<&dyn Fn(&str, &str)>,
     ) -> Result<RestoreCounts, OpcaError> {
-        if self.op.item_exists(&ItemRef::title(self.op_config.ca_title))? {
+        if self.vault.item_exists(&ItemRef::title(self.op_config.ca_title))? {
             return Err(OpcaError::Other(
                 "Target vault already contains a CA. Restore requires an empty vault.".to_string(),
             ));
@@ -210,16 +210,16 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
 
     /// The item as `op item get --format=json` prints it, or `None`.
     fn get_item_json(&self, title: &str) -> Option<String> {
-        let json = self.op.item_json(&ItemRef::title(title)).ok()?;
+        let json = self.vault.item_json(&ItemRef::title(title)).ok()?;
         Some(json.expose().to_string())
     }
 
     fn get_document_content(&self, title: &str) -> Option<String> {
-        op::document_text(self.op, title).ok()
+        op::document_text(self.vault, title).ok()
     }
 
     fn list_secure_notes(&self) -> Result<Vec<String>, OpcaError> {
-        let notes = self.op.items(&[self.op_config.category])?;
+        let notes = self.vault.items(&[self.op_config.category])?;
         Ok(notes.into_iter().map(|n| n.title).collect())
     }
 
@@ -238,7 +238,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
             title
         };
 
-        self.op.create_document(title, filename, content.as_bytes())?;
+        self.vault.create_document(title, filename, content.as_bytes())?;
         Ok(())
     }
 
@@ -253,7 +253,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
             .map(|token| Assignment::parse(token))
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.op.create_item(title, self.op_config.category, &fields)?;
+        self.vault.create_item(title, self.op_config.category, &fields)?;
         Ok(())
     }
 }

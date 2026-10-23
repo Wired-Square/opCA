@@ -27,8 +27,8 @@ use crate::state::{AppState, Runner};
 // ---------------------------------------------------------------------------
 
 /// The `OpenVPN` item, or `None` before one is made.
-fn openvpn_item(op: &Vault<Runner>) -> Result<Option<Item>, String> {
-    match op.item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)) {
+fn openvpn_item(vault: &Vault<Runner>) -> Result<Option<Item>, String> {
+    match vault.item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)) {
         Ok(item) => Ok(Some(item)),
         Err(Error::ItemNotFound(_)) => Ok(None),
         Err(e) => Err(OpcaError::from(e).to_string()),
@@ -62,8 +62,8 @@ fn server_params(item: Option<&Item>) -> OpenVpnServerParams {
     }
 }
 
-fn store_openvpn(op: &Vault<Runner>, fields: &[Assignment]) -> Result<(), OpcaError> {
-    op::put_item(op, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
+fn store_openvpn(vault: &Vault<Runner>, fields: &[Assignment]) -> Result<(), OpcaError> {
+    op::put_item(vault, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ fn store_openvpn(op: &Vault<Runner>, fields: &[Assignment]) -> Result<(), OpcaEr
 pub async fn get_openvpn_params(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
-    state.with_op(|op| Ok(server_params(openvpn_item(op)?.as_ref())))
+    state.with_vault(|vault| Ok(server_params(openvpn_item(vault)?.as_ref())))
 }
 
 /// Generate DH parameters and store in 1Password.
@@ -84,7 +84,7 @@ pub async fn generate_openvpn_dh(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
     info!("[tauri] generate_openvpn_dh");
-    state.with_op(|op| {
+    state.with_vault(|vault| {
         let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)
             .map_err(|e| format!("Failed to generate DH parameters: {e}"))?;
 
@@ -97,7 +97,7 @@ pub async fn generate_openvpn_dh(
 
         op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)
             .and_then(|dh| Ok([dh, op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?]))
-            .and_then(|fields| store_openvpn(op, &fields))
+            .and_then(|fields| store_openvpn(vault, &fields))
             .map_err(|e| format!("Failed to store DH parameters: {e}"))
     })?;
 
@@ -111,7 +111,7 @@ pub async fn generate_openvpn_ta(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
     info!("[tauri] generate_openvpn_ta");
-    state.with_op(|op| {
+    state.with_vault(|vault| {
         let ta_pem = generate_ta_key(DEFAULT_KEY_SIZE.ta)
             .map_err(|e| format!("Failed to generate TA key: {e}"))?;
 
@@ -124,7 +124,7 @@ pub async fn generate_openvpn_ta(
 
         op::assign(DEFAULT_OP_CONF.ta_item, &ta_pem)
             .and_then(|ta| Ok([ta, op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?]))
-            .and_then(|fields| store_openvpn(op, &fields))
+            .and_then(|fields| store_openvpn(vault, &fields))
             .map_err(|e| format!("Failed to store TA key: {e}"))
     })?;
 
@@ -142,8 +142,8 @@ pub async fn setup_openvpn_server(
     let template_name = request.template_name;
 
     info!("[tauri] setup_openvpn_server: template='{template_name}'");
-    state.with_op(|op| {
-        let item = openvpn_item(op)?;
+    state.with_vault(|vault| {
+        let item = openvpn_item(vault)?;
         let has = |label: &str| conf_field(item.as_ref(), label).is_some();
         let assign = |label: &str, value: &dyn std::fmt::Display| op::assign(label, value).map_err(|e| e.to_string());
         let mut attrs: Vec<Assignment> = Vec::new();
@@ -185,8 +185,8 @@ pub async fn setup_openvpn_server(
         }
 
         let stored = match item {
-            Some(item) => op.edit_item(&ItemRef::from(&item), &attrs),
-            None => op.create_item(DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, &attrs).map(drop),
+            Some(item) => vault.edit_item(&ItemRef::from(&item), &attrs),
+            None => vault.create_item(DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, &attrs).map(drop),
         };
         stored.map_err(|e| format!("Failed to store OpenVPN configuration: {}", OpcaError::from(e)))
     })?;
@@ -200,11 +200,11 @@ pub async fn setup_openvpn_server(
     get_openvpn_params(state).await
 }
 
-/// The vault named `dest`, or `op`'s own when there is none.
-fn dest_or_own(op: &Vault<Runner>, dest: Option<&str>) -> Result<Vault<Runner>, OpcaError> {
+/// The vault named `dest`, or `vault` itself when there is none.
+fn dest_or_own(vault: &Vault<Runner>, dest: Option<&str>) -> Result<Vault<Runner>, OpcaError> {
     match dest {
-        Some(name) => Ok(op.op().open_vault(name)?),
-        None => Ok(op.clone()),
+        Some(name) => Ok(vault.op().open_vault(name)?),
+        None => Ok(vault.clone()),
     }
 }
 
@@ -444,16 +444,16 @@ fn do_generate_openvpn_profile(
     let template_content =
         with_ca(state, "generate_profile", |ca| openvpn::get_template(ca, template_name))?.content;
 
-    state.with_op(|op| {
+    state.with_vault(|vault| {
         // Inject op:// references with OPCA_USER pointing at the resolved item.
-        let profile_content = op
+        let profile_content = vault
             .op()
             .inject(&template_content, &[("OPCA_USER", &opca_user)])
             .map_err(|e| format!("Failed to inject template references: {}", OpcaError::from(e)))?;
 
         // Create-or-edit so regenerating the same cert overwrites its
         // existing document instead of failing/duplicating.
-        dest_or_own(op, dest_vault)
+        dest_or_own(vault, dest_vault)
             .and_then(|dest| {
                 op::put_document(&dest, &title, &format!("{cn}-{template_name}.ovpn"), profile_content.expose())
             })
@@ -761,12 +761,12 @@ pub async fn send_profile_to_vault(
     }
 
     info!("[tauri] send_profile_to_vault: title='{title}' dest='{dest_vault}'");
-    state.with_op(|op| {
-        let content = op
+    state.with_vault(|vault| {
+        let content = vault
             .document(&ItemRef::title(&title))
             .map_err(|e| format!("Failed to read profile '{title}': {}", OpcaError::from(e)))?;
 
-        dest_or_own(op, Some(&dest_vault))
+        dest_or_own(vault, Some(&dest_vault))
             .and_then(|dest| Ok(dest.create_document(&title, &format!("{cn}.ovpn"), content.expose())?))
             .map_err(|e| format!("Failed to send profile to vault '{dest_vault}': {e}"))?;
 

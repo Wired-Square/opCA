@@ -7,10 +7,10 @@ use opca_core::vault_lock::VaultLock;
 /// CLI application context.
 ///
 /// Mirrors the Tauri `AppState` pattern: the vault moves into
-/// `CertificateAuthority` when the CA is loaded, so `op()` checks
-/// `ca.op` first, then falls back to the standalone vault.
+/// `CertificateAuthority` when the CA is loaded, so `vault()` checks
+/// `ca.vault` first, then falls back to the standalone vault.
 pub struct AppContext<R: Runner> {
-    standalone_op: Option<Vault<R>>,
+    standalone_vault: Option<Vault<R>>,
     pub ca: Option<CertificateAuthority<R>>,
     pub vault_lock: VaultLock,
 }
@@ -18,9 +18,9 @@ pub struct AppContext<R: Runner> {
 impl AppContext<ShellRunner> {
     /// Create a new context by connecting to 1Password.
     pub fn new(vault: &str, account: Option<String>) -> Result<Self, OpcaError> {
-        let op = op::connect(ShellRunner::new(), vault, account.as_deref())?;
+        let vault = op::connect(ShellRunner::new(), vault, account.as_deref())?;
         Ok(Self {
-            standalone_op: Some(op),
+            standalone_vault: Some(vault),
             ca: None,
             vault_lock: VaultLock::new(None),
         })
@@ -30,11 +30,11 @@ impl AppContext<ShellRunner> {
 impl<R: Runner> AppContext<R> {
     /// The connected vault, whether it is held standalone or inside the
     /// `CertificateAuthority`.
-    pub fn op(&self) -> Result<&Vault<R>, OpcaError> {
+    pub fn vault(&self) -> Result<&Vault<R>, OpcaError> {
         match &self.ca {
-            Some(ca) => Ok(&ca.op),
+            Some(ca) => Ok(&ca.vault),
             None => self
-                .standalone_op
+                .standalone_vault
                 .as_ref()
                 .ok_or_else(|| OpcaError::Other("Not connected".into())),
         }
@@ -45,15 +45,15 @@ impl<R: Runner> AppContext<R> {
         if self.ca.is_some() {
             return Ok(());
         }
-        let op = self
-            .standalone_op
+        let vault = self
+            .standalone_vault
             .take()
             .ok_or_else(|| OpcaError::Other("Not connected".into()))?;
-        let source = BackupSource::of(&op);
-        let account = op.op().account().map(String::from);
-        match CertificateAuthority::retrieve(op) {
+        let source = BackupSource::of(&vault);
+        let account = vault.op().account().map(String::from);
+        match CertificateAuthority::retrieve(vault) {
             Ok(mut ca) => {
-                ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
+                ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
                 self.ca = Some(ca);
                 Ok(())
             }
@@ -66,8 +66,8 @@ impl<R: Runner> AppContext<R> {
 
     /// Take the standalone vault out of the context (consumes it).
     /// Used by init-like commands that need to pass it to a CA constructor.
-    pub fn take_op(&mut self) -> Result<Vault<R>, OpcaError> {
-        self.standalone_op
+    pub fn take_vault(&mut self) -> Result<Vault<R>, OpcaError> {
+        self.standalone_vault
             .take()
             .ok_or_else(|| OpcaError::Other("Not connected".into()))
     }
@@ -75,8 +75,8 @@ impl<R: Runner> AppContext<R> {
     /// Acquire the vault lock for a mutating operation.
     pub fn lock(&mut self, operation: &str) -> Result<(), OpcaError> {
         let vault = match &self.ca {
-            Some(ca) => &ca.op,
-            None => self.standalone_op.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
+            Some(ca) => &ca.vault,
+            None => self.standalone_vault.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
         };
         self.vault_lock.acquire(vault, operation, VaultLock::default_ttl())
     }
@@ -87,8 +87,8 @@ impl<R: Runner> AppContext<R> {
             return Ok(());
         }
         let vault = match &self.ca {
-            Some(ca) => &ca.op,
-            None => self.standalone_op.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
+            Some(ca) => &ca.vault,
+            None => self.standalone_vault.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
         };
         self.vault_lock.release(vault)
     }

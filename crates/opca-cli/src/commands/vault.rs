@@ -30,17 +30,17 @@ fn handle_backup<R: Runner>(
         None => super::cert::get_password("Enter backup password: ")?,
     };
 
-    let op = app.op()?;
+    let vault = app.vault()?;
 
     // Default output path
     let path = output_path.unwrap_or_else(|| {
-        let vault_name = &op.info().name;
+        let vault_name = &vault.info().name;
         let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H%M%S");
         let home = dirs_home().unwrap_or_else(|| ".".to_string());
         format!("{home}/{vault_name}-{timestamp}.opca")
     });
 
-    let vb = VaultBackup::new(op, &DEFAULT_OP_CONF);
+    let vb = VaultBackup::new(vault, &DEFAULT_OP_CONF);
     let payload = vb.create_backup()?;
 
     output::info("Vault", &payload.metadata.vault_name);
@@ -79,8 +79,8 @@ fn handle_restore<R: Runner>(
     output::info("Backup Date", &payload.metadata.backup_date);
     output::info("Items", &payload.metadata.item_count.to_string());
 
-    let op = app.op()?;
-    let vb = VaultBackup::new(op, &DEFAULT_OP_CONF);
+    let vault = app.vault()?;
+    let vb = VaultBackup::new(vault, &DEFAULT_OP_CONF);
 
     let on_progress = |item_type: &str, title: &str| {
         println!("  Restoring {item_type}: {title}");

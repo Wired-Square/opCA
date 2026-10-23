@@ -426,10 +426,10 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
   call.
 - [state.rs](../crates/opca-tauri/src/state.rs) — `AppState`, Tauri's
   managed singleton. Mutex-guarded fields:
-  - `conn: Connection { op, ca }` — the live 1Password handle and the loaded
+  - `conn: Connection { vault, ca }` — the live 1Password vault and the loaded
     `CertificateAuthority`. A single mutex makes connect/disconnect atomic
     with respect to in-flight operations. `ensure_ca()` lazily retrieves the
-    CA from 1Password on first use; it and `init_ca` work on a clone of `op`
+    CA from 1Password on first use; it and `init_ca` work on a clone of `vault`
     and only drop it on success, so a failure (such as an empty vault) stays
     connected.
   - `vault_lock: VaultLock` — the current process's advisory lock handle.

@@ -151,7 +151,7 @@ fn openvpn_templates_import_then_archive_without_losing_any() {
         .unwrap();
 
     let mut ca = CertificateAuthority {
-        op: vault,
+        vault,
         op_config: DEFAULT_OP_CONF,
         ca_bundle: None,
         ca_database: Some(CertificateAuthorityDB::new(&CaConfig::default()).unwrap()),
@@ -166,12 +166,12 @@ fn openvpn_templates_import_then_archive_without_losing_any() {
 
         assert_eq!(openvpn::archive_vault_templates(&mut ca).unwrap(), 2);
 
-        let item = ca.op.item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)).unwrap();
+        let item = ca.vault.item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)).unwrap();
         let labels: Vec<&str> = item.fields.iter().map(|f| f.label.as_str()).collect();
         assert!(labels.contains(&"hostname"), "server settings must survive: {labels:?}");
         assert!(!labels.contains(&"default") && !labels.contains(&"tcp"), "templates left behind: {labels:?}");
 
-        let archive = ca.op.clone().including_archive();
+        let archive = ca.vault.clone().including_archive();
         let note = archive.items(&[]).unwrap().into_iter()
             .find(|i| i.title.starts_with("OpenVPN_Templates_"))
             .expect("archived templates note");
@@ -188,10 +188,10 @@ fn openvpn_templates_import_then_archive_without_losing_any() {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(result));
 
     if let Ok(note_id) = &outcome {
-        ca.op.delete_item_permanently(&ItemRef::id(note_id)).ok();
+        ca.vault.delete_item_permanently(&ItemRef::id(note_id)).ok();
     }
-    ca.op.delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)).ok();
-    ca.op.delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.ca_database_title)).ok();
+    ca.vault.delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)).ok();
+    ca.vault.delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.ca_database_title)).ok();
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);
     }

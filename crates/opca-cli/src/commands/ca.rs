@@ -100,8 +100,8 @@ fn handle_init<R: Runner>(
     };
 
     with_lock(app, "ca_init", |app| {
-        let op = app.take_op()?;
-        let ca = CertificateAuthority::init(op, &init_config)?;
+        let vault = app.take_vault()?;
+        let ca = CertificateAuthority::init(vault, &init_config)?;
         let valid = ca.is_valid().unwrap_or(false);
         output::print_result("CA certificate validation", valid);
         app.ca = Some(ca);
@@ -147,8 +147,8 @@ fn handle_import<R: Runner>(
     };
 
     with_lock(app, "ca_import", |app| {
-        let op = app.take_op()?;
-        let ca = CertificateAuthority::import_ca(op, &cert_pem, Some(&key_pem), &config)?;
+        let vault = app.take_vault()?;
+        let ca = CertificateAuthority::import_ca(vault, &cert_pem, Some(&key_pem), &config)?;
         let valid = ca.is_valid().unwrap_or(false);
         output::print_result("CA certificate validation", valid);
         app.ca = Some(ca);

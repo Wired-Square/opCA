@@ -26,7 +26,7 @@ pub trait Handler: Fn(Invoke<MockRuntime>) -> bool + Send + Sync + 'static {}
 impl<H: Fn(Invoke<MockRuntime>) -> bool + Send + Sync + 'static> Handler for H {}
 
 impl Harness {
-    /// A loaded, empty CA whose `op` answers with `op_responses` in turn; any
+    /// A loaded, empty CA whose `vault` answers with `op_responses` in turn; any
     /// call past them fails.
     pub fn with_ca(op_responses: Vec<Output>, handler: impl Handler) -> Self {
         let runner = FakeRunner::new();
@@ -132,7 +132,7 @@ fn test_ca(runner: &FakeRunner) -> CertificateAuthority<FakeRunner> {
     })
     .unwrap();
     CertificateAuthority {
-        op: fake_vault(runner),
+        vault: fake_vault(runner),
         op_config: DEFAULT_OP_CONF,
         ca_bundle: Some(ca_bundle),
         ca_database: Some(db),

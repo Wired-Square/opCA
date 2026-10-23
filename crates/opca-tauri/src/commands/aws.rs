@@ -40,7 +40,7 @@ pub async fn list_aws_credentials(
     // `op item list` takes seconds on a large account, so copy the account
     // out and release the connection lock before spawning it — otherwise
     // every other command stalls for the duration.
-    let account = state.with_op(|op| Ok(op.op().account().map(String::from)))?;
+    let account = state.with_vault(|vault| Ok(vault.op().account().map(String::from)))?;
 
     list_aws_credential_items(&op::client(ShellRunner::new(), account.as_deref())).map_err(|e| {
         warn!("[tauri] list_aws_credentials failed: {e}");
@@ -53,7 +53,7 @@ pub async fn get_aws_credential(
     state: State<'_, AppState>,
 ) -> Result<AwsCredentialSelection, String> {
     debug!("[tauri] get_aws_credential");
-    state.with_op(|vault| {
+    state.with_vault(|vault| {
         let account = vault.op().account();
         Ok(AwsCredentialSelection {
             item_id: settings::aws_credential_item(account),
@@ -74,7 +74,7 @@ pub async fn set_aws_credential(
     info!("[tauri] set_aws_credential");
 
     state
-        .with_op(|vault| {
+        .with_vault(|vault| {
             if let Some(ref id) = item_id {
                 get_aws_credentials_for_item(vault.op(), id).map_err(|e| e.to_string())?;
             }

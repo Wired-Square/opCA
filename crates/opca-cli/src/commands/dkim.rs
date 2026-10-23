@@ -25,7 +25,7 @@ fn make_dns_name(domain: &str, selector: &str) -> String {
 
 /// The DKIM item, or `ItemNotFound` naming its title.
 fn dkim_item<R: Runner>(app: &AppContext<R>, item_title: &str) -> Result<Item, OpcaError> {
-    match app.op()?.item(&ItemRef::title(item_title)) {
+    match app.vault()?.item(&ItemRef::title(item_title)) {
         Err(Error::ItemNotFound(_)) => Err(OpcaError::ItemNotFound(item_title.to_string())),
         found => Ok(found?),
     }
@@ -78,7 +78,7 @@ fn handle_create<R: Runner>(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    if app.op()?.item_exists(&ItemRef::title(&item_title))? {
+    if app.vault()?.item_exists(&ItemRef::title(&item_title))? {
         return Err(OpcaError::Other(format!(
             "DKIM key '{item_title}' already exists. Delete it first or use a different selector."
         )));
@@ -115,7 +115,7 @@ fn handle_create<R: Runner>(
         op::assign("dns_name[text]", &dns_name)?,
         op::assign("created_at[text]", &created_at)?,
     ];
-    app.op()?.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?;
+    app.vault()?.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?;
 
     output::print_result(&format!("DKIM key '{item_title}' created"), true);
 
@@ -196,7 +196,7 @@ fn handle_list<R: Runner>(
     app: &mut AppContext<R>,
     domain_filter: Option<String>,
 ) -> Result<(), OpcaError> {
-    let items = app.op()?.items(&[DEFAULT_OP_CONF.category])?;
+    let items = app.vault()?.items(&[DEFAULT_OP_CONF.category])?;
 
     let mut dkim_items: Vec<(String, String, String)> = Vec::new();
     for item in &items {

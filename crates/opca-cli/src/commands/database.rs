@@ -151,9 +151,9 @@ fn handle_rebuild<R: Runner>(
         ..CaConfig::default()
     };
 
-    let op = app.take_op()?;
-    let mut ca = CertificateAuthority::rebuild_database(op, &config)?;
-    ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
+    let vault = app.take_vault()?;
+    let mut ca = CertificateAuthority::rebuild_database(vault, &config)?;
+    ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
     ca.store_ca_database()?;
     output::print_result("Database rebuilt and stored", true);
     app.ca = Some(ca);

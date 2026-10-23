@@ -48,8 +48,8 @@ fn handle_create<R: Runner>(
     let cert_type: CertType = csr_type.parse()?;
     let op_title = format!("CSR_{cn}");
 
-    let op = app.op()?;
-    if op.item_exists(&ItemRef::title(&op_title))? {
+    let vault = app.vault()?;
+    if vault.item_exists(&ItemRef::title(&op_title))? {
         return Err(OpcaError::Other(format!(
             "Item '{op_title}' already exists in 1Password"
         )));
@@ -84,7 +84,7 @@ fn handle_create<R: Runner>(
 
     // Store in 1Password
     let fields = csr_item_fields(&cert_type, &cn, &key_pem, &csr_pem)?;
-    app.op()?.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?;
+    app.vault()?.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?;
 
     output::print_result(&format!("CSR '{op_title}' stored"), true);
 
@@ -161,7 +161,7 @@ fn handle_import<R: Runner>(
 
     // Retrieve CSR item from 1Password
     let item = ca
-        .op
+        .vault
         .item(&ItemRef::title(&csr_title))
         .map_err(|e| OpcaError::Other(format!("No existing entry '{csr_title}' found: {e}")))?;
 
@@ -189,7 +189,7 @@ fn handle_import<R: Runner>(
     }
 
     // Delete old CSR item
-    ca.op.delete_item(&ItemRef::from(&item))?;
+    ca.vault.delete_item(&ItemRef::from(&item))?;
 
     // Build certificate bundle
     let bundle = CertificateBundle::import(

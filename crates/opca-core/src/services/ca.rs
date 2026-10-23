@@ -213,7 +213,7 @@ fn assess_apple_tls_limit(cert_type: &CertType, days: u32) -> Option<CertIssuanc
 
 /// Certificate Authority manager for PKI operations.
 pub struct CertificateAuthority<R: Runner> {
-    pub op: Vault<R>,
+    pub vault: Vault<R>,
     pub op_config: OpConf,
     pub ca_bundle: Option<CertificateBundle>,
     pub ca_database: Option<CertificateAuthorityDB>,
@@ -241,11 +241,11 @@ impl<R: Runner> CertificateAuthority<R> {
     // -----------------------------------------------------------------------
 
     /// Initialise a brand-new CA — generates key, self-signs, stores in 1Password.
-    pub fn init(op: Vault<R>, config: &CaConfig) -> Result<Self, OpcaError> {
+    pub fn init(vault: Vault<R>, config: &CaConfig) -> Result<Self, OpcaError> {
         info!("[ca] initialising new Certificate Authority");
         let op_config = DEFAULT_OP_CONF;
 
-        if op.item_exists(&ItemRef::title(op_config.ca_title))? {
+        if vault.item_exists(&ItemRef::title(op_config.ca_title))? {
             return Err(OpcaError::CaAlreadyExists);
         }
 
@@ -258,7 +258,7 @@ impl<R: Runner> CertificateAuthority<R> {
         db.increment_serial(SerialType::Cert, None)?;
 
         let mut ca = Self {
-            op,
+            vault,
             op_config,
             ca_bundle: Some(bundle),
             ca_database: Some(db),
@@ -273,14 +273,14 @@ impl<R: Runner> CertificateAuthority<R> {
 
     /// Import an existing CA from PEM-encoded certificate (and optionally key).
     pub fn import_ca(
-        op: Vault<R>,
+        vault: Vault<R>,
         cert_pem: &[u8],
         key_pem: Option<&[u8]>,
         config: &CaConfig,
     ) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
-        if op.item_exists(&ItemRef::title(op_config.ca_title))? {
+        if vault.item_exists(&ItemRef::title(op_config.ca_title))? {
             return Err(OpcaError::CaAlreadyExists);
         }
 
@@ -297,7 +297,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let db = CertificateAuthorityDB::new(config)?;
 
         let mut ca = Self {
-            op,
+            vault,
             op_config,
             ca_bundle: Some(bundle),
             ca_database: Some(db),
@@ -311,13 +311,13 @@ impl<R: Runner> CertificateAuthority<R> {
     }
 
     /// Retrieve an existing CA from 1Password.
-    pub fn retrieve(op: Vault<R>) -> Result<Self, OpcaError> {
+    pub fn retrieve(vault: Vault<R>) -> Result<Self, OpcaError> {
         info!("[ca] retrieving CA from 1Password");
         let op_config = DEFAULT_OP_CONF;
 
         // Download database — also proves the CA exists, so we skip a
         // separate `item_exists` probe (one fewer `op` process spawn).
-        let ca_database_sql = op::document_text(&op, op_config.ca_database_title)
+        let ca_database_sql = op::document_text(&vault, op_config.ca_database_title)
             .map_err(|e| match e {
                 OpcaError::ItemNotFound(_) => OpcaError::CaNotFound,
                 other => other,
@@ -329,11 +329,11 @@ impl<R: Runner> CertificateAuthority<R> {
         db.download_fingerprint = Some(fingerprint);
 
         // Retrieve CA bundle
-        let bundle = Self::retrieve_certbundle_static(&op, &op_config, op_config.ca_title)?
+        let bundle = Self::retrieve_certbundle_static(&vault, &op_config, op_config.ca_title)?
             .ok_or(OpcaError::CaNotFound)?;
 
         Ok(Self {
-            op,
+            vault,
             op_config,
             ca_bundle: Some(bundle),
             ca_database: Some(db),
@@ -348,17 +348,17 @@ impl<R: Runner> CertificateAuthority<R> {
     /// match this vault's CA certificate. The unreadable 1Password copy is
     /// saved to `unreadable_copy_to` before being overwritten.
     pub fn restore_from_backup(
-        op: Vault<R>,
+        vault: Vault<R>,
         backup_contents: &str,
         unreadable_copy_to: &LocalBackup,
     ) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
         if let Some(source) = local_backup::read_source(backup_contents) {
-            if source.vault_id.as_ref().is_some_and(|id| *id != op.info().id) {
+            if source.vault_id.as_ref().is_some_and(|id| *id != vault.info().id) {
                 return Err(OpcaError::Other(format!(
                     "Backup is from vault {:?}, not the connected vault {:?}",
-                    source.vault, op.info().name
+                    source.vault, vault.info().name
                 )));
             }
         }
@@ -366,7 +366,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let sql = local_backup::strip_header(backup_contents);
         let (mut db, _migration) = CertificateAuthorityDB::from_sql_dump(sql)?;
 
-        let bundle = Self::retrieve_certbundle_static(&op, &op_config, op_config.ca_title)?
+        let bundle = Self::retrieve_certbundle_static(&vault, &op_config, op_config.ca_title)?
             .ok_or(OpcaError::CaNotFound)?;
         let ca_serial = bundle.get_certificate_attrib("serial")?;
         let ca_row = db.query_cert(&CertLookup::Title(op_config.ca_title.into()), false)?;
@@ -376,11 +376,11 @@ impl<R: Runner> CertificateAuthority<R> {
             ));
         }
 
-        if let Ok(current) = op::document_text(&op, op_config.ca_database_title) {
-            unreadable_copy_to.write_unreadable(&BackupSource::of(&op), &current)?;
+        if let Ok(current) = op::document_text(&vault, op_config.ca_database_title) {
+            unreadable_copy_to.write_unreadable(&BackupSource::of(&vault), &current)?;
         }
 
-        op.edit_document(
+        vault.edit_document(
             &ItemRef::title(op_config.ca_database_title),
             op_config.ca_database_filename,
             sql.as_bytes(),
@@ -388,7 +388,7 @@ impl<R: Runner> CertificateAuthority<R> {
         db.download_fingerprint = Some(sha256_hex(sql.as_bytes()));
 
         Ok(Self {
-            op,
+            vault,
             op_config,
             ca_bundle: Some(bundle),
             ca_database: Some(db),
@@ -398,18 +398,18 @@ impl<R: Runner> CertificateAuthority<R> {
     }
 
     /// Rebuild the CA database by scanning all vault items.
-    pub fn rebuild_database(op: Vault<R>, config: &CaConfig) -> Result<Self, OpcaError> {
+    pub fn rebuild_database(vault: Vault<R>, config: &CaConfig) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
-        if !op.item_exists(&ItemRef::title(op_config.ca_title))? {
+        if !vault.item_exists(&ItemRef::title(op_config.ca_title))? {
             return Err(OpcaError::CaNotFound);
         }
-        if op.item_exists(&ItemRef::title(op_config.ca_database_title))? {
+        if vault.item_exists(&ItemRef::title(op_config.ca_database_title))? {
             return Err(OpcaError::CaAlreadyExists);
         }
 
         let db = CertificateAuthorityDB::new(config)?;
-        let bundle = Self::retrieve_certbundle_static(&op, &op_config, op_config.ca_title)?
+        let bundle = Self::retrieve_certbundle_static(&vault, &op_config, op_config.ca_title)?
             .ok_or(OpcaError::CaNotFound)?;
 
         // Update config from bundle
@@ -425,7 +425,7 @@ impl<R: Runner> CertificateAuthority<R> {
         db.update_config(&bundle_conf)?;
 
         let mut ca = Self {
-            op,
+            vault,
             op_config,
             ca_bundle: Some(bundle),
             ca_database: Some(db),
@@ -861,7 +861,7 @@ impl<R: Runner> CertificateAuthority<R> {
         }
         db.upsert_crl_metadata(&parse_crl_metadata(&crls[0])?)?;
 
-        op::put_document(&self.op, self.op_config.crl_title, self.op_config.crl_filename, &crls[0])?;
+        op::put_document(&self.vault, self.op_config.crl_title, self.op_config.crl_filename, &crls[0])?;
         self.crl = Some(crls[0].clone());
         self.store_ca_database()?;
 
@@ -896,7 +896,7 @@ impl<R: Runner> CertificateAuthority<R> {
     /// Return the CRL in PEM format from 1Password.
     pub fn get_crl(&mut self) -> Result<Option<String>, OpcaError> {
         if self.crl.is_none() {
-            match op::document_text(&self.op, self.op_config.crl_title) {
+            match op::document_text(&self.vault, self.op_config.crl_title) {
                 Ok(content) => self.crl = Some(content),
                 Err(_) => return Ok(None),
             }
@@ -1007,7 +1007,7 @@ impl<R: Runner> CertificateAuthority<R> {
             op::assign(self.op_config.start_date_item, not_before_text)?,
             op::assign(self.op_config.expiry_date_item, not_after_text)?,
         ];
-        self.op.edit_item(&ItemRef::title(self.op_config.ca_title), &fields)?;
+        self.vault.edit_item(&ItemRef::title(self.op_config.ca_title), &fields)?;
 
         self.store_ca_database()?;
         Ok(())
@@ -1068,7 +1068,7 @@ impl<R: Runner> CertificateAuthority<R> {
             fields.push(op::assign(c.chain_item, chain_pem)?);
         }
 
-        self.op.create_item(&op_title, c.category, &fields)?;
+        self.vault.create_item(&op_title, c.category, &fields)?;
 
         // Add to database
         let db_item = format_db_item(bundle, item_title, issuer, issuer_subject)?;
@@ -1146,7 +1146,7 @@ impl<R: Runner> CertificateAuthority<R> {
             fields.push(op::assign(c.chain_item, cp)?);
         }
 
-        self.op.create_item(&op_title, c.category, &fields)?;
+        self.vault.create_item(&op_title, c.category, &fields)?;
 
         let db = self.ca_database.as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
@@ -1171,16 +1171,16 @@ impl<R: Runner> CertificateAuthority<R> {
 
     /// Retrieve a certificate bundle from 1Password.
     pub fn retrieve_certbundle(&self, item_title: &str) -> Result<Option<CertificateBundle>, OpcaError> {
-        Self::retrieve_certbundle_static(&self.op, &self.op_config, item_title)
+        Self::retrieve_certbundle_static(&self.vault, &self.op_config, item_title)
     }
 
     /// Static version for use during construction.
     fn retrieve_certbundle_static(
-        op: &Vault<R>,
+        vault: &Vault<R>,
         _op_config: &OpConf,
         item_title: &str,
     ) -> Result<Option<CertificateBundle>, OpcaError> {
-        let Ok(item) = op.item(&ItemRef::title(item_title)) else {
+        let Ok(item) = vault.item(&ItemRef::title(item_title)) else {
             return Ok(None);
         };
         let text = |label: &str| op::field_text(&item, label);
@@ -1223,7 +1223,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let mut record = db.query_cert(&CertLookup::Title(src_title.to_string()), false)?
             .ok_or_else(|| OpcaError::CertificateNotFound(src_title.to_string()))?;
 
-        self.op.rename_item(&ItemRef::title(src_title), dst_title)?;
+        self.vault.rename_item(&ItemRef::title(src_title), dst_title)?;
 
         record.title = Some(dst_title.to_string());
         db.update_cert(&record)?;
@@ -1255,7 +1255,7 @@ impl<R: Runner> CertificateAuthority<R> {
         }
 
         if let Some(title) = cert.title.as_deref() {
-            match self.op.delete_item(&ItemRef::title(title)) {
+            match self.vault.delete_item(&ItemRef::title(title)) {
                 Ok(()) | Err(Error::ItemNotFound(_)) => {}
                 Err(e) => return Err(e.into()),
             }
@@ -1285,7 +1285,7 @@ impl<R: Runner> CertificateAuthority<R> {
             .clone()
             .unwrap_or_else(|| format!("CSR_{}", record.cn.as_deref().unwrap_or_default()));
         if record.status.as_deref() == Some("Pending") {
-            match self.op.delete_item(&ItemRef::title(&title)) {
+            match self.vault.delete_item(&ItemRef::title(&title)) {
                 Ok(()) | Err(Error::ItemNotFound(_)) => {}
                 Err(e) => return Err(e.into()),
             }
@@ -1308,13 +1308,13 @@ impl<R: Runner> CertificateAuthority<R> {
         // Before the 1Password write, so a failed or damaged store still
         // leaves a good local copy.
         if let Some(backup) = &self.local_backup {
-            if let Err(e) = backup.write(&BackupSource::of(&self.op), &sql_text) {
+            if let Err(e) = backup.write(&BackupSource::of(&self.vault), &sql_text) {
                 warn!("[ca] local database backup failed: {e}");
             }
         }
 
         op::put_document(
-            &self.op,
+            &self.vault,
             self.op_config.ca_database_title,
             self.op_config.ca_database_filename,
             &sql_text,
@@ -1341,7 +1341,7 @@ impl<R: Runner> CertificateAuthority<R> {
         Ok(Some(PrivateStoreJob {
             bytes,
             uri,
-            account: self.op.op().account().map(String::from),
+            account: self.vault.op().account().map(String::from),
             region: self.aws_region()?,
             fingerprint,
         }))
@@ -1353,7 +1353,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let db = self.ca_database.as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         Ok(db.get_config()?.ca_private_store.map(|store| {
-            let vault_name = self.op.info().name.trim().to_lowercase();
+            let vault_name = self.vault.info().name.trim().to_lowercase();
             format!("{}/{vault_name}.sqlite", store.trim_end_matches('/'))
         }))
     }
@@ -1377,7 +1377,7 @@ impl<R: Runner> CertificateAuthority<R> {
     // -----------------------------------------------------------------------
 
     fn do_rebuild_database(&mut self) -> Result<HashMap<String, usize>, OpcaError> {
-        let items = self.op.items(&[self.op_config.category])?;
+        let items = self.vault.items(&[self.op_config.category])?;
 
         let mut result_map: HashMap<String, (X509, String, CertType)> = HashMap::new();
         let mut max_serial: i64 = 0;
@@ -1479,7 +1479,7 @@ impl<R: Runner> CertificateAuthority<R> {
     /// The AWS credentials this operator has selected, with the CA's
     /// configured region applied.
     pub fn aws_credentials(&self) -> Result<storage::AwsCredentials, OpcaError> {
-        storage::get_aws_credentials(self.op.op(), self.aws_region()?.as_deref())
+        storage::get_aws_credentials(self.vault.op(), self.aws_region()?.as_deref())
     }
 
     /// Upload the CA database to the private store.
@@ -1559,7 +1559,7 @@ impl<R: Runner> CertificateAuthority<R> {
         });
 
         let aws_creds = if needs_s3 {
-            match storage::get_aws_credentials(self.op.op(), config.ca_aws_region.as_deref()) {
+            match storage::get_aws_credentials(self.vault.op(), config.ca_aws_region.as_deref()) {
                 Ok(creds) => Some(creds),
                 Err(e) => {
                     error!("[ca] failed to retrieve AWS credentials: {e}");
@@ -1834,8 +1834,8 @@ pub fn csr_item_fields(
 }
 
 /// Convenience: prepare a CA by retrieving it from 1Password.
-pub fn prepare_cert_authority<R: Runner>(op: Vault<R>) -> Result<CertificateAuthority<R>, OpcaError> {
-    CertificateAuthority::retrieve(op)
+pub fn prepare_cert_authority<R: Runner>(vault: Vault<R>) -> Result<CertificateAuthority<R>, OpcaError> {
+    CertificateAuthority::retrieve(vault)
 }
 
 /// Parse CRL metadata from a PEM string without needing a full CA instance.
@@ -1960,12 +1960,12 @@ mod tests {
     /// Scripts `n` empty successes: a document or item write each.
     fn answer_writes(ca: &CertificateAuthority<FakeRunner>, n: usize) {
         for _ in 0..n {
-            ca.op.op().runner().respond(Output::ok(""));
+            ca.vault.op().runner().respond(Output::ok(""));
         }
     }
 
     fn calls(ca: &CertificateAuthority<FakeRunner>) -> Vec<Vec<String>> {
-        ca.op.op().runner().calls().iter().map(|c| c.args().to_vec()).collect()
+        ca.vault.op().runner().calls().iter().map(|c| c.args().to_vec()).collect()
     }
 
     fn ca_item(bundle: &CertificateBundle) -> Output {
@@ -2006,7 +2006,7 @@ mod tests {
 
         let ca = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store).unwrap();
 
-        let source = BackupSource::of(&ca.op);
+        let source = BackupSource::of(&ca.vault);
         let kept: Vec<_> = std::fs::read_dir(store.dir_for(&source)).unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .filter(|n| n.ends_with("-unreadable.sql"))
@@ -2122,7 +2122,7 @@ mod tests {
 
         // Sign with mock CA
         let mut ca = CertificateAuthority {
-            op: fake_vault(&FakeRunner::new()),
+            vault: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2172,7 +2172,7 @@ mod tests {
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
 
         let mut ca = CertificateAuthority {
-            op: fake_vault(&FakeRunner::new()),
+            vault: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2217,7 +2217,7 @@ mod tests {
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
 
         let mut ca = CertificateAuthority {
-            op: fake_vault(&FakeRunner::new()),
+            vault: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2262,7 +2262,7 @@ mod tests {
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
 
         let mut ca = CertificateAuthority {
-            op: fake_vault(&FakeRunner::new()),
+            vault: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2296,7 +2296,7 @@ mod tests {
         let ca_cert = ca_bundle.certificate.clone().unwrap();
         db.add_cert(&format_db_item(&ca_bundle, "CA", None, None).unwrap()).unwrap();
         let mut ca = CertificateAuthority {
-            op: fake_vault(&FakeRunner::new()),
+            vault: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2368,7 +2368,7 @@ mod tests {
         })
         .unwrap();
         CertificateAuthority {
-            op: fake_vault(&FakeRunner::new()),
+            vault: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2810,10 +2810,10 @@ mod tests {
             country: config.country,
             ..CertBundleConfig::default()
         };
-        ca.op.op().runner().respond(crate::testutil::created("CRT_2_www.example.com"));
+        ca.vault.op().runner().respond(crate::testutil::created("CRT_2_www.example.com"));
         answer_writes(&ca, 1);
         ca.generate_certificate_bundle(CertType::WebServer, "www.example.com", leaf, None).unwrap();
-        assert!(ca.op.op().runner().is_done());
+        assert!(ca.vault.op().runner().is_done());
     }
 
     #[test]
@@ -2821,7 +2821,7 @@ mod tests {
         let mut ca = ca_with_cert_rows();
         let fake = FakeRunner::new();
         fake.respond(not_found("CRT_4_host4.example.com")).respond(Output::ok(""));
-        ca.op = fake_vault(&fake);
+        ca.vault = fake_vault(&fake);
         ca.delete_certificate("4").unwrap();
         let db = ca.ca_database.as_ref().unwrap();
         assert!(db.query_all_certs().unwrap().iter().all(|c| c.serial != "4"));

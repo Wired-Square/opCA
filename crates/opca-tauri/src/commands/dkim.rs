@@ -148,7 +148,7 @@ fn do_sync_dkim_keys(state: &State<'_, AppState>) -> Result<usize, String> {
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     let items = ca
-        .op
+        .vault
         .items(&[DEFAULT_OP_CONF.category])
         .map_err(|e| OpcaError::from(e).to_string())?;
 
@@ -241,7 +241,7 @@ pub async fn backfill_dkim(
 
     // One `op item get` for every field, not an `op read` each.
     let item = ca
-        .op
+        .vault
         .item(&ItemRef::title(&item_title))
         .map_err(|e| format!("DKIM key '{item_title}' not found: {}", OpcaError::from(e)))?;
     let field = |label: &str| item.value(label).map(|v| v.expose().trim().to_string());
@@ -340,7 +340,7 @@ pub async fn get_dkim_private_key(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
     let item_title = make_dkim_title(&domain, &selector);
 
-    let item = dkim_item(&ca.op, &item_title)?;
+    let item = dkim_item(&ca.vault, &item_title)?;
     let trimmed = op::field_text(&item, "private_key")
         .map(str::trim)
         .filter(|key| !key.is_empty())
@@ -395,7 +395,7 @@ pub async fn create_dkim_key(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    if ca.op.item_exists(&ItemRef::title(&item_title)).map_err(|e| OpcaError::from(e).to_string())? {
+    if ca.vault.item_exists(&ItemRef::title(&item_title)).map_err(|e| OpcaError::from(e).to_string())? {
         return Err(format!(
             "DKIM key '{}' already exists. Delete it first or use a different selector.",
             item_title
@@ -434,7 +434,7 @@ pub async fn create_dkim_key(
     .collect::<Result<Vec<_>, _>>();
 
     fields
-        .and_then(|fields| Ok(ca.op.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?))
+        .and_then(|fields| Ok(ca.vault.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?))
         .map_err(|e| format!("Failed to store DKIM key in 1Password: {e}"))?;
 
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
@@ -486,7 +486,7 @@ pub async fn delete_dkim_key(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    match ca.op.delete_item(&ItemRef::title(&item_title)) {
+    match ca.vault.delete_item(&ItemRef::title(&item_title)) {
         Err(Error::ItemNotFound(_)) => return Err(format!("DKIM key '{}' not found.", item_title)),
         deleted => deleted.map_err(|e| format!("Failed to delete DKIM key: {}", OpcaError::from(e)))?,
     }
@@ -517,7 +517,7 @@ pub async fn verify_dkim_dns(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let expected_record = state.with_op(|op| dns_record(op, &item_title))?;
+    let expected_record = state.with_vault(|vault| dns_record(vault, &item_title))?;
 
     let found_records = opca_core::services::route53::lookup_txt(&dns_name)
         .await
@@ -564,7 +564,7 @@ pub async fn deploy_dkim_route53(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let dns_record = state.with_op(|op| dns_record(op, &item_title))?;
+    let dns_record = state.with_vault(|vault| dns_record(vault, &item_title))?;
 
     let creds = {
         let conn = state.ensure_ca()?;

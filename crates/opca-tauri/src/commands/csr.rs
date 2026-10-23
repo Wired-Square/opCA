@@ -196,7 +196,7 @@ pub async fn create_csr(
 
     // Check for duplicate
     let op_title = format!("CSR_{}", request.cn);
-    if ca.op.item_exists(&ItemRef::title(&op_title)).map_err(|e| e.to_string())? {
+    if ca.vault.item_exists(&ItemRef::title(&op_title)).map_err(|e| e.to_string())? {
         return Err(format!("Item '{}' already exists in 1Password", op_title));
     }
 
@@ -229,7 +229,7 @@ pub async fn create_csr(
 
     // Store private key + CSR in 1Password (no certificate)
     csr_item_fields(&cert_type, &request.cn, &key_pem, &csr_pem)
-        .and_then(|fields| Ok(ca.op.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?))
+        .and_then(|fields| Ok(ca.vault.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?))
         .map_err(|e| {
             state.log_err("create_csr", Some(e.to_string()));
             e.to_string()
@@ -390,7 +390,7 @@ pub async fn import_csr_cert(
     // Retrieve CSR item from 1Password
     let csr_title = format!("CSR_{cn}");
     let item = ca
-        .op
+        .vault
         .item(&ItemRef::title(&csr_title))
         .map_err(|e| format!("No existing entry '{}' found: {}", csr_title, e))?;
 
@@ -417,7 +417,7 @@ pub async fn import_csr_cert(
     }
 
     // Delete the old CSR-only item
-    ca.op.delete_item(&ItemRef::from(&item)).map_err(|e| {
+    ca.vault.delete_item(&ItemRef::from(&item)).map_err(|e| {
         state.log_err("import_csr_cert", Some(e.to_string()));
         e.to_string()
     })?;
@@ -557,7 +557,7 @@ pub async fn generate_csr_from_cert(
     let title = format!("EXT_{cn}");
 
     let csr_title = format!("CSR_{}", cn);
-    if ca.op.item_exists(&ItemRef::title(&csr_title)).map_err(|e| e.to_string())? {
+    if ca.vault.item_exists(&ItemRef::title(&csr_title)).map_err(|e| e.to_string())? {
         return Err(format!(
             "Item '{}' already exists in 1Password — delete or rename the existing CSR first",
             csr_title
@@ -579,7 +579,7 @@ pub async fn generate_csr_from_cert(
 
     let cert_type = bundle.cert_type.clone();
     csr_item_fields(&cert_type, &cn, &key_pem, &csr_pem)
-        .and_then(|fields| Ok(ca.op.create_item(&csr_title, DEFAULT_OP_CONF.category, &fields)?))
+        .and_then(|fields| Ok(ca.vault.create_item(&csr_title, DEFAULT_OP_CONF.category, &fields)?))
         .map_err(|e| {
             state.log_err("generate_csr_from_cert", Some(e.to_string()));
             e.to_string()

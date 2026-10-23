@@ -25,13 +25,13 @@ pub struct ConnectionInfo {
 
 /// Determine the vault state by probing 1Password, recording why the
 /// database is unreadable (if it is) for the recovery dialog.
-fn detect_vault_state(state: &AppState, op: &Vault<Runner>) -> Result<String, OpcaError> {
-    let ca_exists = op.item_exists(&ItemRef::title(DEFAULT_OP_CONF.ca_title))?;
+fn detect_vault_state(state: &AppState, vault: &Vault<Runner>) -> Result<String, OpcaError> {
+    let ca_exists = vault.item_exists(&ItemRef::title(DEFAULT_OP_CONF.ca_title))?;
     let mut database_error = state.database_error.lock().expect("mutex poisoned");
     *database_error = None;
 
     Ok(if ca_exists {
-        match op::document_text(op, DEFAULT_OP_CONF.ca_database_title) {
+        match op::document_text(vault, DEFAULT_OP_CONF.ca_database_title) {
             Ok(sql) => match CertificateAuthorityDB::from_sql_dump(&sql) {
                 Ok(_) => "valid_ca".to_string(),
                 Err(e) => {
@@ -44,7 +44,7 @@ fn detect_vault_state(state: &AppState, op: &Vault<Runner>) -> Result<String, Op
         }
     } else {
         // No CA item — is the vault completely empty?
-        match op.item_count()? {
+        match vault.item_count()? {
             0 => "empty_vault".to_string(),
             _ => "invalid_ca".to_string(),
         }
@@ -59,24 +59,24 @@ pub async fn connect(
 ) -> Result<ConnectionInfo, String> {
     info!("[tauri] connect: vault='{}' account={:?}", vault, account);
     let connected = op::connect(Runner::default(), &vault, account.as_deref())
-        .and_then(|op| Ok((detect_vault_state(&state, &op)?, op)));
-    let (vault_state, op) = connected.map_err(|e| {
+        .and_then(|vault| Ok((detect_vault_state(&state, &vault)?, vault)));
+    let (vault_state, vault) = connected.map_err(|e| {
         warn!("[tauri] connect failed: {e}");
         e.to_string()
     })?;
 
     let info = ConnectionInfo {
         connected: true,
-        vault: op.info().name.clone(),
+        vault: vault.info().name.clone(),
         account: account.clone(),
         vault_state,
     };
 
-    // Clear any stale CA and Op before installing the new connection.
+    // Clear any stale CA and vault before installing the new connection.
     // This single lock acquisition prevents the race where a stale CA
     // from a previous vault survives into the new session.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    state.replace_connection(&mut conn, Connection { op: Some(op), ..Connection::default() });
+    state.replace_connection(&mut conn, Connection { vault: Some(vault), ..Connection::default() });
 
     state.log_ok("connect", Some(format!("Connected to vault '{}'", info.vault)));
     Ok(info)
@@ -88,14 +88,14 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     // Acquire the single connection lock — no other command can race us.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
 
-    // Release the vault lock (best-effort) using whichever Op is available.
-    let op_ref = conn.ca.as_ref().map(|ca| &ca.op).or(conn.op.as_ref());
-    if let Some(op) = op_ref {
+    // Release the vault lock (best-effort) using whichever vault is available.
+    let vault_ref = conn.ca.as_ref().map(|ca| &ca.vault).or(conn.vault.as_ref());
+    if let Some(vault) = vault_ref {
         let mut lock = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-        let _ = lock.release(op);
+        let _ = lock.release(vault);
     }
 
-    // Drop both CA and Op atomically.
+    // Drop both CA and vault atomically.
     state.replace_connection(&mut conn, Connection::default());
     Ok(())
 }
@@ -129,7 +129,7 @@ pub async fn create_vault(
 /// Re-check the vault state (e.g. after CA init/import/restore).
 #[tauri::command]
 pub async fn check_vault_state(state: State<'_, AppState>) -> Result<String, String> {
-    state.with_op(|op| detect_vault_state(&state, op).map_err(|e| e.to_string()))
+    state.with_vault(|vault| detect_vault_state(&state, vault).map_err(|e| e.to_string()))
 }
 
 /// Check whether the 1Password CLI binary is available on PATH.

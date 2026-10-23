@@ -26,7 +26,7 @@ pub fn dispatch(args: AwsArgs, app: &mut AppContext<ShellRunner>) -> Result<(), 
 }
 
 fn list(app: &AppContext<ShellRunner>, pattern: Option<String>) -> Result<(), OpcaError> {
-    let op = app.op()?.op();
+    let op = app.vault()?.op();
     let all = list_aws_credential_items(op)?;
     let selected = settings::aws_credential_item(op.account());
 
@@ -60,7 +60,7 @@ fn list(app: &AppContext<ShellRunner>, pattern: Option<String>) -> Result<(), Op
 }
 
 fn show(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
-    let op = app.op()?.op();
+    let op = app.vault()?.op();
     // Name the account as the operator would recognise it: this line is where
     // someone works out why the GUI's selection isn't showing up here.
     let account = settings::account_label(op.account())
@@ -83,7 +83,7 @@ fn show(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
 }
 
 fn select(app: &AppContext<ShellRunner>, item: String) -> Result<(), OpcaError> {
-    let op = app.op()?.op();
+    let op = app.vault()?.op();
 
     // Validate by reading the item, so a bad pick fails now rather than at
     // the next upload. `op item get` accepts an ID or a title.
@@ -98,7 +98,7 @@ fn select(app: &AppContext<ShellRunner>, item: String) -> Result<(), OpcaError> 
 }
 
 fn clear(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
-    let op = app.op()?.op();
+    let op = app.vault()?.op();
     settings::set_aws_credential_item(op.account(), None)?;
     output::print_result("AWS credential selection cleared", true);
     Ok(())

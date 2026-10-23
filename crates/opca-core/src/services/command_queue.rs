@@ -210,7 +210,7 @@ impl CommandQueue {
     }
 
     /// Execute all queued commands against the 1Password CLI.
-    pub fn flush<R: Runner>(&mut self, op: &Vault<R>) -> Vec<FlushResult> {
+    pub fn flush<R: Runner>(&mut self, vault: &Vault<R>) -> Vec<FlushResult> {
         if self.queue.is_empty() {
             return Vec::new();
         }
@@ -228,7 +228,7 @@ impl CommandQueue {
                 error: None,
             };
 
-            match execute(op, &cmd) {
+            match execute(vault, &cmd) {
                 Ok(()) => result.success = true,
                 Err(e) => result.error = Some(e.to_string()),
             }
@@ -251,7 +251,7 @@ impl Default for CommandQueue {
     }
 }
 
-fn execute<R: Runner>(op: &Vault<R>, cmd: &QueuedCommand) -> Result<(), OpcaError> {
+fn execute<R: Runner>(vault: &Vault<R>, cmd: &QueuedCommand) -> Result<(), OpcaError> {
     let title = ItemRef::title(&cmd.target_id);
     let p = &cmd.payload;
     match cmd.operation {
@@ -264,22 +264,22 @@ fn execute<R: Runner>(op: &Vault<R>, cmd: &QueuedCommand) -> Result<(), OpcaErro
             let edit = match parse_store_action(&p.action) {
                 StoreAction::Create => false,
                 StoreAction::Edit => true,
-                StoreAction::Auto => op.item_exists(&title)?,
+                StoreAction::Auto => vault.item_exists(&title)?,
             };
             if edit {
-                op.edit_item(&title, &fields)?;
+                vault.edit_item(&title, &fields)?;
             } else {
-                op.create_item(&cmd.target_id, &p.category, &fields)?;
+                vault.create_item(&cmd.target_id, &p.category, &fields)?;
             }
         }
         QueueOp::StoreDocument => match parse_store_action(&p.action) {
-            StoreAction::Create => op.create_document(&cmd.target_id, &p.filename, p.content.as_bytes())?,
-            StoreAction::Edit => op.edit_document(&title, &p.filename, p.content.as_bytes())?,
-            StoreAction::Auto => op::put_document(op, &cmd.target_id, &p.filename, &p.content)?,
+            StoreAction::Create => vault.create_document(&cmd.target_id, &p.filename, p.content.as_bytes())?,
+            StoreAction::Edit => vault.edit_document(&title, &p.filename, p.content.as_bytes())?,
+            StoreAction::Auto => op::put_document(vault, &cmd.target_id, &p.filename, &p.content)?,
         },
-        QueueOp::RenameItem => op.rename_item(&title, &p.dst_title)?,
-        QueueOp::DeleteItem if p.archive => op.delete_item(&title)?,
-        QueueOp::DeleteItem => op.delete_item_permanently(&title)?,
+        QueueOp::RenameItem => vault.rename_item(&title, &p.dst_title)?,
+        QueueOp::DeleteItem if p.archive => vault.delete_item(&title)?,
+        QueueOp::DeleteItem => vault.delete_item_permanently(&title)?,
     }
     Ok(())
 }
