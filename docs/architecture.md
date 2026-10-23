@@ -132,7 +132,12 @@ Organised by concern under [src/](../crates/opca-core/src):
     credentials are read straight from a 1Password item with `op item get`
     (see [AWS credentials](#aws-credentials)).
   - [route53.rs](../crates/opca-core/src/services/route53.rs) — AWS SDK
-    calls for DKIM TXT record deployment and verification.
+    calls for DKIM TXT record deployment, and the DKIM DNS check
+    (`check_dkim_record`), which looks the record up through `wslib-dns` so
+    NXDOMAIN/NODATA (not published) stay apart from SERVFAIL, REFUSED or a
+    timeout (`OpcaError::Dns`).
+    Published keys are read with `wslib-dns-mail`'s DKIM parser and compared
+    decoded.
   - [backup.rs](../crates/opca-core/src/services/backup.rs) — encrypted
     file format: 4-byte magic `OPCA` + version + 16-byte salt + 12-byte
     nonce + 16-byte GCM tag + AES-256-GCM ciphertext. Key derivation is

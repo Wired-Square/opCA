@@ -5,7 +5,7 @@ use openssl::rsa::Rsa;
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Error, Item, ItemRef, Runner, ShellRunner};
-use opca_core::services::route53::{extract_dkim_key, Route53Client};
+use opca_core::services::route53::{check_dkim_record, DkimDnsCheck, Route53Client};
 use opca_core::services::storage::AwsCredentials;
 
 use crate::app::AppContext;
@@ -245,28 +245,18 @@ fn handle_verify<R: Runner>(
     let item = dkim_item(app, &item_title)?;
     let expected_record = op::field_text(&item, "dns_record").unwrap_or_default().trim().to_string();
 
-    // Native DNS TXT lookup
-    let found_records = tokio::runtime::Runtime::new()
+    let check = tokio::runtime::Runtime::new()
         .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?
-        .block_on(opca_core::services::route53::lookup_txt(&dns_name))?;
+        .block_on(check_dkim_record(&dns_name, &expected_record))?;
 
-    let expected_key = extract_dkim_key(&expected_record);
-
-    let verified = found_records.iter().any(|rec| {
-        match (&expected_key, extract_dkim_key(rec)) {
-            (Some(ek), Some(fk)) => ek == &fk,
-            _ => rec.contains(&expected_record),
+    match check {
+        DkimDnsCheck::Matches => output::print_result("DNS record verified — published and matching", true),
+        DkimDnsCheck::NotPublished => {
+            output::print_result("No TXT record found. DNS may not have propagated yet", false)
         }
-    });
-
-    let found_txt = found_records.join("\n");
-
-    if verified {
-        output::print_result("DNS record verified — published and matching", true);
-    } else if found_txt.is_empty() {
-        output::print_result("No TXT record found. DNS may not have propagated yet", false);
-    } else {
-        output::print_result("TXT record found but does not match expected value", false);
+        DkimDnsCheck::Mismatch { .. } => {
+            output::print_result("TXT record found but does not match expected value", false)
+        }
     }
 
     Ok(())

@@ -100,6 +100,9 @@ pub enum OpcaError {
     #[error("Route53 error: {0}")]
     Route53(String),
 
+    #[error("DNS lookup failed: {0}")]
+    Dns(String),
+
     // ---- Crypto errors ----
     #[error("Cryptographic operation failed: {0}")]
     Crypto(String),
