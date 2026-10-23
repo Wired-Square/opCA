@@ -118,6 +118,7 @@ Organised by concern under [src/](../crates/opca-core/src):
     `backups/<account key>/<vault id>/ca-database-<UTC timestamp>.sql`, keyed by
     the same canonical account key as the AWS credential selection; the first
     line is a SQL comment recording the account key, vault name and vault ID.
+    Each is written whole and owner-only through `wslib-file-atomic`.
     Identical consecutive dumps are skipped and the newest 30 are kept. The
     timestamp in the filename (not the mtime) is the backup's age.
   - [command_queue.rs](../crates/opca-core/src/services/command_queue.rs)
@@ -350,7 +351,8 @@ AWS access key, so the credential *choice* cannot live there. It is instead
 kept locally by [settings.rs](../crates/opca-core/src/settings.rs) at the
 platform config directory (macOS: `~/Library/Application Support/opca/
 settings.json`), keyed per account so an operator working across tenants keeps
-a separate selection per tenant.
+a separate selection per tenant. It is replaced whole and owner-only
+(`wslib-file-atomic`).
 
 The key is the account's **`user_uuid`**, not the identifier the user supplied.
 `op --account` accepts a shorthand, a sign-in address, an account UUID or a user

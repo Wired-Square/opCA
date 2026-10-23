@@ -1,7 +1,7 @@
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+
+use wslib_file_atomic::{Options, Readers};
 
 use crate::error::OpcaError;
 
@@ -20,65 +20,24 @@ pub fn read_bytes(path: impl AsRef<Path>) -> Result<Vec<u8>, OpcaError> {
     })
 }
 
-/// Write bytes to a file with optional atomic replacement and permission setting.
+/// Write bytes to a file, whole or not at all, readable by `readers` from creation.
 ///
 /// - `overwrite`: if `false` and the file exists, returns an error.
 /// - `create_dirs`: create parent directories if needed.
-/// - `atomic`: write to a temp file in the same directory, fsync, then replace.
-/// - `mode`: Unix permission mode (default `0o600`).
 pub fn write_bytes(
     path: impl AsRef<Path>,
     data: &[u8],
     overwrite: bool,
     create_dirs: bool,
-    atomic: bool,
-    #[cfg_attr(not(unix), allow(unused_variables))]
-    mode: u32,
+    readers: Readers,
 ) -> Result<PathBuf, OpcaError> {
     let file_path = expand_path(path.as_ref());
-    let parent = file_path
-        .parent()
-        .ok_or_else(|| OpcaError::Io(format!("No parent directory for '{}'", file_path.display())))?;
-
-    if file_path.exists() && !overwrite {
-        return Err(OpcaError::Io(format!(
-            "File '{}' already exists. Aborting.",
-            file_path.display()
-        )));
-    }
-
-    if create_dirs {
-        fs::create_dir_all(parent)?;
-    }
-
-    if !atomic {
-        fs::write(&file_path, data)?;
-        #[cfg(unix)]
-        fs::set_permissions(&file_path, fs::Permissions::from_mode(mode))?;
-        return Ok(file_path);
-    }
-
-    // Atomic write: temp file in same dir → fsync → replace → fsync dir
-    let tmp = tempfile::NamedTempFile::new_in(parent)?;
-    fs::write(tmp.path(), data)?;
-    tmp.as_file().sync_all()?;
-
-    #[cfg(unix)]
-    fs::set_permissions(tmp.path(), fs::Permissions::from_mode(mode))?;
-
-    let tmp_path = tmp.into_temp_path();
-    tmp_path.persist(&file_path).map_err(|e| {
-        OpcaError::Io(format!(
-            "Failed to persist temp file to '{}': {e}",
-            file_path.display()
-        ))
-    })?;
-
-    // fsync the containing directory so the rename is durable
-    if let Ok(dir) = fs::File::open(parent) {
-        let _ = dir.sync_all();
-    }
-
+    Options::new()
+        .readers(readers)
+        .create_new(!overwrite)
+        .create_parents(create_dirs)
+        .write(&file_path, data)
+        .map_err(|e| OpcaError::Io(format!("Failed to write '{}': {e}", file_path.display())))?;
     Ok(file_path)
 }
 
@@ -136,6 +95,9 @@ fn expand_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
 
     #[test]
@@ -150,7 +112,7 @@ mod tests {
         let path = dir.path().join("test.txt");
         let data = b"hello world";
 
-        write_bytes(&path, data, false, false, true, 0o600).unwrap();
+        write_bytes(&path, data, false, false, Readers::Private).unwrap();
         let read = read_bytes(&path).unwrap();
         assert_eq!(read, data);
 
@@ -167,8 +129,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.txt");
 
-        write_bytes(&path, b"first", false, false, true, 0o600).unwrap();
-        let result = write_bytes(&path, b"second", false, false, true, 0o600);
+        write_bytes(&path, b"first", false, false, Readers::Private).unwrap();
+        let result = write_bytes(&path, b"second", false, false, Readers::Private);
         assert!(result.is_err());
     }
 
@@ -177,8 +139,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.txt");
 
-        write_bytes(&path, b"first", false, false, true, 0o600).unwrap();
-        write_bytes(&path, b"second", true, false, true, 0o600).unwrap();
+        write_bytes(&path, b"first", false, false, Readers::Private).unwrap();
+        write_bytes(&path, b"second", true, false, Readers::Private).unwrap();
 
         let data = read_bytes(&path).unwrap();
         assert_eq!(data, b"second");
@@ -189,17 +151,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sub").join("dir").join("test.txt");
 
-        write_bytes(&path, b"hello", false, true, true, 0o600).unwrap();
+        write_bytes(&path, b"hello", false, true, Readers::Private).unwrap();
         let data = read_bytes(&path).unwrap();
         assert_eq!(data, b"hello");
     }
 
     #[test]
-    fn test_write_non_atomic() {
+    fn test_write_readable() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.txt");
 
-        write_bytes(&path, b"data", false, false, false, 0o644).unwrap();
+        write_bytes(&path, b"data", false, false, Readers::Readable).unwrap();
         let data = read_bytes(&path).unwrap();
         assert_eq!(data, b"data");
 
@@ -215,7 +177,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bulk.txt");
         let content = b"# comment\nserver.example.com\nclient.example.com --alt client1.example.com --alt client2.example.com\n\n";
-        write_bytes(&path, content, false, false, false, 0o600).unwrap();
+        write_bytes(&path, content, false, false, Readers::Private).unwrap();
 
         let entries = parse_bulk_file(&path).unwrap();
         assert_eq!(entries.len(), 2);
@@ -235,7 +197,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bulk.txt");
         let content = b"# header comment\n\n  # another\nonly.example.com\n  \n";
-        write_bytes(&path, content, false, false, false, 0o600).unwrap();
+        write_bytes(&path, content, false, false, Readers::Private).unwrap();
 
         let entries = parse_bulk_file(&path).unwrap();
         assert_eq!(entries.len(), 1);

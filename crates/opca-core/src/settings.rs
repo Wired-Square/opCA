@@ -273,19 +273,15 @@ fn load() -> Settings {
     settings
 }
 
-/// Persist settings, replacing the existing file.
+/// Persist settings, replacing the existing file whole, readable by its owner alone.
 fn save(settings: &Settings) -> Result<(), OpcaError> {
     let path = settings_path()?;
     let json = serde_json::to_string_pretty(settings)
         .map_err(|e| OpcaError::Other(format!("Could not serialise settings: {e}")))?;
 
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            OpcaError::Other(format!("Could not create {}: {e}", dir.display()))
-        })?;
-    }
-
-    std::fs::write(&path, json)
+    wslib_file_atomic::Options::new()
+        .create_parents(true)
+        .write(&path, json.as_bytes())
         .map_err(|e| OpcaError::Other(format!("Could not write {}: {e}", path.display())))?;
 
     debug!("[settings] saved {}", path.display());

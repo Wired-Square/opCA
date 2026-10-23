@@ -2876,7 +2876,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3973,6 +3973,7 @@ dependencies = [
  "wslib-crypto",
  "wslib-crypto-ca",
  "wslib-crypto-x509",
+ "wslib-file-atomic",
 ]
 
 [[package]]
@@ -8226,6 +8227,15 @@ dependencies = [
  "rustls-webpki 0.103.9",
  "wslib-crypto",
  "x509-parser",
+]
+
+[[package]]
+name = "wslib-file-atomic"
+version = "0.1.2"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "bb3afb2c53ad723e75e6ae3cd6bd4b266befbc40fb3f14708c0dd910afee587c"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

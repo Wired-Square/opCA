@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
+use wslib_file_atomic::Readers;
 
 use crate::error::OpcaError;
 use crate::op::{Runner, Vault};
@@ -140,7 +141,7 @@ impl LocalBackup {
             .map_err(|e| OpcaError::Other(format!("backup header: {e}")))?;
         let name = format!("{FILE_PREFIX}{}{suffix}.sql", taken_at.format(TIMESTAMP_FORMAT));
         let contents = format!("{HEADER_PREFIX}{header_json}\n{sql}");
-        write_bytes(self.dir_for(source).join(name), contents.as_bytes(), true, true, true, 0o600)
+        write_bytes(self.dir_for(source).join(name), contents.as_bytes(), true, true, Readers::Private)
     }
 
     /// Regular (non-unreadable) backup files, oldest first.

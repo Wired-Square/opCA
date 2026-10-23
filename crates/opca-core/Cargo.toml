@@ -13,6 +13,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.33", features = ["bundled", "backup"] }
 tempfile = "3"
+wslib-file-atomic = { version = "0.1.2", registry = "wired-square" }
 shellexpand = "3"
 aes-gcm = "0.10"
 pbkdf2 = { version = "0.12", features = ["hmac"] }
