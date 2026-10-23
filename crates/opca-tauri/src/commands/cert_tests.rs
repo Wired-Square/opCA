@@ -1,5 +1,5 @@
 use opca_core::services::database::{CaConfig, CertLookup};
-use opca_core::testutil::err_output;
+use opca_core::testutil::{created, Output};
 use serde_json::{json, Value};
 
 use super::cert::*;
@@ -9,13 +9,16 @@ fn handler() -> impl Handler {
     tauri::generate_handler![create_cert, revoke_cert, delete_cert, bulk_revoke_certs, bulk_delete_certs]
 }
 
+/// Issues a certificate, answering its item create and database store.
 fn issue(h: &Harness, cn: &str) -> String {
+    h.answer([created(cn), Output::ok("")]);
     let item = h.invoke("create_cert", json!({ "request": { "cn": cn, "cert_type": "webserver" } })).unwrap();
     item["serial"].as_str().unwrap().to_string()
 }
 
 fn issue_revoked(h: &Harness, cn: &str) -> String {
     let serial = issue(h, cn);
+    h.answer_writes(3);
     assert_eq!(h.invoke("revoke_cert", json!({ "serial": serial })), Ok(json!(true)));
     serial
 }
@@ -71,10 +74,12 @@ fn a_revoke_says_whether_regenerating_or_uploading_the_crl_batch_failed() {
     let serials = [issue(&h, "a.example.com"), issue(&h, "b.example.com")];
 
     enable_crl_batches(&h, None);
+    h.answer_writes(1);
     let err = h.invoke("revoke_cert", json!({ "serial": serials[0] })).unwrap_err();
     assert!(err.as_str().unwrap().starts_with("Revoked, but regenerating the CRL failed"), "{err}");
 
     enable_crl_batches(&h, Some("rsync:///nonexistent-opca-store".into()));
+    h.answer_writes(3);
     let err = h.invoke("revoke_cert", json!({ "serial": serials[1] })).unwrap_err();
     assert!(err.as_str().unwrap().starts_with("Revoked and re-signed the CRL batch, but uploading it"), "{err}");
     assert_eq!(h.last_log().detail.as_deref(), err.as_str());
@@ -84,6 +89,7 @@ fn a_revoke_says_whether_regenerating_or_uploading_the_crl_batch_failed() {
 fn bulk_revoke_regenerates_the_crl_once_for_the_batch() {
     let h = Harness::with_ca(vec![], handler());
     let serials = [issue(&h, "a.example.com"), issue(&h, "b.example.com")];
+    h.answer_writes(4);
 
     let results = h.invoke("bulk_revoke_certs", json!({ "serials": serials })).unwrap();
 
@@ -101,7 +107,7 @@ fn bulk_revoke_leaves_the_crl_alone_when_nothing_was_revoked() {
 
 #[test]
 fn create_cert_returns_the_list_item_and_stores_the_bundle_and_the_database() {
-    let h = Harness::with_ca(vec![], handler());
+    let h = Harness::with_ca(vec![created("CRT_2_www.example.com"), Output::ok("")], handler());
     let item = h
         .invoke(
             "create_cert",
@@ -118,7 +124,8 @@ fn create_cert_returns_the_list_item_and_stores_the_bundle_and_the_database() {
 
     let creates = h.op_calls(&["item", "create"]);
     assert_eq!(creates.len(), 1);
-    assert_eq!(creates[0][2], "--title=CRT_2_www.example.com");
+    assert_eq!(creates[0][2], "-", "the fields go on stdin");
+    assert!(creates[0].contains(&"--title=CRT_2_www.example.com".to_string()));
     assert_eq!(h.op_calls(&["document", "edit", "CA_Database"]).len(), 1);
     assert!(h.last_log().success);
 }
@@ -133,7 +140,7 @@ fn create_cert_rejects_an_unknown_type_without_calling_op() {
 
 #[test]
 fn create_cert_surfaces_an_op_failure_and_logs_it() {
-    let h = Harness::with_ca(vec![err_output("[ERROR] vault is read-only")], handler());
+    let h = Harness::with_ca(vec![Output::fail("[ERROR] vault is read-only")], handler());
     let err = h.invoke("create_cert", json!({ "request": { "cn": "www.example.com", "cert_type": "webserver" } })).unwrap_err();
     let log = h.last_log();
     assert_eq!((log.action.as_str(), log.success), ("create_cert", false));
@@ -145,6 +152,7 @@ fn create_cert_surfaces_an_op_failure_and_logs_it() {
 fn delete_cert_archives_a_revoked_cert_and_hides_its_row() {
     let h = Harness::with_ca(vec![], handler());
     let serial = issue_revoked(&h, "www.example.com");
+    h.answer_writes(2);
 
     assert_eq!(h.invoke("delete_cert", json!({ "serial": serial })), Ok(Value::Null));
     let deletes = h.op_calls(&["item", "delete"]);
@@ -171,6 +179,7 @@ fn a_bulk_op_reports_each_serial_and_carries_on_past_a_failure() {
     let first = issue(&h, "a.example.com");
     let second = issue(&h, "b.example.com");
     let progress = h.record_events("bulk-progress");
+    h.answer_writes(4);
 
     let results = h.invoke("bulk_revoke_certs", json!({ "serials": [first, "99", second] })).unwrap();
 
@@ -189,6 +198,7 @@ fn a_bulk_op_reports_each_serial_and_carries_on_past_a_failure() {
 fn bulk_delete_archives_every_revoked_cert() {
     let h = Harness::with_ca(vec![], handler());
     let serials = [issue_revoked(&h, "a.example.com"), issue_revoked(&h, "b.example.com")];
+    h.answer_writes(4);
 
     let results = h.invoke("bulk_delete_certs", json!({ "serials": serials })).unwrap();
 

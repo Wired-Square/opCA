@@ -9,7 +9,8 @@ use rand::RngCore;
 use tauri::{Emitter, State, Window};
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::{Op, StoreAction};
+use opca_core::error::OpcaError;
+use opca_core::op::{self, Assignment};
 use opca_core::services::backup::{decrypt_payload, encrypt_payload};
 use opca_core::services::vault::{BackupPayload, VaultBackup};
 
@@ -38,7 +39,7 @@ pub async fn vault_backup(
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
     emit_progress(&window, "Enumerating vault items\u{2026}");
-    let vb = VaultBackup::new(&ca.op, &ca.op_config);
+    let vb = VaultBackup::new(&ca.vault, &ca.op_config);
     let payload = vb.create_backup().map_err(|e| {
         state.log_err("vault_backup", Some(e.to_string()));
         e.to_string()
@@ -115,7 +116,7 @@ pub async fn vault_backup(
 ///
 /// Creates a fresh 1Password connection from the provided vault/account
 /// because restore targets empty vaults where `ensure_ca()` would have
-/// consumed and lost the original `Op` on failure.
+/// consumed and lost the original vault on failure.
 #[tauri::command]
 pub async fn vault_restore(
     window: Window,
@@ -146,32 +147,32 @@ pub async fn vault_restore(
     })?;
 
     emit_progress(&window, "Connecting to 1Password\u{2026}");
-    let op = Op::sign_in(&vault, account, None, Runner::default()).map_err(|e| {
+    let vault = op::connect(Runner::default(), &vault, account.as_deref()).map_err(|e| {
         state.log_err("vault_restore", Some(e.to_string()));
         e.to_string()
     })?;
 
-    // Acquire vault lock using the fresh Op
+    // Acquire vault lock using the fresh connection
     {
         let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-        lock_guard.acquire(&op, "vault_restore", opca_core::vault_lock::VaultLock::default_ttl())
+        lock_guard.acquire(&vault, "vault_restore", opca_core::vault_lock::VaultLock::default_ttl())
             .map_err(|e| e.to_string())?;
     }
 
     emit_progress(&window, &format!("Restoring {} items\u{2026}", payload.metadata.item_count));
-    let vb = VaultBackup::new(&op, &DEFAULT_OP_CONF);
+    let vb = VaultBackup::new(&vault, &DEFAULT_OP_CONF);
     let on_progress = |item_type: &str, title: &str| {
         emit_progress(&window, &format!("Restoring {}: {}", item_type, title));
     };
     let counts = match vb.restore_backup(&payload, Some(&on_progress)) {
         Ok(c) => {
             let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-            let _ = lock_guard.release(&op);
+            let _ = lock_guard.release(&vault);
             c
         }
         Err(e) => {
             let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-            let _ = lock_guard.release(&op);
+            let _ = lock_guard.release(&vault);
             error!("[tauri] vault_restore failed: {e}");
             state.log_err("vault_restore", Some(e.to_string()));
             return Err(e.to_string());
@@ -181,9 +182,9 @@ pub async fn vault_restore(
     let items_restored: usize = counts.values().sum();
     let item_breakdown = counts_to_breakdown(&counts);
 
-    // Re-install the fresh Op into state so ensure_ca() works without reconnecting.
+    // Re-install the fresh connection into state so ensure_ca() works without reconnecting.
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    state.replace_connection(&mut conn, Connection { op: Some(op), ..Connection::default() });
+    state.replace_connection(&mut conn, Connection { vault: Some(vault), ..Connection::default() });
 
     state.log_ok(
         "vault_restore",
@@ -227,7 +228,7 @@ pub async fn vault_info(path: String, password: String) -> Result<BackupInfoResu
 #[tauri::command]
 pub async fn vault_default_filename(state: State<'_, AppState>) -> Result<String, String> {
     let vault_name = state
-        .with_op(|op| Ok(op.vault.clone()))
+        .with_vault(|vault| Ok(vault.info().name.clone()))
         .unwrap_or_else(|_| "vault".to_string());
 
     let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H%M%S");
@@ -265,24 +266,18 @@ pub async fn store_password_in_op(
     md5_hash: Option<String>,
 ) -> Result<(), String> {
     info!("[tauri] store_password_in_op: item='{item_title}'");
-    state.with_op(|op| {
-        let pw_attr = format!("password={}", password);
-        let md5_attr;
-        let mut attrs = vec![pw_attr.as_str()];
-        if let Some(ref hash) = md5_hash {
-            md5_attr = format!("md5 hash={}", hash);
-            attrs.push(md5_attr.as_str());
+    state.with_vault(|connected| {
+        let mut fields = vec![Assignment::untyped("password", password.as_str())];
+        if let Some(hash) = &md5_hash {
+            fields.push(Assignment::untyped("md5 hash", hash.as_str()));
         }
-        op.store_item(
-            &item_title,
-            Some(&attrs),
-            StoreAction::Create,
-            "Password",
-            None,
-            vault.as_deref(),
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
+        let dest = match vault.as_deref() {
+            Some(name) => connected.op().open_vault(name),
+            None => Ok(connected.clone()),
+        };
+        dest.and_then(|dest| dest.create_item(&item_title, "Password", &fields))
+            .map(drop)
+            .map_err(|e| OpcaError::from(e).to_string())
     })?;
 
     state.log_ok(

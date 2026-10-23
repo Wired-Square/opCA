@@ -1,11 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::{CommandOutput, Op};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 use opca_core::services::database::{CaConfig, CertificateAuthorityDB};
-use opca_core::testutil::MockRunner;
+use opca_core::testutil::{fake_vault, FakeRunner, Output};
 use serde_json::Value;
 use tauri::ipc::{CallbackFn, Invoke, InvokeBody};
 use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY};
@@ -16,29 +15,47 @@ use crate::commands::dto::LogEntry;
 use crate::state::{AppState, Connection};
 
 /// A mock Tauri app running the commands in `handler` (a `tauri::generate_handler![..]`)
-/// against an `AppState` whose `op` is a scripted `MockRunner`.
+/// against an `AppState` whose `op` is a scripted `FakeRunner`.
 pub struct Harness {
     app: App<MockRuntime>,
     webview: WebviewWindow<MockRuntime>,
-    runner: MockRunner,
+    runner: FakeRunner,
 }
 
 pub trait Handler: Fn(Invoke<MockRuntime>) -> bool + Send + Sync + 'static {}
 impl<H: Fn(Invoke<MockRuntime>) -> bool + Send + Sync + 'static> Handler for H {}
 
 impl Harness {
-    /// A loaded, empty CA whose `op` answers with `op_responses` in turn, then empty successes.
-    pub fn with_ca(op_responses: Vec<CommandOutput>, handler: impl Handler) -> Self {
-        let runner = MockRunner::new(op_responses);
-        let conn = Connection { ca: Some(test_ca(runner.clone())), ..Connection::default() };
+    /// A loaded, empty CA whose `vault` answers with `op_responses` in turn; any
+    /// call past them fails.
+    pub fn with_ca(op_responses: Vec<Output>, handler: impl Handler) -> Self {
+        let runner = FakeRunner::new();
+        Self::script(&runner, op_responses);
+        let conn = Connection { ca: Some(test_ca(&runner)), ..Connection::default() };
         Self::build(conn, runner, handler)
     }
 
     pub fn disconnected(handler: impl Handler) -> Self {
-        Self::build(Connection::default(), MockRunner::default(), handler)
+        Self::build(Connection::default(), FakeRunner::new(), handler)
     }
 
-    fn build(conn: Connection, runner: MockRunner, handler: impl Handler) -> Self {
+    /// Answers the next `op` calls with `responses`.
+    pub fn answer(&self, responses: impl IntoIterator<Item = Output>) {
+        Self::script(&self.runner, responses);
+    }
+
+    /// Answers the next `n` calls with an empty success, as `op` gives for an edit or delete.
+    pub fn answer_writes(&self, n: usize) {
+        self.answer((0..n).map(|_| Output::ok("")));
+    }
+
+    fn script(runner: &FakeRunner, responses: impl IntoIterator<Item = Output>) {
+        for response in responses {
+            runner.respond(response);
+        }
+    }
+
+    fn build(conn: Connection, runner: FakeRunner, handler: impl Handler) -> Self {
         let state = AppState::default();
         *state.conn.lock().unwrap() = conn;
         let app = mock_builder()
@@ -78,7 +95,7 @@ impl Harness {
     /// The argument lists of every `op` call so far that start with `prefix`.
     pub fn op_calls(&self, prefix: &[&str]) -> Vec<Vec<String>> {
         let starts = |c: &Vec<String>| c.iter().map(String::as_str).take(prefix.len()).eq(prefix.iter().copied());
-        self.runner.calls().into_iter().filter(starts).collect()
+        self.runner.calls().iter().map(|c| c.args().to_vec()).filter(starts).collect()
     }
 
     /// Collects the payload of every `event` emitted from now on.
@@ -92,7 +109,7 @@ impl Harness {
     }
 }
 
-fn test_ca(runner: MockRunner) -> CertificateAuthority<MockRunner> {
+fn test_ca(runner: &FakeRunner) -> CertificateAuthority<FakeRunner> {
     let config = CertBundleConfig {
         cn: Some("Test CA".into()),
         key_algorithm: Some(KeyAlgorithm::EcP256),
@@ -115,7 +132,7 @@ fn test_ca(runner: MockRunner) -> CertificateAuthority<MockRunner> {
     })
     .unwrap();
     CertificateAuthority {
-        op: Op::with_runner("TestVault", None, "op", runner),
+        vault: fake_vault(runner),
         op_config: DEFAULT_OP_CONF,
         ca_bundle: Some(ca_bundle),
         ca_database: Some(db),

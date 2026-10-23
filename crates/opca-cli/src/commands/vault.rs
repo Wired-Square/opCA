@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner};
+use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::backup::{decrypt_payload, encrypt_payload};
 use opca_core::services::vault::{BackupPayload, VaultBackup};
 
@@ -18,7 +18,7 @@ pub fn dispatch(args: VaultArgs, app: &mut AppContext<ShellRunner>) -> Result<()
     }
 }
 
-fn handle_backup<R: CommandRunner>(
+fn handle_backup<R: Runner>(
     app: &mut AppContext<R>,
     output_path: Option<String>,
     password: Option<String>,
@@ -30,17 +30,17 @@ fn handle_backup<R: CommandRunner>(
         None => super::cert::get_password("Enter backup password: ")?,
     };
 
-    let op = app.op()?;
+    let vault = app.vault()?;
 
     // Default output path
     let path = output_path.unwrap_or_else(|| {
-        let vault_name = &op.vault;
+        let vault_name = &vault.info().name;
         let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H%M%S");
         let home = dirs_home().unwrap_or_else(|| ".".to_string());
         format!("{home}/{vault_name}-{timestamp}.opca")
     });
 
-    let vb = VaultBackup::new(op, &DEFAULT_OP_CONF);
+    let vb = VaultBackup::new(vault, &DEFAULT_OP_CONF);
     let payload = vb.create_backup()?;
 
     output::info("Vault", &payload.metadata.vault_name);
@@ -57,7 +57,7 @@ fn handle_backup<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_restore<R: CommandRunner>(
+fn handle_restore<R: Runner>(
     app: &mut AppContext<R>,
     input: String,
     password: Option<String>,
@@ -79,8 +79,8 @@ fn handle_restore<R: CommandRunner>(
     output::info("Backup Date", &payload.metadata.backup_date);
     output::info("Items", &payload.metadata.item_count.to_string());
 
-    let op = app.op()?;
-    let vb = VaultBackup::new(op, &DEFAULT_OP_CONF);
+    let vault = app.vault()?;
+    let vb = VaultBackup::new(vault, &DEFAULT_OP_CONF);
 
     let on_progress = |item_type: &str, title: &str| {
         println!("  Restoring {item_type}: {title}");

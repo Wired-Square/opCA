@@ -11,7 +11,6 @@ log = "0.4"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-which = "7"
 rusqlite = { version = "0.33", features = ["bundled", "backup"] }
 tempfile = "3"
 shellexpand = "3"
@@ -28,6 +27,9 @@ rustls-pki-types = "1.12"
 wslib-crypto = { version = "0.1", registry = "wired-square" }
 wslib-crypto-x509 = { version = "0.1.1", registry = "wired-square" }
 wslib-crypto-ca = { version = "0.1", registry = "wired-square" }
+wslib-1password = { version = "0.1.1", registry = "wired-square" }
+# wslib-1password traces each `op` call; this forwards them to `log`.
+tracing = { version = "0.1", features = ["log"] }
 aws-sdk-s3 = "1"
 aws-sdk-route53 = "1"
 aws-credential-types = "1"
@@ -37,7 +39,10 @@ ssh2 = "0.9"
 dirs = "6"
 whoami = "1"
 
+[dev-dependencies]
+wslib-1password = { version = "0.1.1", registry = "wired-square", features = ["testing"] }
+
 [features]
 default = []
-# Exposes `testutil` and `Op::with_runner` to other crates' tests.
-test-support = []
+# Exposes `testutil` and the fake `op` to other crates' tests.
+test-support = ["wslib-1password/testing"]

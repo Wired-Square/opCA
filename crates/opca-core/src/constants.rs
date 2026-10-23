@@ -91,9 +91,6 @@ pub const CRL_BATCH_SIZE: i64 = 5;
 /// Fewer unreleased CRLs than this is low cover (the Lambda alerts at the same point).
 pub const CRL_BATCH_LOW_COVER: i64 = 2;
 
-/// 1Password CLI binary name.
-pub const OP_BIN: &str = "op";
-
 /// Region used for S3 and Route53 when neither the CA config
 /// (`ca_aws_region`) nor the credential item names one.
 pub const DEFAULT_AWS_REGION: &str = "ap-southeast-2";

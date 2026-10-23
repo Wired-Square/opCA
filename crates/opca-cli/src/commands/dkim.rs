@@ -4,7 +4,7 @@ use openssl::rsa::Rsa;
 
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
+use opca_core::op::{self, Error, Item, ItemRef, Runner, ShellRunner};
 use opca_core::services::route53::{extract_dkim_key, Route53Client};
 use opca_core::services::storage::AwsCredentials;
 
@@ -23,8 +23,16 @@ fn make_dns_name(domain: &str, selector: &str) -> String {
     format!("{selector}._domainkey.{domain}")
 }
 
+/// The DKIM item, or `ItemNotFound` naming its title.
+fn dkim_item<R: Runner>(app: &AppContext<R>, item_title: &str) -> Result<Item, OpcaError> {
+    match app.vault()?.item(&ItemRef::title(item_title)) {
+        Err(Error::ItemNotFound(_)) => Err(OpcaError::ItemNotFound(item_title.to_string())),
+        found => Ok(found?),
+    }
+}
+
 /// The AWS credentials for this CA, with its configured region applied.
-fn aws_credentials<R: CommandRunner>(app: &AppContext<R>) -> Result<AwsCredentials, OpcaError> {
+fn aws_credentials<R: Runner>(app: &AppContext<R>) -> Result<AwsCredentials, OpcaError> {
     app.ca.as_ref().ok_or(OpcaError::CaNotFound)?.aws_credentials()
 }
 
@@ -57,7 +65,7 @@ pub fn dispatch(args: DkimArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
     }
 }
 
-fn handle_create<R: CommandRunner>(
+fn handle_create<R: Runner>(
     app: &mut AppContext<R>,
     domain: String,
     selector: String,
@@ -70,8 +78,7 @@ fn handle_create<R: CommandRunner>(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let op = app.op()?;
-    if op.item_exists(&item_title) {
+    if app.vault()?.item_exists(&ItemRef::title(&item_title))? {
         return Err(OpcaError::Other(format!(
             "DKIM key '{item_title}' already exists. Delete it first or use a different selector."
         )));
@@ -98,27 +105,17 @@ fn handle_create<R: CommandRunner>(
     let dns_record = format_dkim_dns_record(&public_pem);
     let created_at = Utc::now().to_rfc3339();
 
-    let attrs: Vec<String> = vec![
-        format!("domain[text]={domain}"),
-        format!("selector[text]={selector}"),
-        format!("key_size[text]={key_size}"),
-        format!("private_key={private_pem}"),
-        format!("public_key[text]={public_pem}"),
-        format!("dns_record[text]={dns_record}"),
-        format!("dns_name[text]={dns_name}"),
-        format!("created_at[text]={created_at}"),
+    let fields = [
+        op::assign("domain[text]", &domain)?,
+        op::assign("selector[text]", &selector)?,
+        op::assign("key_size[text]", key_size)?,
+        op::assign("private_key", &private_pem)?,
+        op::assign("public_key[text]", &public_pem)?,
+        op::assign("dns_record[text]", &dns_record)?,
+        op::assign("dns_name[text]", &dns_name)?,
+        op::assign("created_at[text]", &created_at)?,
     ];
-    let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-    let op = app.op()?;
-    op.store_item(
-        &item_title,
-        Some(&attr_refs),
-        StoreAction::Create,
-        DEFAULT_OP_CONF.category,
-        None,
-        None,
-    )?;
+    app.vault()?.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?;
 
     output::print_result(&format!("DKIM key '{item_title}' created"), true);
 
@@ -145,7 +142,7 @@ fn handle_create<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_info<R: CommandRunner>(
+fn handle_info<R: Runner>(
     app: &mut AppContext<R>,
     domain: String,
     selector: String,
@@ -153,15 +150,8 @@ fn handle_info<R: CommandRunner>(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let op = app.op()?;
-    if !op.item_exists(&item_title) {
-        return Err(OpcaError::ItemNotFound(item_title));
-    }
-
-    let read_field = |field: &str| -> Option<String> {
-        let url = op.mk_url(&item_title, Some(field));
-        op.read_item(&url).ok().map(|s| s.trim().to_string())
-    };
+    let item = dkim_item(app, &item_title)?;
+    let read_field = |field: &str| op::field_text(&item, field).map(|s| s.trim().to_string());
 
     output::subtitle(&format!("DKIM Key: {domain} / {selector}"));
     output::info("Domain", &domain);
@@ -174,7 +164,7 @@ fn handle_info<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_deploy<R: CommandRunner>(
+fn handle_deploy<R: Runner>(
     app: &mut AppContext<R>,
     domain: String,
     selector: String,
@@ -185,13 +175,8 @@ fn handle_deploy<R: CommandRunner>(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let op = app.op()?;
-    if !op.item_exists(&item_title) {
-        return Err(OpcaError::ItemNotFound(item_title));
-    }
-
-    let url = op.mk_url(&item_title, Some("dns_record"));
-    let dns_record = op.read_item(&url)?.trim().to_string();
+    let item = dkim_item(app, &item_title)?;
+    let dns_record = op::field_text(&item, "dns_record").unwrap_or_default().trim().to_string();
 
     let client = Route53Client::new(aws_credentials(app)?);
     let rt = tokio::runtime::Runtime::new()
@@ -207,19 +192,15 @@ fn handle_deploy<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_list<R: CommandRunner>(
+fn handle_list<R: Runner>(
     app: &mut AppContext<R>,
     domain_filter: Option<String>,
 ) -> Result<(), OpcaError> {
-    let op = app.op()?;
-    let json_str = op.item_list(DEFAULT_OP_CONF.category, "json")?;
-    let items: Vec<serde_json::Value> =
-        serde_json::from_str(&json_str).map_err(|e| OpcaError::Other(e.to_string()))?;
+    let items = app.vault()?.items(&[DEFAULT_OP_CONF.category])?;
 
     let mut dkim_items: Vec<(String, String, String)> = Vec::new();
     for item in &items {
-        let title = item["title"].as_str().unwrap_or_default();
-        if let Some(rest) = title.strip_prefix(&format!("{DKIM_ITEM_PREFIX}_")) {
+        if let Some(rest) = item.title.strip_prefix(&format!("{DKIM_ITEM_PREFIX}_")) {
             if let Some(pos) = rest.rfind('_') {
                 let domain = &rest[..pos];
                 let selector = &rest[pos + 1..];
@@ -229,10 +210,7 @@ fn handle_list<R: CommandRunner>(
                             continue;
                         }
                     }
-                    let created = item["created_at"]
-                        .as_str()
-                        .map(|s| s[..10].to_string())
-                        .unwrap_or_default();
+                    let created = item.created_at.get(..10).unwrap_or_default().to_string();
                     dkim_items.push((domain.to_string(), selector.to_string(), created));
                 }
             }
@@ -254,7 +232,7 @@ fn handle_list<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_verify<R: CommandRunner>(
+fn handle_verify<R: Runner>(
     app: &mut AppContext<R>,
     domain: String,
     selector: String,
@@ -264,13 +242,8 @@ fn handle_verify<R: CommandRunner>(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let op = app.op()?;
-    if !op.item_exists(&item_title) {
-        return Err(OpcaError::ItemNotFound(item_title));
-    }
-
-    let url = op.mk_url(&item_title, Some("dns_record"));
-    let expected_record = op.read_item(&url)?.trim().to_string();
+    let item = dkim_item(app, &item_title)?;
+    let expected_record = op::field_text(&item, "dns_record").unwrap_or_default().trim().to_string();
 
     // Native DNS TXT lookup
     let found_records = tokio::runtime::Runtime::new()

@@ -1,107 +1,60 @@
-//! Shared test utilities for opca-core.
-//!
-//! Provides a [`MockRunner`] that returns pre-configured responses,
-//! plus helpers for building common [`CommandOutput`] values.
+//! A scripted `op` and the CA vault it answers for.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+pub use wslib_1password::testing::FakeRunner;
+pub use wslib_1password::Output;
 
-use crate::error::OpcaError;
-use crate::op::{CommandOutput, CommandRunner, Op};
+use crate::op::{Vault, VaultInfo};
 
-/// A mock command runner that returns pre-configured responses in order.
-/// Clones share one queue and call log.
-#[derive(Clone, Default)]
-pub struct MockRunner {
-    responses: Arc<Mutex<Vec<CommandOutput>>>,
-    calls: Arc<Mutex<Vec<Vec<String>>>>,
-    inputs: Arc<Mutex<Vec<Option<String>>>>,
-    file_args: Arc<Mutex<Vec<String>>>,
+pub const VAULT_ID: &str = "testvault";
+
+pub fn fake_vault(fake: &FakeRunner) -> Vault<FakeRunner> {
+    crate::op::client(fake.clone(), None).vault(VaultInfo {
+        id: VAULT_ID.into(),
+        name: "TestVault".into(),
+    })
 }
 
-impl MockRunner {
-    pub fn new(responses: Vec<CommandOutput>) -> Self {
-        Self {
-            responses: Arc::new(Mutex::new(responses)),
-            calls: Arc::default(),
-            inputs: Arc::default(),
-            file_args: Arc::default(),
-        }
-    }
-
-    /// Return all recorded call argument lists.
-    pub fn calls(&self) -> Vec<Vec<String>> {
-        self.calls.lock().unwrap().clone()
-    }
-
-    /// Return the stdin passed to each call.
-    pub fn inputs(&self) -> Vec<Option<String>> {
-        self.inputs.lock().unwrap().clone()
-    }
-
-    /// Return the contents of every argument that named an existing file,
-    /// read at call time (temp files are gone once the call returns).
-    pub fn file_args(&self) -> Vec<String> {
-        self.file_args.lock().unwrap().clone()
-    }
+/// A 26-character item id, as `op` gives, distinct for each `n`.
+pub fn item_id(n: u32) -> String {
+    format!("{n:0>26}")
 }
 
-impl CommandRunner for MockRunner {
-    fn run(
-        &self,
-        _bin: &str,
-        args: &[&str],
-        input: Option<&str>,
-        _env_vars: Option<&HashMap<String, String>>,
-    ) -> Result<CommandOutput, OpcaError> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(args.iter().map(|s| s.to_string()).collect());
-        self.inputs.lock().unwrap().push(input.map(String::from));
-        self.file_args.lock().unwrap().extend(
-            args.iter().filter_map(|a| std::fs::read_to_string(a).ok()),
-        );
-
-        let mut responses = self.responses.lock().unwrap();
-        if responses.is_empty() {
-            Ok(CommandOutput {
-                stdout: String::new(),
-                stderr: String::new(),
-                success: true,
-            })
-        } else {
-            Ok(responses.remove(0))
-        }
-    }
+/// `op item get --format=json` for an item with these `(label, value)` fields.
+pub fn item_json(title: &str, fields: &[(&str, &str)]) -> String {
+    item_with_sections(title, &fields.iter().map(|&(l, v)| (None, l, v)).collect::<Vec<_>>())
 }
 
-/// Build a successful [`CommandOutput`] with the given stdout.
-pub fn ok_output(stdout: &str) -> CommandOutput {
-    CommandOutput {
-        stdout: stdout.to_string(),
-        stderr: String::new(),
-        success: true,
-    }
+/// [`item_json`] with each field in an optional section.
+pub fn item_with_sections(title: &str, fields: &[(Option<&str>, &str, &str)]) -> String {
+    let fields: Vec<_> = fields
+        .iter()
+        .map(|(section, label, value)| {
+            let mut field = serde_json::json!({ "label": label, "value": value, "type": "STRING" });
+            if let Some(section) = section {
+                field["section"] = serde_json::json!({ "id": section, "label": section });
+            }
+            field
+        })
+        .collect();
+    serde_json::json!({
+        "id": item_id(1),
+        "title": title,
+        "vault": { "id": VAULT_ID, "name": "TestVault" },
+        "fields": fields,
+    })
+    .to_string()
 }
 
-/// Build a failed [`CommandOutput`] with the given stderr.
-pub fn err_output(stderr: &str) -> CommandOutput {
-    CommandOutput {
-        stdout: String::new(),
-        stderr: stderr.to_string(),
-        success: false,
-    }
+/// What `op item create --format=json` answers.
+pub fn created(title: &str) -> Output {
+    Output::ok(summary_json(&item_id(1), title))
 }
 
-/// Create an `Op<MockRunner>` with no account configured.
-pub fn mock_op(responses: Vec<CommandOutput>) -> Op<MockRunner> {
-    let runner = MockRunner::new(responses);
-    Op::with_runner("TestVault", None, "op", runner)
+pub fn summary_json(id: &str, title: &str) -> String {
+    serde_json::json!({ "id": id, "title": title, "vault": { "id": VAULT_ID, "name": "TestVault" } })
+        .to_string()
 }
 
-/// Create an `Op<MockRunner>` with a test account configured.
-pub fn mock_op_with_account(responses: Vec<CommandOutput>) -> Op<MockRunner> {
-    let runner = MockRunner::new(responses);
-    Op::with_runner("TestVault", Some("test.1password.com".into()), "op", runner)
+pub fn not_found(title: &str) -> Output {
+    Output::fail(format!("[ERROR] \"{title}\" isn't an item in the \"TestVault\" vault."))
 }

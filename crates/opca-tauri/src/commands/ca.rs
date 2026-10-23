@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use log::{info, warn, error, debug};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use opca_core::op::ShellRunner;
+use opca_core::op::{self, ShellRunner};
 use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
 use opca_core::services::database::CaConfig;
 use opca_core::services::local_backup::LocalBackup;
@@ -101,16 +101,16 @@ pub async fn init_ca(
     config: CaConfigDto,
 ) -> Result<(), String> {
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    let op = conn.op.clone().ok_or("Not connected")?;
+    let vault = conn.vault.clone().ok_or("Not connected")?;
 
     info!("[tauri] init_ca");
     let ca_config = dto_to_ca_config(&config);
 
-    match CertificateAuthority::init(op, &ca_config) {
+    match CertificateAuthority::init(vault, &ca_config) {
         Ok(mut ca) => {
-            ca.local_backup = LocalBackup::if_enabled(ca.op.account());
+            ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
             conn.ca = Some(ca);
-            conn.op = None;
+            conn.vault = None;
             state.log_ok("init_ca", Some("Certificate Authority initialised".to_string()));
             Ok(())
         }
@@ -195,7 +195,7 @@ pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> R
         let _ = app.emit("op-status", Some("sync_private_store"));
         let result = needs_aws_credentials(&job.uri)
             .then(|| {
-                get_aws_credentials(&ShellRunner, job.account.as_deref(), job.region.as_deref())
+                get_aws_credentials(&op::client(ShellRunner::new(), job.account.as_deref()), job.region.as_deref())
             })
             .transpose()
             .and_then(|creds| storage_from_uri_with_creds(&job.uri, creds.as_ref()))

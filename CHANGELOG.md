@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- 1Password access now goes through `wslib-1password`. Item fields reach `op`
+  on stdin when an item is created, every call names the vault by id, a title
+  two items share fails naming both ids, and a signed-out `op` is reported
+  rather than read as an empty vault. Storing the CA database, the CRL and the
+  OpenVPN item takes one `op` call where it took two, and the OpenVPN and DKIM
+  pages read their item once instead of once per field.
 - The MCP dev harness now comes from `wslib-mcp` 0.1.0 on the private
   `wired-square` cargo registry, replacing the `wslib-ai-mcp` git dependency.
   It adds a read-only `console` tool for the page's errors and warnings.
@@ -28,6 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   identifier. The stored CRL issuer keeps its one-line `CN=…, C=…` form.
 - `openssl` is now 0.10.81, and subject text is read with `to_string` instead
   of the deprecated `as_utf8`, so the workspace builds without warnings.
+
+### Fixed
+
+- The vault lock now excludes a second holder. `op` allows two items one title,
+  so creating `CA_Lock` never failed: the lock 1Password created first now wins
+  and a loser deletes its own copy, and release and stale-lock breaking address
+  the lock by id, so duplicates no longer fail with "More than one item matches".
+- A vault backup no longer carries `CA_Lock`, and a restore skips one an older
+  backup carries, so restoring a backup the app took no longer locks the new
+  vault for five minutes.
+- An `op` call 1Password refuses as racing another write (409 Conflict) is
+  made once more, so lock contention no longer fails the holder's own write.
 
 ## [0.102.3] - 2026-10-10
 

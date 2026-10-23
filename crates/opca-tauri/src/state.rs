@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{info, warn};
 use zeroize::Zeroizing;
-use opca_core::op::Op;
+use opca_core::op::Vault;
 use opca_core::services::ca::{CertIssuanceWarning, CertificateAuthority};
 use opca_core::services::cert::CertificateBundle;
 use opca_core::error::OpcaError;
@@ -15,20 +15,20 @@ use opca_core::vault_lock::VaultLock;
 
 use crate::commands::dto::LogEntry;
 
-/// Command tests swap in core's `MockRunner` so no command reaches the real `op`.
+/// Command tests swap in a scripted `op` so no command reaches the real one.
 #[cfg(not(test))]
 pub type Runner = opca_core::op::ShellRunner;
 #[cfg(test)]
-pub type Runner = opca_core::testutil::MockRunner;
+pub type Runner = opca_core::testutil::FakeRunner;
 
-/// Connection state: holds the `Op` handle and, once loaded, the `CertificateAuthority`.
+/// Connection state: holds the vault and, once loaded, the `CertificateAuthority`.
 ///
 /// All fields are guarded by a single mutex on `AppState` so that
 /// connect/disconnect transitions are atomic with respect to in-flight
 /// operations — preventing stale-vault races.
 #[derive(Default)]
 pub struct Connection {
-    pub op: Option<Op<Runner>>,
+    pub vault: Option<Vault<Runner>>,
     pub ca: Option<CertificateAuthority<Runner>>,
 }
 
@@ -92,16 +92,16 @@ impl AppState {
     ///
     /// Returns a `MutexGuard<Connection>` so the caller holds the lock for the
     /// duration of the operation.  If `ca` is already populated the guard is
-    /// returned immediately; otherwise the CA is retrieved with a copy of `Op`,
+    /// returned immediately; otherwise the CA is retrieved with a copy of the `Vault`,
     /// which replaces it only on success so an empty vault stays connected.
     pub fn ensure_ca(&self) -> Result<MutexGuard<'_, Connection>, String> {
         let mut conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
 
         if conn.ca.is_none() {
-            let op = conn.op.clone().ok_or("Not connected")?;
+            let vault = conn.vault.clone().ok_or("Not connected")?;
 
             info!("[tauri] loading CA from 1Password");
-            let mut ca = CertificateAuthority::retrieve(op)
+            let mut ca = CertificateAuthority::retrieve(vault)
                 .map_err(|e| {
                     warn!("[tauri] failed to load CA: {e}");
                     if let OpcaError::DatabaseUnreadable(msg) = &e {
@@ -111,9 +111,9 @@ impl AppState {
                     e.to_string()
                 })?;
             self.log_ok("retrieve_ca", Some("CA loaded from 1Password".to_string()));
-            ca.local_backup = LocalBackup::if_enabled(ca.op.account());
+            ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
             conn.ca = Some(ca);
-            conn.op = None;
+            conn.vault = None;
         }
 
         Ok(conn)
@@ -128,19 +128,19 @@ impl AppState {
         self.action_log.lock().expect("mutex poisoned — a prior operation panicked").clear();
     }
 
-    /// Run a closure with a reference to the connected `Op`.
+    /// Run a closure with a reference to the connected vault.
     ///
-    /// Checks `ca.op` first (if CA is loaded), then falls back to raw `op`.
-    pub fn with_op<F, T>(&self, f: F) -> Result<T, String>
+    /// Checks `ca.vault` first (if CA is loaded), then falls back to the bare `vault`.
+    pub fn with_vault<F, T>(&self, f: F) -> Result<T, String>
     where
-        F: FnOnce(&Op<Runner>) -> Result<T, String>,
+        F: FnOnce(&Vault<Runner>) -> Result<T, String>,
     {
         let conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
         if let Some(ref ca) = conn.ca {
-            return f(&ca.op);
+            return f(&ca.vault);
         }
-        let op = conn.op.as_ref().ok_or("Not connected")?;
-        f(op)
+        let vault = conn.vault.as_ref().ok_or("Not connected")?;
+        f(vault)
     }
 }
 

@@ -4,7 +4,7 @@ use log::info;
 
 use crate::constants::DEFAULT_OP_CONF;
 use crate::error::OpcaError;
-use crate::op::{CommandRunner, Op, StoreAction};
+use crate::op::{Assignment, Error, FieldType, Item, ItemRef, Runner, Vault};
 use crate::services::ca::CertificateAuthority;
 use crate::services::database::{CertificateAuthorityDB, OpenVpnTemplate, TemplateImport};
 use crate::utils::datetime::{self, DateTimeFormat};
@@ -56,25 +56,22 @@ mssfix 1300
     )
 }
 
-/// Template fields (`template` section) of the 1Password `OpenVPN` item's JSON.
-fn templates_in_item(item_json: &str) -> Result<Vec<(String, String)>, OpcaError> {
-    let item: serde_json::Value = serde_json::from_str(item_json)
-        .map_err(|e| OpcaError::Other(format!("Unreadable OpenVPN item: {e}")))?;
+const TEMPLATE_SECTION: &str = "template";
 
-    Ok(item["fields"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|f| f["section"]["label"].as_str() == Some("template"))
-        .filter_map(|f| {
-            let label = f["label"].as_str().filter(|l| !l.is_empty())?;
-            let content = f["value"].as_str().unwrap_or_default().trim();
-            Some((label.to_string(), content.to_string()))
+/// Template fields (`template` section) of the 1Password `OpenVPN` item.
+fn templates_in_item(item: &Item) -> Vec<(String, String)> {
+    item.fields
+        .iter()
+        .filter(|f| f.section.as_ref().and_then(|s| s.label.as_deref()) == Some(TEMPLATE_SECTION))
+        .filter(|f| !f.label.is_empty())
+        .map(|f| {
+            let content = f.value.as_ref().map_or("", |v| v.expose()).trim();
+            (f.label.clone(), content.to_string())
         })
-        .collect())
+        .collect()
 }
 
-fn database<R: CommandRunner>(
+fn database<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<&mut CertificateAuthorityDB, OpcaError> {
     ca.ca_database
@@ -82,15 +79,15 @@ fn database<R: CommandRunner>(
         .ok_or_else(|| OpcaError::Other("Database not loaded".into()))
 }
 
-fn vault_templates<R: CommandRunner>(op: &Op<R>) -> Result<Vec<(String, String)>, OpcaError> {
-    let title = DEFAULT_OP_CONF.openvpn_title;
-    if !op.item_exists(title) {
-        return Ok(Vec::new());
+fn vault_templates<R: Runner>(vault: &Vault<R>) -> Result<Vec<(String, String)>, OpcaError> {
+    match vault.item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)) {
+        Ok(item) => Ok(templates_in_item(&item)),
+        Err(Error::ItemNotFound(_)) => Ok(Vec::new()),
+        Err(e) => Err(e.into()),
     }
-    templates_in_item(&op.get_item(title, "json")?)
 }
 
-fn set_import_state<R: CommandRunner>(
+fn set_import_state<R: Runner>(
     ca: &mut CertificateAuthority<R>,
     state: TemplateImport,
 ) -> Result<(), OpcaError> {
@@ -104,14 +101,14 @@ fn set_import_state<R: CommandRunner>(
 ///
 /// Returns the number of templates imported, or `None` if the import had
 /// already run.
-pub fn import_templates_from_vault<R: CommandRunner>(
+pub fn import_templates_from_vault<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<Option<usize>, OpcaError> {
     if database(ca)?.openvpn_template_import()? != TemplateImport::NotImported {
         return Ok(None);
     }
 
-    let found = vault_templates(&ca.op)?;
+    let found = vault_templates(&ca.vault)?;
     let db = database(ca)?;
     for (name, content) in &found {
         db.upsert_openvpn_template(name, content, None)?;
@@ -129,7 +126,7 @@ pub fn import_templates_from_vault<R: CommandRunner>(
 
 /// Add any 1Password template the database lacks — e.g. one an older client
 /// created after the import — without overwriting the database's copies.
-fn copy_missing_templates<R: CommandRunner>(
+fn copy_missing_templates<R: Runner>(
     ca: &mut CertificateAuthority<R>,
     found: &[(String, String)],
 ) -> Result<(), OpcaError> {
@@ -150,14 +147,14 @@ fn copy_missing_templates<R: CommandRunner>(
 /// After a successful import, the template fields still on the 1Password
 /// `OpenVPN` item — each confirmed present in the database — for an operator
 /// to archive or keep. Empty once that decision is made.
-pub fn templates_awaiting_cleanup<R: CommandRunner>(
+pub fn templates_awaiting_cleanup<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<Vec<String>, OpcaError> {
     if database(ca)?.openvpn_template_import()? != TemplateImport::AwaitingCleanup {
         return Ok(Vec::new());
     }
 
-    let found = vault_templates(&ca.op)?;
+    let found = vault_templates(&ca.vault)?;
     if found.is_empty() {
         set_import_state(ca, TemplateImport::Settled)?;
         return Ok(Vec::new());
@@ -172,10 +169,10 @@ pub fn templates_awaiting_cleanup<R: CommandRunner>(
 /// parameters, TLS-auth key and server settings, so it can't be archived itself.
 ///
 /// Returns the number of templates archived.
-pub fn archive_vault_templates<R: CommandRunner>(
+pub fn archive_vault_templates<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<usize, OpcaError> {
-    let found = vault_templates(&ca.op)?;
+    let found = vault_templates(&ca.vault)?;
     if !found.is_empty() {
         copy_missing_templates(ca, &found)?;
         let openvpn_title = DEFAULT_OP_CONF.openvpn_title;
@@ -183,19 +180,21 @@ pub fn archive_vault_templates<R: CommandRunner>(
             "{openvpn_title}_Templates_{}",
             datetime::now_utc_str(DateTimeFormat::Openssl)
         );
-        let copies: Vec<String> = found
+        let copies: Vec<Assignment> = found
             .iter()
-            .map(|(name, content)| format!("template.{name}[text]={content}"))
+            .map(|(name, content)| {
+                Assignment::set(name, FieldType::Text, content.as_str()).in_section(TEMPLATE_SECTION)
+            })
             .collect();
-        let removals: Vec<String> = found
+        let removals: Vec<Assignment> = found
             .iter()
-            .map(|(name, _)| format!("template.{name}[delete]"))
+            .map(|(name, _)| Assignment::delete(name).in_section(TEMPLATE_SECTION))
             .collect();
 
         // Copy and archive before removing, so a failure part-way never loses a template.
-        store_fields(&ca.op, &archive_title, &copies, StoreAction::Create)?;
-        ca.op.delete_item(&archive_title, true)?;
-        store_fields(&ca.op, openvpn_title, &removals, StoreAction::Edit)?;
+        let archive = ca.vault.create_item(&archive_title, DEFAULT_OP_CONF.category, &copies)?;
+        ca.vault.delete_item(&ItemRef::from(&archive))?;
+        ca.vault.edit_item(&ItemRef::title(openvpn_title), &removals)?;
         info!("[openvpn] archived {} template(s) as '{archive_title}'", found.len());
     }
 
@@ -204,39 +203,28 @@ pub fn archive_vault_templates<R: CommandRunner>(
 }
 
 /// Leave the old template fields on the 1Password `OpenVPN` item and stop asking.
-pub fn keep_vault_templates<R: CommandRunner>(
+pub fn keep_vault_templates<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<(), OpcaError> {
     set_import_state(ca, TemplateImport::Settled)
 }
 
-fn store_fields<R: CommandRunner>(
-    op: &Op<R>,
-    title: &str,
-    fields: &[String],
-    action: StoreAction,
-) -> Result<(), OpcaError> {
-    let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
-    op.store_item(title, Some(&refs), action, DEFAULT_OP_CONF.category, None, None)?;
-    Ok(())
-}
-
 /// The database, once any templates still on the 1Password item are imported,
 /// so a write can't later be overwritten by the import.
-fn templates_db<R: CommandRunner>(
+fn templates_db<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<&mut CertificateAuthorityDB, OpcaError> {
     import_templates_from_vault(ca)?;
     database(ca)
 }
 
-pub fn list_templates<R: CommandRunner>(
+pub fn list_templates<R: Runner>(
     ca: &mut CertificateAuthority<R>,
 ) -> Result<Vec<OpenVpnTemplate>, OpcaError> {
     templates_db(ca)?.query_all_openvpn_templates()
 }
 
-pub fn get_template<R: CommandRunner>(
+pub fn get_template<R: Runner>(
     ca: &mut CertificateAuthority<R>,
     name: &str,
 ) -> Result<OpenVpnTemplate, OpcaError> {
@@ -245,7 +233,7 @@ pub fn get_template<R: CommandRunner>(
         .ok_or_else(|| OpcaError::Other(format!("OpenVPN template '{name}' not found")))
 }
 
-pub fn save_template<R: CommandRunner>(
+pub fn save_template<R: Runner>(
     ca: &mut CertificateAuthority<R>,
     name: &str,
     content: &str,
@@ -255,20 +243,20 @@ pub fn save_template<R: CommandRunner>(
 }
 
 /// Add the starter template under `name` unless one exists. Returns whether it was added.
-pub fn add_starter_template<R: CommandRunner>(
+pub fn add_starter_template<R: Runner>(
     ca: &mut CertificateAuthority<R>,
     name: &str,
 ) -> Result<bool, OpcaError> {
     if templates_db(ca)?.get_openvpn_template(name)?.is_some() {
         return Ok(false);
     }
-    let content = template_boilerplate(&ca.op.vault);
+    let content = template_boilerplate(&ca.vault.info().name);
     save_template(ca, name, &content)?;
     Ok(true)
 }
 
 /// Returns whether a template of that name existed.
-pub fn delete_template<R: CommandRunner>(
+pub fn delete_template<R: Runner>(
     ca: &mut CertificateAuthority<R>,
     name: &str,
 ) -> Result<bool, OpcaError> {
@@ -283,20 +271,24 @@ pub fn delete_template<R: CommandRunner>(
 mod tests {
     use super::*;
     use crate::services::database::models::CaConfig;
-    use crate::testutil::{err_output, mock_op, ok_output, MockRunner};
+    use crate::testutil::{created, fake_vault, item_with_sections, not_found, FakeRunner, Output};
 
-    const ITEM_JSON: &str = r#"{
-        "fields": [
-            {"label": "hostname", "value": "vpn.example.com", "section": {"label": "server"}},
-            {"label": "default", "value": "client\ndev tun\n", "section": {"label": "template"}},
-            {"label": "tcp", "value": "client\nproto tcp", "section": {"label": "template"}},
-            {"label": "static_key", "value": "secret", "section": {"label": "tls_authentication"}}
-        ]
-    }"#;
+    fn item() -> Output {
+        Output::ok(item_with_sections(
+            "OpenVPN",
+            &[
+                (Some("server"), "hostname", "vpn.example.com"),
+                (Some("template"), "default", "client\ndev tun\n"),
+                (Some("template"), "tcp", "client\nproto tcp"),
+                (Some("tls_authentication"), "static_key", "secret"),
+            ],
+        ))
+    }
 
-    fn ca(responses: Vec<crate::op::CommandOutput>) -> CertificateAuthority<MockRunner> {
+    /// A CA whose `vault` answers with `fake`'s script.
+    fn ca(fake: &FakeRunner) -> CertificateAuthority<FakeRunner> {
         CertificateAuthority {
-            op: mock_op(responses),
+            vault: fake_vault(fake),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: None,
             ca_database: Some(CertificateAuthorityDB::new(&CaConfig::default()).unwrap()),
@@ -305,10 +297,20 @@ mod tests {
         }
     }
 
+    /// `op`'s answer to a `CA_Database` store.
+    fn stored() -> Output {
+        Output::ok("")
+    }
+
+    fn db(ca: &CertificateAuthority<FakeRunner>) -> &CertificateAuthorityDB {
+        ca.ca_database.as_ref().unwrap()
+    }
+
     #[test]
     fn only_template_section_fields_are_templates() {
+        let item: Item = serde_json::from_slice(&item().stdout).unwrap();
         assert_eq!(
-            templates_in_item(ITEM_JSON).unwrap(),
+            templates_in_item(&item),
             vec![
                 ("default".to_string(), "client\ndev tun".to_string()),
                 ("tcp".to_string(), "client\nproto tcp".to_string()),
@@ -316,34 +318,46 @@ mod tests {
         );
     }
 
-    fn db(ca: &CertificateAuthority<MockRunner>) -> &CertificateAuthorityDB {
-        ca.ca_database.as_ref().unwrap()
-    }
-
     #[test]
     fn import_copies_vault_templates_once_and_awaits_cleanup() {
-        let mut ca = ca(vec![ok_output(ITEM_JSON), ok_output(ITEM_JSON)]);
+        let fake = FakeRunner::new();
+        fake.respond(item()).respond(stored());
+        let mut ca = ca(&fake);
 
         assert_eq!(import_templates_from_vault(&mut ca).unwrap(), Some(2));
         assert_eq!(get_template(&mut ca, "tcp").unwrap().content, "client\nproto tcp");
         assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::AwaitingCleanup);
 
-        let calls_after_import = ca.op.runner().calls().len();
+        let calls_after_import = fake.calls().len();
         assert_eq!(import_templates_from_vault(&mut ca).unwrap(), None);
-        assert_eq!(ca.op.runner().calls().len(), calls_after_import);
+        assert_eq!(fake.calls().len(), calls_after_import);
     }
 
     #[test]
     fn import_without_an_openvpn_item_has_nothing_to_clean_up() {
-        let mut ca = ca(vec![err_output("isn't an item")]);
+        let fake = FakeRunner::new();
+        fake.respond(not_found("OpenVPN")).respond(stored());
+        let mut ca = ca(&fake);
 
         assert_eq!(import_templates_from_vault(&mut ca).unwrap(), Some(0));
         assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::Settled);
     }
 
     #[test]
+    fn import_fails_rather_than_settling_when_op_cannot_answer() {
+        let fake = FakeRunner::new();
+        fake.respond(Output::fail("[ERROR] You are not currently signed in."));
+        let mut ca = ca(&fake);
+
+        assert!(matches!(import_templates_from_vault(&mut ca), Err(OpcaError::AuthenticationFailed)));
+        assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::NotImported);
+    }
+
+    #[test]
     fn import_keeps_templates_already_in_the_database() {
-        let mut ca = ca(vec![ok_output(ITEM_JSON), ok_output(ITEM_JSON)]);
+        let fake = FakeRunner::new();
+        fake.respond(item()).respond(stored());
+        let mut ca = ca(&fake);
         db(&ca).upsert_openvpn_template("db-only", "client", None).unwrap();
 
         import_templates_from_vault(&mut ca).unwrap();
@@ -353,39 +367,48 @@ mod tests {
 
     #[test]
     fn archive_copies_to_an_archived_note_before_removing_the_fields() {
-        let mut ca = ca(vec![ok_output(ITEM_JSON), ok_output(ITEM_JSON)]);
+        let fake = FakeRunner::new();
+        fake.respond(item())
+            .respond(stored())
+            .respond(created("OpenVPN_Templates"))
+            .respond(Output::ok(""))
+            .respond(Output::ok(""))
+            .respond(stored());
+        let mut ca = ca(&fake);
 
         assert_eq!(archive_vault_templates(&mut ca).unwrap(), 2);
 
-        let calls = ca.op.runner().calls();
-        let position = |pred: &dyn Fn(&Vec<String>) -> bool| calls.iter().position(pred).unwrap();
-        let created = position(&|c| {
-            c[1] == "create"
-                && c[2].starts_with("--title=OpenVPN_Templates_")
-                && c.contains(&"template.tcp[text]=client\nproto tcp".to_string())
-        });
-        let archived = position(&|c| c[1] == "delete" && c.contains(&"--archive".to_string()));
-        let removed = position(&|c| {
-            c[1] == "edit"
-                && c[2] == "OpenVPN"
-                && c.contains(&"template.default[delete]".to_string())
-                && c.contains(&"template.tcp[delete]".to_string())
-        });
-        assert!(created < archived && archived < removed);
+        let calls = fake.calls();
+        let args = |i: usize| calls[i].args().to_vec();
+        assert_eq!(args(2)[..3], ["item", "create", "-"]);
+        assert!(args(2).iter().any(|a| a.starts_with("--title=OpenVPN_Templates_")));
+        let template: serde_json::Value = serde_json::from_slice(calls[2].stdin().unwrap()).unwrap();
+        assert_eq!(template["fields"][1]["label"], "tcp");
+        assert_eq!(template["fields"][1]["value"], "client\nproto tcp");
+        assert_eq!(template["fields"][1]["section"]["label"], "template");
+        assert_eq!(args(3)[..3], ["item", "delete", crate::testutil::item_id(1).as_str()]);
+        assert!(args(3).contains(&"--archive".to_string()));
+        assert_eq!(args(4)[..3], ["item", "edit", "OpenVPN"]);
+        assert!(args(4).contains(&"template.default[delete]".to_string()));
+        assert!(args(4).contains(&"template.tcp[delete]".to_string()));
         assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::Settled);
+        assert!(fake.is_done());
     }
 
     #[test]
     fn cleanup_is_only_offered_after_a_successful_import() {
-        let mut ca = ca(vec![]);
+        let fake = FakeRunner::new();
+        let mut ca = ca(&fake);
 
         assert!(templates_awaiting_cleanup(&mut ca).unwrap().is_empty());
-        assert!(ca.op.runner().calls().is_empty());
+        assert!(fake.calls().is_empty());
     }
 
     #[test]
     fn cleanup_lists_vault_templates_and_copies_any_the_database_lacks() {
-        let mut ca = ca(vec![ok_output(ITEM_JSON), ok_output(ITEM_JSON)]);
+        let fake = FakeRunner::new();
+        fake.respond(item()).respond(stored());
+        let mut ca = ca(&fake);
         db(&ca).upsert_openvpn_template("default", "edited since import", None).unwrap();
         db(&ca).set_openvpn_template_import(TemplateImport::AwaitingCleanup).unwrap();
 
@@ -396,7 +419,9 @@ mod tests {
 
     #[test]
     fn cleanup_settles_once_the_vault_holds_no_templates() {
-        let mut ca = ca(vec![err_output("isn't an item")]);
+        let fake = FakeRunner::new();
+        fake.respond(not_found("OpenVPN")).respond(stored());
+        let mut ca = ca(&fake);
         db(&ca).set_openvpn_template_import(TemplateImport::AwaitingCleanup).unwrap();
 
         assert!(templates_awaiting_cleanup(&mut ca).unwrap().is_empty());
@@ -405,27 +430,42 @@ mod tests {
 
     #[test]
     fn keep_leaves_the_vault_untouched() {
-        let mut ca = ca(vec![]);
+        let fake = FakeRunner::new();
+        fake.respond(stored());
+        let mut ca = ca(&fake);
 
         keep_vault_templates(&mut ca).unwrap();
 
-        let touched_vault = |c: &Vec<String>| c.iter().any(|a| a.ends_with("[delete]") || a == "--archive");
-        assert!(!ca.op.runner().calls().iter().any(touched_vault));
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].args()[..3], ["document", "edit", "CA_Database"]);
         assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::Settled);
     }
 
     #[test]
     fn a_save_before_the_import_is_not_overwritten_by_it() {
-        let mut ca = ca(vec![ok_output(ITEM_JSON), ok_output(ITEM_JSON)]);
+        let fake = FakeRunner::new();
+        fake.respond(item()).respond(stored()).respond(stored());
+        let mut ca = ca(&fake);
 
         save_template(&mut ca, "tcp", "saved after the move").unwrap();
 
         assert_eq!(get_template(&mut ca, "tcp").unwrap().content, "saved after the move");
     }
 
+    /// A CA whose import has run and found nothing, answering every later store.
+    fn settled(stores: usize) -> CertificateAuthority<FakeRunner> {
+        let fake = FakeRunner::new();
+        fake.respond(not_found("OpenVPN"));
+        for _ in 0..=stores {
+            fake.respond(stored());
+        }
+        ca(&fake)
+    }
+
     #[test]
     fn the_starter_template_never_replaces_an_existing_one() {
-        let mut ca = ca(vec![err_output("isn't an item")]);
+        let mut ca = settled(2);
         save_template(&mut ca, "default", "client").unwrap();
 
         assert!(!add_starter_template(&mut ca, "default").unwrap());
@@ -436,7 +476,7 @@ mod tests {
 
     #[test]
     fn delete_reports_whether_the_template_existed() {
-        let mut ca = ca(vec![err_output("isn't an item")]);
+        let mut ca = settled(2);
         save_template(&mut ca, "default", "client").unwrap();
 
         assert!(delete_template(&mut ca, "default").unwrap());

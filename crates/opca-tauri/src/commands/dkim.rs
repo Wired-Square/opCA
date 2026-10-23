@@ -6,7 +6,8 @@ use serde::Deserialize;
 use tauri::State;
 
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
-use opca_core::op::StoreAction;
+use opca_core::error::OpcaError;
+use opca_core::op::{self, Error, Item, ItemRef, Runner, Vault};
 use opca_core::services::database::{DkimRecord, DkimSync};
 use opca_core::services::route53::{format_txt_value, split_txt_value, Route53Client};
 
@@ -26,6 +27,18 @@ fn make_dkim_title(domain: &str, selector: &str) -> String {
 
 fn make_dns_name(domain: &str, selector: &str) -> String {
     format!("{selector}._domainkey.{domain}")
+}
+
+fn dkim_item<R: Runner>(vault: &Vault<R>, item_title: &str) -> Result<Item, String> {
+    match vault.item(&ItemRef::title(item_title)) {
+        Err(Error::ItemNotFound(_)) => Err(format!("DKIM key '{item_title}' not found.")),
+        found => found.map_err(|e| OpcaError::from(e).to_string()),
+    }
+}
+
+fn dns_record<R: Runner>(vault: &Vault<R>, item_title: &str) -> Result<String, String> {
+    let item = dkim_item(vault, item_title)?;
+    Ok(op::field_text(&item, "dns_record").unwrap_or_default().trim().to_string())
 }
 
 /// Format a PEM-encoded public key as a DKIM DNS TXT record value.
@@ -134,18 +147,15 @@ fn do_sync_dkim_keys(state: &State<'_, AppState>) -> Result<usize, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    let json_str = ca
-        .op
-        .item_list(DEFAULT_OP_CONF.category, "json")
-        .map_err(|e| e.to_string())?;
-    let items: Vec<serde_json::Value> =
-        serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
+    let items = ca
+        .vault
+        .items(&[DEFAULT_OP_CONF.category])
+        .map_err(|e| OpcaError::from(e).to_string())?;
 
     let prefix = format!("{DKIM_ITEM_PREFIX}_");
     let mut found = Vec::new();
     for item in &items {
-        let title = item["title"].as_str().unwrap_or_default();
-        let Some(rest) = title.strip_prefix(&prefix) else { continue };
+        let Some(rest) = item.title.strip_prefix(&prefix) else { continue };
         // Title format: DKIM_<domain>_<selector> — split on the LAST underscore
         // because domains never contain '_' but selectors might (rare).
         let Some(pos) = rest.rfind('_') else { continue };
@@ -154,7 +164,7 @@ fn do_sync_dkim_keys(state: &State<'_, AppState>) -> Result<usize, String> {
         if domain.is_empty() || selector.is_empty() {
             continue;
         }
-        let created_at = item["created_at"].as_str().map(|s| s.to_string());
+        let created_at = Some(item.created_at.clone()).filter(|at| !at.is_empty());
         found.push(item_to_dkim_record(domain, selector, created_at));
     }
 
@@ -229,39 +239,18 @@ pub async fn backfill_dkim(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
     let item_title = make_dkim_title(&domain, &selector);
 
-    // Fetch the whole item once and pull each field out of the JSON. The
-    // previous implementation invoked `op read` four or five separate times,
-    // which dominated the page-open latency.
-    let json_str = ca
-        .op
-        .get_item(&item_title, "json")
-        .map_err(|e| format!("DKIM key '{item_title}' not found: {e}"))?;
-    let obj: serde_json::Value =
-        serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse 1Password item: {e}"))?;
+    // One `op item get` for every field, not an `op read` each.
+    let item = ca
+        .vault
+        .item(&ItemRef::title(&item_title))
+        .map_err(|e| format!("DKIM key '{item_title}' not found: {}", OpcaError::from(e)))?;
+    let field = |label: &str| item.value(label).map(|v| v.expose().trim().to_string());
 
-    let mut public_key: Option<String> = None;
-    let mut dns_record_raw: Option<String> = None;
-    let mut private_key: Option<String> = None;
-    let mut key_size_str: Option<String> = None;
-    let mut created_at: Option<String> = None;
-
-    if let Some(fields) = obj.get("fields").and_then(|f| f.as_array()) {
-        for field in fields {
-            let label = field.get("label").and_then(|v| v.as_str()).unwrap_or("");
-            let value = field
-                .get("value")
-                .and_then(|v| v.as_str())
-                .map(|s| s.trim().to_string());
-            match label {
-                "public_key" => public_key = value,
-                "dns_record" => dns_record_raw = value,
-                "private_key" => private_key = value,
-                "key_size" => key_size_str = value,
-                "created_at" => created_at = value,
-                _ => {}
-            }
-        }
-    }
+    let public_key = field("public_key");
+    let dns_record_raw = field("dns_record");
+    let private_key = field("private_key");
+    let key_size_str = field("key_size");
+    let created_at = field("created_at");
 
     let has_public_key = Some(public_key.as_ref().is_some_and(|s| !s.is_empty()));
     let has_private_key = Some(private_key.as_ref().is_some_and(|s| !s.is_empty()));
@@ -351,16 +340,11 @@ pub async fn get_dkim_private_key(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
     let item_title = make_dkim_title(&domain, &selector);
 
-    if !ca.op.item_exists(&item_title) {
-        return Err(format!("DKIM key '{}' not found.", item_title));
-    }
-
-    let url = ca.op.mk_url(&item_title, Some("private_key"));
-    let key_pem = ca.op.read_item(&url).map_err(|e| e.to_string())?;
-    let trimmed = key_pem.trim();
-    if trimmed.is_empty() {
-        return Err("No private key stored alongside this DKIM key".into());
-    }
+    let item = dkim_item(&ca.vault, &item_title)?;
+    let trimmed = op::field_text(&item, "private_key")
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .ok_or("No private key stored alongside this DKIM key")?;
 
     let exported = encrypt_if_asked(trimmed, passphrase.as_deref())?;
     state.log_ok(
@@ -411,7 +395,7 @@ pub async fn create_dkim_key(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    if ca.op.item_exists(&item_title) {
+    if ca.vault.item_exists(&ItemRef::title(&item_title)).map_err(|e| OpcaError::from(e).to_string())? {
         return Err(format!(
             "DKIM key '{}' already exists. Delete it first or use a different selector.",
             item_title
@@ -435,27 +419,22 @@ pub async fn create_dkim_key(
     let dns_record = format_dkim_dns_record(&public_pem);
     let created_at = Utc::now().to_rfc3339();
 
-    let attrs: Vec<String> = vec![
-        format!("domain[text]={domain}"),
-        format!("selector[text]={selector}"),
-        format!("key_size[text]={key_size}"),
-        format!("private_key={private_pem}"),
-        format!("public_key[text]={public_pem}"),
-        format!("dns_record[text]={dns_record}"),
-        format!("dns_name[text]={dns_name}"),
-        format!("created_at[text]={created_at}"),
-    ];
-    let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
+    let fields = [
+        ("domain[text]", domain.as_str()),
+        ("selector[text]", &selector),
+        ("key_size[text]", &key_size.to_string()),
+        ("private_key", &private_pem),
+        ("public_key[text]", &public_pem),
+        ("dns_record[text]", &dns_record),
+        ("dns_name[text]", &dns_name),
+        ("created_at[text]", &created_at),
+    ]
+    .into_iter()
+    .map(|(label, value)| op::assign(label, value))
+    .collect::<Result<Vec<_>, _>>();
 
-    ca.op
-        .store_item(
-            &item_title,
-            Some(&attr_refs),
-            StoreAction::Create,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )
+    fields
+        .and_then(|fields| Ok(ca.vault.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?))
         .map_err(|e| format!("Failed to store DKIM key in 1Password: {e}"))?;
 
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
@@ -507,13 +486,10 @@ pub async fn delete_dkim_key(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    if !ca.op.item_exists(&item_title) {
-        return Err(format!("DKIM key '{}' not found.", item_title));
+    match ca.vault.delete_item(&ItemRef::title(&item_title)) {
+        Err(Error::ItemNotFound(_)) => return Err(format!("DKIM key '{}' not found.", item_title)),
+        deleted => deleted.map_err(|e| format!("Failed to delete DKIM key: {}", OpcaError::from(e)))?,
     }
-
-    ca.op
-        .delete_item(&item_title, true)
-        .map_err(|e| format!("Failed to delete DKIM key: {e}"))?;
 
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
     db.delete_dkim(&domain, &selector)
@@ -541,14 +517,7 @@ pub async fn verify_dkim_dns(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let expected_record = state.with_op(|op| {
-        if !op.item_exists(&item_title) {
-            return Err(format!("DKIM key '{}' not found.", item_title));
-        }
-        let url = op.mk_url(&item_title, Some("dns_record"));
-        let record = op.read_item(&url).map_err(|e| e.to_string())?;
-        Ok(record.trim().to_string())
-    })?;
+    let expected_record = state.with_vault(|vault| dns_record(vault, &item_title))?;
 
     let found_records = opca_core::services::route53::lookup_txt(&dns_name)
         .await
@@ -595,14 +564,7 @@ pub async fn deploy_dkim_route53(
     let item_title = make_dkim_title(&domain, &selector);
     let dns_name = make_dns_name(&domain, &selector);
 
-    let dns_record = state.with_op(|op| {
-        if !op.item_exists(&item_title) {
-            return Err(format!("DKIM key '{}' not found.", item_title));
-        }
-        let url = op.mk_url(&item_title, Some("dns_record"));
-        let record = op.read_item(&url).map_err(|e| e.to_string())?;
-        Ok(record.trim().to_string())
-    })?;
+    let dns_record = state.with_vault(|vault| dns_record(vault, &item_title))?;
 
     let creds = {
         let conn = state.ensure_ca()?;

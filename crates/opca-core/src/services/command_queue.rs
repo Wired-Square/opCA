@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::OpcaError;
-use crate::op::{CommandRunner, Op, StoreAction};
+use crate::op::{self, Assignment, ItemRef, Runner, Vault};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -210,7 +210,7 @@ impl CommandQueue {
     }
 
     /// Execute all queued commands against the 1Password CLI.
-    pub fn flush<R: CommandRunner>(&mut self, op: &Op<R>) -> Vec<FlushResult> {
+    pub fn flush<R: Runner>(&mut self, vault: &Vault<R>) -> Vec<FlushResult> {
         if self.queue.is_empty() {
             return Vec::new();
         }
@@ -228,41 +228,7 @@ impl CommandQueue {
                 error: None,
             };
 
-            let exec_result: Result<(), OpcaError> = match cmd.operation {
-                QueueOp::StoreItem => {
-                    let action = parse_store_action(&cmd.payload.action);
-                    let attr_refs: Vec<&str> =
-                        cmd.payload.attributes.iter().map(|s| s.as_str()).collect();
-                    op.store_item(
-                        &cmd.target_id,
-                        Some(&attr_refs),
-                        action,
-                        &cmd.payload.category,
-                        None,
-                        None,
-                    )
-                    .map(|_| ())
-                }
-                QueueOp::StoreDocument => {
-                    let action = parse_store_action(&cmd.payload.action);
-                    op.store_document(
-                        &cmd.target_id,
-                        &cmd.payload.filename,
-                        &cmd.payload.content,
-                        action,
-                        None,
-                    )
-                    .map(|_| ())
-                }
-                QueueOp::RenameItem => op
-                    .rename_item(&cmd.target_id, &cmd.payload.dst_title)
-                    .map(|_| ()),
-                QueueOp::DeleteItem => op
-                    .delete_item(&cmd.target_id, cmd.payload.archive)
-                    .map(|_| ()),
-            };
-
-            match exec_result {
+            match execute(vault, &cmd) {
                 Ok(()) => result.success = true,
                 Err(e) => result.error = Some(e.to_string()),
             }
@@ -283,6 +249,46 @@ impl Default for CommandQueue {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn execute<R: Runner>(vault: &Vault<R>, cmd: &QueuedCommand) -> Result<(), OpcaError> {
+    let title = ItemRef::title(&cmd.target_id);
+    let p = &cmd.payload;
+    match cmd.operation {
+        QueueOp::StoreItem => {
+            let fields = p
+                .attributes
+                .iter()
+                .map(|token| Assignment::parse(token))
+                .collect::<Result<Vec<_>, _>>()?;
+            let edit = match parse_store_action(&p.action) {
+                StoreAction::Create => false,
+                StoreAction::Edit => true,
+                StoreAction::Auto => vault.item_exists(&title)?,
+            };
+            if edit {
+                vault.edit_item(&title, &fields)?;
+            } else {
+                vault.create_item(&cmd.target_id, &p.category, &fields)?;
+            }
+        }
+        QueueOp::StoreDocument => match parse_store_action(&p.action) {
+            StoreAction::Create => vault.create_document(&cmd.target_id, &p.filename, p.content.as_bytes())?,
+            StoreAction::Edit => vault.edit_document(&title, &p.filename, p.content.as_bytes())?,
+            StoreAction::Auto => op::put_document(vault, &cmd.target_id, &p.filename, &p.content)?,
+        },
+        QueueOp::RenameItem => vault.rename_item(&title, &p.dst_title)?,
+        QueueOp::DeleteItem if p.archive => vault.delete_item(&title)?,
+        QueueOp::DeleteItem => vault.delete_item_permanently(&title)?,
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoreAction {
+    Auto,
+    Create,
+    Edit,
 }
 
 fn parse_store_action(s: &str) -> StoreAction {
@@ -391,30 +397,71 @@ mod tests {
     }
 
     #[test]
-    fn test_flush_with_mock_runner() {
-        use crate::testutil::{mock_op, ok_output};
+    fn test_flush_with_fake_runner() {
+        use crate::testutil::{created, fake_vault, FakeRunner};
 
-        let op = mock_op(vec![ok_output(r#"{"id":"abc123"}"#)]);
+        let fake = FakeRunner::new();
+        fake.respond(created("test_cert"));
 
         let mut q = CommandQueue::new();
         q.enqueue_store_item("test_cert", vec!["cn[text]=test".into()], "certbundle", "create", "Secure Note");
 
-        let results = q.flush(&op);
+        let results = q.flush(&fake_vault(&fake));
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].operation, QueueOp::StoreItem);
         assert_eq!(results[0].target_id, "test_cert");
+        assert!(results[0].success, "{:?}", results[0].error);
         assert_eq!(q.pending_count(), 0);
+        assert_eq!(fake.calls()[0].args()[..3], ["item", "create", "-"]);
+    }
+
+    #[test]
+    fn test_flush_auto_store_item_checks_then_edits_or_creates() {
+        use crate::testutil::{created, fake_vault, item_json, not_found, FakeRunner, Output};
+
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(item_json("old", &[])))
+            .respond(Output::ok(""))
+            .respond(not_found("new"))
+            .respond(created("new"));
+
+        let mut q = CommandQueue::new();
+        q.enqueue_store_item("old", vec!["cn[text]=a".into()], "certbundle", "auto", "Secure Note");
+        q.enqueue_store_item("new", vec!["cn[text]=b".into()], "certbundle", "auto", "Secure Note");
+        let results = q.flush(&fake_vault(&fake));
+
+        assert!(results.iter().all(|r| r.success), "{results:?}");
+        let verbs: Vec<_> = fake.calls().iter().map(|c| c.args()[1].clone()).collect();
+        assert_eq!(verbs, ["get", "edit", "get", "create"]);
+    }
+
+    #[test]
+    fn test_flush_reports_a_failure_and_carries_on() {
+        use crate::testutil::{fake_vault, FakeRunner, Output};
+
+        let fake = FakeRunner::new();
+        fake.respond(Output::fail("[ERROR] boom")).respond(Output::ok(""));
+
+        let mut q = CommandQueue::new();
+        q.enqueue_rename_item("a", "b");
+        q.enqueue_delete_item("c", false);
+        let results = q.flush(&fake_vault(&fake));
+
+        assert_eq!(results[0].error.as_deref(), Some("1Password CLI error: [ERROR] boom"));
+        assert!(results[1].success);
+        assert!(!fake.calls()[1].args().contains(&"--archive".to_string()));
     }
 
     #[test]
     fn test_flush_empty_queue() {
-        use crate::testutil::mock_op;
+        use crate::testutil::{fake_vault, FakeRunner};
 
-        let op = mock_op(vec![]);
+        let fake = FakeRunner::new();
 
         let mut q = CommandQueue::new();
-        let results = q.flush(&op);
+        let results = q.flush(&fake_vault(&fake));
         assert!(results.is_empty());
+        assert!(fake.calls().is_empty());
     }
 
     #[test]

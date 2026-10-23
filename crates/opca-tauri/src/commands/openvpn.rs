@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::crypto::utils::{generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key};
 use opca_core::error::OpcaError;
-use opca_core::op::StoreAction;
+use opca_core::op::{self, Assignment, Error, Item, ItemRef, Vault};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::CertType;
 use opca_core::services::database::models::OpenVpnProfile;
@@ -26,43 +26,44 @@ use crate::state::{AppState, Runner};
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Read all field labels and values from the OpenVPN 1Password item.
-fn read_openvpn_fields(
-    op: &opca_core::op::Op<Runner>,
-) -> Result<(bool, HashMap<String, String>), String> {
-    let title = DEFAULT_OP_CONF.openvpn_title;
-    if !op.item_exists(title) {
-        return Ok((false, HashMap::new()));
+/// The `OpenVPN` item, or `None` before one is made.
+fn openvpn_item(vault: &Vault<Runner>) -> Result<Option<Item>, String> {
+    match vault.item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)) {
+        Ok(item) => Ok(Some(item)),
+        Err(Error::ItemNotFound(_)) => Ok(None),
+        Err(e) => Err(OpcaError::from(e).to_string()),
     }
-
-    let json_str = op
-        .get_item(title, "json")
-        .map_err(|e| e.to_string())?;
-
-    let item: serde_json::Value =
-        serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
-
-    let mut fields = HashMap::new();
-    if let Some(arr) = item["fields"].as_array() {
-        for field in arr {
-            let label = field["label"].as_str().unwrap_or_default();
-            let value = field["value"].as_str().unwrap_or_default();
-            if !label.is_empty() {
-                fields.insert(label.to_string(), value.to_string());
-            }
-        }
-    }
-
-    Ok((true, fields))
 }
 
-/// Determine create vs edit action for the OpenVPN item.
-fn resolve_store_action(op: &opca_core::op::Op<Runner>) -> StoreAction {
-    if op.item_exists(DEFAULT_OP_CONF.openvpn_title) {
-        StoreAction::Edit
-    } else {
-        StoreAction::Create
+/// The trimmed value of a field named as `DEFAULT_OP_CONF` names it
+/// (`section.label[type]`); a bare label matches in any section.
+fn conf_field(item: Option<&Item>, conf_label: &str) -> Option<String> {
+    let item = item?;
+    let name = conf_label.split_once('[').map_or(conf_label, |(name, _)| name);
+    let field = match name.split_once('.') {
+        Some((section, label)) => item.field_in(section, label),
+        None => item.field(name),
+    };
+    field.map(|f| f.value.as_ref().map_or("", |v| v.expose()).trim().to_string())
+}
+
+fn server_params(item: Option<&Item>) -> OpenVpnServerParams {
+    let field = |label: &str| conf_field(item, label);
+    OpenVpnServerParams {
+        has_item: item.is_some(),
+        has_dh: field(DEFAULT_OP_CONF.dh_item).is_some(),
+        dh_key_size: field(DEFAULT_OP_CONF.dh_key_size_item),
+        has_ta: field(DEFAULT_OP_CONF.ta_item).is_some(),
+        ta_key_size: field(DEFAULT_OP_CONF.ta_key_size_item),
+        hostname: field("hostname"),
+        port: field("port"),
+        cipher: field("cipher"),
+        auth: field("auth"),
     }
+}
+
+fn store_openvpn(vault: &Vault<Runner>, fields: &[Assignment]) -> Result<(), OpcaError> {
+    op::put_item(vault, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
 }
 
 // ---------------------------------------------------------------------------
@@ -74,41 +75,7 @@ fn resolve_store_action(op: &opca_core::op::Op<Runner>) -> StoreAction {
 pub async fn get_openvpn_params(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
-    state.with_op(|op| {
-        let (has_item, fields) = read_openvpn_fields(op)?;
-
-        Ok(OpenVpnServerParams {
-            has_item,
-            has_dh: fields.contains_key("dh_parameters"),
-            dh_key_size: fields.get("key_size").cloned().or_else(|| {
-                // DH key_size is in the diffie-hellman section
-                // Try reading via op:// if present
-                if fields.contains_key("dh_parameters") {
-                    let url = op.mk_url(
-                        DEFAULT_OP_CONF.openvpn_title,
-                        Some(&DEFAULT_OP_CONF.dh_key_size_item.replace('.', "/")),
-                    );
-                    op.read_item(&url).ok().map(|s| s.trim().to_string())
-                } else {
-                    None
-                }
-            }),
-            has_ta: fields.contains_key("static_key"),
-            ta_key_size: if fields.contains_key("static_key") {
-                let url = op.mk_url(
-                    DEFAULT_OP_CONF.openvpn_title,
-                    Some(&DEFAULT_OP_CONF.ta_key_size_item.replace('.', "/")),
-                );
-                op.read_item(&url).ok().map(|s| s.trim().to_string())
-            } else {
-                None
-            },
-            hostname: fields.get("hostname").cloned(),
-            port: fields.get("port").cloned(),
-            cipher: fields.get("cipher").cloned(),
-            auth: fields.get("auth").cloned(),
-        })
-    })
+    state.with_vault(|vault| Ok(server_params(openvpn_item(vault)?.as_ref())))
 }
 
 /// Generate DH parameters and store in 1Password.
@@ -117,7 +84,7 @@ pub async fn generate_openvpn_dh(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
     info!("[tauri] generate_openvpn_dh");
-    state.with_op(|op| {
+    state.with_vault(|vault| {
         let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)
             .map_err(|e| format!("Failed to generate DH parameters: {e}"))?;
 
@@ -128,36 +95,10 @@ pub async fn generate_openvpn_dh(
             return Err("Generated DH parameters do not meet minimum key size".to_string());
         }
 
-        let action = resolve_store_action(op);
-        let attrs: Vec<String> = vec![
-            format!("{}={}", DEFAULT_OP_CONF.dh_item, dh_pem),
-            format!("{}={}", DEFAULT_OP_CONF.dh_key_size_item, dh_keysize),
-        ];
-        let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-        op.store_item(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&attr_refs),
-            action,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )
-        .map_err(|e| format!("Failed to store DH parameters: {e}"))?;
-
-        // Re-read full state
-        let (has_item, fields) = read_openvpn_fields(op)?;
-        Ok(OpenVpnServerParams {
-            has_item,
-            has_dh: true,
-            dh_key_size: Some(dh_keysize.to_string()),
-            has_ta: fields.contains_key("static_key"),
-            ta_key_size: None,
-            hostname: fields.get("hostname").cloned(),
-            port: fields.get("port").cloned(),
-            cipher: fields.get("cipher").cloned(),
-            auth: fields.get("auth").cloned(),
-        })
+        op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)
+            .and_then(|dh| Ok([dh, op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?]))
+            .and_then(|fields| store_openvpn(vault, &fields))
+            .map_err(|e| format!("Failed to store DH parameters: {e}"))
     })?;
 
     state.log_ok("generate_dh", Some("Generated DH parameters".to_string()));
@@ -170,7 +111,7 @@ pub async fn generate_openvpn_ta(
     state: State<'_, AppState>,
 ) -> Result<OpenVpnServerParams, String> {
     info!("[tauri] generate_openvpn_ta");
-    state.with_op(|op| {
+    state.with_vault(|vault| {
         let ta_pem = generate_ta_key(DEFAULT_KEY_SIZE.ta)
             .map_err(|e| format!("Failed to generate TA key: {e}"))?;
 
@@ -181,24 +122,10 @@ pub async fn generate_openvpn_ta(
             return Err("Generated TA key does not meet minimum key size".to_string());
         }
 
-        let action = resolve_store_action(op);
-        let attrs: Vec<String> = vec![
-            format!("{}={}", DEFAULT_OP_CONF.ta_item, ta_pem),
-            format!("{}={}", DEFAULT_OP_CONF.ta_key_size_item, ta_keysize),
-        ];
-        let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-        op.store_item(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&attr_refs),
-            action,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )
-        .map_err(|e| format!("Failed to store TA key: {e}"))?;
-
-        Ok(())
+        op::assign(DEFAULT_OP_CONF.ta_item, &ta_pem)
+            .and_then(|ta| Ok([ta, op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?]))
+            .and_then(|fields| store_openvpn(vault, &fields))
+            .map_err(|e| format!("Failed to store TA key: {e}"))
     })?;
 
     state.log_ok("generate_ta", Some("Generated TLS Authentication key".to_string()));
@@ -215,66 +142,53 @@ pub async fn setup_openvpn_server(
     let template_name = request.template_name;
 
     info!("[tauri] setup_openvpn_server: template='{template_name}'");
-    state.with_op(|op| {
-        let (item_exists, fields) = read_openvpn_fields(op)?;
-        let mut attrs: Vec<String> = Vec::new();
+    state.with_vault(|vault| {
+        let item = openvpn_item(vault)?;
+        let has = |label: &str| conf_field(item.as_ref(), label).is_some();
+        let assign = |label: &str, value: &dyn std::fmt::Display| op::assign(label, value).map_err(|e| e.to_string());
+        let mut attrs: Vec<Assignment> = Vec::new();
 
         // Server defaults — only add if missing
-        if !fields.contains_key("hostname") {
-            attrs.push("server.hostname[text]=vpn.domain.com.au".to_string());
-        }
-        if !fields.contains_key("port") {
-            attrs.push("server.port[text]=1194".to_string());
-        }
-        if !fields.contains_key("cipher") {
-            attrs.push("server.cipher[text]=aes-256-gcm".to_string());
-        }
-        if !fields.contains_key("auth") {
-            attrs.push("server.auth[text]=sha256".to_string());
+        for (label, value) in [
+            ("hostname", "vpn.domain.com.au"),
+            ("port", "1194"),
+            ("cipher", "aes-256-gcm"),
+            ("auth", "sha256"),
+        ] {
+            if !has(label) {
+                attrs.push(assign(&format!("server.{label}[text]"), &value)?);
+            }
         }
 
         // DH parameters — generate if missing
-        if !fields.contains_key("dh_parameters") {
+        if !has(DEFAULT_OP_CONF.dh_item) {
             let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)
                 .map_err(|e| format!("Failed to generate DH parameters: {e}"))?;
             let dh_keysize = verify_dh_params(dh_pem.as_bytes())
                 .map_err(|e| format!("Failed to verify DH parameters: {e}"))?;
-            attrs.push(format!("{}={}", DEFAULT_OP_CONF.dh_item, dh_pem));
-            attrs.push(format!("{}={}", DEFAULT_OP_CONF.dh_key_size_item, dh_keysize));
+            attrs.push(assign(DEFAULT_OP_CONF.dh_item, &dh_pem)?);
+            attrs.push(assign(DEFAULT_OP_CONF.dh_key_size_item, &dh_keysize)?);
         }
 
         // TA key — generate if missing
-        if !fields.contains_key("static_key") {
+        if !has(DEFAULT_OP_CONF.ta_item) {
             let ta_pem = generate_ta_key(DEFAULT_KEY_SIZE.ta)
                 .map_err(|e| format!("Failed to generate TA key: {e}"))?;
             let ta_keysize = verify_ta_key(ta_pem.as_bytes())
                 .map_err(|e| format!("Failed to verify TA key: {e}"))?;
-            attrs.push(format!("{}={}", DEFAULT_OP_CONF.ta_item, ta_pem));
-            attrs.push(format!("{}={}", DEFAULT_OP_CONF.ta_key_size_item, ta_keysize));
+            attrs.push(assign(DEFAULT_OP_CONF.ta_item, &ta_pem)?);
+            attrs.push(assign(DEFAULT_OP_CONF.ta_key_size_item, &ta_keysize)?);
         }
 
         if attrs.is_empty() {
             return Ok(());
         }
 
-        let action = if item_exists {
-            StoreAction::Edit
-        } else {
-            StoreAction::Create
+        let stored = match item {
+            Some(item) => vault.edit_item(&ItemRef::from(&item), &attrs),
+            None => vault.create_item(DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, &attrs).map(drop),
         };
-
-        let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-        op.store_item(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&attr_refs),
-            action,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )
-        .map_err(|e| format!("Failed to store OpenVPN configuration: {e}"))?;
-
-        Ok(())
+        stored.map_err(|e| format!("Failed to store OpenVPN configuration: {}", OpcaError::from(e)))
     })?;
 
     with_ca(&state, "setup_openvpn", |ca| openvpn::add_starter_template(ca, &template_name))?;
@@ -284,6 +198,14 @@ pub async fn setup_openvpn_server(
         Some(format!("OpenVPN server setup complete (template: {template_name})")),
     );
     get_openvpn_params(state).await
+}
+
+/// The vault named `dest`, or `vault` itself when there is none.
+fn dest_or_own(vault: &Vault<Runner>, dest: Option<&str>) -> Result<Vault<Runner>, OpcaError> {
+    match dest {
+        Some(name) => Ok(vault.op().open_vault(name)?),
+        None => Ok(vault.clone()),
+    }
 }
 
 /// Run `f` against the loaded CA, logging a failure under `action`.
@@ -522,27 +444,20 @@ fn do_generate_openvpn_profile(
     let template_content =
         with_ca(state, "generate_profile", |ca| openvpn::get_template(ca, template_name))?.content;
 
-    state.with_op(|op| {
+    state.with_vault(|vault| {
         // Inject op:// references with OPCA_USER pointing at the resolved item.
-        let mut env_vars = HashMap::new();
-        env_vars.insert("OPCA_USER".to_string(), opca_user.clone());
+        let profile_content = vault
+            .op()
+            .inject(&template_content, &[("OPCA_USER", &opca_user)])
+            .map_err(|e| format!("Failed to inject template references: {}", OpcaError::from(e)))?;
 
-        let profile_content = op
-            .inject_item(&template_content, Some(&env_vars))
-            .map_err(|e| format!("Failed to inject template references: {e}"))?;
-
-        // Auto (create-or-edit) so regenerating the same cert overwrites its
+        // Create-or-edit so regenerating the same cert overwrites its
         // existing document instead of failing/duplicating.
-        op.store_document(
-            &title,
-            &format!("{cn}-{template_name}.ovpn"),
-            &profile_content,
-            StoreAction::Auto,
-            dest_vault,
-        )
-        .map_err(|e| format!("Failed to store VPN profile: {e}"))?;
-
-        Ok(())
+        dest_or_own(vault, dest_vault)
+            .and_then(|dest| {
+                op::put_document(&dest, &title, &format!("{cn}-{template_name}.ovpn"), profile_content.expose())
+            })
+            .map_err(|e| format!("Failed to store VPN profile: {e}"))
     })?;
 
     // Record the profile in the database and persist it, so the Profiles list
@@ -846,19 +761,14 @@ pub async fn send_profile_to_vault(
     }
 
     info!("[tauri] send_profile_to_vault: title='{title}' dest='{dest_vault}'");
-    state.with_op(|op| {
-        let content = op
-            .get_document(&title)
-            .map_err(|e| format!("Failed to read profile '{title}': {e}"))?;
+    state.with_vault(|vault| {
+        let content = vault
+            .document(&ItemRef::title(&title))
+            .map_err(|e| format!("Failed to read profile '{title}': {}", OpcaError::from(e)))?;
 
-        op.store_document(
-            &title,
-            &format!("{cn}.ovpn"),
-            &content,
-            StoreAction::Create,
-            Some(&dest_vault),
-        )
-        .map_err(|e| format!("Failed to send profile to vault '{dest_vault}': {e}"))?;
+        dest_or_own(vault, Some(&dest_vault))
+            .and_then(|dest| Ok(dest.create_document(&title, &format!("{cn}.ovpn"), content.expose())?))
+            .map_err(|e| format!("Failed to send profile to vault '{dest_vault}': {e}"))?;
 
         Ok(true)
     })?;

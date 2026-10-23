@@ -21,7 +21,7 @@ pub fn dispatch(cli: Cli) -> Result<(), OpcaError> {
         action: crate::CaAction::Init { create_vault: true, .. },
     }) = &cli.command
     {
-        let created = op::create_vault_standalone(&cli.vault, cli.account.as_deref())?;
+        let created = op::create_vault(&op::client(ShellRunner::new(), cli.account.as_deref()), &cli.vault)?;
         output::print_result(&format!("Created vault {}", created.name), true);
     }
 

@@ -1840,12 +1840,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_home"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f84e12ccf0a7ddc17a6c41c93326024c42920d7ee630d04950e6926645c0fe"
-
-[[package]]
 name = "env_logger"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3973,8 +3967,9 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "which",
+ "tracing",
  "whoami",
+ "wslib-1password",
  "wslib-crypto",
  "wslib-crypto-ca",
  "wslib-crypto-x509",
@@ -6935,6 +6930,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -7537,18 +7533,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
-name = "which"
-version = "7.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24d643ce3fd3e5b54854602a080f34fb10ab75e0b813ee32d00ca2b44fa74762"
-dependencies = [
- "either",
- "env_home",
- "rustix",
- "winsafe",
-]
-
-[[package]]
 name = "whoami"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8026,12 +8010,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "winsafe"
-version = "0.0.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
-
-[[package]]
 name = "wit-bindgen"
 version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8188,6 +8166,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "wslib-1password"
+version = "0.1.1"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "0d8a77d32fa6fcddbd4d0358945f99804a5fc74c71fcb716c452e846c27af6e2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "wslib-secret",
+]
+
+[[package]]
 name = "wslib-crypto"
 version = "0.1.0"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
@@ -8253,6 +8244,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "wslib-secret"
+version = "0.1.1"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "1cecb90fec3688b4d4e14cfcd6aca61f6b41500f1244f65e3e697abf1b0da931"
+dependencies = [
+ "serde",
+ "subtle",
 ]
 
 [[package]]

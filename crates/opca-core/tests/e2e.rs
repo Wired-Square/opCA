@@ -15,7 +15,7 @@
 use std::sync::Mutex;
 
 use opca_core::constants::{DEFAULT_OP_CONF, DEFAULT_STORAGE_CONF};
-use opca_core::op::{create_vault_standalone, CommandRunner, Op};
+use opca_core::op::{self, ItemRef, Runner, ShellRunner, Vault, VaultInfo};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertType, KeyAlgorithm};
 use opca_core::services::database::models::{CaConfig, CertLookup};
@@ -42,8 +42,12 @@ fn test_account() -> Option<String> {
     std::env::var("OPCA_TEST_ACCOUNT").ok()
 }
 
-fn make_op(vault: &str) -> Op {
-    Op::new(vault, test_account(), None).expect("Op::new failed")
+fn make_vault(vault: &str) -> Vault {
+    op::connect(ShellRunner::new(), vault, test_account().as_deref()).expect("connect failed")
+}
+
+fn create_vault(name: &str) -> VaultInfo {
+    op::create_vault(&op::client(ShellRunner::new(), test_account().as_deref()), name).expect("vault create failed")
 }
 
 /// Skip the test if `OPCA_INTEGRATION_TEST` is not set.
@@ -61,7 +65,7 @@ macro_rules! skip_unless_integration {
 // ---------------------------------------------------------------------------
 
 /// Serial of the cert matching `lookup` (any status).
-fn cert_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, lookup: &CertLookup) -> String {
+fn cert_serial<R: Runner>(ca: &CertificateAuthority<R>, lookup: &CertLookup) -> String {
     ca.ca_database
         .as_ref()
         .expect("database missing")
@@ -72,7 +76,7 @@ fn cert_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, lookup: &CertLook
 }
 
 /// Stored title (`CRT_<serial>_<cn>`) of the cert with the given serial.
-fn cert_title_for_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, serial: &str) -> String {
+fn cert_title_for_serial<R: Runner>(ca: &CertificateAuthority<R>, serial: &str) -> String {
     ca.ca_database
         .as_ref()
         .expect("database missing")
@@ -84,20 +88,15 @@ fn cert_title_for_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, serial:
 }
 
 /// State of `title` in the vault (`ACTIVE`/`ARCHIVED`), including archived items.
-fn item_state(op: &Op, title: &str) -> String {
-    let mut args = vec!["item", "get", title, "--vault", &op.vault, "--include-archive", "--format=json"];
-    if let Some(account) = op.account() {
-        args.extend(["--account", account]);
-    }
-    let out = op.runner().run("op", &args, None, None).expect("op item get failed");
-    assert!(out.success, "op item get {title}: {}", out.stderr);
-    let item: serde_json::Value = serde_json::from_str(&out.stdout).expect("item json");
+fn item_state(vault: &Vault, title: &str) -> String {
+    let json = vault.clone().including_archive().item_json(&ItemRef::title(title)).expect("op item get failed");
+    let item: serde_json::Value = serde_json::from_str(json.expose()).expect("item json");
     item["state"].as_str().unwrap_or("ACTIVE").to_string()
 }
 
 /// Assert a renew/rekey predecessor was auto-ignored with the expected reason
 /// and a `replaced by <new_serial>` note.
-fn assert_predecessor_ignored<R: CommandRunner>(
+fn assert_predecessor_ignored<R: Runner>(
     ca: &CertificateAuthority<R>,
     old_serial: &str,
     new_serial: &str,
@@ -127,7 +126,7 @@ fn t01_create_vault() {
     skip_unless_integration!();
 
     let vault_name = format!("opca-e2e-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
-    let info = create_vault_standalone(&vault_name, test_account().as_deref()).expect("vault create failed");
+    let info = create_vault(&vault_name);
     eprintln!("[e2e] Created vault: {} (id={})", info.name, info.id);
 
     let mut state = STATE.lock().unwrap();
@@ -146,7 +145,7 @@ fn t10_ca_init() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
     let config = CaConfig {
         cn: Some("OPCA E2E Test CA".to_string()),
@@ -165,7 +164,7 @@ fn t10_ca_init() {
         ..CaConfig::default()
     };
 
-    let ca = CertificateAuthority::init(op, &config).expect("CA init failed");
+    let ca = CertificateAuthority::init(vault, &config).expect("CA init failed");
     let bundle = ca.ca_bundle.as_ref().expect("CA bundle missing");
     assert!(bundle.certificate.is_some(), "CA certificate missing");
     eprintln!("[e2e] CA initialised successfully");
@@ -177,9 +176,9 @@ fn t11_ca_retrieve() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
     let bundle = ca.ca_bundle.as_ref().expect("CA bundle missing");
     let cert = bundle.certificate.as_ref().expect("certificate missing");
 
@@ -201,9 +200,9 @@ fn t12_ca_export() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
     let pem = ca
         .ca_bundle
         .as_ref()
@@ -221,9 +220,9 @@ fn t20_cert_create_server() {
 
     let mut state = STATE.lock().unwrap();
     let s = state.as_mut().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
 
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-webserver.example.com".to_string()),
@@ -255,9 +254,9 @@ fn t21_cert_create_client() {
 
     let mut state = STATE.lock().unwrap();
     let s = state.as_mut().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
 
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-vpnclient".to_string()),
@@ -281,9 +280,9 @@ fn t22_cert_list() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
     let db = ca.ca_database.as_ref().expect("database missing");
     let certs = db.query_all_certs().expect("query_all_certs failed");
 
@@ -301,9 +300,9 @@ fn t23_cert_renew() {
 
     let mut state = STATE.lock().unwrap();
     let s = state.as_mut().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
 
     let lookup = CertLookup::Title(s.server_cert_title.clone());
     let old_serial = cert_serial(&ca, &lookup);
@@ -329,9 +328,9 @@ fn t23b_cert_rekey() {
 
     let mut state = STATE.lock().unwrap();
     let s = state.as_mut().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
 
     let lookup = CertLookup::Title(s.server_cert_title.clone());
     let old_serial = cert_serial(&ca, &lookup);
@@ -356,9 +355,9 @@ fn t24_cert_revoke() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
 
     let lookup = CertLookup::Title(s.client_cert_title.clone());
     let result = ca.revoke_certificate(&lookup).expect("revoke failed");
@@ -372,7 +371,7 @@ fn t25_cert_create_with_days() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let mut ca = CertificateAuthority::retrieve(make_op(&s.vault)).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
 
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-shortlived".to_string()),
@@ -395,8 +394,8 @@ fn t26_cert_delete_revoked() {
 
     let mut state = STATE.lock().unwrap();
     let s = state.as_mut().expect("t01 must run first");
-    let op = make_op(&s.vault);
-    let mut ca = CertificateAuthority::retrieve(op.clone()).expect("CA retrieve failed");
+    let vault = make_vault(&s.vault);
+    let mut ca = CertificateAuthority::retrieve(vault.clone()).expect("CA retrieve failed");
 
     let valid_serial = cert_serial(&ca, &CertLookup::Title(s.server_cert_title.clone()));
     assert!(ca.delete_certificate(&valid_serial).is_err(), "a valid certificate must not be deletable");
@@ -407,7 +406,7 @@ fn t26_cert_delete_revoked() {
     let deleted = ca.delete_certificate(&serial).expect("delete failed");
 
     let title = deleted.title.expect("deleted cert title");
-    assert_eq!(item_state(&op, &title), "ARCHIVED");
+    assert_eq!(item_state(&vault, &title), "ARCHIVED");
     let row = ca
         .ca_database
         .as_ref()
@@ -427,9 +426,9 @@ fn t30_crl_generate() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
     let crl_pem = ca.generate_crl().expect("generate_crl failed");
 
     assert!(crl_pem.contains("BEGIN X509 CRL"), "CRL missing header");
@@ -458,11 +457,10 @@ fn t31_crl_verify() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
     // Re-retrieve — CRL was stored in 1Password by t30
-    let crl_pem = op
-        .get_document(DEFAULT_OP_CONF.crl_title)
+    let crl_pem = op::document_text(&vault, DEFAULT_OP_CONF.crl_title)
         .expect("CRL document not found in vault");
 
     assert!(crl_pem.contains("BEGIN X509 CRL"));
@@ -486,7 +484,7 @@ fn t32_crl_batch_generate_and_revoke() {
     let store = tempfile::tempdir().expect("temp store");
     std::fs::create_dir(store.path().join("pending-crl")).unwrap();
     let batch_path = store.path().join(DEFAULT_STORAGE_CONF.crl_batch_file);
-    let mut ca = CertificateAuthority::retrieve(make_op(&s.vault)).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
     let set_batches = |ca: &mut CertificateAuthority<_>, on: bool, store: String| {
         ca.ca_database.as_ref().unwrap()
             .update_config(&CaConfig { crl_batch_enabled: Some(on), ca_private_store: Some(store), ..CaConfig::default() })
@@ -519,7 +517,7 @@ fn t32_crl_batch_generate_and_revoke() {
         crl.get_revoked().into_iter().flatten().map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string()).collect()
     };
     assert!(resigned.iter().all(|crl| revoked(crl).contains(&serial)));
-    let reloaded = CertificateAuthority::retrieve(make_op(&s.vault)).expect("CA retrieve failed");
+    let reloaded = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
     let batch = reloaded.ca_database.as_ref().unwrap().get_crl_batch().unwrap().expect("batch recorded");
     assert_eq!(batch.first_number, number(&resigned[0]));
 
@@ -533,9 +531,9 @@ fn t40_database_counts() {
 
     let state = STATE.lock().unwrap();
     let s = state.as_ref().expect("t01 must run first");
-    let op = make_op(&s.vault);
+    let vault = make_vault(&s.vault);
 
-    let mut ca = CertificateAuthority::retrieve(op).expect("CA retrieve failed");
+    let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
     let db = ca.ca_database.as_mut().expect("database missing");
     db.process_ca_database(None, false).expect("process_ca_database failed");
 
@@ -569,8 +567,8 @@ fn t50_vault_backup_restore() {
     let s = state.as_mut().expect("t01 must run first");
 
     // --- Backup from source vault ---
-    let op_src = make_op(&s.vault);
-    let vb = VaultBackup::new(&op_src, &DEFAULT_OP_CONF);
+    let vault_src = make_vault(&s.vault);
+    let vb = VaultBackup::new(&vault_src, &DEFAULT_OP_CONF);
     let payload = vb.create_backup().expect("create_backup failed");
 
     assert!(payload.items.len() >= 3, "Expected at least CA + DB + certs");
@@ -583,8 +581,7 @@ fn t50_vault_backup_restore() {
 
     // --- Create a new empty vault for restore ---
     let restore_vault_name = format!("{}-restore", s.vault);
-    let restore_info = create_vault_standalone(&restore_vault_name, test_account().as_deref())
-        .expect("restore vault create failed");
+    let restore_info = create_vault(&restore_vault_name);
     eprintln!(
         "[e2e] Created restore vault: {} (id={})",
         restore_info.name, restore_info.id
@@ -592,8 +589,8 @@ fn t50_vault_backup_restore() {
     s.restore_vault = restore_vault_name.clone();
 
     // --- Restore into the new vault ---
-    let op_dst = make_op(&restore_vault_name);
-    let vb_dst = VaultBackup::new(&op_dst, &DEFAULT_OP_CONF);
+    let vault_dst = make_vault(&restore_vault_name);
+    let vb_dst = VaultBackup::new(&vault_dst, &DEFAULT_OP_CONF);
     let counts = vb_dst
         .restore_backup(&payload, None)
         .expect("restore_backup failed");
@@ -604,11 +601,11 @@ fn t50_vault_backup_restore() {
 
     // --- Verify CA exists in restored vault ---
     assert!(
-        op_dst.item_exists(DEFAULT_OP_CONF.ca_title),
+        vault_dst.item_exists(&ItemRef::title(DEFAULT_OP_CONF.ca_title)).unwrap(),
         "CA item not found in restored vault"
     );
 
-    let ca = CertificateAuthority::retrieve(op_dst).expect("retrieve from restored vault failed");
+    let ca = CertificateAuthority::retrieve(vault_dst).expect("retrieve from restored vault failed");
     let bundle = ca.ca_bundle.as_ref().expect("CA bundle missing");
     assert!(bundle.certificate.is_some(), "Restored CA has no certificate");
     eprintln!("[e2e] Verified CA in restored vault");
@@ -625,9 +622,9 @@ fn t90_cleanup() {
 
     // `op vault delete` is account-wide, so the test vault's own `Op` can
     // delete the restore vault and then itself.
-    let op = make_op(&s.vault);
+    let test_vault = make_vault(&s.vault);
     for vault in [&s.restore_vault, &s.vault].into_iter().filter(|v| !v.is_empty()) {
-        match op.vault_delete(vault) {
+        match test_vault.op().delete_vault_permanently(vault) {
             Ok(()) => eprintln!("[e2e] Deleted vault: {vault}"),
             Err(e) => eprintln!("[e2e] Warning: failed to delete vault '{vault}': {e}"),
         }
