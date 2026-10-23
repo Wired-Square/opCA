@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use log::{info, warn, error, debug};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use opca_core::op::ShellRunner;
+use opca_core::op::{self, ShellRunner};
 use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
 use opca_core::services::database::CaConfig;
 use opca_core::services::local_backup::LocalBackup;
@@ -108,7 +108,7 @@ pub async fn init_ca(
 
     match CertificateAuthority::init(op, &ca_config) {
         Ok(mut ca) => {
-            ca.local_backup = LocalBackup::if_enabled(ca.op.account());
+            ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
             conn.ca = Some(ca);
             conn.op = None;
             state.log_ok("init_ca", Some("Certificate Authority initialised".to_string()));
@@ -195,7 +195,7 @@ pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> R
         let _ = app.emit("op-status", Some("sync_private_store"));
         let result = needs_aws_credentials(&job.uri)
             .then(|| {
-                get_aws_credentials(&ShellRunner, job.account.as_deref(), job.region.as_deref())
+                get_aws_credentials(&op::client(ShellRunner::new(), job.account.as_deref()), job.region.as_deref())
             })
             .transpose()
             .and_then(|creds| storage_from_uri_with_creds(&job.uri, creds.as_ref()))

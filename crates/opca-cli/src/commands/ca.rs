@@ -1,5 +1,5 @@
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner};
+use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::ca::{CaExpiryWarning, CertificateAuthority};
 use opca_core::services::cert::KeyAlgorithm;
 use opca_core::services::database::CaConfig;
@@ -62,7 +62,7 @@ pub fn dispatch(args: CaArgs, app: &mut AppContext<ShellRunner>) -> Result<(), O
     }
 }
 
-fn handle_init<R: CommandRunner>(
+fn handle_init<R: Runner>(
     app: &mut AppContext<R>,
     cn: String,
     org: String,
@@ -109,7 +109,7 @@ fn handle_init<R: CommandRunner>(
     })
 }
 
-fn handle_import<R: CommandRunner>(
+fn handle_import<R: Runner>(
     app: &mut AppContext<R>,
     cert_file: String,
     key_file: String,
@@ -156,7 +156,7 @@ fn handle_import<R: CommandRunner>(
     })
 }
 
-fn handle_export<R: CommandRunner>(
+fn handle_export<R: Runner>(
     app: &mut AppContext<R>,
     with_key: bool,
     to_stdout: bool,
@@ -208,7 +208,7 @@ fn handle_export<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_list<R: CommandRunner>(
+fn handle_list<R: Runner>(
     app: &mut AppContext<R>,
     expired: bool,
     revoked: bool,
@@ -335,7 +335,7 @@ fn handle_list<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_upload<R: CommandRunner>(
+fn handle_upload<R: Runner>(
     app: &mut AppContext<R>,
     stores: Vec<String>,
 ) -> Result<(), OpcaError> {
@@ -356,7 +356,7 @@ fn handle_upload<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_resign<R: CommandRunner>(
+fn handle_resign<R: Runner>(
     app: &mut AppContext<R>,
     ca_days: i64,
 ) -> Result<(), OpcaError> {
@@ -379,7 +379,7 @@ fn handle_resign<R: CommandRunner>(
 }
 
 /// Print a warning if the CA certificate is approaching expiry.
-pub fn warn_ca_expiry<R: CommandRunner>(app: &AppContext<R>) {
+pub fn warn_ca_expiry<R: Runner>(app: &AppContext<R>) {
     if let Some(ref ca) = app.ca {
         match ca.check_ca_expiry() {
             CaExpiryWarning::Critical { days_remaining } => {

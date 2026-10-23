@@ -26,8 +26,8 @@ pub fn dispatch(args: AwsArgs, app: &mut AppContext<ShellRunner>) -> Result<(), 
 }
 
 fn list(app: &AppContext<ShellRunner>, pattern: Option<String>) -> Result<(), OpcaError> {
-    let op = app.op()?;
-    let all = list_aws_credential_items(op.runner(), op.account())?;
+    let op = app.op()?.op();
+    let all = list_aws_credential_items(op)?;
     let selected = settings::aws_credential_item(op.account());
 
     let needle = pattern.unwrap_or_default().to_lowercase();
@@ -60,7 +60,7 @@ fn list(app: &AppContext<ShellRunner>, pattern: Option<String>) -> Result<(), Op
 }
 
 fn show(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
-    let op = app.op()?;
+    let op = app.op()?.op();
     // Name the account as the operator would recognise it: this line is where
     // someone works out why the GUI's selection isn't showing up here.
     let account = settings::account_label(op.account())
@@ -72,7 +72,7 @@ fn show(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
 
     match settings::aws_credential_item(op.account()) {
         Some(item_id) => {
-            let creds = get_aws_credentials_for_item(op.runner(), op.account(), &item_id)?;
+            let creds = get_aws_credentials_for_item(op, &item_id)?;
             output::info("Item", &item_id);
             output::info("Access key ID", &creds.access_key_id);
             output::info("Settings file", &settings::settings_path()?.display().to_string());
@@ -83,11 +83,11 @@ fn show(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
 }
 
 fn select(app: &AppContext<ShellRunner>, item: String) -> Result<(), OpcaError> {
-    let op = app.op()?;
+    let op = app.op()?.op();
 
     // Validate by reading the item, so a bad pick fails now rather than at
     // the next upload. `op item get` accepts an ID or a title.
-    let creds = get_aws_credentials_for_item(op.runner(), op.account(), &item)?;
+    let creds = get_aws_credentials_for_item(op, &item)?;
     settings::set_aws_credential_item(op.account(), Some(&item))?;
 
     output::print_result(
@@ -98,7 +98,7 @@ fn select(app: &AppContext<ShellRunner>, item: String) -> Result<(), OpcaError> 
 }
 
 fn clear(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
-    let op = app.op()?;
+    let op = app.op()?.op();
     settings::set_aws_credential_item(op.account(), None)?;
     output::print_result("AWS credential selection cleared", true);
     Ok(())

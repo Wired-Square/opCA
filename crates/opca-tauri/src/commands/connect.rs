@@ -3,7 +3,8 @@ use serde::Serialize;
 use tauri::State;
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::{self, AccountInfo, Op, VaultInfo};
+use opca_core::error::OpcaError;
+use opca_core::op::{self, AccountInfo, ItemRef, ShellRunner, Vault, VaultInfo};
 use opca_core::services::database::CertificateAuthorityDB;
 
 use crate::state::{AppState, Connection, Runner};
@@ -24,13 +25,13 @@ pub struct ConnectionInfo {
 
 /// Determine the vault state by probing 1Password, recording why the
 /// database is unreadable (if it is) for the recovery dialog.
-fn detect_vault_state(state: &AppState, op: &Op<Runner>) -> String {
-    let ca_exists = op.item_exists(DEFAULT_OP_CONF.ca_title);
+fn detect_vault_state(state: &AppState, op: &Vault<Runner>) -> Result<String, OpcaError> {
+    let ca_exists = op.item_exists(&ItemRef::title(DEFAULT_OP_CONF.ca_title))?;
     let mut database_error = state.database_error.lock().expect("mutex poisoned");
     *database_error = None;
 
-    if ca_exists {
-        match op.get_document(DEFAULT_OP_CONF.ca_database_title) {
+    Ok(if ca_exists {
+        match op::document_text(op, DEFAULT_OP_CONF.ca_database_title) {
             Ok(sql) => match CertificateAuthorityDB::from_sql_dump(&sql) {
                 Ok(_) => "valid_ca".to_string(),
                 Err(e) => {
@@ -43,12 +44,11 @@ fn detect_vault_state(state: &AppState, op: &Op<Runner>) -> String {
         }
     } else {
         // No CA item — is the vault completely empty?
-        match op.vault_item_count() {
-            Ok(0) => "empty_vault".to_string(),
-            Ok(_) => "invalid_ca".to_string(),
-            Err(_) => "empty_vault".to_string(), // assume empty on error
+        match op.item_count()? {
+            0 => "empty_vault".to_string(),
+            _ => "invalid_ca".to_string(),
         }
-    }
+    })
 }
 
 #[tauri::command]
@@ -58,16 +58,16 @@ pub async fn connect(
     account: Option<String>,
 ) -> Result<ConnectionInfo, String> {
     info!("[tauri] connect: vault='{}' account={:?}", vault, account);
-    let op = Op::sign_in(&vault, account.clone(), None, Runner::default()).map_err(|e| {
+    let connected = op::connect(Runner::default(), &vault, account.as_deref())
+        .and_then(|op| Ok((detect_vault_state(&state, &op)?, op)));
+    let (vault_state, op) = connected.map_err(|e| {
         warn!("[tauri] connect failed: {e}");
         e.to_string()
     })?;
 
-    let vault_state = detect_vault_state(&state, &op);
-
     let info = ConnectionInfo {
         connected: true,
-        vault: op.vault.clone(),
+        vault: op.info().name.clone(),
         account: account.clone(),
         vault_state,
     };
@@ -102,14 +102,14 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn list_vaults(account: Option<String>) -> Result<Vec<VaultInfo>, String> {
-    op::list_vaults_standalone(account.as_deref()).map_err(|e| e.to_string())
+    op::client(ShellRunner::new(), account.as_deref()).vaults().map_err(|e| e.to_string())
 }
 
 /// The accounts configured in the local `op` CLI, for the connect screen's
 /// account picker. Works signed out.
 #[tauri::command]
 pub async fn list_accounts() -> Result<Vec<AccountInfo>, String> {
-    op::list_accounts_standalone().map_err(|e| e.to_string())
+    op::accounts(&ShellRunner::new()).map_err(|e| e.to_string())
 }
 
 /// Works before connecting, so the connect screen can start a CA in a new vault.
@@ -120,7 +120,8 @@ pub async fn create_vault(
     account: Option<String>,
 ) -> Result<VaultInfo, String> {
     info!("[tauri] create_vault: name='{name}' account={account:?}");
-    let result = op::create_vault_standalone(&name, account.as_deref()).map_err(|e| e.to_string())?;
+    let result = op::create_vault(&op::client(ShellRunner::new(), account.as_deref()), &name)
+        .map_err(|e| e.to_string())?;
     state.log_ok("create_vault", Some(format!("Created vault '{}'", result.name)));
     Ok(result)
 }
@@ -128,7 +129,7 @@ pub async fn create_vault(
 /// Re-check the vault state (e.g. after CA init/import/restore).
 #[tauri::command]
 pub async fn check_vault_state(state: State<'_, AppState>) -> Result<String, String> {
-    state.with_op(|op| Ok(detect_vault_state(&state, op)))
+    state.with_op(|op| detect_vault_state(&state, op).map_err(|e| e.to_string()))
 }
 
 /// Check whether the 1Password CLI binary is available on PATH.
@@ -141,10 +142,10 @@ pub struct OpCliStatus {
 #[tauri::command]
 pub async fn check_op_cli() -> OpCliStatus {
     debug!("[tauri] check_op_cli");
-    match op::check_cli_available() {
+    match op::cli_path() {
         Some(path) => OpCliStatus {
             found: true,
-            path: Some(path),
+            path: Some(path.display().to_string()),
         },
         None => OpCliStatus {
             found: false,

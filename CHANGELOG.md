@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- 1Password access now goes through `wslib-1password`. Item fields reach `op`
+  on stdin when an item is created, every call names the vault by id, a title
+  two items share fails naming both ids, and a signed-out `op` is reported
+  rather than read as an empty vault. Storing the CA database, the CRL and the
+  OpenVPN item takes one `op` call where it took two, and the OpenVPN and DKIM
+  pages read their item once instead of once per field.
 - The MCP dev harness now comes from `wslib-mcp` 0.1.0 on the private
   `wired-square` cargo registry, replacing the `wslib-ai-mcp` git dependency.
   It adds a read-only `console` tool for the page's errors and warnings.

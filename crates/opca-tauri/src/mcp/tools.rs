@@ -95,8 +95,8 @@ impl OpcaTools {
         let op = conn.ca.as_ref().map(|ca| &ca.op).or(conn.op.as_ref());
         ok_json(json!({
             "connected": op.is_some(),
-            "account": op.and_then(|op| op.account()),
-            "vault": op.map(|op| &op.vault),
+            "account": op.and_then(|op| op.op().account()),
+            "vault": op.map(|op| &op.info().name),
             "ca_loaded": conn.ca.is_some(),
         }))
     }

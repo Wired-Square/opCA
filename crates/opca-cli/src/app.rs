@@ -1,16 +1,16 @@
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, Op, ShellRunner};
+use opca_core::op::{self, Runner, ShellRunner, Vault};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::local_backup::{age_phrase, BackupSource, LocalBackup};
 use opca_core::vault_lock::VaultLock;
 
 /// CLI application context.
 ///
-/// Mirrors the Tauri `AppState` pattern: `Op` ownership moves into
+/// Mirrors the Tauri `AppState` pattern: the vault moves into
 /// `CertificateAuthority` when the CA is loaded, so `op()` checks
-/// `ca.op` first, then falls back to the standalone `op`.
-pub struct AppContext<R: CommandRunner> {
-    standalone_op: Option<Op<R>>,
+/// `ca.op` first, then falls back to the standalone vault.
+pub struct AppContext<R: Runner> {
+    standalone_op: Option<Vault<R>>,
     pub ca: Option<CertificateAuthority<R>>,
     pub vault_lock: VaultLock,
 }
@@ -18,7 +18,7 @@ pub struct AppContext<R: CommandRunner> {
 impl AppContext<ShellRunner> {
     /// Create a new context by connecting to 1Password.
     pub fn new(vault: &str, account: Option<String>) -> Result<Self, OpcaError> {
-        let op = Op::new(vault, account, None)?;
+        let op = op::connect(ShellRunner::new(), vault, account.as_deref())?;
         Ok(Self {
             standalone_op: Some(op),
             ca: None,
@@ -27,16 +27,17 @@ impl AppContext<ShellRunner> {
     }
 }
 
-impl<R: CommandRunner> AppContext<R> {
-    /// Get a reference to the `Op` client, whether it is held standalone
-    /// or inside the `CertificateAuthority`.
-    pub fn op(&self) -> Result<&Op<R>, OpcaError> {
-        if let Some(ref ca) = self.ca {
-            return Ok(&ca.op);
+impl<R: Runner> AppContext<R> {
+    /// The connected vault, whether it is held standalone or inside the
+    /// `CertificateAuthority`.
+    pub fn op(&self) -> Result<&Vault<R>, OpcaError> {
+        match &self.ca {
+            Some(ca) => Ok(&ca.op),
+            None => self
+                .standalone_op
+                .as_ref()
+                .ok_or_else(|| OpcaError::Other("Not connected".into())),
         }
-        self.standalone_op
-            .as_ref()
-            .ok_or_else(|| OpcaError::Other("Not connected".into()))
     }
 
     /// Ensure the CA is loaded, lazily retrieving from 1Password.
@@ -49,10 +50,10 @@ impl<R: CommandRunner> AppContext<R> {
             .take()
             .ok_or_else(|| OpcaError::Other("Not connected".into()))?;
         let source = BackupSource::of(&op);
-        let account = op.account().map(String::from);
+        let account = op.op().account().map(String::from);
         match CertificateAuthority::retrieve(op) {
             Ok(mut ca) => {
-                ca.local_backup = LocalBackup::if_enabled(ca.op.account());
+                ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
                 self.ca = Some(ca);
                 Ok(())
             }
@@ -63,9 +64,9 @@ impl<R: CommandRunner> AppContext<R> {
         }
     }
 
-    /// Take the standalone `Op` out of the context (consumes it).
-    /// Used by init-like commands that need to pass `Op` to a CA constructor.
-    pub fn take_op(&mut self) -> Result<Op<R>, OpcaError> {
+    /// Take the standalone vault out of the context (consumes it).
+    /// Used by init-like commands that need to pass it to a CA constructor.
+    pub fn take_op(&mut self) -> Result<Vault<R>, OpcaError> {
         self.standalone_op
             .take()
             .ok_or_else(|| OpcaError::Other("Not connected".into()))
@@ -73,37 +74,23 @@ impl<R: CommandRunner> AppContext<R> {
 
     /// Acquire the vault lock for a mutating operation.
     pub fn lock(&mut self, operation: &str) -> Result<(), OpcaError> {
-        // Get a raw pointer to Op to break the borrow overlap with vault_lock.
-        // This is safe because vault_lock.acquire only reads Op, and we hold
-        // &mut self so no other references exist.
-        let op_ref: &Op<R> = if let Some(ref ca) = self.ca {
-            &ca.op
-        } else {
-            self.standalone_op
-                .as_ref()
-                .ok_or_else(|| OpcaError::Other("Not connected".into()))?
+        let vault = match &self.ca {
+            Some(ca) => &ca.op,
+            None => self.standalone_op.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
         };
-        // SAFETY: op_ref is a reborrow that does not alias vault_lock.
-        // The borrow checker cannot see through the disjoint fields, so we
-        // use an unsafe pointer cast to convince it.
-        let op_ptr: *const Op<R> = op_ref;
-        unsafe { self.vault_lock.acquire(&*op_ptr, operation, VaultLock::default_ttl()) }
+        self.vault_lock.acquire(vault, operation, VaultLock::default_ttl())
     }
 
     /// Release the vault lock.
     pub fn unlock(&mut self) -> Result<(), OpcaError> {
-        if self.vault_lock.held() {
-            let op_ref: &Op<R> = if let Some(ref ca) = self.ca {
-                &ca.op
-            } else {
-                self.standalone_op
-                    .as_ref()
-                    .ok_or_else(|| OpcaError::Other("Not connected".into()))?
-            };
-            let op_ptr: *const Op<R> = op_ref;
-            unsafe { self.vault_lock.release(&*op_ptr)? };
+        if !self.vault_lock.held() {
+            return Ok(());
         }
-        Ok(())
+        let vault = match &self.ca {
+            Some(ca) => &ca.op,
+            None => self.standalone_op.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
+        };
+        self.vault_lock.release(vault)
     }
 }
 
@@ -111,7 +98,7 @@ impl<R: CommandRunner> AppContext<R> {
 /// is released even if the closure returns an error.
 pub fn with_lock<R, F>(app: &mut AppContext<R>, operation: &str, f: F) -> Result<(), OpcaError>
 where
-    R: CommandRunner,
+    R: Runner,
     F: FnOnce(&mut AppContext<R>) -> Result<(), OpcaError>,
 {
     app.lock(operation)?;

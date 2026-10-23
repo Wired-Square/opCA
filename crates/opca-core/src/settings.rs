@@ -21,7 +21,7 @@ use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::error::OpcaError;
-use crate::op::{self, AccountInfo};
+use crate::op::{self, AccountInfo, ShellRunner};
 
 /// Directory name under the platform config directory.
 const SETTINGS_DIR: &str = "opca";
@@ -106,7 +106,7 @@ fn account_id_via_op(identifier: &str) -> Option<String> {
         }
     }
 
-    let id = op::get_account_standalone(identifier)
+    let id = op::find_account(&ShellRunner::new(), identifier)
         .map(|account| account.id)
         .map_err(|e| debug!("[settings] `op account get {identifier}` found nothing: {e}"))
         .ok();
@@ -134,7 +134,7 @@ fn canonical_key(identifier: &str) -> Option<String> {
 fn configured_accounts() -> &'static [AccountInfo] {
     static ACCOUNTS: OnceLock<Vec<AccountInfo>> = OnceLock::new();
     ACCOUNTS.get_or_init(|| {
-        op::list_accounts_standalone().unwrap_or_else(|e| {
+        op::accounts(&ShellRunner::new()).unwrap_or_else(|e| {
             warn!("[settings] could not list 1Password accounts: {e}");
             Vec::new()
         })
@@ -148,7 +148,7 @@ fn configured_accounts() -> &'static [AccountInfo] {
 fn signed_in_user() -> Option<&'static str> {
     static USER: OnceLock<Option<String>> = OnceLock::new();
     USER.get_or_init(|| {
-        match op::whoami_standalone() {
+        match op::client(ShellRunner::new(), None).whoami() {
             Ok(who) if !who.user_uuid.is_empty() => Some(who.user_uuid),
             Ok(_) => None,
             Err(e) => {

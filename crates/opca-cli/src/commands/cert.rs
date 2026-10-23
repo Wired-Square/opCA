@@ -1,5 +1,5 @@
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner};
+use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle};
 use opca_core::services::database::CertLookup;
 
@@ -28,7 +28,7 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
     }
 }
 
-fn handle_create<R: CommandRunner>(
+fn handle_create<R: Runner>(
     app: &mut AppContext<R>,
     args: CertCreateArgs,
 ) -> Result<(), OpcaError> {
@@ -48,13 +48,6 @@ fn handle_create<R: CommandRunner>(
     with_lock(app, "cert_create", |app| {
         for (cn, alt_names) in &cn_list {
             let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-
-            // Check if already exists
-            if ca.op.item_exists(cn) {
-                output::warning(&format!("'{cn}' already exists, skipping"));
-                continue;
-            }
-
             let db = ca.ca_database.as_ref()
                 .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
             let ca_config = db.get_config()?;
@@ -88,7 +81,7 @@ fn handle_create<R: CommandRunner>(
     })
 }
 
-fn handle_export<R: CommandRunner>(
+fn handle_export<R: Runner>(
     app: &mut AppContext<R>,
     args: CertExportArgs,
 ) -> Result<(), OpcaError> {
@@ -147,7 +140,7 @@ fn handle_export<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_info<R: CommandRunner>(
+fn handle_info<R: Runner>(
     app: &mut AppContext<R>,
     id: CertIdentifier,
 ) -> Result<(), OpcaError> {
@@ -189,7 +182,7 @@ fn handle_info<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_import<R: CommandRunner>(
+fn handle_import<R: Runner>(
     app: &mut AppContext<R>,
     cert_file: String,
     key_file: Option<String>,
@@ -223,7 +216,7 @@ fn handle_import<R: CommandRunner>(
     })
 }
 
-fn handle_rekey<R: CommandRunner>(
+fn handle_rekey<R: Runner>(
     app: &mut AppContext<R>,
     args: CertRekeyArgs,
 ) -> Result<(), OpcaError> {
@@ -243,7 +236,7 @@ fn handle_rekey<R: CommandRunner>(
     })
 }
 
-fn handle_renew<R: CommandRunner>(
+fn handle_renew<R: Runner>(
     app: &mut AppContext<R>,
     args: CertRenewArgs,
 ) -> Result<(), OpcaError> {
@@ -263,7 +256,7 @@ fn handle_renew<R: CommandRunner>(
     })
 }
 
-fn handle_revoke<R: CommandRunner>(
+fn handle_revoke<R: Runner>(
     app: &mut AppContext<R>,
     args: CertRevokeArgs,
 ) -> Result<(), OpcaError> {
@@ -322,7 +315,7 @@ fn handle_revoke<R: CommandRunner>(
     })
 }
 
-fn handle_delete<R: CommandRunner>(
+fn handle_delete<R: Runner>(
     app: &mut AppContext<R>,
     id: CertIdentifier,
 ) -> Result<(), OpcaError> {
@@ -352,7 +345,7 @@ fn handle_delete<R: CommandRunner>(
 
 /// A CN is shared by every renewal of a certificate, so it names a delete only
 /// when exactly one of its certificates is revoked or expired.
-fn deletable_serial_for_cn<R: CommandRunner>(
+fn deletable_serial_for_cn<R: Runner>(
     app: &AppContext<R>,
     cn: &str,
 ) -> Result<String, OpcaError> {
@@ -383,7 +376,7 @@ fn deletable_serial_for_cn<R: CommandRunner>(
 
 /// Item titles are `CRT_<serial>_<cn>`; a CN shared by renewals resolves to its valid certificate.
 /// Returns the bundle and the certificate's CN.
-fn retrieve_bundle<R: CommandRunner>(
+fn retrieve_bundle<R: Runner>(
     app: &AppContext<R>,
     cn: Option<&str>,
     serial: Option<&str>,

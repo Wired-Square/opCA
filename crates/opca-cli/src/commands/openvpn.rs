@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::crypto::utils::{generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key};
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
+use opca_core::op::{self, Assignment, Runner, ShellRunner};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::openvpn;
 
@@ -39,17 +37,26 @@ pub fn dispatch(args: OpenvpnArgs, app: &mut AppContext<ShellRunner>) -> Result<
     }
 }
 
-fn resolve_store_action<R: CommandRunner>(op: &opca_core::op::Op<R>) -> StoreAction {
-    if op.item_exists(DEFAULT_OP_CONF.openvpn_title) {
-        StoreAction::Edit
-    } else {
-        StoreAction::Create
-    }
+/// Sets fields of the `OpenVPN` item, creating it when there is none.
+fn store_openvpn<R: Runner>(app: &AppContext<R>, fields: &[Assignment]) -> Result<(), OpcaError> {
+    op::put_item(app.op()?, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
+}
+
+fn server_defaults() -> Result<Vec<Assignment>, OpcaError> {
+    [
+        ("server.hostname[text]", "vpn.domain.com.au"),
+        ("server.port[text]", "1194"),
+        ("server.cipher[text]", "aes-256-gcm"),
+        ("server.auth[text]", "sha256"),
+    ]
+    .into_iter()
+    .map(|(label, value)| op::assign(label, value))
+    .collect()
 }
 
 /// The loaded CA, with any templates older versions kept on the 1Password
 /// `OpenVPN` item imported into the database.
-fn ca_with_templates<R: CommandRunner>(
+fn ca_with_templates<R: Runner>(
     app: &mut AppContext<R>,
 ) -> Result<&mut CertificateAuthority<R>, OpcaError> {
     app.ensure_ca()?;
@@ -68,7 +75,7 @@ fn ca_with_templates<R: CommandRunner>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_generate<R: CommandRunner>(
+fn handle_generate<R: Runner + Clone>(
     app: &mut AppContext<R>,
     dh: bool,
     ta_key: bool,
@@ -112,29 +119,17 @@ fn handle_generate<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_generate_dh<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
+fn handle_generate_dh<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     output::title("Generating Diffie-Hellman Parameters");
 
     let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)?;
     let dh_keysize = verify_dh_params(dh_pem.as_bytes())?;
     output::print_result(&format!("DH parameters generated ({dh_keysize} bits)"), true);
 
-    let op = app.op()?;
-    let action = resolve_store_action(op);
-    let attrs: Vec<String> = vec![
-        format!("{}={}", DEFAULT_OP_CONF.dh_item, dh_pem),
-        format!("{}={}", DEFAULT_OP_CONF.dh_key_size_item, dh_keysize),
-    ];
-    let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-    op.store_item(
-        DEFAULT_OP_CONF.openvpn_title,
-        Some(&attr_refs),
-        action,
-        DEFAULT_OP_CONF.category,
-        None,
-        None,
-    )?;
+    store_openvpn(app, &[
+        op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)?,
+        op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?,
+    ])?;
 
     output::print_result("Stored in 1Password", true);
     println!();
@@ -143,7 +138,7 @@ fn handle_generate_dh<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), O
     Ok(())
 }
 
-fn handle_generate_ta<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
+fn handle_generate_ta<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     output::title("Generating TLS Authentication Key");
 
     let ta_pem = generate_ta_key(DEFAULT_KEY_SIZE.ta)?;
@@ -157,22 +152,10 @@ fn handle_generate_ta<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), O
 
     output::print_result(&format!("TA key generated ({ta_keysize} bits)"), true);
 
-    let op = app.op()?;
-    let action = resolve_store_action(op);
-    let attrs: Vec<String> = vec![
-        format!("{}={}", DEFAULT_OP_CONF.ta_item, ta_pem),
-        format!("{}={}", DEFAULT_OP_CONF.ta_key_size_item, ta_keysize),
-    ];
-    let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-    op.store_item(
-        DEFAULT_OP_CONF.openvpn_title,
-        Some(&attr_refs),
-        action,
-        DEFAULT_OP_CONF.category,
-        None,
-        None,
-    )?;
+    store_openvpn(app, &[
+        op::assign(DEFAULT_OP_CONF.ta_item, &ta_pem)?,
+        op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?,
+    ])?;
 
     output::print_result("Stored in 1Password", true);
     println!();
@@ -181,7 +164,7 @@ fn handle_generate_ta<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), O
     Ok(())
 }
 
-fn handle_generate_profiles<R: CommandRunner>(
+fn handle_generate_profiles<R: Runner + Clone>(
     app: &mut AppContext<R>,
     cn: Option<String>,
     file: Option<String>,
@@ -206,25 +189,17 @@ fn handle_generate_profiles<R: CommandRunner>(
     };
 
     let template_content = openvpn::get_template(ca_with_templates(app)?, template_name)?.content;
-    let op = app.op()?;
+    let vault = app.op()?;
+    let dest = match dest_vault {
+        Some(name) => vault.op().open_vault(name)?,
+        None => vault.clone(),
+    };
     for profile_cn in &cn_list {
-        // Inject with OPCA_USER env var
-        let mut env_vars = HashMap::new();
-        env_vars.insert("OPCA_USER".to_string(), profile_cn.clone());
+        let profile = vault.op().inject(&template_content, &[("OPCA_USER", profile_cn)])?;
 
-        let profile_content = op.inject_item(&template_content, Some(&env_vars))?;
-
-        // Store as document
         let item_title = format!("VPN_{profile_cn}");
         let filename = format!("{profile_cn}-{template_name}.ovpn");
-
-        op.store_document(
-            &item_title,
-            &filename,
-            &profile_content,
-            StoreAction::Create,
-            dest_vault,
-        )?;
+        dest.create_document(&item_title, &filename, profile.expose().as_bytes())?;
 
         output::print_result(&format!("Profile '{item_title}' stored"), true);
     }
@@ -232,79 +207,37 @@ fn handle_generate_profiles<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_generate_server<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
+fn handle_generate_server<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     output::title("Generating OpenVPN Server Configuration");
 
-    let op = app.op()?;
-    let action = resolve_store_action(op);
-
-    let attrs: Vec<String> = vec![
-        "server.hostname[text]=vpn.domain.com.au".to_string(),
-        "server.port[text]=1194".to_string(),
-        "server.cipher[text]=aes-256-gcm".to_string(),
-        "server.auth[text]=sha256".to_string(),
-    ];
-    let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-    op.store_item(
-        DEFAULT_OP_CONF.openvpn_title,
-        Some(&attr_refs),
-        action,
-        DEFAULT_OP_CONF.category,
-        None,
-        None,
-    )?;
+    store_openvpn(app, &server_defaults()?)?;
 
     output::print_result("Server configuration stored", true);
     Ok(())
 }
 
-fn handle_setup<R: CommandRunner>(
+fn handle_setup<R: Runner>(
     app: &mut AppContext<R>,
     template_name: &str,
 ) -> Result<(), OpcaError> {
     output::title("OpenVPN Server Setup");
 
-    let op = app.op()?;
-    let item_exists = op.item_exists(DEFAULT_OP_CONF.openvpn_title);
-    let mut attrs: Vec<String> = Vec::new();
-
-    // Server defaults
-    attrs.push("server.hostname[text]=vpn.domain.com.au".to_string());
-    attrs.push("server.port[text]=1194".to_string());
-    attrs.push("server.cipher[text]=aes-256-gcm".to_string());
-    attrs.push("server.auth[text]=sha256".to_string());
+    let mut fields = server_defaults()?;
 
     // DH parameters
     let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)?;
     let dh_keysize = verify_dh_params(dh_pem.as_bytes())?;
     output::print_result(&format!("DH parameters generated ({dh_keysize} bits)"), true);
-    attrs.push(format!("{}={}", DEFAULT_OP_CONF.dh_item, dh_pem));
-    attrs.push(format!("{}={}", DEFAULT_OP_CONF.dh_key_size_item, dh_keysize));
+    fields.push(op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)?);
+    fields.push(op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?);
 
     // TA key
     let ta_pem = generate_ta_key(DEFAULT_KEY_SIZE.ta)?;
     let ta_keysize = verify_ta_key(ta_pem.as_bytes())?;
     output::print_result(&format!("TA key generated ({ta_keysize} bits)"), true);
-    attrs.push(format!("{}={}", DEFAULT_OP_CONF.ta_item, ta_pem));
-    attrs.push(format!("{}={}", DEFAULT_OP_CONF.ta_key_size_item, ta_keysize));
-
-    let action = if item_exists {
-        StoreAction::Edit
-    } else {
-        StoreAction::Create
-    };
-
-    let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-    let op = app.op()?;
-    op.store_item(
-        DEFAULT_OP_CONF.openvpn_title,
-        Some(&attr_refs),
-        action,
-        DEFAULT_OP_CONF.category,
-        None,
-        None,
-    )?;
+    fields.push(op::assign(DEFAULT_OP_CONF.ta_item, &ta_pem)?);
+    fields.push(op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?);
+    store_openvpn(app, &fields)?;
 
     if openvpn::add_starter_template(ca_with_templates(app)?, template_name)? {
         output::print_result(&format!("Template '{template_name}' created"), true);
@@ -314,7 +247,7 @@ fn handle_setup<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_get<R: CommandRunner>(
+fn handle_get<R: Runner>(
     app: &mut AppContext<R>,
     dh: bool,
     ta_key: bool,
@@ -326,14 +259,14 @@ fn handle_get<R: CommandRunner>(
         ));
     }
 
-    let op = app.op()?;
+    let vault = app.op()?;
+    let read = |field: &str| {
+        let reference = vault.reference(DEFAULT_OP_CONF.openvpn_title, Some(&field.replace('.', "/")));
+        op::read_text(vault, &reference)
+    };
 
     if dh {
-        let url = op.mk_url(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&DEFAULT_OP_CONF.dh_item.replace('.', "/")),
-        );
-        let dh_pem = op.read_item(&url)?;
+        let dh_pem = read(DEFAULT_OP_CONF.dh_item)?;
         let dh_keysize = verify_dh_params(dh_pem.trim().as_bytes())?;
         output::print_result(&format!("DH parameters ({dh_keysize} bits)"), true);
         println!();
@@ -342,11 +275,7 @@ fn handle_get<R: CommandRunner>(
     }
 
     if ta_key {
-        let url = op.mk_url(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&DEFAULT_OP_CONF.ta_item.replace('.', "/")),
-        );
-        let ta_pem = op.read_item(&url)?;
+        let ta_pem = read(DEFAULT_OP_CONF.ta_item)?;
         let ta_keysize = verify_ta_key(ta_pem.trim().as_bytes())?;
         output::print_result(&format!("TA key ({ta_keysize} bits)"), true);
         println!();
@@ -362,7 +291,7 @@ fn handle_get<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_import<R: CommandRunner>(
+fn handle_import<R: Runner>(
     app: &mut AppContext<R>,
     dh: bool,
     ta_key: bool,
@@ -394,22 +323,10 @@ fn handle_import<R: CommandRunner>(
 
         output::print_result(&format!("DH parameters verified ({dh_keysize} bits)"), true);
 
-        let op = app.op()?;
-        let action = resolve_store_action(op);
-        let attrs: Vec<String> = vec![
-            format!("{}={}", DEFAULT_OP_CONF.dh_item, dh_pem.trim()),
-            format!("{}={}", DEFAULT_OP_CONF.dh_key_size_item, dh_keysize),
-        ];
-        let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-        op.store_item(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&attr_refs),
-            action,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )?;
+        store_openvpn(app, &[
+            op::assign(DEFAULT_OP_CONF.dh_item, dh_pem.trim())?,
+            op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?,
+        ])?;
 
         output::print_result("Stored in 1Password", true);
     }
@@ -432,22 +349,10 @@ fn handle_import<R: CommandRunner>(
 
         output::print_result(&format!("TA key verified ({ta_keysize} bits)"), true);
 
-        let op = app.op()?;
-        let action = resolve_store_action(op);
-        let attrs: Vec<String> = vec![
-            format!("{}={}", DEFAULT_OP_CONF.ta_item, ta_pem.trim()),
-            format!("{}={}", DEFAULT_OP_CONF.ta_key_size_item, ta_keysize),
-        ];
-        let attr_refs: Vec<&str> = attrs.iter().map(|s| s.as_str()).collect();
-
-        op.store_item(
-            DEFAULT_OP_CONF.openvpn_title,
-            Some(&attr_refs),
-            action,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )?;
+        store_openvpn(app, &[
+            op::assign(DEFAULT_OP_CONF.ta_item, ta_pem.trim())?,
+            op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?,
+        ])?;
 
         output::print_result("Stored in 1Password", true);
     }

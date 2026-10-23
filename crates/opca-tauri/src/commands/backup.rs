@@ -5,7 +5,7 @@ use serde::Serialize;
 use tauri::State;
 
 use opca_core::services::ca::CertificateAuthority;
-use opca_core::op::Op;
+use opca_core::op::Vault;
 use opca_core::services::local_backup::{BackupEntry, BackupSource, LocalBackup};
 use opca_core::settings;
 
@@ -21,8 +21,8 @@ pub struct LocalBackupsInfo {
 }
 
 /// The connected account's backup store and the connected vault.
-fn connected_store(op: &Op<Runner>) -> Result<(LocalBackup, BackupSource), String> {
-    let store = LocalBackup::for_account(op.account()).map_err(|e| e.to_string())?;
+fn connected_store(op: &Vault<Runner>) -> Result<(LocalBackup, BackupSource), String> {
+    let store = LocalBackup::for_account(op.op().account()).map_err(|e| e.to_string())?;
     Ok((store, BackupSource::of(op)))
 }
 
@@ -45,7 +45,7 @@ pub async fn set_local_backup_enabled(state: State<'_, AppState>, enabled: bool)
 
     let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
     if let Some(ca) = conn.ca.as_mut() {
-        ca.local_backup = LocalBackup::if_enabled(ca.op.account());
+        ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
     }
     Ok(())
 }
@@ -93,7 +93,7 @@ pub async fn restore_local_backup(state: State<'_, AppState>, path: String) -> R
         state.log_err("restore_local_backup", Some(e.to_string()));
         e.to_string()
     })?;
-    ca.local_backup = LocalBackup::if_enabled(ca.op.account());
+    ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
     conn.op = None;
     conn.ca = Some(ca);
     *state.database_error.lock().expect("mutex poisoned") = None;

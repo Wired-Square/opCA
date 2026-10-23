@@ -4,7 +4,8 @@ use openssl::x509::{X509Req, X509};
 
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner, StoreAction};
+use opca_core::op::{self, ItemRef, Runner, ShellRunner};
+use opca_core::services::ca::csr_item_fields;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType, KeyAlgorithm};
 use opca_core::services::database::{CsrLookup, CsrRecord};
 use opca_core::utils::datetime::{self, DateTimeFormat};
@@ -34,7 +35,7 @@ pub fn dispatch(args: CsrArgs, app: &mut AppContext<ShellRunner>) -> Result<(), 
     }
 }
 
-fn handle_create<R: CommandRunner>(
+fn handle_create<R: Runner>(
     app: &mut AppContext<R>,
     csr_type: String,
     cn: String,
@@ -48,7 +49,7 @@ fn handle_create<R: CommandRunner>(
     let op_title = format!("CSR_{cn}");
 
     let op = app.op()?;
-    if op.item_exists(&op_title) {
+    if op.item_exists(&ItemRef::title(&op_title))? {
         return Err(OpcaError::Other(format!(
             "Item '{op_title}' already exists in 1Password"
         )));
@@ -82,23 +83,8 @@ fn handle_create<R: CommandRunner>(
         .ok_or_else(|| OpcaError::Other("CSR not generated".into()))?;
 
     // Store in 1Password
-    let attributes = vec![
-        format!("{}={}", DEFAULT_OP_CONF.cert_type_item, cert_type),
-        format!("{}={}", DEFAULT_OP_CONF.cn_item, cn),
-        format!("{}={}", DEFAULT_OP_CONF.key_item, key_pem),
-        format!("{}={}", DEFAULT_OP_CONF.csr_item, csr_pem),
-    ];
-    let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
-
-    let op = app.op()?;
-    op.store_item(
-        &op_title,
-        Some(&attr_refs),
-        StoreAction::Create,
-        DEFAULT_OP_CONF.category,
-        None,
-        None,
-    )?;
+    let fields = csr_item_fields(&cert_type, &cn, &key_pem, &csr_pem)?;
+    app.op()?.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?;
 
     output::print_result(&format!("CSR '{op_title}' stored"), true);
 
@@ -134,7 +120,7 @@ fn handle_create<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_delete<R: CommandRunner>(app: &mut AppContext<R>, cn: String) -> Result<(), OpcaError> {
+fn handle_delete<R: Runner>(app: &mut AppContext<R>, cn: String) -> Result<(), OpcaError> {
     output::title("Deleting Certificate Signing Request");
     app.ensure_ca()?;
     with_lock(app, "csr_delete", |app| {
@@ -150,7 +136,7 @@ fn handle_delete<R: CommandRunner>(app: &mut AppContext<R>, cn: String) -> Resul
     })
 }
 
-fn handle_import<R: CommandRunner>(
+fn handle_import<R: Runner>(
     app: &mut AppContext<R>,
     cn_override: Option<String>,
     cert_file: String,
@@ -174,36 +160,14 @@ fn handle_import<R: CommandRunner>(
     let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
 
     // Retrieve CSR item from 1Password
-    let item_json = ca
+    let item = ca
         .op
-        .get_item(&csr_title, "json")
+        .item(&ItemRef::title(&csr_title))
         .map_err(|e| OpcaError::Other(format!("No existing entry '{csr_title}' found: {e}")))?;
 
-    let obj: serde_json::Value = serde_json::from_str(&item_json)
-        .map_err(|e| OpcaError::Other(format!("Failed to parse 1Password item: {e}")))?;
-
-    let fields = obj
-        .get("fields")
-        .and_then(|f| f.as_array())
-        .ok_or_else(|| OpcaError::Other("No fields in 1Password item".into()))?;
-
-    let mut key_pem_str: Option<String> = None;
-    let mut csr_pem_str: Option<String> = None;
-
-    for field in fields {
-        let label = field.get("label").and_then(|v| v.as_str()).unwrap_or("");
-        let value = field.get("value").and_then(|v| v.as_str()).unwrap_or("");
-        if value.is_empty() {
-            continue;
-        }
-        match label {
-            "private_key" => key_pem_str = Some(value.to_string()),
-            "certificate_signing_request" => csr_pem_str = Some(value.to_string()),
-            _ => {}
-        }
-    }
-
-    let key_pem = key_pem_str.ok_or_else(|| OpcaError::Other("No private key found in CSR item".into()))?;
+    let key_pem = op::field_text(&item, "private_key")
+        .ok_or_else(|| OpcaError::Other("No private key found in CSR item".into()))?;
+    let csr_pem_str = op::field_text(&item, "certificate_signing_request");
 
     // Validate certificate public key matches private key
     let private_key = PKey::private_key_from_pem(key_pem.as_bytes())
@@ -225,7 +189,7 @@ fn handle_import<R: CommandRunner>(
     }
 
     // Delete old CSR item
-    ca.op.delete_item(&csr_title, true)?;
+    ca.op.delete_item(&ItemRef::from(&item))?;
 
     // Build certificate bundle
     let bundle = CertificateBundle::import(
@@ -233,7 +197,7 @@ fn handle_import<R: CommandRunner>(
         &cn,
         &cert_pem_bytes,
         Some(key_pem.as_bytes()),
-        csr_pem_str.as_deref().map(|s| s.as_bytes()),
+        csr_pem_str.map(str::as_bytes),
         None,
         CertBundleConfig::default(),
     )?;
@@ -259,7 +223,7 @@ fn handle_import<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_sign<R: CommandRunner>(
+fn handle_sign<R: Runner>(
     app: &mut AppContext<R>,
     csr_file: Option<String>,
     csr_pem_arg: Option<String>,

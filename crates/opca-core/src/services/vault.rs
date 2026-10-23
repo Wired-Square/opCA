@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::OpConf;
 use crate::error::OpcaError;
-use crate::op::{CommandRunner, Op, StoreAction};
+use crate::op::{self, Assignment, ItemRef, Runner, Vault};
 use crate::utils::datetime::{self, DateTimeFormat};
 
 // ---------------------------------------------------------------------------
@@ -60,13 +60,13 @@ pub type RestoreCounts = std::collections::HashMap<String, usize>;
 // ---------------------------------------------------------------------------
 
 /// Create and restore encrypted vault backups.
-pub struct VaultBackup<'a, R: CommandRunner> {
-    op: &'a Op<R>,
+pub struct VaultBackup<'a, R: Runner> {
+    op: &'a Vault<R>,
     op_config: &'a OpConf,
 }
 
-impl<'a, R: CommandRunner> VaultBackup<'a, R> {
-    pub fn new(op: &'a Op<R>, op_config: &'a OpConf) -> Self {
+impl<'a, R: Runner> VaultBackup<'a, R> {
+    pub fn new(op: &'a Vault<R>, op_config: &'a OpConf) -> Self {
         Self { op, op_config }
     }
 
@@ -148,7 +148,7 @@ impl<'a, R: CommandRunner> VaultBackup<'a, R> {
         let metadata = BackupMetadata {
             opca_version: env!("CARGO_PKG_VERSION").to_string(),
             backup_date: datetime::now_utc_str(DateTimeFormat::Openssl),
-            vault_name: self.op.vault.clone(),
+            vault_name: self.op.info().name.clone(),
             item_count: items.len(),
         };
 
@@ -167,7 +167,7 @@ impl<'a, R: CommandRunner> VaultBackup<'a, R> {
         payload: &BackupPayload,
         on_progress: Option<&dyn Fn(&str, &str)>,
     ) -> Result<RestoreCounts, OpcaError> {
-        if self.op.item_exists(self.op_config.ca_title) {
+        if self.op.item_exists(&ItemRef::title(self.op_config.ca_title))? {
             return Err(OpcaError::Other(
                 "Target vault already contains a CA. Restore requires an empty vault.".to_string(),
             ));
@@ -208,26 +208,19 @@ impl<'a, R: CommandRunner> VaultBackup<'a, R> {
     // Internal — read helpers
     // -----------------------------------------------------------------------
 
-    /// Return the raw JSON string from `op item get`, or `None`.
+    /// The item as `op item get --format=json` prints it, or `None`.
     fn get_item_json(&self, title: &str) -> Option<String> {
-        self.op.get_item(title, "json").ok()
+        let json = self.op.item_json(&ItemRef::title(title)).ok()?;
+        Some(json.expose().to_string())
     }
 
-    /// Return document text from `op document get`, or `None`.
     fn get_document_content(&self, title: &str) -> Option<String> {
-        self.op.get_document(title).ok()
+        op::document_text(self.op, title).ok()
     }
 
-    /// Return titles of all Secure Note items in the vault.
     fn list_secure_notes(&self) -> Result<Vec<String>, OpcaError> {
-        let json_str = self.op.item_list(self.op_config.category, "json")?;
-        let notes: Vec<serde_json::Value> = serde_json::from_str(&json_str)
-            .map_err(|e| OpcaError::Other(format!("Failed to parse item list: {e}")))?;
-
-        Ok(notes
-            .iter()
-            .filter_map(|n| n.get("title")?.as_str().map(|s| s.to_string()))
-            .collect())
+        let notes = self.op.items(&[self.op_config.category])?;
+        Ok(notes.into_iter().map(|n| n.title).collect())
     }
 
     // -----------------------------------------------------------------------
@@ -245,8 +238,7 @@ impl<'a, R: CommandRunner> VaultBackup<'a, R> {
             title
         };
 
-        self.op
-            .store_document(title, filename, content, StoreAction::Create, None)?;
+        self.op.create_document(title, filename, content.as_bytes())?;
         Ok(())
     }
 
@@ -256,17 +248,12 @@ impl<'a, R: CommandRunner> VaultBackup<'a, R> {
             OpcaError::Other(format!("Invalid JSON for item {title:?}: {e}"))
         })?;
 
-        let attributes = extract_attributes(&obj);
-        let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
+        let fields = extract_attributes(&obj)
+            .iter()
+            .map(|token| Assignment::parse(token))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        self.op.store_item(
-            title,
-            Some(&attr_refs),
-            StoreAction::Create,
-            self.op_config.category,
-            None,
-            None,
-        )?;
+        self.op.create_item(title, self.op_config.category, &fields)?;
         Ok(())
     }
 }
@@ -518,7 +505,7 @@ mod tests {
             items: vec![],
         };
 
-        let meta = VaultBackup::<crate::testutil::MockRunner>::get_metadata(&payload);
+        let meta = VaultBackup::<crate::testutil::FakeRunner>::get_metadata(&payload);
         assert_eq!(meta.vault_name, "TestVault");
         assert_eq!(meta.item_count, 3);
     }

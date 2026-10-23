@@ -9,14 +9,12 @@ pub mod rsync;
 pub mod s3;
 pub mod sftp;
 
-use std::sync::OnceLock;
-
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::DEFAULT_AWS_REGION;
 use crate::error::OpcaError;
-use crate::op::{self, CommandRunner};
+use crate::op::{is_item_id, Item, ItemRef, ItemSummary, Op, Runner};
 use crate::settings;
 
 // ---------------------------------------------------------------------------
@@ -129,56 +127,15 @@ pub struct AwsItemRef {
 /// the `API_CREDENTIAL` / `LOGIN` forms the JSON output uses.
 const AWS_ITEM_CATEGORIES: [&str; 2] = ["API Credential", "Login"];
 
-/// Run an `op` sub-command that is *not* scoped to the CA vault.
-///
-/// The AWS access key normally lives in the operator's own personal vault,
-/// so unlike [`crate::op::Op`]'s item helpers these calls carry no
-/// `--vault` flag.  Failures go through [`op::map_cli_error`] so an expired
-/// session surfaces as `AuthenticationFailed` rather than an opaque string.
-fn run_op<R: CommandRunner>(
-    runner: &R,
-    account: Option<&str>,
-    args: &[&str],
-) -> Result<String, OpcaError> {
-    // Resolved once per process — this is on the path of every S3 upload.
-    static OP_BIN: OnceLock<String> = OnceLock::new();
-    let bin = OP_BIN.get_or_init(|| {
-        which::which("op")
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "op".to_string())
-    });
-
-    let mut args = args.to_vec();
-    if let Some(acct) = account {
-        args.extend_from_slice(&["--account", acct]);
-    }
-
-    let output = runner.run(bin, &args, None, None)?;
-    if !output.success {
-        return Err(op::map_cli_error(&output));
-    }
-    Ok(output.stdout)
-}
-
-/// List candidate AWS credential items in `account`, so the user can pick
+/// List candidate AWS credential items in `op`'s account, so the user can pick
 /// the one holding their own access key.
 ///
-/// This is a single `op item list` call — the item contents are not read,
-/// so no secrets are fetched until a selection is actually made.
-pub fn list_aws_credential_items<R: CommandRunner>(
-    runner: &R,
-    account: Option<&str>,
-) -> Result<Vec<AwsItemRef>, OpcaError> {
+/// This is a single `op item list` across every vault (the access key normally
+/// lives in the operator's own vault, not the CA's) — the item contents are not
+/// read, so no secrets are fetched until a selection is actually made.
+pub fn list_aws_credential_items<R: Runner>(op: &Op<R>) -> Result<Vec<AwsItemRef>, OpcaError> {
     info!("[storage] listing candidate AWS credential items");
-
-    let categories = AWS_ITEM_CATEGORIES.join(",");
-    let stdout = run_op(
-        runner,
-        account,
-        &["item", "list", "--categories", &categories, "--format=json"],
-    )?;
-
-    parse_aws_item_list(&stdout)
+    Ok(aws_item_refs(op.items(&AWS_ITEM_CATEGORIES)?))
 }
 
 /// Retrieve the AWS credentials this user has selected for `account`.
@@ -187,12 +144,11 @@ pub fn list_aws_credential_items<R: CommandRunner>(
 /// several operators share one CA but each has their own AWS access key.
 /// `region` comes from the CA config and takes precedence over any region
 /// recorded on the item itself.
-pub fn get_aws_credentials<R: CommandRunner>(
-    runner: &R,
-    account: Option<&str>,
+pub fn get_aws_credentials<R: Runner>(
+    op: &Op<R>,
     region: Option<&str>,
 ) -> Result<AwsCredentials, OpcaError> {
-    let item_id = settings::aws_credential_item(account).ok_or_else(|| {
+    let item_id = settings::aws_credential_item(op.account()).ok_or_else(|| {
         OpcaError::Storage(
             "No AWS credential selected. Pick the 1Password item holding your \
              AWS access key under CA → Stores."
@@ -200,77 +156,64 @@ pub fn get_aws_credentials<R: CommandRunner>(
         )
     })?;
 
-    let mut creds = get_aws_credentials_for_item(runner, account, &item_id)?;
+    let mut creds = get_aws_credentials_for_item(op, &item_id)?;
     if let Some(region) = region.map(str::trim).filter(|r| !r.is_empty()) {
         creds.region = Some(region.to_string());
     }
     Ok(creds)
 }
 
-/// Read AWS credentials from a specific 1Password item.
+/// Read AWS credentials from a specific 1Password item, named by id or, as the
+/// CLI allows, by title.
 ///
 /// Used both by [`get_aws_credentials`] and to validate a selection before
 /// it is saved.  Reads the credential fields with a plain `op item get`
 /// rather than `op plugin run`, which spawns a sub-process and can hang in
 /// non-interactive / GUI contexts.
-pub fn get_aws_credentials_for_item<R: CommandRunner>(
-    runner: &R,
-    account: Option<&str>,
-    item_id: &str,
+pub fn get_aws_credentials_for_item<R: Runner>(
+    op: &Op<R>,
+    item: &str,
 ) -> Result<AwsCredentials, OpcaError> {
-    info!("[storage] reading AWS credentials from item {item_id}");
-
-    let stdout = run_op(runner, account, &["item", "get", item_id, "--format=json"])?;
-    parse_aws_item_json(&stdout)
+    info!("[storage] reading AWS credentials from item {item}");
+    aws_credentials(&op.item(&id_or_title(item))?)
 }
 
-/// Parse the JSON output of `op item list` into credential candidates.
-fn parse_aws_item_list(json_str: &str) -> Result<Vec<AwsItemRef>, OpcaError> {
-    let items: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-        OpcaError::Storage(format!("Failed to parse op item list JSON: {e}"))
-    })?;
+fn id_or_title(item: &str) -> ItemRef {
+    if is_item_id(item) {
+        ItemRef::id(item)
+    } else {
+        ItemRef::title(item)
+    }
+}
 
-    let items = items
-        .as_array()
-        .ok_or_else(|| OpcaError::Storage("Unexpected op item list response".into()))?;
-
+fn aws_item_refs(items: Vec<ItemSummary>) -> Vec<AwsItemRef> {
     let mut refs: Vec<AwsItemRef> = items
-        .iter()
-        .filter_map(|item| {
-            Some(AwsItemRef {
-                id: item["id"].as_str()?.to_string(),
-                title: item["title"].as_str().unwrap_or("(untitled)").to_string(),
-                vault: item["vault"]["name"].as_str().unwrap_or("").to_string(),
-            })
+        .into_iter()
+        .map(|item| AwsItemRef {
+            id: item.id,
+            title: if item.title.is_empty() { "(untitled)".into() } else { item.title },
+            vault: item.vault.name,
         })
         .collect();
 
     refs.sort_by_key(|item| item.title.to_lowercase());
     debug!("[storage] {} candidate AWS credential items", refs.len());
-    Ok(refs)
+    refs
 }
 
-/// Parse the JSON output of `op item get` to extract AWS credentials.
+/// AWS credentials from an item's fields.
 ///
 /// Field labels match those the 1Password AWS shell plugin uses, so items
 /// created by `op plugin init aws` work unchanged.
-fn parse_aws_item_json(json_str: &str) -> Result<AwsCredentials, OpcaError> {
-    let item: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-        OpcaError::Storage(format!("Failed to parse op item JSON: {e}"))
-    })?;
-
-    let fields = item["fields"]
-        .as_array()
-        .ok_or_else(|| OpcaError::Storage("No fields in op item response".into()))?;
-
+fn aws_credentials(item: &Item) -> Result<AwsCredentials, OpcaError> {
     let mut access_key_id: Option<String> = None;
     let mut secret_access_key: Option<String> = None;
     let mut session_token: Option<String> = None;
     let mut region: Option<String> = None;
 
-    for field in fields {
-        let label = field["label"].as_str().unwrap_or("").to_lowercase();
-        let Some(value) = field["value"].as_str().filter(|v| !v.is_empty()) else {
+    for field in &item.fields {
+        let label = field.label.to_lowercase();
+        let Some(value) = field.value.as_ref().map(|v| v.expose()).filter(|v| !v.is_empty()) else {
             continue;
         };
         match label.as_str() {
@@ -351,15 +294,19 @@ mod tests {
         assert_eq!(creds(None).region_or_default(), DEFAULT_AWS_REGION);
     }
 
+    fn item(fields: &str) -> Item {
+        serde_json::from_str(&format!(r#"{{"id":"i1","vault":{{"id":"v1"}},"fields":{fields}}}"#)).unwrap()
+    }
+
     #[test]
-    fn test_parse_aws_item_json_full() {
-        let json = r#"{
-            "fields": [
+    fn test_aws_credentials_full() {
+        let creds = aws_credentials(&item(
+            r#"[
                 {"label": "access key id", "value": "AKIA1234", "type": "STRING"},
                 {"label": "secret access key", "value": "secret123", "type": "CONCEALED"}
-            ]
-        }"#;
-        let creds = parse_aws_item_json(json).unwrap();
+            ]"#,
+        ))
+        .unwrap();
         assert_eq!(creds.access_key_id, "AKIA1234");
         assert_eq!(creds.secret_access_key, "secret123");
         assert!(creds.session_token.is_none());
@@ -367,59 +314,71 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_aws_item_json_optional_fields() {
-        let json = r#"{
-            "fields": [
+    fn test_aws_credentials_optional_fields() {
+        let creds = aws_credentials(&item(
+            r#"[
                 {"label": "Access Key ID", "value": "AKIA1234", "type": "STRING"},
                 {"label": "secret access key", "value": "secret123", "type": "CONCEALED"},
                 {"label": "session token", "value": "tok", "type": "CONCEALED"},
                 {"label": "default region", "value": "us-east-1", "type": "STRING"},
                 {"label": "notesPlain", "value": "", "type": "STRING"}
-            ]
-        }"#;
-        let creds = parse_aws_item_json(json).unwrap();
+            ]"#,
+        ))
+        .unwrap();
         assert_eq!(creds.access_key_id, "AKIA1234");
         assert_eq!(creds.session_token.as_deref(), Some("tok"));
         assert_eq!(creds.region.as_deref(), Some("us-east-1"));
     }
 
     #[test]
-    fn test_parse_aws_item_list() {
-        let json = r#"[
-            {"id": "bbb", "title": "Zulu key", "vault": {"name": "Employee"}},
-            {"id": "aaa", "title": "alpha key", "vault": {"name": "Xentro"}}
-        ]"#;
-        let items = parse_aws_item_list(json).unwrap();
+    fn test_list_aws_credential_items_across_vaults_sorted() {
+        use crate::testutil::{FakeRunner, Output};
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(
+            r#"[
+                {"id": "bbb", "title": "Zulu key", "vault": {"id": "v1", "name": "Employee"}},
+                {"id": "aaa", "title": "alpha key", "vault": {"id": "v2", "name": "Xentro"}}
+            ]"#,
+        ));
+        let items = list_aws_credential_items(&crate::op::client(fake.clone(), Some("ws"))).unwrap();
         assert_eq!(items.len(), 2);
         // Sorted case-insensitively by title.
         assert_eq!(items[0].id, "aaa");
         assert_eq!(items[0].vault, "Xentro");
         assert_eq!(items[1].title, "Zulu key");
+
+        let args = fake.calls()[0].args().to_vec();
+        assert_eq!(args[..2], ["item", "list"]);
+        assert!(args.contains(&"--categories=API Credential,Login".to_string()));
+        assert!(!args.iter().any(|a| a.starts_with("--vault")));
+        assert!(args.ends_with(&["--account".to_string(), "ws".to_string()]));
     }
 
     #[test]
-    fn test_parse_aws_item_list_skips_malformed() {
-        let json = r#"[{"title": "no id"}, {"id": "ok", "title": "fine"}]"#;
-        let items = parse_aws_item_list(json).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].id, "ok");
+    fn test_aws_credentials_are_read_by_item_id() {
+        use crate::testutil::{item_id, FakeRunner, Output};
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(format!(
+            r#"{{"id":"{}","vault":{{"id":"v1"}},"fields":[
+                {{"label":"access key id","value":"AKIA1234"}},
+                {{"label":"secret access key","value":"secret123"}}]}}"#,
+            item_id(7)
+        )));
+        let creds = get_aws_credentials_for_item(&crate::op::client(fake.clone(), None), &item_id(7)).unwrap();
+        assert_eq!(creds.access_key_id, "AKIA1234");
+        assert_eq!(fake.calls()[0].args()[..3], ["item", "get", item_id(7).as_str()]);
     }
 
     #[test]
-    fn test_parse_aws_item_json_missing_key() {
-        let json = r#"{
-            "fields": [
-                {"label": "secret access key", "value": "secret123", "type": "CONCEALED"}
-            ]
-        }"#;
-        let result = parse_aws_item_json(json);
+    fn test_aws_credentials_missing_key() {
+        let result = aws_credentials(&item(
+            r#"[{"label": "secret access key", "value": "secret123", "type": "CONCEALED"}]"#,
+        ));
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_parse_aws_item_json_empty_fields() {
-        let json = r#"{"fields": []}"#;
-        let result = parse_aws_item_json(json);
-        assert!(result.is_err());
+    fn test_aws_credentials_empty_fields() {
+        assert!(aws_credentials(&item("[]")).is_err());
     }
 }

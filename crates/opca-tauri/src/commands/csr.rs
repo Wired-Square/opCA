@@ -6,7 +6,8 @@ use openssl::pkey::PKey;
 use openssl::x509::{X509Req, X509};
 
 use opca_core::constants::DEFAULT_OP_CONF;
-use opca_core::op::StoreAction;
+use opca_core::op::{self, ItemRef};
+use opca_core::services::ca::csr_item_fields;
 use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{CertLookup, CsrLookup, CsrRecord};
 use opca_core::services::san;
@@ -195,7 +196,7 @@ pub async fn create_csr(
 
     // Check for duplicate
     let op_title = format!("CSR_{}", request.cn);
-    if ca.op.item_exists(&op_title) {
+    if ca.op.item_exists(&ItemRef::title(&op_title)).map_err(|e| e.to_string())? {
         return Err(format!("Item '{}' already exists in 1Password", op_title));
     }
 
@@ -227,23 +228,8 @@ pub async fn create_csr(
     let csr_pem = bundle.csr_pem().ok_or("CSR not generated")?;
 
     // Store private key + CSR in 1Password (no certificate)
-    let attributes = vec![
-        format!("{}={}", DEFAULT_OP_CONF.cert_type_item, cert_type),
-        format!("{}={}", DEFAULT_OP_CONF.cn_item, request.cn),
-        format!("{}={}", DEFAULT_OP_CONF.key_item, key_pem),
-        format!("{}={}", DEFAULT_OP_CONF.csr_item, csr_pem),
-    ];
-    let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
-
-    ca.op
-        .store_item(
-            &op_title,
-            Some(&attr_refs),
-            StoreAction::Create,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )
+    csr_item_fields(&cert_type, &request.cn, &key_pem, &csr_pem)
+        .and_then(|fields| Ok(ca.op.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?))
         .map_err(|e| {
             state.log_err("create_csr", Some(e.to_string()));
             e.to_string()
@@ -403,37 +389,13 @@ pub async fn import_csr_cert(
 
     // Retrieve CSR item from 1Password
     let csr_title = format!("CSR_{cn}");
-    let item_json = ca
+    let item = ca
         .op
-        .get_item(&csr_title, "json")
+        .item(&ItemRef::title(&csr_title))
         .map_err(|e| format!("No existing entry '{}' found: {}", csr_title, e))?;
 
-    let obj: serde_json::Value = serde_json::from_str(&item_json)
-        .map_err(|e| format!("Failed to parse 1Password item: {e}"))?;
-
-    let fields = obj
-        .get("fields")
-        .and_then(|f| f.as_array())
-        .ok_or("No fields in 1Password item")?;
-
-    let mut key_pem_str: Option<String> = None;
-    let mut csr_pem_str: Option<String> = None;
-
-    for field in fields {
-        let label = field.get("label").and_then(|v| v.as_str()).unwrap_or("");
-        let value = field.get("value").and_then(|v| v.as_str()).unwrap_or("");
-        if value.is_empty() {
-            continue;
-        }
-        match label {
-            "private_key" => key_pem_str = Some(value.to_string()),
-            "certificate_signing_request" => csr_pem_str = Some(value.to_string()),
-            _ => {}
-        }
-    }
-
-    let key_pem = key_pem_str.ok_or("No private key found in CSR item")?;
-    let csr_pem = csr_pem_str.unwrap_or_default();
+    let key_pem = op::field_text(&item, "private_key").ok_or("No private key found in CSR item")?;
+    let csr_pem = op::field_text(&item, "certificate_signing_request").unwrap_or_default();
 
     // Validate certificate public key matches private key
     let private_key = PKey::private_key_from_pem(key_pem.as_bytes())
@@ -455,7 +417,7 @@ pub async fn import_csr_cert(
     }
 
     // Delete the old CSR-only item
-    ca.op.delete_item(&csr_title, true).map_err(|e| {
+    ca.op.delete_item(&ItemRef::from(&item)).map_err(|e| {
         state.log_err("import_csr_cert", Some(e.to_string()));
         e.to_string()
     })?;
@@ -595,7 +557,7 @@ pub async fn generate_csr_from_cert(
     let title = format!("EXT_{cn}");
 
     let csr_title = format!("CSR_{}", cn);
-    if ca.op.item_exists(&csr_title) {
+    if ca.op.item_exists(&ItemRef::title(&csr_title)).map_err(|e| e.to_string())? {
         return Err(format!(
             "Item '{}' already exists in 1Password — delete or rename the existing CSR first",
             csr_title
@@ -616,23 +578,8 @@ pub async fn generate_csr_from_cert(
     let csr_pem = bundle.csr_pem().ok_or("CSR not generated")?;
 
     let cert_type = bundle.cert_type.clone();
-    let attributes = [
-        format!("{}={}", DEFAULT_OP_CONF.cert_type_item, cert_type),
-        format!("{}={}", DEFAULT_OP_CONF.cn_item, cn),
-        format!("{}={}", DEFAULT_OP_CONF.key_item, key_pem),
-        format!("{}={}", DEFAULT_OP_CONF.csr_item, csr_pem),
-    ];
-    let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
-
-    ca.op
-        .store_item(
-            &csr_title,
-            Some(&attr_refs),
-            StoreAction::Create,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        )
+    csr_item_fields(&cert_type, &cn, &key_pem, &csr_pem)
+        .and_then(|fields| Ok(ca.op.create_item(&csr_title, DEFAULT_OP_CONF.category, &fields)?))
         .map_err(|e| {
             state.log_err("generate_csr_from_cert", Some(e.to_string()));
             e.to_string()

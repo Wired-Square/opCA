@@ -8,7 +8,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::OpcaError;
-use crate::op::{CommandRunner, Op};
+use crate::op::{Runner, Vault};
 use crate::services::database::CertificateAuthorityDB;
 use crate::settings;
 use crate::utils::files::write_bytes;
@@ -28,10 +28,10 @@ pub struct BackupSource {
 }
 
 impl BackupSource {
-    pub fn of<R: CommandRunner>(op: &Op<R>) -> Self {
+    pub fn of<R: Runner>(vault: &Vault<R>) -> Self {
         Self {
-            vault: op.vault.clone(),
-            vault_id: op.vault_id.clone(),
+            vault: vault.info().name.clone(),
+            vault_id: Some(vault.info().id.clone()),
         }
     }
 

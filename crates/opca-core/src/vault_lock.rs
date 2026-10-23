@@ -7,9 +7,9 @@
 //!
 //! ```ignore
 //! let mut lock = VaultLock::new(None);
-//! lock.acquire(&op, "cert_create", 300)?;
+//! lock.acquire(&vault, "cert_create", 300)?;
 //! // … mutating operations …
-//! lock.release(&op)?;
+//! lock.release(&vault)?;
 //! ```
 
 use std::collections::HashMap;
@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 
 use crate::constants::DEFAULT_OP_CONF;
 use crate::error::OpcaError;
-use crate::op::{CommandRunner, Op, StoreAction};
+use crate::op::{Assignment, Error, FieldType, ItemRef, Runner, Vault};
 
 // Field labels written onto the CA_Lock Secure Note.
 // These must match the Python implementation exactly.
@@ -57,112 +57,66 @@ impl VaultLock {
 
     /// Attempt to acquire the vault lock.
     ///
-    /// # Arguments
-    ///
-    /// * `op` — 1Password CLI wrapper.
-    /// * `operation` — Human-readable description of the operation.
-    /// * `ttl` — Maximum seconds the lock may be held before it is
-    ///   considered stale and eligible for automatic breaking.
-    ///
     /// # Errors
     ///
     /// Returns [`OpcaError::VaultLocked`] if another user holds a
     /// non-stale lock.
-    pub fn acquire<R: CommandRunner>(
+    pub fn acquire<R: Runner>(
         &mut self,
-        op: &Op<R>,
+        vault: &Vault<R>,
         operation: &str,
         ttl: u64,
     ) -> Result<(), OpcaError> {
-        let (holder_email, holder_name) = current_user(op);
-        let hostname = gethostname::gethostname()
-            .to_string_lossy()
-            .into_owned();
-        let acquired_at = now_utc_iso();
-
-        let attr_email = format!("{FIELD_HOLDER_EMAIL}[text]={holder_email}");
-        let attr_name = format!("{FIELD_HOLDER_NAME}[text]={holder_name}");
-        let attr_time = format!("{FIELD_ACQUIRED_AT}[text]={acquired_at}");
-        let attr_op = format!("{FIELD_OPERATION}[text]={operation}");
-        let attr_host = format!("{FIELD_HOSTNAME}[text]={hostname}");
-        let attr_ttl = format!("{FIELD_TTL}[text]={ttl}");
-
-        let attrs: Vec<&str> = vec![
-            &attr_email,
-            &attr_name,
-            &attr_time,
-            &attr_op,
-            &attr_host,
-            &attr_ttl,
+        let (holder_email, holder_name) = current_user(vault);
+        let hostname = gethostname::gethostname().to_string_lossy().into_owned();
+        let fields = [
+            (FIELD_HOLDER_EMAIL, holder_email),
+            (FIELD_HOLDER_NAME, holder_name),
+            (FIELD_ACQUIRED_AT, now_utc_iso()),
+            (FIELD_OPERATION, operation.to_string()),
+            (FIELD_HOSTNAME, hostname),
+            (FIELD_TTL, ttl.to_string()),
         ];
+        let assignments: Vec<Assignment> = fields
+            .iter()
+            .map(|(label, value)| Assignment::set(*label, FieldType::Text, value.as_str()))
+            .collect();
+        let create = || vault.create_item(&self.lock_title, DEFAULT_OP_CONF.category, &assignments);
 
-        // First attempt — atomic create.
-        match op.store_item(
-            &self.lock_title,
-            Some(&attrs),
-            StoreAction::Create,
-            DEFAULT_OP_CONF.category,
-            None,
-            None,
-        ) {
+        match create() {
             Ok(_) => {
                 self.held = true;
                 return Ok(());
             }
-            Err(OpcaError::ItemConflict(_)) => {
-                // Someone else holds the lock — inspect it.
-            }
-            Err(e) => return Err(e),
+            Err(Error::ItemConflict(_)) => {}
+            Err(e) => return Err(e.into()),
         }
 
-        // Lock exists. Read it to decide whether it is stale.
-        let mut lock_info = read_lock(op, &self.lock_title)?;
+        let mut lock_info = read_lock(vault, &self.lock_title)?;
 
         if is_stale(&lock_info) {
-            break_stale(op, &self.lock_title)?;
+            delete_lock(vault, &self.lock_title)?;
 
             // Retry once after breaking a stale lock.
-            match op.store_item(
-                &self.lock_title,
-                Some(&attrs),
-                StoreAction::Create,
-                DEFAULT_OP_CONF.category,
-                None,
-                None,
-            ) {
+            match create() {
                 Ok(_) => {
                     self.held = true;
                     return Ok(());
                 }
-                Err(OpcaError::ItemConflict(_)) => {
-                    // Another user beat us to re-acquire after the stale break.
-                    lock_info = read_lock(op, &self.lock_title)?;
+                Err(Error::ItemConflict(_)) => {
+                    lock_info = read_lock(vault, &self.lock_title)?;
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.into()),
             }
         }
 
+        let field = |label: &str| lock_info.get(label).cloned().unwrap_or_default();
         Err(OpcaError::VaultLocked {
-            holder_email: lock_info
-                .get(FIELD_HOLDER_EMAIL)
-                .cloned()
-                .unwrap_or_default(),
-            holder_name: lock_info
-                .get(FIELD_HOLDER_NAME)
-                .cloned()
-                .unwrap_or_default(),
-            acquired_at: lock_info
-                .get(FIELD_ACQUIRED_AT)
-                .cloned()
-                .unwrap_or_default(),
-            operation: lock_info
-                .get(FIELD_OPERATION)
-                .cloned()
-                .unwrap_or_default(),
-            hostname: lock_info
-                .get(FIELD_HOSTNAME)
-                .cloned()
-                .unwrap_or_default(),
+            holder_email: field(FIELD_HOLDER_EMAIL),
+            holder_name: field(FIELD_HOLDER_NAME),
+            acquired_at: field(FIELD_ACQUIRED_AT),
+            operation: field(FIELD_OPERATION),
+            hostname: field(FIELD_HOSTNAME),
         })
     }
 
@@ -170,18 +124,11 @@ impl VaultLock {
     ///
     /// This is idempotent — calling release when the lock is not held
     /// is a no-op.
-    pub fn release<R: CommandRunner>(&mut self, op: &Op<R>) -> Result<(), OpcaError> {
-        if !self.held {
-            return Ok(());
+    pub fn release<R: Runner>(&mut self, vault: &Vault<R>) -> Result<(), OpcaError> {
+        if self.held {
+            delete_lock(vault, &self.lock_title)?;
+            self.held = false;
         }
-        match op.delete_item(&self.lock_title, false) {
-            Ok(_) => {}
-            Err(OpcaError::ItemNotFound(_)) => {
-                // Lock item already removed.
-            }
-            Err(e) => return Err(e),
-        }
-        self.held = false;
         Ok(())
     }
 
@@ -196,69 +143,37 @@ impl VaultLock {
     }
 }
 
-// ------------------------------------------------------------------
-// Private helpers
-// ------------------------------------------------------------------
-
 /// Return `(email, name)` of the currently authenticated user.
-fn current_user<R: CommandRunner>(op: &Op<R>) -> (String, String) {
-    match op.get_current_user_details() {
-        Ok(stdout) => {
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                let email = data
-                    .get("email")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                let name = data
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                return (email, name);
-            }
-            ("unknown".to_string(), "unknown".to_string())
-        }
+fn current_user<R: Runner>(vault: &Vault<R>) -> (String, String) {
+    let known = |s: String| if s.is_empty() { "unknown".to_string() } else { s };
+    match vault.op().current_user() {
+        Ok(user) => (known(user.email), known(user.name)),
         Err(_) => ("unknown".to_string(), "unknown".to_string()),
     }
 }
 
-/// Read the existing lock item and return its fields as label→value pairs.
-///
-/// Returns an empty map if the lock item no longer exists (race with
-/// another user deleting it).  Propagates all other errors.
-fn read_lock<R: CommandRunner>(
-    op: &Op<R>,
+/// The lock's fields by label; empty once another user has deleted it.
+fn read_lock<R: Runner>(
+    vault: &Vault<R>,
     lock_title: &str,
 ) -> Result<HashMap<String, String>, OpcaError> {
-    match op.get_item(lock_title, "json") {
-        Ok(stdout) => Ok(extract_fields(&stdout)),
-        Err(OpcaError::ItemNotFound(_)) => Ok(HashMap::new()),
-        Err(e) => Err(e),
+    match vault.item(&ItemRef::title(lock_title)) {
+        Ok(item) => Ok(item
+            .fields
+            .into_iter()
+            .filter(|f| !f.label.is_empty())
+            .map(|f| (f.label, f.value.map(|v| v.expose().to_string()).unwrap_or_default()))
+            .collect()),
+        Err(Error::ItemNotFound(_)) => Ok(HashMap::new()),
+        Err(e) => Err(e.into()),
     }
 }
 
-/// Pull label→value pairs from a 1Password item JSON blob.
-fn extract_fields(json_str: &str) -> HashMap<String, String> {
-    let mut fields = HashMap::new();
-    if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
-        if let Some(arr) = data.get("fields").and_then(|v| v.as_array()) {
-            for f in arr {
-                let label = f
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                let value = f
-                    .get("value")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                if !label.is_empty() {
-                    fields.insert(label.to_string(), value.to_string());
-                }
-            }
-        }
+fn delete_lock<R: Runner>(vault: &Vault<R>, lock_title: &str) -> Result<(), OpcaError> {
+    match vault.delete_item_permanently(&ItemRef::title(lock_title)) {
+        Ok(()) | Err(Error::ItemNotFound(_)) => Ok(()),
+        Err(e) => Err(e.into()),
     }
-    fields
 }
 
 /// Check whether a lock has exceeded its TTL.
@@ -288,15 +203,6 @@ fn is_stale(lock_info: &HashMap<String, String>) -> bool {
     elapsed > ttl as i64
 }
 
-/// Delete a stale lock item so a new one can be created.
-fn break_stale<R: CommandRunner>(op: &Op<R>, lock_title: &str) -> Result<(), OpcaError> {
-    match op.delete_item(lock_title, false) {
-        Ok(_) => Ok(()),
-        Err(OpcaError::ItemNotFound(_)) => Ok(()), // Already gone.
-        Err(e) => Err(e),
-    }
-}
-
 /// Return the current UTC time as an ISO 8601 string.
 fn now_utc_iso() -> String {
     Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
@@ -305,182 +211,97 @@ fn now_utc_iso() -> String {
 /// Parse an ISO 8601 UTC timestamp (with or without trailing Z).
 fn parse_iso(ts: &str) -> Option<DateTime<Utc>> {
     let ts = ts.trim_end_matches('Z');
-    // Try parsing with chrono's flexible parser.
-    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S") {
-        return Some(naive.and_utc());
-    }
-    None
+    chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S")
+        .ok()
+        .map(|naive| naive.and_utc())
 }
-
-// ------------------------------------------------------------------
-// Tests
-// ------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{err_output, mock_op, ok_output};
+    use crate::testutil::{created, fake_vault, not_found, FakeRunner, Output};
 
-    /// Build a 1Password item JSON blob with lock fields.
-    fn lock_item_json(
-        email: &str,
-        name: &str,
-        acquired_at: &str,
-        operation: &str,
-        hostname: &str,
-        ttl: u64,
-    ) -> String {
-        serde_json::json!({
-            "fields": [
-                {"label": FIELD_HOLDER_EMAIL, "value": email},
-                {"label": FIELD_HOLDER_NAME, "value": name},
-                {"label": FIELD_ACQUIRED_AT, "value": acquired_at},
-                {"label": FIELD_OPERATION, "value": operation},
-                {"label": FIELD_HOSTNAME, "value": hostname},
-                {"label": FIELD_TTL, "value": ttl.to_string()},
-            ]
-        })
-        .to_string()
+    const ALICE: &str = r#"{"id":"U1","email":"alice@example.com","name":"Alice"}"#;
+    const CONFLICT: &str = "[ERROR] item already exists";
+
+    fn lock_item(email: &str, acquired_at: &str) -> Output {
+        Output::ok(crate::testutil::item_json(
+            "CA_Lock",
+            &[
+                (FIELD_HOLDER_EMAIL, email),
+                (FIELD_HOLDER_NAME, "Bob"),
+                (FIELD_ACQUIRED_AT, acquired_at),
+                (FIELD_OPERATION, "cert_revoke"),
+                (FIELD_HOSTNAME, "bobs-mac"),
+                (FIELD_TTL, "300"),
+            ],
+        ))
     }
 
-    /// Return a recent ISO timestamp (within the default TTL).
-    fn fresh_timestamp() -> String {
-        Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-    }
-
-    /// Return an old ISO timestamp (well beyond default TTL).
-    fn stale_timestamp() -> String {
-        (Utc::now() - chrono::Duration::seconds(600))
+    fn timestamp(offset_secs: i64) -> String {
+        (Utc::now() + chrono::Duration::seconds(offset_secs))
             .format("%Y-%m-%dT%H:%M:%SZ")
             .to_string()
+    }
+
+    /// A fake that has answered who the user is and created the lock.
+    fn acquired() -> FakeRunner {
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(ALICE)).respond(created("CA_Lock"));
+        fake
     }
 
     // -- acquire ----------------------------------------------------------
 
     #[test]
     fn acquire_succeeds() {
-        // Responses: get_current_user_details, store_item (create).
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let op = mock_op(vec![ok_output(user_json), ok_output("")]);
-
+        let fake = acquired();
         let mut lock = VaultLock::new(None);
-        lock.acquire(&op, "cert_create", 300).unwrap();
+        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
         assert!(lock.held());
+        assert!(fake.is_done());
     }
 
     #[test]
-    fn acquire_sets_correct_attributes() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let op = mock_op(vec![ok_output(user_json), ok_output("")]);
+    fn the_lock_fields_go_on_stdin_with_their_python_labels() {
+        let fake = acquired();
+        VaultLock::new(None)
+            .acquire(&fake_vault(&fake), "cert_create", 300)
+            .unwrap();
 
-        let mut lock = VaultLock::new(None);
-        lock.acquire(&op, "cert_create", 300).unwrap();
-
-        let calls = op.runner().calls();
-        // Second call is the store_item create.
-        let create_call = &calls[1];
-        assert!(create_call.iter().any(|a| a == "create"));
-        assert!(create_call.iter().any(|a| a == "--title=CA_Lock"));
-        assert!(create_call
-            .iter()
-            .any(|a| a == "holder_email[text]=alice@example.com"));
-        assert!(create_call
-            .iter()
-            .any(|a| a == "holder_name[text]=Alice"));
-        assert!(create_call
-            .iter()
-            .any(|a: &String| a.starts_with("acquired_at[text]=")));
-        assert!(create_call
-            .iter()
-            .any(|a| a == "operation[text]=cert_create"));
-        assert!(create_call
-            .iter()
-            .any(|a| a == "ttl_seconds[text]=300"));
+        let create = &fake.calls()[1];
+        assert_eq!(create.args()[..3], ["item", "create", "-"]);
+        assert!(create.args().contains(&"--title=CA_Lock".to_string()));
+        let template: serde_json::Value = serde_json::from_slice(create.stdin().unwrap()).unwrap();
+        let field = |label: &str| {
+            template["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["label"] == label)
+                .map(|f| f["value"].as_str().unwrap().to_string())
+                .unwrap()
+        };
+        assert_eq!(field(FIELD_HOLDER_EMAIL), "alice@example.com");
+        assert_eq!(field(FIELD_HOLDER_NAME), "Alice");
+        assert_eq!(field(FIELD_OPERATION), "cert_create");
+        assert_eq!(field(FIELD_TTL), "300");
+        assert!(parse_iso(&field(FIELD_ACQUIRED_AT)).is_some());
     }
-
-    // -- release ----------------------------------------------------------
-
-    #[test]
-    fn release_deletes_without_archive() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        // Responses: get_current_user_details, store_item, delete_item.
-        let op = mock_op(vec![ok_output(user_json), ok_output(""), ok_output("")]);
-
-        let mut lock = VaultLock::new(None);
-        lock.acquire(&op, "test", 300).unwrap();
-        lock.release(&op).unwrap();
-
-        assert!(!lock.held());
-        let calls = op.runner().calls();
-        let delete_call = &calls[2];
-        assert!(delete_call.iter().any(|a| a == "delete"));
-        assert!(!delete_call.iter().any(|a| a == "--archive"));
-    }
-
-    #[test]
-    fn release_idempotent() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let op = mock_op(vec![ok_output(user_json), ok_output(""), ok_output("")]);
-
-        let mut lock = VaultLock::new(None);
-        lock.acquire(&op, "test", 300).unwrap();
-        lock.release(&op).unwrap();
-        // Second release should be a no-op (no additional CLI call).
-        lock.release(&op).unwrap();
-
-        let calls = op.runner().calls();
-        assert_eq!(calls.len(), 3); // user details + create + delete
-    }
-
-    #[test]
-    fn release_ignores_item_not_found() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let op = mock_op(vec![
-            ok_output(user_json),
-            ok_output(""),
-            err_output("[ERROR] item \"CA_Lock\" not found"),
-        ]);
-
-        let mut lock = VaultLock::new(None);
-        lock.acquire(&op, "test", 300).unwrap();
-        // Should not error even though delete returns ItemNotFound.
-        lock.release(&op).unwrap();
-        assert!(!lock.held());
-    }
-
-    // -- contention -------------------------------------------------------
 
     #[test]
     fn vault_locked_when_held_by_another() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let fresh = fresh_timestamp();
-        let existing_lock = lock_item_json(
-            "bob@example.com",
-            "Bob",
-            &fresh,
-            "cert_revoke",
-            "bobs-mac",
-            300,
-        );
-
-        let op = mock_op(vec![
-            ok_output(user_json),                    // get_current_user_details
-            err_output("already exists"),            // store_item conflict
-            ok_output(&existing_lock),               // get_item (read lock)
-        ]);
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(ALICE))
+            .respond(Output::fail(CONFLICT))
+            .respond(lock_item("bob@example.com", &timestamp(0)));
 
         let mut lock = VaultLock::new(None);
-        let err = lock.acquire(&op, "cert_create", 300).unwrap_err();
+        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
 
         assert!(!lock.held());
         match err {
-            OpcaError::VaultLocked {
-                holder_email,
-                holder_name,
-                operation,
-                hostname,
-                ..
-            } => {
+            OpcaError::VaultLocked { holder_email, holder_name, operation, hostname, .. } => {
                 assert_eq!(holder_email, "bob@example.com");
                 assert_eq!(holder_name, "Bob");
                 assert_eq!(operation, "cert_revoke");
@@ -490,116 +311,142 @@ mod tests {
         }
     }
 
-    // -- stale lock breaking ----------------------------------------------
-
     #[test]
     fn breaks_stale_lock_and_reacquires() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let stale = stale_timestamp();
-        let stale_lock = lock_item_json(
-            "bob@example.com",
-            "Bob",
-            &stale,
-            "cert_create",
-            "bobs-mac",
-            300,
-        );
-
-        let op = mock_op(vec![
-            ok_output(user_json),                    // get_current_user_details
-            err_output("already exists"),            // store_item conflict
-            ok_output(&stale_lock),                  // get_item (read stale lock)
-            ok_output(""),                           // delete_item (break stale)
-            ok_output(""),                           // store_item retry (success)
-        ]);
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(ALICE))
+            .respond(Output::fail(CONFLICT))
+            .respond(lock_item("bob@example.com", &timestamp(-600)))
+            .respond(Output::ok(""))
+            .respond(created("CA_Lock"));
 
         let mut lock = VaultLock::new(None);
-        lock.acquire(&op, "cert_create", 300).unwrap();
+        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
         assert!(lock.held());
+        assert!(fake.is_done());
     }
 
     #[test]
     fn corrupt_lock_treated_as_stale() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let corrupt_lock = lock_item_json(
-            "bob@example.com",
-            "Bob",
-            "not-a-valid-date",
-            "cert_create",
-            "bobs-mac",
-            300,
-        );
-
-        let op = mock_op(vec![
-            ok_output(user_json),                    // get_current_user_details
-            err_output("already exists"),            // store_item conflict
-            ok_output(&corrupt_lock),                // get_item (corrupt lock)
-            ok_output(""),                           // delete_item (break stale)
-            ok_output(""),                           // store_item retry (success)
-        ]);
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(ALICE))
+            .respond(Output::fail(CONFLICT))
+            .respond(lock_item("bob@example.com", "not-a-valid-date"))
+            .respond(Output::ok(""))
+            .respond(created("CA_Lock"));
 
         let mut lock = VaultLock::new(None);
-        lock.acquire(&op, "cert_create", 300).unwrap();
+        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
         assert!(lock.held());
+    }
+
+    #[test]
+    fn acquire_propagates_read_lock_error() {
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(ALICE))
+            .respond(Output::fail(CONFLICT))
+            .respond(Output::fail("You are not currently signed in"));
+
+        let mut lock = VaultLock::new(None);
+        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
+
+        assert!(!lock.held());
+        assert!(matches!(err, OpcaError::AuthenticationFailed), "{err:?}");
+    }
+
+    #[test]
+    fn acquire_treats_disappeared_lock_as_stale() {
+        let fake = FakeRunner::new();
+        fake.respond(Output::ok(ALICE))
+            .respond(Output::fail(CONFLICT))
+            .respond(not_found("CA_Lock"))
+            .respond(not_found("CA_Lock"))
+            .respond(created("CA_Lock"));
+
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
+        assert!(lock.held());
+        assert!(fake.is_done());
+    }
+
+    #[test]
+    fn custom_lock_title() {
+        let fake = acquired();
+        VaultLock::new(Some("Custom_Lock"))
+            .acquire(&fake_vault(&fake), "test", 300)
+            .unwrap();
+        assert!(fake.calls()[1].args().contains(&"--title=Custom_Lock".to_string()));
+    }
+
+    // -- release ----------------------------------------------------------
+
+    #[test]
+    fn release_deletes_without_archive() {
+        let fake = acquired();
+        fake.respond(Output::ok(""));
+
+        let vault = fake_vault(&fake);
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&vault, "test", 300).unwrap();
+        lock.release(&vault).unwrap();
+
+        assert!(!lock.held());
+        assert_eq!(fake.calls()[2].args(), ["item", "delete", "CA_Lock", "--vault=testvault"]);
+    }
+
+    #[test]
+    fn release_idempotent() {
+        let fake = acquired();
+        fake.respond(Output::ok(""));
+
+        let vault = fake_vault(&fake);
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&vault, "test", 300).unwrap();
+        lock.release(&vault).unwrap();
+        lock.release(&vault).unwrap();
+
+        assert_eq!(fake.calls().len(), 3);
+    }
+
+    #[test]
+    fn release_ignores_item_not_found() {
+        let fake = acquired();
+        fake.respond(not_found("CA_Lock"));
+
+        let vault = fake_vault(&fake);
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&vault, "test", 300).unwrap();
+        lock.release(&vault).unwrap();
+        assert!(!lock.held());
     }
 
     // -- is_stale ---------------------------------------------------------
 
+    fn info(acquired_at: &str) -> HashMap<String, String> {
+        HashMap::from([
+            (FIELD_ACQUIRED_AT.to_string(), acquired_at.to_string()),
+            (FIELD_TTL.to_string(), "300".to_string()),
+        ])
+    }
+
     #[test]
     fn fresh_lock_not_stale() {
-        let mut info = HashMap::new();
-        info.insert(FIELD_ACQUIRED_AT.to_string(), fresh_timestamp());
-        info.insert(FIELD_TTL.to_string(), "300".to_string());
-        assert!(!is_stale(&info));
+        assert!(!is_stale(&info(&timestamp(0))));
     }
 
     #[test]
     fn expired_lock_is_stale() {
-        let mut info = HashMap::new();
-        info.insert(FIELD_ACQUIRED_AT.to_string(), stale_timestamp());
-        info.insert(FIELD_TTL.to_string(), "300".to_string());
-        assert!(is_stale(&info));
+        assert!(is_stale(&info(&timestamp(-600))));
     }
 
     #[test]
     fn missing_acquired_at_is_stale() {
-        let info = HashMap::new();
-        assert!(is_stale(&info));
+        assert!(is_stale(&HashMap::new()));
     }
 
     #[test]
     fn unparseable_timestamp_is_stale() {
-        let mut info = HashMap::new();
-        info.insert(FIELD_ACQUIRED_AT.to_string(), "garbage".to_string());
-        info.insert(FIELD_TTL.to_string(), "300".to_string());
-        assert!(is_stale(&info));
-    }
-
-    // -- extract_fields ---------------------------------------------------
-
-    #[test]
-    fn extract_fields_parses_item_json() {
-        let json = lock_item_json(
-            "alice@example.com",
-            "Alice",
-            "2025-01-01T00:00:00Z",
-            "test",
-            "host",
-            300,
-        );
-        let fields = extract_fields(&json);
-        assert_eq!(fields.get(FIELD_HOLDER_EMAIL).unwrap(), "alice@example.com");
-        assert_eq!(fields.get(FIELD_HOLDER_NAME).unwrap(), "Alice");
-        assert_eq!(
-            fields.get(FIELD_ACQUIRED_AT).unwrap(),
-            "2025-01-01T00:00:00Z"
-        );
-    }
-
-    #[test]
-    fn extract_fields_returns_empty_on_bad_json() {
-        let fields = extract_fields("not json");
-        assert!(fields.is_empty());
+        assert!(is_stale(&info("garbage")));
     }
 
     // -- parse_iso --------------------------------------------------------
@@ -619,63 +466,5 @@ mod tests {
     #[test]
     fn parse_iso_invalid() {
         assert!(parse_iso("not-a-date").is_none());
-    }
-
-    // -- read_lock error propagation --------------------------------------
-
-    #[test]
-    fn acquire_propagates_read_lock_error() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-
-        let op = mock_op(vec![
-            ok_output(user_json),                                // get_current_user_details
-            err_output("already exists"),                        // store_item conflict
-            err_output("You are not currently sign in"),         // get_item → auth error
-        ]);
-
-        let mut lock = VaultLock::new(None);
-        let err = lock.acquire(&op, "cert_create", 300).unwrap_err();
-
-        assert!(!lock.held());
-        assert!(
-            matches!(err, OpcaError::AuthenticationFailed),
-            "Expected AuthenticationFailed, got: {err:?}"
-        );
-    }
-
-    #[test]
-    fn acquire_treats_disappeared_lock_as_stale() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-
-        let op = mock_op(vec![
-            ok_output(user_json),                                // get_current_user_details
-            err_output("already exists"),                        // store_item conflict
-            err_output("[ERROR] item \"CA_Lock\" not found"),    // get_item → lock gone
-            ok_output(""),                                       // store_item retry (success)
-        ]);
-
-        let mut lock = VaultLock::new(None);
-        // Lock disappeared between conflict and read — treated as stale
-        // (empty map → missing acquired_at → is_stale → break + retry).
-        // break_stale will call delete_item, but the mock sequence
-        // already consumed the "not found" response.  Since MockRunner
-        // returns a default ok when responses are exhausted, this works.
-        lock.acquire(&op, "cert_create", 300).unwrap();
-        assert!(lock.held());
-    }
-
-    // -- custom lock title ------------------------------------------------
-
-    #[test]
-    fn custom_lock_title() {
-        let user_json = r#"{"email":"alice@example.com","name":"Alice"}"#;
-        let op = mock_op(vec![ok_output(user_json), ok_output("")]);
-
-        let mut lock = VaultLock::new(Some("Custom_Lock"));
-        lock.acquire(&op, "test", 300).unwrap();
-
-        let calls = op.runner().calls();
-        let create_call = &calls[1];
-        assert!(create_call.iter().any(|a| a == "--title=Custom_Lock"));
     }
 }

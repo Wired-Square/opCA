@@ -52,6 +52,9 @@ pub enum OpcaError {
     #[error("1Password authentication failed")]
     AuthenticationFailed,
 
+    #[error("1Password CLI has no accounts it can use: {0}")]
+    NoAccountsConfigured(String),
+
     #[error("1Password permission denied: {0}")]
     PermissionDenied(String),
 
@@ -60,6 +63,9 @@ pub enum OpcaError {
 
     #[error("Item not found: {0}")]
     ItemNotFound(String),
+
+    #[error("{} items are titled {title:?}: {}", ids.len(), ids.join(", "))]
+    AmbiguousItem { title: String, ids: Vec<String> },
 
     #[error("Vault is locked by {holder_email} ({holder_name}) since {acquired_at} for {operation} (on {hostname})")]
     VaultLocked {
@@ -109,6 +115,25 @@ pub enum OpcaError {
 impl From<std::io::Error> for OpcaError {
     fn from(err: std::io::Error) -> Self {
         OpcaError::Io(err.to_string())
+    }
+}
+
+impl From<wslib_1password::Error> for OpcaError {
+    fn from(err: wslib_1password::Error) -> Self {
+        use wslib_1password::Error as E;
+        match err {
+            E::CliNotFound => OpcaError::CliNotFound,
+            E::NotSignedIn(_) | E::NotApproved(_) => OpcaError::AuthenticationFailed,
+            E::NoAccountsConfigured(m) => OpcaError::NoAccountsConfigured(m),
+            E::PermissionDenied(m) => OpcaError::PermissionDenied(m),
+            E::VaultNotFound(m) => OpcaError::VaultNotFound(m),
+            E::ItemNotFound(m) => OpcaError::ItemNotFound(m),
+            E::ItemConflict(m) => OpcaError::ItemConflict(m),
+            E::Ambiguous { title, ids } => OpcaError::AmbiguousItem { title, ids },
+            E::Cli { message, .. } => OpcaError::CliError(message),
+            E::TimedOut | E::Io(_) => OpcaError::Io(err.to_string()),
+            other => OpcaError::CliError(other.to_string()),
+        }
     }
 }
 

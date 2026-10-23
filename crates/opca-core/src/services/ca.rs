@@ -18,7 +18,7 @@ use crate::constants::{
     DEFAULT_STORAGE_CONF,
 };
 use crate::error::OpcaError;
-use crate::op::{CommandRunner, Op, StoreAction};
+use crate::op::{self, Assignment, Error, ItemRef, Runner, Vault};
 use crate::services::cert::{
     crypto_provider, signer_of, CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm,
     APPLE_TLS_MAX_DAYS,
@@ -212,8 +212,8 @@ fn assess_apple_tls_limit(cert_type: &CertType, days: u32) -> Option<CertIssuanc
 // ---------------------------------------------------------------------------
 
 /// Certificate Authority manager for PKI operations.
-pub struct CertificateAuthority<R: CommandRunner> {
-    pub op: Op<R>,
+pub struct CertificateAuthority<R: Runner> {
+    pub op: Vault<R>,
     pub op_config: OpConf,
     pub ca_bundle: Option<CertificateBundle>,
     pub ca_database: Option<CertificateAuthorityDB>,
@@ -235,17 +235,17 @@ pub struct PrivateStoreJob {
     pub fingerprint: String,
 }
 
-impl<R: CommandRunner> CertificateAuthority<R> {
+impl<R: Runner> CertificateAuthority<R> {
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
 
     /// Initialise a brand-new CA — generates key, self-signs, stores in 1Password.
-    pub fn init(op: Op<R>, config: &CaConfig) -> Result<Self, OpcaError> {
+    pub fn init(op: Vault<R>, config: &CaConfig) -> Result<Self, OpcaError> {
         info!("[ca] initialising new Certificate Authority");
         let op_config = DEFAULT_OP_CONF;
 
-        if op.item_exists(op_config.ca_title) {
+        if op.item_exists(&ItemRef::title(op_config.ca_title))? {
             return Err(OpcaError::CaAlreadyExists);
         }
 
@@ -273,14 +273,14 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 
     /// Import an existing CA from PEM-encoded certificate (and optionally key).
     pub fn import_ca(
-        op: Op<R>,
+        op: Vault<R>,
         cert_pem: &[u8],
         key_pem: Option<&[u8]>,
         config: &CaConfig,
     ) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
-        if op.item_exists(op_config.ca_title) {
+        if op.item_exists(&ItemRef::title(op_config.ca_title))? {
             return Err(OpcaError::CaAlreadyExists);
         }
 
@@ -311,13 +311,13 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     }
 
     /// Retrieve an existing CA from 1Password.
-    pub fn retrieve(op: Op<R>) -> Result<Self, OpcaError> {
+    pub fn retrieve(op: Vault<R>) -> Result<Self, OpcaError> {
         info!("[ca] retrieving CA from 1Password");
         let op_config = DEFAULT_OP_CONF;
 
         // Download database — also proves the CA exists, so we skip a
         // separate `item_exists` probe (one fewer `op` process spawn).
-        let ca_database_sql = op.get_document(op_config.ca_database_title)
+        let ca_database_sql = op::document_text(&op, op_config.ca_database_title)
             .map_err(|e| match e {
                 OpcaError::ItemNotFound(_) => OpcaError::CaNotFound,
                 other => other,
@@ -348,17 +348,17 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     /// match this vault's CA certificate. The unreadable 1Password copy is
     /// saved to `unreadable_copy_to` before being overwritten.
     pub fn restore_from_backup(
-        op: Op<R>,
+        op: Vault<R>,
         backup_contents: &str,
         unreadable_copy_to: &LocalBackup,
     ) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
-        if let (Some(source), Some(vault_id)) = (local_backup::read_source(backup_contents), &op.vault_id) {
-            if source.vault_id.as_ref().is_some_and(|id| id != vault_id) {
+        if let Some(source) = local_backup::read_source(backup_contents) {
+            if source.vault_id.as_ref().is_some_and(|id| *id != op.info().id) {
                 return Err(OpcaError::Other(format!(
                     "Backup is from vault {:?}, not the connected vault {:?}",
-                    source.vault, op.vault
+                    source.vault, op.info().name
                 )));
             }
         }
@@ -376,16 +376,14 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             ));
         }
 
-        if let Ok(current) = op.get_document(op_config.ca_database_title) {
+        if let Ok(current) = op::document_text(&op, op_config.ca_database_title) {
             unreadable_copy_to.write_unreadable(&BackupSource::of(&op), &current)?;
         }
 
-        op.store_document(
-            op_config.ca_database_title,
+        op.edit_document(
+            &ItemRef::title(op_config.ca_database_title),
             op_config.ca_database_filename,
-            sql,
-            StoreAction::Edit,
-            None,
+            sql.as_bytes(),
         )?;
         db.download_fingerprint = Some(sha256_hex(sql.as_bytes()));
 
@@ -400,13 +398,13 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     }
 
     /// Rebuild the CA database by scanning all vault items.
-    pub fn rebuild_database(op: Op<R>, config: &CaConfig) -> Result<Self, OpcaError> {
+    pub fn rebuild_database(op: Vault<R>, config: &CaConfig) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
-        if !op.item_exists(op_config.ca_title) {
+        if !op.item_exists(&ItemRef::title(op_config.ca_title))? {
             return Err(OpcaError::CaNotFound);
         }
-        if op.item_exists(op_config.ca_database_title) {
+        if op.item_exists(&ItemRef::title(op_config.ca_database_title))? {
             return Err(OpcaError::CaAlreadyExists);
         }
 
@@ -863,13 +861,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         }
         db.upsert_crl_metadata(&parse_crl_metadata(&crls[0])?)?;
 
-        self.op.store_document(
-            self.op_config.crl_title,
-            self.op_config.crl_filename,
-            &crls[0],
-            StoreAction::Auto,
-            None,
-        )?;
+        op::put_document(&self.op, self.op_config.crl_title, self.op_config.crl_filename, &crls[0])?;
         self.crl = Some(crls[0].clone());
         self.store_ca_database()?;
 
@@ -904,7 +896,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     /// Return the CRL in PEM format from 1Password.
     pub fn get_crl(&mut self) -> Result<Option<String>, OpcaError> {
         if self.crl.is_none() {
-            match self.op.get_document(self.op_config.crl_title) {
+            match op::document_text(&self.op, self.op_config.crl_title) {
                 Ok(content) => self.crl = Some(content),
                 Err(_) => return Ok(None),
             }
@@ -1010,20 +1002,12 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let not_after_text = openssl_to_text(&not_after);
 
         // Update the CA item in 1Password
-        let attributes = [
-            format!("{}={cert_pem}", self.op_config.cert_item),
-            format!("{}={not_before_text}", self.op_config.start_date_item),
-            format!("{}={not_after_text}", self.op_config.expiry_date_item),
+        let fields = [
+            op::assign(self.op_config.cert_item, cert_pem)?,
+            op::assign(self.op_config.start_date_item, not_before_text)?,
+            op::assign(self.op_config.expiry_date_item, not_after_text)?,
         ];
-        let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
-        self.op.store_item(
-            self.op_config.ca_title,
-            Some(&attr_refs),
-            StoreAction::Edit,
-            self.op_config.category,
-            None,
-            None,
-        )?;
+        self.op.edit_item(&ItemRef::title(self.op_config.ca_title), &fields)?;
 
         self.store_ca_database()?;
         Ok(())
@@ -1064,35 +1048,27 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let not_before_text = openssl_to_text(&not_before);
         let not_after_text = openssl_to_text(&not_after);
 
-        let mut attributes = vec![
-            format!("{}={}", self.op_config.cert_type_item, bundle.cert_type),
-            format!("{}={cn}", self.op_config.cn_item),
-            format!("{}={subject}", self.op_config.subject_item),
-            format!("{}={cert_pem}", self.op_config.cert_item),
-            format!("{}={not_before_text}", self.op_config.start_date_item),
-            format!("{}={not_after_text}", self.op_config.expiry_date_item),
-            format!("{}={serial}", self.op_config.serial_item),
-            format!("{}={csr_pem}", self.op_config.csr_item),
+        let c = &self.op_config;
+        let mut fields = vec![
+            op::assign(c.cert_type_item, &bundle.cert_type)?,
+            op::assign(c.cn_item, cn)?,
+            op::assign(c.subject_item, subject)?,
+            op::assign(c.cert_item, cert_pem)?,
+            op::assign(c.start_date_item, not_before_text)?,
+            op::assign(c.expiry_date_item, not_after_text)?,
+            op::assign(c.serial_item, serial)?,
+            op::assign(c.csr_item, csr_pem)?,
         ];
 
         if bundle.private_key.is_some() {
-            let key_pem = bundle.private_key_pem()?;
-            attributes.push(format!("{}={key_pem}", self.op_config.key_item));
+            fields.push(op::assign(c.key_item, bundle.private_key_pem()?)?);
         }
 
         if let Some(chain_pem) = bundle.chain_pem() {
-            attributes.push(format!("{}={chain_pem}", self.op_config.chain_item));
+            fields.push(op::assign(c.chain_item, chain_pem)?);
         }
 
-        let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
-        self.op.store_item(
-            &op_title,
-            Some(&attr_refs),
-            StoreAction::Create,
-            self.op_config.category,
-            None,
-            None,
-        )?;
+        self.op.create_item(&op_title, c.category, &fields)?;
 
         // Add to database
         let db_item = format_db_item(bundle, item_title, issuer, issuer_subject)?;
@@ -1150,34 +1126,27 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let not_before_text = openssl_to_text(&not_before);
         let not_after_text = openssl_to_text(&not_after);
 
-        let mut attributes = vec![
-            format!("{}={cert_type_str}", self.op_config.cert_type_item),
-            format!("{}={cn}", self.op_config.cn_item),
-            format!("{}={subject}", self.op_config.subject_item),
-            format!("{}={cert_pem}", self.op_config.cert_item),
-            format!("{}={not_before_text}", self.op_config.start_date_item),
-            format!("{}={not_after_text}", self.op_config.expiry_date_item),
-            format!("{}={serial}", self.op_config.serial_item),
-            format!("{}={csr_pem_str}", self.op_config.csr_item),
+        let c = &self.op_config;
+        let mut fields = vec![
+            op::assign(c.cert_type_item, cert_type_str)?,
+            op::assign(c.cn_item, cn)?,
+            op::assign(c.subject_item, subject)?,
+            op::assign(c.cert_item, cert_pem)?,
+            op::assign(c.start_date_item, not_before_text)?,
+            op::assign(c.expiry_date_item, not_after_text)?,
+            op::assign(c.serial_item, serial)?,
+            op::assign(c.csr_item, csr_pem_str)?,
         ];
 
-        if let Some(ref kp) = key_pem {
-            attributes.push(format!("{}={kp}", self.op_config.key_item));
+        if let Some(kp) = key_pem {
+            fields.push(op::assign(c.key_item, kp)?);
         }
 
-        if let Some(ref cp) = chain_pem {
-            attributes.push(format!("{}={cp}", self.op_config.chain_item));
+        if let Some(cp) = chain_pem {
+            fields.push(op::assign(c.chain_item, cp)?);
         }
 
-        let attr_refs: Vec<&str> = attributes.iter().map(|s| s.as_str()).collect();
-        self.op.store_item(
-            &op_title,
-            Some(&attr_refs),
-            StoreAction::Create,
-            self.op_config.category,
-            None,
-            None,
-        )?;
+        self.op.create_item(&op_title, c.category, &fields)?;
 
         let db = self.ca_database.as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
@@ -1207,75 +1176,35 @@ impl<R: CommandRunner> CertificateAuthority<R> {
 
     /// Static version for use during construction.
     fn retrieve_certbundle_static(
-        op: &Op<R>,
+        op: &Vault<R>,
         _op_config: &OpConf,
         item_title: &str,
     ) -> Result<Option<CertificateBundle>, OpcaError> {
-        let json_str = match op.get_item(item_title, "json") {
-            Ok(s) => s,
-            Err(_) => return Ok(None),
+        let Ok(item) = op.item(&ItemRef::title(item_title)) else {
+            return Ok(None);
+        };
+        let text = |label: &str| op::field_text(&item, label);
+
+        let Some(cert_data) = text("certificate") else {
+            return Ok(None);
         };
 
-        let obj: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| OpcaError::Other(format!("Parse item JSON: {e}")))?;
-
-        let fields = match obj.get("fields").and_then(|f| f.as_array()) {
-            Some(f) => f,
-            None => return Ok(None),
-        };
-
-        let mut cert_pem: Option<Vec<u8>> = None;
-        let mut key_pem: Option<Vec<u8>> = None;
-        let mut csr_pem: Option<Vec<u8>> = None;
-        let mut chain_pem: Option<Vec<u8>> = None;
-        let mut cert_type_str: Option<String> = None;
-
-        for field in fields {
-            let label = field.get("label").and_then(|v| v.as_str()).unwrap_or("");
-            let value = field.get("value").and_then(|v| v.as_str()).unwrap_or("");
-
-            match label {
-                "certificate" if !value.is_empty() => {
-                    cert_pem = Some(value.as_bytes().to_vec());
-                }
-                "private_key" if !value.is_empty() => {
-                    key_pem = Some(value.as_bytes().to_vec());
-                }
-                "certificate_signing_request" if !value.is_empty() => {
-                    csr_pem = Some(value.as_bytes().to_vec());
-                }
-                "certificate_chain" if !value.is_empty() => {
-                    chain_pem = Some(value.as_bytes().to_vec());
-                }
-                "type" if !value.is_empty() => {
-                    cert_type_str = Some(value.to_string());
-                }
-                _ => {}
-            }
-        }
-
-        let cert_data = match cert_pem {
-            Some(data) => data,
-            None => return Ok(None),
-        };
-
-        let ct = cert_type_str
-            .as_deref()
+        let ct = text("type")
             .and_then(|s| s.parse::<CertType>().ok())
             .unwrap_or(CertType::Device);
 
         let mut bundle = CertificateBundle::import(
             ct,
             item_title,
-            &cert_data,
-            key_pem.as_deref(),
-            csr_pem.as_deref(),
+            cert_data.as_bytes(),
+            text("private_key").map(str::as_bytes),
+            text("certificate_signing_request").map(str::as_bytes),
             None,
             CertBundleConfig::default(),
         )?;
 
-        if let Some(ref cp) = chain_pem {
-            bundle.set_chain_from_pem(cp)?;
+        if let Some(cp) = text("certificate_chain") {
+            bundle.set_chain_from_pem(cp.as_bytes())?;
         }
 
         Ok(Some(bundle))
@@ -1294,7 +1223,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let mut record = db.query_cert(&CertLookup::Title(src_title.to_string()), false)?
             .ok_or_else(|| OpcaError::CertificateNotFound(src_title.to_string()))?;
 
-        self.op.rename_item(src_title, dst_title)?;
+        self.op.rename_item(&ItemRef::title(src_title), dst_title)?;
 
         record.title = Some(dst_title.to_string());
         db.update_cert(&record)?;
@@ -1326,9 +1255,9 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         }
 
         if let Some(title) = cert.title.as_deref() {
-            match self.op.delete_item(title, true) {
-                Ok(_) | Err(OpcaError::ItemNotFound(_)) => {}
-                Err(e) => return Err(e),
+            match self.op.delete_item(&ItemRef::title(title)) {
+                Ok(()) | Err(Error::ItemNotFound(_)) => {}
+                Err(e) => return Err(e.into()),
             }
         }
 
@@ -1355,8 +1284,11 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             .title
             .clone()
             .unwrap_or_else(|| format!("CSR_{}", record.cn.as_deref().unwrap_or_default()));
-        if record.status.as_deref() == Some("Pending") && self.op.item_exists(&title) {
-            self.op.delete_item(&title, true)?;
+        if record.status.as_deref() == Some("Pending") {
+            match self.op.delete_item(&ItemRef::title(&title)) {
+                Ok(()) | Err(Error::ItemNotFound(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
         db.delete_csr(id)?;
         self.store_ca_database()?;
@@ -1381,14 +1313,11 @@ impl<R: CommandRunner> CertificateAuthority<R> {
             }
         }
 
-        // Use Auto — during init/rebuild the document doesn't exist yet,
-        // while during normal operation it does. Auto checks existence first.
-        self.op.store_document(
+        op::put_document(
+            &self.op,
             self.op_config.ca_database_title,
             self.op_config.ca_database_filename,
             &sql_text,
-            StoreAction::Auto,
-            None,
         )?;
 
         // NB: the private-store (e.g. S3) copy is intentionally NOT uploaded
@@ -1412,7 +1341,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         Ok(Some(PrivateStoreJob {
             bytes,
             uri,
-            account: self.op.account().map(String::from),
+            account: self.op.op().account().map(String::from),
             region: self.aws_region()?,
             fingerprint,
         }))
@@ -1424,7 +1353,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         let db = self.ca_database.as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         Ok(db.get_config()?.ca_private_store.map(|store| {
-            let vault_name = self.op.vault.trim().to_lowercase();
+            let vault_name = self.op.info().name.trim().to_lowercase();
             format!("{}/{vault_name}.sqlite", store.trim_end_matches('/'))
         }))
     }
@@ -1448,18 +1377,13 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     // -----------------------------------------------------------------------
 
     fn do_rebuild_database(&mut self) -> Result<HashMap<String, usize>, OpcaError> {
-        let items_json = self.op.item_list(self.op_config.category, "json")?;
-        let items: Vec<serde_json::Value> = serde_json::from_str(&items_json)
-            .map_err(|e| OpcaError::Other(format!("Parse item list: {e}")))?;
+        let items = self.op.items(&[self.op_config.category])?;
 
         let mut result_map: HashMap<String, (X509, String, CertType)> = HashMap::new();
         let mut max_serial: i64 = 0;
 
         for item in &items {
-            let title = match item.get("title").and_then(|v| v.as_str()) {
-                Some(t) => t,
-                None => continue,
-            };
+            let title = item.title.as_str();
 
             let bundle = match self.retrieve_certbundle(title)? {
                 Some(b) => b,
@@ -1555,11 +1479,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
     /// The AWS credentials this operator has selected, with the CA's
     /// configured region applied.
     pub fn aws_credentials(&self) -> Result<storage::AwsCredentials, OpcaError> {
-        storage::get_aws_credentials(
-            self.op.runner(),
-            self.op.account(),
-            self.aws_region()?.as_deref(),
-        )
+        storage::get_aws_credentials(self.op.op(), self.aws_region()?.as_deref())
     }
 
     /// Upload the CA database to the private store.
@@ -1639,11 +1559,7 @@ impl<R: CommandRunner> CertificateAuthority<R> {
         });
 
         let aws_creds = if needs_s3 {
-            match storage::get_aws_credentials(
-                self.op.runner(),
-                self.op.account(),
-                config.ca_aws_region.as_deref(),
-            ) {
+            match storage::get_aws_credentials(self.op.op(), config.ca_aws_region.as_deref()) {
                 Ok(creds) => Some(creds),
                 Err(e) => {
                     error!("[ca] failed to retrieve AWS credentials: {e}");
@@ -1901,8 +1817,24 @@ fn sha256_hex(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// The fields of a pending CSR's `CSR_<cn>` item, which holds its private key.
+pub fn csr_item_fields(
+    cert_type: &CertType,
+    cn: &str,
+    key_pem: &str,
+    csr_pem: &str,
+) -> Result<Vec<Assignment>, OpcaError> {
+    let c = &DEFAULT_OP_CONF;
+    Ok(vec![
+        op::assign(c.cert_type_item, cert_type)?,
+        op::assign(c.cn_item, cn)?,
+        op::assign(c.key_item, key_pem)?,
+        op::assign(c.csr_item, csr_pem)?,
+    ])
+}
+
 /// Convenience: prepare a CA by retrieving it from 1Password.
-pub fn prepare_cert_authority<R: CommandRunner>(op: Op<R>) -> Result<CertificateAuthority<R>, OpcaError> {
+pub fn prepare_cert_authority<R: Runner>(op: Vault<R>) -> Result<CertificateAuthority<R>, OpcaError> {
     CertificateAuthority::retrieve(op)
 }
 
@@ -2004,7 +1936,7 @@ mod tests {
     use crate::services::san;
     use openssl::nid::Nid;
     use crate::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
-    use crate::testutil::ok_output;
+    use crate::testutil::{fake_vault, item_json, not_found, FakeRunner, Output, VAULT_ID};
 
     fn make_ca_bundle() -> CertificateBundle {
         let config = CertBundleConfig {
@@ -2025,13 +1957,23 @@ mod tests {
         bundle
     }
 
-    fn ca_item_json(bundle: &CertificateBundle) -> String {
-        serde_json::json!({ "fields": [
-            { "label": "certificate", "value": bundle.certificate_pem().unwrap() },
-            { "label": "private_key", "value": bundle.private_key_pem().unwrap() },
-            { "label": "type", "value": "ca" },
-        ]})
-        .to_string()
+    /// Scripts `n` empty successes: a document or item write each.
+    fn answer_writes(ca: &CertificateAuthority<FakeRunner>, n: usize) {
+        for _ in 0..n {
+            ca.op.op().runner().respond(Output::ok(""));
+        }
+    }
+
+    fn calls(ca: &CertificateAuthority<FakeRunner>) -> Vec<Vec<String>> {
+        ca.op.op().runner().calls().iter().map(|c| c.args().to_vec()).collect()
+    }
+
+    fn ca_item(bundle: &CertificateBundle) -> Output {
+        Output::ok(item_json("CA", &[
+            ("certificate", &bundle.certificate_pem().unwrap()),
+            ("private_key", &bundle.private_key_pem().unwrap()),
+            ("type", "ca"),
+        ]))
     }
 
     /// A backup file, as `LocalBackup` writes it, whose `CA` row has `ca_serial`.
@@ -2056,15 +1998,13 @@ mod tests {
     fn restore_from_backup_stores_dump_and_keeps_unreadable_copy() {
         let bundle = make_ca_bundle();
         let serial = bundle.get_certificate_attrib("serial").unwrap().unwrap();
-        let (_dir, store, contents) = backup_contents(&serial, "vault-a");
-        let mut op = crate::testutil::mock_op(vec![
-            ok_output(&ca_item_json(&bundle)),
-            ok_output("BEGIN TRANSACTION;\nCREATE TABLE csr ("),
-            ok_output(""),
-        ]);
-        op.vault_id = Some("vault-a".into());
+        let (_dir, store, contents) = backup_contents(&serial, VAULT_ID);
+        let fake = FakeRunner::new();
+        fake.respond(ca_item(&bundle))
+            .respond(Output::ok("BEGIN TRANSACTION;\nCREATE TABLE csr ("))
+            .respond(Output::ok(""));
 
-        let ca = CertificateAuthority::restore_from_backup(op, &contents, &store).unwrap();
+        let ca = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store).unwrap();
 
         let source = BackupSource::of(&ca.op);
         let kept: Vec<_> = std::fs::read_dir(store.dir_for(&source)).unwrap()
@@ -2072,16 +2012,16 @@ mod tests {
             .filter(|n| n.ends_with("-unreadable.sql"))
             .collect();
         assert_eq!(kept.len(), 1);
-        assert_eq!(ca.op.runner().file_args().last().unwrap(), local_backup::strip_header(&contents));
+        assert_eq!(fake.files().last().unwrap(), local_backup::strip_header(&contents).as_bytes());
+        assert_eq!(fake.calls()[2].args()[..3], ["document", "edit", "CA_Database"]);
     }
 
     #[test]
     fn restore_from_backup_refuses_backup_from_another_vault() {
         let (_dir, store, contents) = backup_contents("1", "vault-a");
-        let mut op = crate::testutil::mock_op(vec![]);
-        op.vault_id = Some("vault-b".into());
+        let fake = FakeRunner::new();
 
-        let result = CertificateAuthority::restore_from_backup(op, &contents, &store);
+        let result = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store);
 
         assert!(result.is_err_and(|e| e.to_string().contains("not the connected vault")));
     }
@@ -2089,15 +2029,15 @@ mod tests {
     #[test]
     fn restore_from_backup_refuses_backup_of_another_ca() {
         let bundle = make_ca_bundle();
-        let (_dir, store, contents) = backup_contents("999999", "vault-a");
-        let mut op = crate::testutil::mock_op(vec![ok_output(&ca_item_json(&bundle))]);
-        op.vault_id = Some("vault-a".into());
+        let (_dir, store, contents) = backup_contents("999999", VAULT_ID);
+        let fake = FakeRunner::new();
+        fake.respond(ca_item(&bundle));
 
-        let result = CertificateAuthority::restore_from_backup(op, &contents, &store);
+        let result = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store);
 
         assert!(result.is_err_and(|e| e.to_string().contains("different CA")));
         assert_eq!(std::fs::read_dir(store.dir_for(&BackupSource {
-            vault: "TestVault".into(), vault_id: Some("vault-a".into()),
+            vault: "TestVault".into(), vault_id: Some(VAULT_ID.into()),
         })).unwrap().count(), 1);
     }
 
@@ -2182,7 +2122,7 @@ mod tests {
 
         // Sign with mock CA
         let mut ca = CertificateAuthority {
-            op: crate::testutil::mock_op(vec![]),
+            op: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2232,7 +2172,7 @@ mod tests {
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
 
         let mut ca = CertificateAuthority {
-            op: crate::testutil::mock_op(vec![]),
+            op: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2277,7 +2217,7 @@ mod tests {
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
 
         let mut ca = CertificateAuthority {
-            op: crate::testutil::mock_op(vec![]),
+            op: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2322,7 +2262,7 @@ mod tests {
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
 
         let mut ca = CertificateAuthority {
-            op: crate::testutil::mock_op(vec![]),
+            op: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2356,7 +2296,7 @@ mod tests {
         let ca_cert = ca_bundle.certificate.clone().unwrap();
         db.add_cert(&format_db_item(&ca_bundle, "CA", None, None).unwrap()).unwrap();
         let mut ca = CertificateAuthority {
-            op: crate::testutil::mock_op(vec![]),
+            op: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2411,7 +2351,7 @@ mod tests {
         assert_eq!(validity(&crl), (this_update, next_update));
     }
 
-    fn ca_with_key(algorithm: KeyAlgorithm) -> CertificateAuthority<crate::testutil::MockRunner> {
+    fn ca_with_key(algorithm: KeyAlgorithm) -> CertificateAuthority<FakeRunner> {
         let config = CertBundleConfig {
             cn: Some("Test CA".to_string()),
             key_algorithm: Some(algorithm),
@@ -2428,7 +2368,7 @@ mod tests {
         })
         .unwrap();
         CertificateAuthority {
-            op: crate::testutil::mock_op(vec![]),
+            op: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
             ca_bundle: Some(ca_bundle),
             ca_database: Some(db),
@@ -2438,7 +2378,7 @@ mod tests {
     }
 
     fn sign(
-        ca: &mut CertificateAuthority<crate::testutil::MockRunner>,
+        ca: &mut CertificateAuthority<FakeRunner>,
         cert_type: CertType,
         cn: &str,
         alt_names: &[&str],
@@ -2454,7 +2394,7 @@ mod tests {
         ca.sign_certificate(leaf.csr.as_ref().unwrap(), &cert_type, 365).unwrap()
     }
 
-    fn sign_leaf(ca: &mut CertificateAuthority<crate::testutil::MockRunner>, algorithm: KeyAlgorithm) -> X509 {
+    fn sign_leaf(ca: &mut CertificateAuthority<FakeRunner>, algorithm: KeyAlgorithm) -> X509 {
         sign(ca, CertType::WebServer, "www.example.com", &[], algorithm)
     }
 
@@ -2568,17 +2508,18 @@ mod tests {
             .unwrap();
         }
 
+        answer_writes(&ca, 3);
         ca.delete_csr(1).unwrap();
         ca.delete_csr(2).unwrap();
 
-        let deletes: Vec<_> = ca.op.runner().calls().into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
+        let deletes: Vec<_> = calls(&ca).into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
         assert_eq!(deletes.len(), 1, "only the pending CSR's item is archived: {deletes:?}");
         assert_eq!(deletes[0][2], "CSR_pending.example.com");
         assert!(deletes[0].contains(&"--archive".to_string()));
         assert!(ca.ca_database.as_ref().unwrap().query_all_csrs(None).unwrap().is_empty());
     }
 
-    fn ca_with_cert_rows() -> CertificateAuthority<crate::testutil::MockRunner> {
+    fn ca_with_cert_rows() -> CertificateAuthority<FakeRunner> {
         let mut ca = ca_with_key(KeyAlgorithm::EcP256);
         let db = ca.ca_database.as_mut().unwrap();
         for (serial, cert_type, expiry, revoked) in [
@@ -2607,16 +2548,17 @@ mod tests {
         let mut ca = ca_with_cert_rows();
         assert!(ca.delete_certificate("1").is_err());
         assert!(ca.delete_certificate("2").is_err());
-        assert!(ca.op.runner().calls().iter().all(|c| c[..2] != ["item", "delete"]));
+        assert!(calls(&ca).iter().all(|c| c[..2] != ["item", "delete"]));
         assert_eq!(ca.ca_database.as_ref().unwrap().count_certs().unwrap(), 4);
     }
 
     #[test]
     fn a_deleted_revoked_certificate_is_archived_hidden_and_still_on_the_crl() {
         let mut ca = ca_with_cert_rows();
+        answer_writes(&ca, 4);
         ca.delete_certificate("3").unwrap();
 
-        let deletes: Vec<_> = ca.op.runner().calls().into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
+        let deletes: Vec<_> = calls(&ca).into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
         assert_eq!(deletes.len(), 1);
         assert_eq!(deletes[0][2], "CRT_3_host3.example.com");
         assert!(deletes[0].contains(&"--archive".to_string()));
@@ -2661,6 +2603,7 @@ mod tests {
             })
             .unwrap();
         }
+        answer_writes(&ca, 4);
         ca.delete_certificate("3").unwrap();
 
         let listed = crl_serials(&ca.generate_crl().unwrap());
@@ -2685,6 +2628,7 @@ mod tests {
     #[test]
     fn each_crl_carries_the_next_crl_number_and_the_one_it_records() {
         let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        answer_writes(&ca, 4);
         for expected in [1, 2] {
             let crl = openssl::x509::X509Crl::from_pem(ca.generate_crl().unwrap().as_bytes()).unwrap();
             assert_eq!(crl_extension(&crl, Nid::CRL_NUMBER), (false, vec![0x02, 0x01, expected as u8]));
@@ -2698,6 +2642,7 @@ mod tests {
     #[test]
     fn a_crl_names_its_signing_key_by_the_cas_subject_key_identifier() {
         let mut ca = ca_with_key(KeyAlgorithm::EcP384);
+        answer_writes(&ca, 2);
         let crl = openssl::x509::X509Crl::from_pem(ca.generate_crl().unwrap().as_bytes()).unwrap();
         let ski = ca.ca_bundle.as_ref().unwrap().certificate.as_ref().unwrap().subject_key_id().unwrap().as_slice().to_vec();
 
@@ -2729,7 +2674,7 @@ mod tests {
         );
     }
 
-    fn batch_ca(store: Option<&str>) -> CertificateAuthority<crate::testutil::MockRunner> {
+    fn batch_ca(store: Option<&str>) -> CertificateAuthority<FakeRunner> {
         let ca = ca_with_cert_rows();
         ca.ca_database.as_ref().unwrap().update_config(&CaConfig {
             crl_batch_enabled: Some(true),
@@ -2759,6 +2704,7 @@ mod tests {
     fn a_batch_is_staggered_numbered_upward_uploaded_and_led_by_the_stored_crl() {
         let (dir, uri) = private_store();
         let mut ca = batch_ca(Some(&uri));
+        answer_writes(&ca, 2);
 
         let stored = ca.generate_crl().unwrap();
 
@@ -2784,6 +2730,7 @@ mod tests {
     fn re_signing_a_batch_numbers_it_above_the_last_one() {
         let (dir, uri) = private_store();
         let mut ca = batch_ca(Some(&uri));
+        answer_writes(&ca, 4);
         ca.generate_crl().unwrap();
 
         ca.generate_crl().unwrap();
@@ -2815,13 +2762,14 @@ mod tests {
         let db = ca.ca_database.as_ref().unwrap();
         assert_eq!(db.get_config().unwrap().next_crl_serial, None);
         assert!(db.get_crl_metadata().unwrap().is_none());
-        assert!(ca.op.runner().calls().is_empty());
+        assert!(calls(&ca).is_empty());
     }
 
     #[test]
     fn a_failed_batch_upload_says_so_after_the_crl_is_stored() {
         let dir = tempfile::tempdir().unwrap();
         let mut ca = batch_ca(Some(&format!("rsync://{}/missing", dir.path().display())));
+        answer_writes(&ca, 2);
 
         let err = ca.generate_crl().unwrap_err();
 
@@ -2834,6 +2782,7 @@ mod tests {
     fn with_batches_off_one_crl_lasts_crl_days_and_any_old_batch_record_goes() {
         let (_dir, uri) = private_store();
         let mut ca = batch_ca(Some(&uri));
+        answer_writes(&ca, 4);
         ca.generate_crl().unwrap();
         let db = ca.ca_database.as_ref().unwrap();
         db.update_config(&CaConfig { crl_batch_enabled: Some(false), crl_days: Some(30), ..CaConfig::default() }).unwrap();
@@ -2861,15 +2810,18 @@ mod tests {
             country: config.country,
             ..CertBundleConfig::default()
         };
+        ca.op.op().runner().respond(crate::testutil::created("CRT_2_www.example.com"));
+        answer_writes(&ca, 1);
         ca.generate_certificate_bundle(CertType::WebServer, "www.example.com", leaf, None).unwrap();
+        assert!(ca.op.op().runner().is_done());
     }
 
     #[test]
     fn deleting_an_expired_certificate_tolerates_a_missing_item() {
         let mut ca = ca_with_cert_rows();
-        ca.op = crate::testutil::mock_op(vec![crate::testutil::err_output(
-            "[ERROR] \"CRT_4_host4.example.com\" isn't an item in the \"CA\" vault.",
-        )]);
+        let fake = FakeRunner::new();
+        fake.respond(not_found("CRT_4_host4.example.com")).respond(Output::ok(""));
+        ca.op = fake_vault(&fake);
         ca.delete_certificate("4").unwrap();
         let db = ca.ca_database.as_ref().unwrap();
         assert!(db.query_all_certs().unwrap().iter().all(|c| c.serial != "4"));

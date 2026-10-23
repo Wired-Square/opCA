@@ -39,6 +39,7 @@ fn crl_info_reports_the_signed_batch_and_its_cover() {
     assert_eq!((&info["crl_batch_enabled"], &info["crl_batch"]), (&json!(false), &Value::Null));
 
     let _store = batch_mode(&h);
+    h.answer_writes(2);
     let generated = h.invoke("generate_crl", json!({})).unwrap();
     let info = h.invoke("get_crl_info", json!({})).unwrap();
 
@@ -57,6 +58,7 @@ fn crl_info_reports_the_signed_batch_and_its_cover() {
 fn the_dashboard_judges_crl_expiry_by_the_batch_only_while_batches_are_on() {
     let h = Harness::with_ca(vec![], handler());
     set_config(&h, CaConfig { crl_days: Some(10), ..CaConfig::default() });
+    h.answer_writes(4);
     h.invoke("generate_crl", json!({})).unwrap();
     let single = h.invoke("get_dashboard", json!({})).unwrap();
     assert_eq!(crl_regenerate_items(&single)[0]["message"], json!("CRL expires in 9 days"));
@@ -88,6 +90,7 @@ fn crl_batches_cannot_be_turned_on_without_a_private_store() {
         .unwrap_err();
     assert!(err.as_str().unwrap().contains("private store"), "{err}");
 
+    h.answer_writes(2);
     h.invoke("update_ca_config", json!({ "config": { "crl_batch_enabled": true, "ca_private_store": "rsync:///nonexistent-opca-store" } }))
         .unwrap();
     h.invoke("update_ca_config", json!({ "config": { "crl_batch_enabled": false } })).unwrap();

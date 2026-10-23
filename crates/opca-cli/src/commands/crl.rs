@@ -1,6 +1,6 @@
 use chrono::Utc;
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner};
+use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::ca::parse_crl_metadata;
 use opca_core::utils::datetime::{format_datetime, DateTimeFormat};
 
@@ -21,7 +21,7 @@ pub fn dispatch(args: CrlArgs, app: &mut AppContext<ShellRunner>) -> Result<(), 
     }
 }
 
-fn handle_create<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
+fn handle_create<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     output::title("Generating Certificate Revocation List");
 
     with_lock(app, "crl_create", |app| {
@@ -37,7 +37,7 @@ fn handle_create<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaEr
     })
 }
 
-fn handle_export<R: CommandRunner>(
+fn handle_export<R: Runner>(
     app: &mut AppContext<R>,
     format: String,
     _to_stdout: bool,
@@ -70,7 +70,7 @@ fn handle_export<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_info<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
+fn handle_info<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
     let crl_pem = ca
         .get_crl()?
@@ -124,7 +124,7 @@ fn handle_info<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaErro
     Ok(())
 }
 
-fn handle_upload<R: CommandRunner>(
+fn handle_upload<R: Runner>(
     app: &mut AppContext<R>,
     generate: bool,
     stores: Vec<String>,

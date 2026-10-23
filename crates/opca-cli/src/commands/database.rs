@@ -1,5 +1,5 @@
 use opca_core::error::OpcaError;
-use opca_core::op::{CommandRunner, ShellRunner};
+use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
 use opca_core::services::database::CaConfig;
 use opca_core::services::local_backup::LocalBackup;
@@ -25,7 +25,7 @@ pub fn dispatch(args: DatabaseArgs, app: &mut AppContext<ShellRunner>) -> Result
     }
 }
 
-fn handle_config_get<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
+fn handle_config_get<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
     let db = ca
         .ca_database
@@ -39,7 +39,7 @@ fn handle_config_get<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), Op
     Ok(())
 }
 
-fn handle_config_set<R: CommandRunner>(
+fn handle_config_set<R: Runner>(
     app: &mut AppContext<R>,
     conf: Vec<String>,
 ) -> Result<(), OpcaError> {
@@ -116,7 +116,7 @@ fn handle_config_set<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_export<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
+fn handle_export<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
     let db = ca
         .ca_database
@@ -130,7 +130,7 @@ fn handle_export<R: CommandRunner>(app: &mut AppContext<R>) -> Result<(), OpcaEr
     Ok(())
 }
 
-fn handle_rebuild<R: CommandRunner>(
+fn handle_rebuild<R: Runner>(
     app: &mut AppContext<R>,
     days: i64,
     crl_days: i64,
@@ -153,7 +153,7 @@ fn handle_rebuild<R: CommandRunner>(
 
     let op = app.take_op()?;
     let mut ca = CertificateAuthority::rebuild_database(op, &config)?;
-    ca.local_backup = LocalBackup::if_enabled(ca.op.account());
+    ca.local_backup = LocalBackup::if_enabled(ca.op.op().account());
     ca.store_ca_database()?;
     output::print_result("Database rebuilt and stored", true);
     app.ca = Some(ca);
@@ -161,7 +161,7 @@ fn handle_rebuild<R: CommandRunner>(
     Ok(())
 }
 
-fn handle_upload<R: CommandRunner>(
+fn handle_upload<R: Runner>(
     app: &mut AppContext<R>,
     stores: Vec<String>,
 ) -> Result<(), OpcaError> {

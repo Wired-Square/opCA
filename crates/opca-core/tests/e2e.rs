@@ -15,7 +15,7 @@
 use std::sync::Mutex;
 
 use opca_core::constants::{DEFAULT_OP_CONF, DEFAULT_STORAGE_CONF};
-use opca_core::op::{create_vault_standalone, CommandRunner, Op};
+use opca_core::op::{self, ItemRef, Runner, ShellRunner, Vault, VaultInfo};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertType, KeyAlgorithm};
 use opca_core::services::database::models::{CaConfig, CertLookup};
@@ -42,8 +42,12 @@ fn test_account() -> Option<String> {
     std::env::var("OPCA_TEST_ACCOUNT").ok()
 }
 
-fn make_op(vault: &str) -> Op {
-    Op::new(vault, test_account(), None).expect("Op::new failed")
+fn make_op(vault: &str) -> Vault {
+    op::connect(ShellRunner::new(), vault, test_account().as_deref()).expect("connect failed")
+}
+
+fn create_vault(name: &str) -> VaultInfo {
+    op::create_vault(&op::client(ShellRunner::new(), test_account().as_deref()), name).expect("vault create failed")
 }
 
 /// Skip the test if `OPCA_INTEGRATION_TEST` is not set.
@@ -61,7 +65,7 @@ macro_rules! skip_unless_integration {
 // ---------------------------------------------------------------------------
 
 /// Serial of the cert matching `lookup` (any status).
-fn cert_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, lookup: &CertLookup) -> String {
+fn cert_serial<R: Runner>(ca: &CertificateAuthority<R>, lookup: &CertLookup) -> String {
     ca.ca_database
         .as_ref()
         .expect("database missing")
@@ -72,7 +76,7 @@ fn cert_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, lookup: &CertLook
 }
 
 /// Stored title (`CRT_<serial>_<cn>`) of the cert with the given serial.
-fn cert_title_for_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, serial: &str) -> String {
+fn cert_title_for_serial<R: Runner>(ca: &CertificateAuthority<R>, serial: &str) -> String {
     ca.ca_database
         .as_ref()
         .expect("database missing")
@@ -84,20 +88,15 @@ fn cert_title_for_serial<R: CommandRunner>(ca: &CertificateAuthority<R>, serial:
 }
 
 /// State of `title` in the vault (`ACTIVE`/`ARCHIVED`), including archived items.
-fn item_state(op: &Op, title: &str) -> String {
-    let mut args = vec!["item", "get", title, "--vault", &op.vault, "--include-archive", "--format=json"];
-    if let Some(account) = op.account() {
-        args.extend(["--account", account]);
-    }
-    let out = op.runner().run("op", &args, None, None).expect("op item get failed");
-    assert!(out.success, "op item get {title}: {}", out.stderr);
-    let item: serde_json::Value = serde_json::from_str(&out.stdout).expect("item json");
+fn item_state(vault: &Vault, title: &str) -> String {
+    let json = vault.clone().including_archive().item_json(&ItemRef::title(title)).expect("op item get failed");
+    let item: serde_json::Value = serde_json::from_str(json.expose()).expect("item json");
     item["state"].as_str().unwrap_or("ACTIVE").to_string()
 }
 
 /// Assert a renew/rekey predecessor was auto-ignored with the expected reason
 /// and a `replaced by <new_serial>` note.
-fn assert_predecessor_ignored<R: CommandRunner>(
+fn assert_predecessor_ignored<R: Runner>(
     ca: &CertificateAuthority<R>,
     old_serial: &str,
     new_serial: &str,
@@ -127,7 +126,7 @@ fn t01_create_vault() {
     skip_unless_integration!();
 
     let vault_name = format!("opca-e2e-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
-    let info = create_vault_standalone(&vault_name, test_account().as_deref()).expect("vault create failed");
+    let info = create_vault(&vault_name);
     eprintln!("[e2e] Created vault: {} (id={})", info.name, info.id);
 
     let mut state = STATE.lock().unwrap();
@@ -461,8 +460,7 @@ fn t31_crl_verify() {
     let op = make_op(&s.vault);
 
     // Re-retrieve — CRL was stored in 1Password by t30
-    let crl_pem = op
-        .get_document(DEFAULT_OP_CONF.crl_title)
+    let crl_pem = op::document_text(&op, DEFAULT_OP_CONF.crl_title)
         .expect("CRL document not found in vault");
 
     assert!(crl_pem.contains("BEGIN X509 CRL"));
@@ -583,8 +581,7 @@ fn t50_vault_backup_restore() {
 
     // --- Create a new empty vault for restore ---
     let restore_vault_name = format!("{}-restore", s.vault);
-    let restore_info = create_vault_standalone(&restore_vault_name, test_account().as_deref())
-        .expect("restore vault create failed");
+    let restore_info = create_vault(&restore_vault_name);
     eprintln!(
         "[e2e] Created restore vault: {} (id={})",
         restore_info.name, restore_info.id
@@ -604,7 +601,7 @@ fn t50_vault_backup_restore() {
 
     // --- Verify CA exists in restored vault ---
     assert!(
-        op_dst.item_exists(DEFAULT_OP_CONF.ca_title),
+        op_dst.item_exists(&ItemRef::title(DEFAULT_OP_CONF.ca_title)).unwrap(),
         "CA item not found in restored vault"
     );
 
@@ -627,7 +624,7 @@ fn t90_cleanup() {
     // delete the restore vault and then itself.
     let op = make_op(&s.vault);
     for vault in [&s.restore_vault, &s.vault].into_iter().filter(|v| !v.is_empty()) {
-        match op.vault_delete(vault) {
+        match op.op().delete_vault_permanently(vault) {
             Ok(()) => eprintln!("[e2e] Deleted vault: {vault}"),
             Err(e) => eprintln!("[e2e] Warning: failed to delete vault '{vault}': {e}"),
         }
