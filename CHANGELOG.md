@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   so creating `CA_Lock` never failed: the lock 1Password created first now wins
   and a loser deletes its own copy, and release and stale-lock breaking address
   the lock by id, so duplicates no longer fail with "More than one item matches".
+- A vault backup no longer carries `CA_Lock`, and a restore skips one an older
+  backup carries, so restoring a backup the app took no longer locks the new
+  vault for five minutes.
 
 ## [0.102.3] - 2026-10-10
 

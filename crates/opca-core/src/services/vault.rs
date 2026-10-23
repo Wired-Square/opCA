@@ -124,6 +124,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
         let known_titles: std::collections::HashSet<&str> = [
             self.op_config.ca_title,
             self.op_config.openvpn_title,
+            self.op_config.lock_title,
         ]
         .into_iter()
         .collect();
@@ -174,6 +175,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
         }
 
         let mut items = payload.items.clone();
+        items.retain(|i| i.title != self.op_config.lock_title);
         items.sort_by_key(|i| restore_order(&i.item_type));
 
         let mut counts = RestoreCounts::new();
@@ -380,6 +382,8 @@ pub fn extract_attributes(item_obj: &serde_json::Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::DEFAULT_OP_CONF;
+    use crate::testutil::{created, fake_vault, item_id, item_json, not_found, summary_json, FakeRunner, Output};
 
     #[test]
     fn test_classify_certificate() {
@@ -508,6 +512,54 @@ mod tests {
         let meta = VaultBackup::<crate::testutil::FakeRunner>::get_metadata(&payload);
         assert_eq!(meta.vault_name, "TestVault");
         assert_eq!(meta.item_count, 3);
+    }
+
+    fn lock_free(fake: &FakeRunner) -> bool {
+        fake.calls().iter().all(|c| !c.args().iter().any(|a| a.contains(DEFAULT_OP_CONF.lock_title)))
+    }
+
+    #[test]
+    fn a_backup_leaves_out_the_vault_lock() {
+        let fake = FakeRunner::new();
+        let listed = [summary_json(&item_id(1), "CA"), summary_json(&item_id(2), "CRT_1_a"), summary_json(&item_id(3), "CA_Lock")];
+        fake.respond(Output::ok(item_json("CA", &[("cn", "Test CA")])))
+            .respond(Output::ok("db"))
+            .respond(Output::ok("crl"))
+            .respond(not_found("OpenVPN"))
+            .respond(Output::ok(format!("[{}]", listed.join(","))))
+            .respond(Output::ok(item_json("CRT_1_a", &[("certificate", "pem")])))
+            .respond(Output::ok(item_json("CA_Lock", &[("operation", "vault_backup")])));
+
+        let payload = VaultBackup::new(&fake_vault(&fake), &DEFAULT_OP_CONF).create_backup().unwrap();
+
+        let titles: Vec<_> = payload.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, ["CA", "CA_Database", "CRL", "CRT_1_a"]);
+        assert!(lock_free(&fake));
+    }
+
+    #[test]
+    fn a_restore_skips_a_vault_lock_the_backup_carries() {
+        let fake = FakeRunner::new();
+        fake.respond(not_found("CA")).respond(created("CA")).respond(created("CA_Lock"));
+        let item = |item_type: &str, title: &str| BackupItem {
+            item_type: item_type.into(),
+            title: title.into(),
+            data: item_json(title, &[("cn", "x")]),
+        };
+        let payload = BackupPayload {
+            metadata: BackupMetadata {
+                opca_version: "0.1.0".into(),
+                backup_date: "20261023000000Z".into(),
+                vault_name: "TestVault".into(),
+                item_count: 2,
+            },
+            items: vec![item(ITEM_TYPE_CA, "CA"), item(ITEM_TYPE_CERTIFICATE, "CA_Lock")],
+        };
+
+        let counts = VaultBackup::new(&fake_vault(&fake), &DEFAULT_OP_CONF).restore_backup(&payload, None).unwrap();
+
+        assert_eq!(counts.values().sum::<usize>(), 1);
+        assert!(lock_free(&fake));
     }
 
     #[test]

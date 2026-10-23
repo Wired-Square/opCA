@@ -132,7 +132,8 @@ Organised by concern under [src/](../crates/opca-core/src):
     PBKDF2-HMAC-SHA256, 600 000 iterations. Plaintext never touches disk.
   - [vault.rs](../crates/opca-core/src/services/vault.rs) — enumerates
     every CA-related item in a vault and serialises them into the JSON
-    payload consumed by `backup`.
+    payload consumed by `backup`. `CA_Lock` is left out of a backup and
+    skipped on restore.
 - [error.rs](../crates/opca-core/src/error.rs) — `OpcaError`, a single
   `thiserror` enum that every layer returns. Serialises as `{kind, message}`
   so the frontend can pattern-match error types.
