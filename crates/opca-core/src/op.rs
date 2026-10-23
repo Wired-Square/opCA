@@ -5,10 +5,37 @@ use std::fmt::Display;
 
 pub use wslib_1password::{
     accounts, cli_path, find_account, is_item_id, AccountInfo, Assignment, Error, FieldType, Item,
-    ItemRef, ItemSummary, Op, Runner, ShellRunner, Vault, VaultInfo,
+    ItemRef, ItemSummary, Runner, VaultInfo,
 };
+use wslib_1password::{map_cli_error, Call, Output};
 
 use crate::error::OpcaError;
+
+pub type ShellRunner = RetryOnConflict<wslib_1password::ShellRunner>;
+pub type Op<R = ShellRunner> = wslib_1password::Op<R>;
+pub type Vault<R = ShellRunner> = wslib_1password::Vault<R>;
+
+/// Makes a call once more when 1Password refused it with a 409, which it
+/// refuses only to a write that did not land.
+#[derive(Clone, Debug, Default)]
+pub struct RetryOnConflict<R>(pub R);
+
+impl ShellRunner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl<R: Runner> Runner for RetryOnConflict<R> {
+    fn run(&self, call: &Call) -> std::io::Result<Output> {
+        let out = self.0.run(call)?;
+        if out.success() || !map_cli_error(&out).is_retryable() {
+            return Ok(out);
+        }
+        log::warn!("{call} raced another write; trying once more");
+        self.0.run(call)
+    }
+}
 
 /// A client for `account`, or for whichever account `op` picks when `None`.
 pub fn client<R: Runner>(runner: R, account: Option<&str>) -> Op<R> {
@@ -149,6 +176,36 @@ mod tests {
         let err = put_document(&fake_vault(&fake), "CRL", "crl.pem", "pem").unwrap_err();
         assert!(matches!(err, OpcaError::AuthenticationFailed));
         assert_eq!(fake.calls().len(), 1);
+    }
+
+    const CONFLICT: &str = "[ERROR] 2026/10/23 12:41:55 unable to process line 1: Network: (DB: (409) (Conflict), \
+                            Internal server conflict.), DB: (409) (Conflict), Internal server conflict.";
+
+    fn retrying_vault(fake: &FakeRunner) -> Vault<RetryOnConflict<FakeRunner>> {
+        client(RetryOnConflict(fake.clone()), None).vault(fake_vault(fake).info().clone())
+    }
+
+    #[test]
+    fn a_write_refused_by_a_racing_write_is_made_once_more() {
+        let fake = FakeRunner::new();
+        fake.respond(Output::fail(CONFLICT)).respond(crate::testutil::created("CRT_1_a"));
+        let fields = [assign("cn[text]", "host.example.com").unwrap()];
+        retrying_vault(&fake).create_item("CRT_1_a", "Secure Note", &fields).unwrap();
+
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|c| c.args()[..2] == ["item", "create"]));
+    }
+
+    #[test]
+    fn a_second_write_conflict_surfaces() {
+        let fake = FakeRunner::new();
+        fake.respond(Output::fail(CONFLICT)).respond(Output::fail(CONFLICT));
+        let fields = [assign("cn[text]", "host.example.com").unwrap()];
+        let err = retrying_vault(&fake).edit_item(&ItemRef::title("CRT_1_a"), &fields).unwrap_err();
+
+        assert!(matches!(err, Error::WriteConflict(_)));
+        assert_eq!(fake.calls().len(), 2);
     }
 
     #[test]

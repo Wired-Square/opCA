@@ -57,6 +57,9 @@ Organised by concern under [src/](../crates/opca-core/src):
   edit and create only when there is nothing to edit. The crate's `Error` maps
   into `OpcaError` in [error.rs](../crates/opca-core/src/error.rs). Item creates
   send their values as a JSON template on stdin; edits still pass them in argv.
+  Its `ShellRunner` (the default runner of its `Op` and `Vault`) makes a call
+  once more when 1Password refuses it as racing another write (409), which it
+  does only to a write that did not land.
 - [vault_lock.rs](../crates/opca-core/src/vault_lock.rs) — advisory lock
   implemented as a 1Password Secure Note (`CA_Lock`). `op` never refuses a
   duplicate title, so each acquirer creates its own lock and the one 1Password
@@ -393,7 +396,8 @@ Any mutating operation goes through `VaultLock`:
    when a creation time is missing or unreadable); a rival ahead of ours that
    is past its TTL is deleted by id. A loser deletes its own copy and refuses
    the operation, naming the winner's holder (email, hostname, acquired-at).
-   A create that a concurrent write refuses (409) is retried once.
+   A create refused as racing another write (409) is made once more by
+   `op.rs`'s `ShellRunner`, as every `op` call is.
 2. Perform the mutation through the command queue.
 3. Flush the queue to 1Password.
 4. Release — delete the held `CA_Lock` by its id.

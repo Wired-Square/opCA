@@ -116,13 +116,7 @@ impl VaultLock {
             .map(|(label, value)| Assignment::set(*label, FieldType::Text, value.as_str()))
             .collect();
 
-        let create = || vault.create_item(&self.lock_title, DEFAULT_OP_CONF.category, &assignments);
-        // A write racing another in the same vault fails with a 409; the
-        // retry then ranks behind the winner and reports it.
-        let created = match create() {
-            Err(e) if e.is_retryable() => create()?,
-            created => created?,
-        };
+        let created = vault.create_item(&self.lock_title, DEFAULT_OP_CONF.category, &assignments)?;
         let mine = Lock {
             created: parse_rfc3339(&created.created_at),
             id: created.id,
@@ -417,28 +411,6 @@ mod tests {
             other => panic!("Expected VaultLocked, got: {other:?}"),
         }
         assert_eq!(args(&fake, 3)[2], winner);
-        assert_eq!(deleted(&fake), [mine]);
-        assert!(fake.is_done());
-    }
-
-    #[test]
-    fn a_create_refused_by_a_concurrent_write_retries_and_loses_to_the_winner() {
-        let (winner, mine) = (item_id(1), item_id(2));
-        let fake = FakeRunner::new();
-        fake.respond(Output::ok(ALICE))
-            .respond(Output::fail(
-                "[ERROR] 2026/10/23 12:41:55 unable to process line 1: Network: (DB: (409) (Conflict), \
-                 Internal server conflict.), DB: (409) (Conflict), Internal server conflict.",
-            ))
-            .respond(Output::ok(summary(&mine, &server_at(2)).to_string()))
-            .respond(listed(&[&winner, &mine]))
-            .respond(lock_item(&winner, &server_at(1), "bob@example.com", &timestamp(-1)))
-            .respond(Output::ok(""));
-
-        let mut lock = VaultLock::new(None);
-        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
-
-        assert_eq!(holder(err), "bob@example.com");
         assert_eq!(deleted(&fake), [mine]);
         assert!(fake.is_done());
     }
