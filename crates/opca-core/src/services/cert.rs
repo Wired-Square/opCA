@@ -6,11 +6,9 @@ use std::str::FromStr;
 
 use openssl::asn1::Asn1Time;
 use openssl::bn::BigNum;
-use openssl::ec::{EcGroup, EcKey};
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::{HasPublic, Id, PKey, PKeyRef, Private};
-use openssl::rsa::Rsa;
 use openssl::x509::extension::{
     AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier,
 };
@@ -336,19 +334,14 @@ impl CertificateBundle {
     // -----------------------------------------------------------------------
 
     pub fn generate_private_key(algorithm: KeyAlgorithm) -> Result<PKey<Private>, OpcaError> {
-        let failed = |e| OpcaError::Crypto(format!("{algorithm} key generation failed: {e}"));
-        let ec = |curve| {
-            let group = EcGroup::from_curve_name(curve)?;
-            PKey::from_ec_key(EcKey::generate(&group)?)
-        };
-        let rsa = |bits| PKey::from_rsa(Rsa::generate(bits)?);
-        match algorithm {
-            KeyAlgorithm::EcP256 => ec(Nid::X9_62_PRIME256V1),
-            KeyAlgorithm::EcP384 => ec(Nid::SECP384R1),
-            KeyAlgorithm::Rsa2048 => rsa(2048),
-            KeyAlgorithm::Rsa4096 => rsa(4096),
+        let generated = match algorithm {
+            KeyAlgorithm::EcP256 => wslib_crypto::KeyAlgorithm::EcP256,
+            KeyAlgorithm::EcP384 => wslib_crypto::KeyAlgorithm::EcP384,
+            KeyAlgorithm::Rsa2048 => wslib_crypto::KeyAlgorithm::Rsa2048,
+            KeyAlgorithm::Rsa4096 => wslib_crypto::KeyAlgorithm::Rsa4096,
         }
-        .map_err(failed)
+        .generate()?;
+        Ok(PKey::private_key_from_pkcs8(generated.secret_pkcs8_der())?)
     }
 
     /// Load a PEM-encoded private key, optionally decrypting with a passphrase.
