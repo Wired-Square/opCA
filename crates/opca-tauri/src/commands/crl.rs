@@ -4,7 +4,7 @@ use openssl::x509::X509Crl;
 use tauri::State;
 
 use opca_core::constants::CRL_BATCH_LOW_COVER;
-use opca_core::services::ca::{crl_metadata_from, crl_to_text, parse_crl_metadata};
+use opca_core::services::ca::{crl_to_text, parse_crl_metadata};
 use opca_core::services::database::{CertificateAuthorityDB, CrlMetadata};
 use opca_core::utils::datetime::{format_datetime, DateTimeFormat};
 
@@ -110,7 +110,7 @@ pub async fn inspect_crl(crl_pem: String) -> Result<InspectCrlResult, String> {
         .map_err(|e| format!("Failed to parse CRL PEM: {e}"))?;
 
     let text_dump = crl_to_text(&crl).map_err(|e| format!("Failed to render CRL text: {e}"))?;
-    let metadata = crl_metadata_from(&crl);
+    let metadata = parse_crl_metadata(&crl_pem).unwrap_or_default();
     let signature_algorithm = signature_algorithm_from_text(&text_dump);
 
     Ok(InspectCrlResult {

@@ -511,7 +511,10 @@ fn t32_crl_batch_generate_and_revoke() {
     ca.generate_crl().expect("re-sign on revoke failed");
 
     let resigned = crl_batch(&batch_path);
-    let number = |crl: &openssl::x509::X509Crl| opca_core::services::ca::crl_metadata_from(crl).crl_number.unwrap();
+    let number = |crl: &openssl::x509::X509Crl| {
+        let pem = String::from_utf8(crl.to_pem().unwrap()).unwrap();
+        opca_core::services::ca::parse_crl_metadata(&pem).unwrap().crl_number.unwrap()
+    };
     assert_eq!(number(&resigned[0]), number(&first[4]) + 1);
     let revoked = |crl: &openssl::x509::X509Crl| -> Vec<String> {
         crl.get_revoked().into_iter().flatten().map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string()).collect()

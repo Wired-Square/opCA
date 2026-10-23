@@ -1845,14 +1845,6 @@ pub fn parse_crl_metadata(pem: &str) -> Result<CrlMetadata, OpcaError> {
     Ok(crl_metadata(&view))
 }
 
-/// Metadata of a CRL already parsed by OpenSSL, as `inspect_crl` holds one; all `None` if it does not read.
-pub fn crl_metadata_from(crl: &openssl::x509::X509Crl) -> CrlMetadata {
-    crl.to_der()
-        .ok()
-        .and_then(|der| CrlView::from_der(&der).ok())
-        .map_or_else(CrlMetadata::default, |view| crl_metadata(&view))
-}
-
 fn crl_metadata(view: &CrlView) -> CrlMetadata {
     let openssl_time =
         |at: std::time::SystemTime| datetime::format_datetime(at.into(), DateTimeFormat::Openssl);
@@ -2338,6 +2330,10 @@ mod tests {
         (seconds(crl.last_update()), seconds(crl.next_update().unwrap()))
     }
 
+    fn crl_number(crl: &openssl::x509::X509Crl) -> Option<i64> {
+        parse_crl_metadata(std::str::from_utf8(&crl.to_pem().unwrap()).unwrap()).unwrap().crl_number
+    }
+
     #[test]
     fn a_crl_carries_the_validity_window_it_is_given() {
         let ca_bundle = make_ca_bundle();
@@ -2630,9 +2626,10 @@ mod tests {
         let mut ca = ca_with_key(KeyAlgorithm::EcP256);
         answer_writes(&ca, 4);
         for expected in [1, 2] {
-            let crl = openssl::x509::X509Crl::from_pem(ca.generate_crl().unwrap().as_bytes()).unwrap();
+            let pem = ca.generate_crl().unwrap();
+            let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
             assert_eq!(crl_extension(&crl, Nid::CRL_NUMBER), (false, vec![0x02, 0x01, expected as u8]));
-            assert_eq!(crl_metadata_from(&crl).crl_number, Some(expected));
+            assert_eq!(parse_crl_metadata(&pem).unwrap().crl_number, Some(expected));
             let metadata = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().unwrap();
             assert_eq!(metadata.crl_number, Some(expected));
         }
@@ -2716,7 +2713,7 @@ mod tests {
         assert_eq!(crls.len(), 5);
         for (i, crl) in crls.iter().enumerate() {
             let i = i as i64;
-            assert_eq!(crl_metadata_from(crl).crl_number, Some(1 + i));
+            assert_eq!(crl_number(crl), Some(1 + i));
             assert_eq!(validity(crl), (batch.t0 + chrono::Duration::days(7 * i), batch.t0 + chrono::Duration::days(7 * i + 10)));
             assert_eq!(crl_serials(&String::from_utf8(crl.to_pem().unwrap()).unwrap()), ["3"]);
             assert!(crl.verify(&key).unwrap());
@@ -2735,7 +2732,7 @@ mod tests {
 
         ca.generate_crl().unwrap();
 
-        let numbers: Vec<_> = uploaded_batch(&dir).iter().map(|crl| crl_metadata_from(crl).crl_number).collect();
+        let numbers: Vec<_> = uploaded_batch(&dir).iter().map(crl_number).collect();
         assert_eq!(numbers, [6, 7, 8, 9, 10].map(Some));
         assert_eq!(ca.ca_database.as_ref().unwrap().get_crl_batch().unwrap().unwrap().first_number, 6);
     }

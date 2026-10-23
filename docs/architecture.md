@@ -75,7 +75,8 @@ Organised by concern under [src/](../crates/opca-core/src):
     `sign_certificate` verifies the CSR, builds a `Profile` per `CertType`
     (`profile_for`) and calls `Authority::issue`; `build_crl` calls
     `Authority::revocation_list`, which writes the Authority Key Identifier
-    before the CRL Number. CRL metadata is read with `CrlView`, its issuer
+    before the CRL Number. CRL metadata is read from PEM with `CrlView`
+    (`parse_crl_metadata`, also behind the CRL inspector), its issuer
     kept in OpenSSL's one-line form (`CN=…, C=…, emailAddress=…`) through
     `name_attributes`. A SHA-1-signed CSR can be read but not signed: the
     provider has no SHA-1. `crl_to_text` stays on `openssl-sys`

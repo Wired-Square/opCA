@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   identifier. The stored CRL issuer keeps its one-line `CN=…, C=…` form.
 - `openssl` is now 0.10.81, and subject text is read with `to_string` instead
   of the deprecated `as_utf8`, so the workspace builds without warnings.
+- CRL metadata in the CRL inspector is read by `wslib-crypto-ca` rather than
+  through an OpenSSL-parsed CRL. The text dump stays on OpenSSL.
 
 ### Fixed
 
