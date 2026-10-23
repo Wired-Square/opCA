@@ -9,7 +9,9 @@ use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Error, Item, ItemRef, Runner, Vault};
 use opca_core::services::database::{DkimRecord, DkimSync};
-use opca_core::services::route53::{format_txt_value, split_txt_value, Route53Client};
+use opca_core::services::route53::{
+    check_dkim_record, format_txt_value, split_txt_value, DkimDnsCheck, Route53Client,
+};
 
 use crate::commands::dto::{
     CreateDkimRequest, CreateDkimResult, DkimKeyDetail, DkimKeyItem, DkimRoute53Result,
@@ -519,35 +521,28 @@ pub async fn verify_dkim_dns(
 
     let expected_record = state.with_vault(|vault| dns_record(vault, &item_title))?;
 
-    let found_records = opca_core::services::route53::lookup_txt(&dns_name)
+    let check = check_dkim_record(&dns_name, &expected_record)
         .await
         .map_err(|e| e.to_string())?;
 
-    let expected_key = opca_core::services::route53::extract_dkim_key(&expected_record);
-    let verified = found_records.iter().any(|rec| {
-        match (&expected_key, opca_core::services::route53::extract_dkim_key(rec)) {
-            (Some(ek), Some(fk)) => ek == &fk,
-            _ => rec.contains(&expected_record),
+    let (verified, message, found) = match check {
+        DkimDnsCheck::Matches => (true, "DNS record verified — published and matching.", None),
+        DkimDnsCheck::NotPublished => {
+            (false, "No TXT record found. DNS may not have propagated yet.", None)
         }
-    });
-
-    let found_txt = found_records.join("\n");
-    let mismatch = !verified && !found_txt.is_empty();
-
-    let message = if verified {
-        "DNS record verified — published and matching.".to_string()
-    } else if found_txt.is_empty() {
-        "No TXT record found. DNS may not have propagated yet.".to_string()
-    } else {
-        "TXT record found but does not match the expected value.".to_string()
+        DkimDnsCheck::Mismatch { found } => (
+            false,
+            "TXT record found but does not match the expected value.",
+            Some(found.join("\n")),
+        ),
     };
 
     Ok(DkimVerifyResult {
         verified,
         dns_name,
-        message,
-        expected: if mismatch { Some(expected_record) } else { None },
-        found: if mismatch { Some(found_txt) } else { None },
+        message: message.to_string(),
+        expected: found.is_some().then_some(expected_record),
+        found,
     })
 }
 

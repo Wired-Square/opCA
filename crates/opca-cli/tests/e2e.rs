@@ -562,7 +562,8 @@ fn revoked_count(crl: &openssl::x509::X509Crl) -> usize {
 }
 
 fn crl_number(crl: &openssl::x509::X509Crl) -> i64 {
-    opca_core::services::ca::crl_metadata_from(crl).crl_number.expect("CRL Number")
+    let pem = String::from_utf8(crl.to_pem().expect("CRL PEM")).expect("CRL PEM");
+    opca_core::services::ca::parse_crl_metadata(&pem).expect("CRL metadata").crl_number.expect("CRL Number")
 }
 
 #[test]

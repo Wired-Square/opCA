@@ -1,8 +1,9 @@
 //! Route53 DNS TXT record management.
 //!
-//! Pure helpers (`split_txt_value`, `format_txt_value`, `extract_dkim_key`,
-//! `lookup_txt`) are always available.  The [`Route53Client`] uses the AWS
-//! SDK directly with credentials sourced from 1Password.
+//! Pure helpers (`split_txt_value`, `format_txt_value`, `extract_dkim_key`)
+//! and the DKIM DNS check (`check_dkim_record`) are always available.  The
+//! [`Route53Client`] uses the AWS SDK directly with credentials sourced from
+//! 1Password.
 
 // ---------------------------------------------------------------------------
 // Pure helpers (always available)
@@ -35,46 +36,48 @@ pub fn format_txt_value(chunks: &[String]) -> String {
         .join(" ")
 }
 
-/// Extract the public key portion (`p=...`) from a DKIM record value.
-pub fn extract_dkim_key(value: &str) -> Option<String> {
-    if let Some(rest) = value.split("p=").nth(1) {
-        let key = rest.split(';').next().unwrap_or("").trim();
-        if !key.is_empty() {
-            return Some(key.to_string());
-        }
-    }
-    None
+/// The decoded public key (`p=`) of a DKIM record value; `None` when absent, revoked or unreadable.
+pub fn extract_dkim_key(value: &str) -> Option<Vec<u8>> {
+    wslib_dns_mail::dkim::parse(value).record.public_key.filter(|key| !key.is_empty())
 }
 
-/// Look up TXT records for a DNS name using the system resolver.
+/// What DNS publishes at a DKIM name, against the record opCA holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DkimDnsCheck {
+    Matches,
+    NotPublished,
+    Mismatch { found: Vec<String> },
+}
+
+/// Compare the TXT records at `dns_name`, through the system resolver, with `expected`.
 ///
-/// Returns the concatenated TXT record data for each record found.
-/// Multi-part TXT records are reassembled into a single string.
-pub async fn lookup_txt(dns_name: &str) -> Result<Vec<String>, crate::error::OpcaError> {
-    use hickory_resolver::proto::rr::Name;
-    use hickory_resolver::TokioResolver;
+/// NXDOMAIN and NODATA are [`DkimDnsCheck::NotPublished`]; a lookup that could not
+/// tell (SERVFAIL, REFUSED, timeout) is an [`OpcaError::Dns`].
+pub async fn check_dkim_record(dns_name: &str, expected: &str) -> Result<DkimDnsCheck, OpcaError> {
+    let resolver = HickoryResolver::from_system(HickoryOptions::default())
+        .map_err(|e| OpcaError::Dns(format!("resolver init failed: {e}")))?;
+    compare_dkim_record(&resolver, dns_name, expected).await
+}
 
-    // Parse as an absolute (FQDN) name so the system resolver does not append
-    // search-domain suffixes. DKIM names are always fully qualified.
-    let mut name = Name::from_ascii(dns_name)
-        .map_err(|e| crate::error::OpcaError::Other(format!("invalid DNS name '{dns_name}': {e}")))?;
-    name.set_fqdn(true);
-
-    let resolver = TokioResolver::builder_tokio()
-        .map_err(|e| crate::error::OpcaError::Other(format!("DNS resolver init failed: {e}")))?
-        .build();
-
-    let response = resolver
-        .txt_lookup(name)
-        .await
-        .map_err(|e| crate::error::OpcaError::Other(format!("DNS lookup failed: {e}")))?;
-
-    let records: Vec<String> = response
-        .iter()
-        .map(|txt| txt.to_string())
-        .collect();
-
-    Ok(records)
+async fn compare_dkim_record(
+    resolver: &impl Resolver,
+    dns_name: &str,
+    expected: &str,
+) -> Result<DkimDnsCheck, OpcaError> {
+    let found: Vec<String> = match resolver.txt(dns_name).await {
+        Ok(answer) => answer.records.iter().map(Txt::joined).collect(),
+        Err(e) if e.is_absent() => Vec::new(),
+        Err(e) => return Err(OpcaError::Dns(format!("{dns_name}: {e}"))),
+    };
+    if found.is_empty() {
+        return Ok(DkimDnsCheck::NotPublished);
+    }
+    let expected_key = extract_dkim_key(expected);
+    let matches = found.iter().any(|record| match (&expected_key, extract_dkim_key(record)) {
+        (Some(expected_key), Some(found_key)) => *expected_key == found_key,
+        _ => record.contains(expected),
+    });
+    Ok(if matches { DkimDnsCheck::Matches } else { DkimDnsCheck::Mismatch { found } })
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +85,7 @@ pub async fn lookup_txt(dns_name: &str) -> Result<Vec<String>, crate::error::Opc
 // ---------------------------------------------------------------------------
 
 use log::{debug, error, info};
+use wslib_dns::{HickoryOptions, HickoryResolver, Resolver, Txt};
 
 use crate::error::OpcaError;
 use crate::services::storage::AwsCredentials;
@@ -298,6 +302,7 @@ pub struct Route53DeployResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wslib_dns::{FakeResolver, LookupError};
 
     #[test]
     fn test_split_short_value() {
@@ -343,9 +348,12 @@ mod tests {
 
     #[test]
     fn test_extract_dkim_key() {
-        let value = "v=DKIM1; k=rsa; p=MIGfMA0GCS+qABC123==";
-        let key = extract_dkim_key(value);
-        assert_eq!(key, Some("MIGfMA0GCS+qABC123==".to_string()));
+        assert_eq!(extract_dkim_key("v=DKIM1; k=rsa; p=AQID"), Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn a_dkim_key_split_by_whitespace_reads_as_one() {
+        assert_eq!(extract_dkim_key("v=DKIM1; k=rsa; p=AQ ID"), extract_dkim_key("v=DKIM1; p=AQID"));
     }
 
     #[test]
@@ -365,4 +373,42 @@ mod tests {
     // abstraction, which is not worth the complexity for two API calls.
     // The domain-walk algorithm is unchanged and was already validated.
     // Integration testing against a real AWS account covers the SDK path.
+
+    const DKIM_NAME: &str = "mail._domainkey.example.com";
+    const EXPECTED: &str = "v=DKIM1; k=rsa; p=AQID";
+
+    fn check(resolver: FakeResolver) -> Result<DkimDnsCheck, OpcaError> {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(compare_dkim_record(&resolver, DKIM_NAME, EXPECTED))
+    }
+
+    #[test]
+    fn a_published_key_split_across_strings_matches() {
+        let resolver = FakeResolver::new().with_txt_strings(DKIM_NAME, ["v=DKIM1; k=rsa; ", "p=AQID"]);
+        assert_eq!(check(resolver).unwrap(), DkimDnsCheck::Matches);
+    }
+
+    #[test]
+    fn a_different_key_is_a_mismatch() {
+        let resolver = FakeResolver::new().with_txt(DKIM_NAME, ["v=DKIM1; k=rsa; p=BAUG"]);
+        let found = vec!["v=DKIM1; k=rsa; p=BAUG".to_string()];
+        assert_eq!(check(resolver).unwrap(), DkimDnsCheck::Mismatch { found });
+    }
+
+    #[test]
+    fn nxdomain_and_nodata_are_not_published() {
+        assert_eq!(check(FakeResolver::new()).unwrap(), DkimDnsCheck::NotPublished);
+        let nodata = FakeResolver::new().with_mx(DKIM_NAME, 10, "mx.example.com");
+        assert_eq!(check(nodata).unwrap(), DkimDnsCheck::NotPublished);
+    }
+
+    #[test]
+    fn a_lookup_that_cannot_tell_is_a_dns_error() {
+        for error in [LookupError::ServFail, LookupError::Refused, LookupError::Timeout] {
+            let resolver = FakeResolver::new().with_failure(DKIM_NAME, error);
+            assert!(matches!(check(resolver), Err(OpcaError::Dns(_))));
+        }
+    }
 }
