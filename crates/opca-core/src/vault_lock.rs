@@ -1,7 +1,9 @@
 //! Advisory lock backed by a 1Password Secure Note.
 //!
-//! Uses `op item create` as an atomic compare-and-swap: if two users
-//! race to create the same `CA_Lock` item, only one succeeds.
+//! `op item create` never refuses a title in use, so a create is no
+//! compare-and-swap. Each acquirer creates its own `CA_Lock`, then lists them
+//! all: the one 1Password created first wins (the lowest item id among equals),
+//! and a loser deletes its own copy. Every later call names the lock by its id.
 //!
 //! # Usage
 //!
@@ -33,13 +35,45 @@ const FIELD_TTL: &str = "ttl_seconds";
 const DEFAULT_TTL: u64 = 300;
 
 /// Advisory lock backed by a 1Password Secure Note.
-///
-/// The lock item is created atomically via `op item create`. If a
-/// conflicting item already exists, the lock inspects it for staleness
-/// and breaks it if the TTL has been exceeded.
 pub struct VaultLock {
     lock_title: String,
-    held: bool,
+    /// The id of the lock item this instance holds.
+    held: Option<String>,
+}
+
+/// One `CA_Lock` item: its id, when 1Password created it, and its fields by label.
+struct Lock {
+    id: String,
+    created: Option<DateTime<Utc>>,
+    fields: HashMap<String, String>,
+}
+
+impl Lock {
+    /// Earliest first by the server's creation time, or by the holder's
+    /// `acquired_at` (an unreadable one before any) when that is not known for
+    /// every lock; the lowest id among equals.
+    fn rank(&self, by_server: bool) -> (Option<DateTime<Utc>>, &str) {
+        let at = if by_server {
+            self.created
+        } else {
+            self.fields.get(FIELD_ACQUIRED_AT).and_then(|at| parse_iso(at))
+        };
+        (at, &self.id)
+    }
+
+    fn field(&self, label: &str) -> String {
+        self.fields.get(label).cloned().unwrap_or_default()
+    }
+
+    fn held_against_us(&self) -> OpcaError {
+        OpcaError::VaultLocked {
+            holder_email: self.field(FIELD_HOLDER_EMAIL),
+            holder_name: self.field(FIELD_HOLDER_NAME),
+            acquired_at: self.field(FIELD_ACQUIRED_AT),
+            operation: self.field(FIELD_OPERATION),
+            hostname: self.field(FIELD_HOSTNAME),
+        }
+    }
 }
 
 impl VaultLock {
@@ -51,7 +85,7 @@ impl VaultLock {
             lock_title: lock_title
                 .unwrap_or(DEFAULT_OP_CONF.lock_title)
                 .to_string(),
-            held: false,
+            held: None,
         }
     }
 
@@ -59,8 +93,8 @@ impl VaultLock {
     ///
     /// # Errors
     ///
-    /// Returns [`OpcaError::VaultLocked`] if another user holds a
-    /// non-stale lock.
+    /// Returns [`OpcaError::VaultLocked`] if another holder's lock was
+    /// acquired first and is not yet past its TTL.
     pub fn acquire<R: Runner>(
         &mut self,
         vault: &Vault<R>,
@@ -81,60 +115,67 @@ impl VaultLock {
             .iter()
             .map(|(label, value)| Assignment::set(*label, FieldType::Text, value.as_str()))
             .collect();
+
         let create = || vault.create_item(&self.lock_title, DEFAULT_OP_CONF.category, &assignments);
-
-        match create() {
-            Ok(_) => {
-                self.held = true;
-                return Ok(());
+        // A write racing another in the same vault fails with a 409; the
+        // retry then ranks behind the winner and reports it.
+        let created = match create() {
+            Err(e) if e.is_retryable() => create()?,
+            created => created?,
+        };
+        let mine = Lock {
+            created: parse_rfc3339(&created.created_at),
+            id: created.id,
+            fields: fields.into_iter().map(|(label, value)| (label.to_string(), value)).collect(),
+        };
+        match self.contest(vault, &mine) {
+            Ok(()) => {
+                self.held = Some(mine.id);
+                Ok(())
             }
-            Err(Error::ItemConflict(_)) => {}
-            Err(e) => return Err(e.into()),
-        }
-
-        let mut lock_info = read_lock(vault, &self.lock_title)?;
-
-        if is_stale(&lock_info) {
-            delete_lock(vault, &self.lock_title)?;
-
-            // Retry once after breaking a stale lock.
-            match create() {
-                Ok(_) => {
-                    self.held = true;
-                    return Ok(());
-                }
-                Err(Error::ItemConflict(_)) => {
-                    lock_info = read_lock(vault, &self.lock_title)?;
-                }
-                Err(e) => return Err(e.into()),
+            Err(e) => {
+                let _ = delete_lock(vault, &mine.id);
+                Err(e)
             }
         }
-
-        let field = |label: &str| lock_info.get(label).cloned().unwrap_or_default();
-        Err(OpcaError::VaultLocked {
-            holder_email: field(FIELD_HOLDER_EMAIL),
-            holder_name: field(FIELD_HOLDER_NAME),
-            acquired_at: field(FIELD_ACQUIRED_AT),
-            operation: field(FIELD_OPERATION),
-            hostname: field(FIELD_HOSTNAME),
-        })
     }
 
-    /// Release the vault lock (permanent delete so the title is reusable).
+    /// Whether `mine` ranks first among the vault's locks, breaking any stale
+    /// one that ranks ahead of it.
+    fn contest<R: Runner>(&self, vault: &Vault<R>, mine: &Lock) -> Result<(), OpcaError> {
+        let mut rivals = Vec::new();
+        for item in vault.items_titled(&self.lock_title)? {
+            if item.id != mine.id {
+                rivals.extend(read_lock(vault, &item.id)?);
+            }
+        }
+        let by_server = mine.created.is_some() && rivals.iter().all(|r| r.created.is_some());
+        rivals.sort_by(|a, b| a.rank(by_server).cmp(&b.rank(by_server)));
+        let ahead = |rival: &&Lock| rival.rank(by_server) < mine.rank(by_server);
+        for rival in rivals.iter().take_while(ahead) {
+            if !is_stale(&rival.fields) {
+                return Err(rival.held_against_us());
+            }
+            delete_lock(vault, &rival.id)?;
+        }
+        Ok(())
+    }
+
+    /// Release the vault lock (permanent delete, by id).
     ///
     /// This is idempotent — calling release when the lock is not held
     /// is a no-op.
     pub fn release<R: Runner>(&mut self, vault: &Vault<R>) -> Result<(), OpcaError> {
-        if self.held {
-            delete_lock(vault, &self.lock_title)?;
-            self.held = false;
+        if let Some(id) = &self.held {
+            delete_lock(vault, id)?;
+            self.held = None;
         }
         Ok(())
     }
 
     /// Whether the lock is currently held by this instance.
     pub fn held(&self) -> bool {
-        self.held
+        self.held.is_some()
     }
 
     /// The default TTL in seconds.
@@ -152,25 +193,26 @@ fn current_user<R: Runner>(vault: &Vault<R>) -> (String, String) {
     }
 }
 
-/// The lock's fields by label; empty once another user has deleted it.
-fn read_lock<R: Runner>(
-    vault: &Vault<R>,
-    lock_title: &str,
-) -> Result<HashMap<String, String>, OpcaError> {
-    match vault.item(&ItemRef::title(lock_title)) {
-        Ok(item) => Ok(item
-            .fields
-            .into_iter()
-            .filter(|f| !f.label.is_empty())
-            .map(|f| (f.label, f.value.map(|v| v.expose().to_string()).unwrap_or_default()))
-            .collect()),
-        Err(Error::ItemNotFound(_)) => Ok(HashMap::new()),
+/// The lock item `id`, or `None` once another holder has deleted it.
+fn read_lock<R: Runner>(vault: &Vault<R>, id: &str) -> Result<Option<Lock>, OpcaError> {
+    match vault.item(&ItemRef::id(id)) {
+        Ok(item) => Ok(Some(Lock {
+            created: parse_rfc3339(&item.created_at),
+            id: item.id,
+            fields: item
+                .fields
+                .into_iter()
+                .filter(|f| !f.label.is_empty())
+                .map(|f| (f.label, f.value.map(|v| v.expose().to_string()).unwrap_or_default()))
+                .collect(),
+        })),
+        Err(Error::ItemNotFound(_)) => Ok(None),
         Err(e) => Err(e.into()),
     }
 }
 
-fn delete_lock<R: Runner>(vault: &Vault<R>, lock_title: &str) -> Result<(), OpcaError> {
-    match vault.delete_item_permanently(&ItemRef::title(lock_title)) {
+fn delete_lock<R: Runner>(vault: &Vault<R>, id: &str) -> Result<(), OpcaError> {
+    match vault.delete_item_permanently(&ItemRef::id(id)) {
         Ok(()) | Err(Error::ItemNotFound(_)) => Ok(()),
         Err(e) => Err(e.into()),
     }
@@ -208,6 +250,10 @@ fn now_utc_iso() -> String {
     Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
+fn parse_rfc3339(at: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(at).ok().map(|at| at.with_timezone(&Utc))
+}
+
 /// Parse an ISO 8601 UTC timestamp (with or without trailing Z).
 fn parse_iso(ts: &str) -> Option<DateTime<Utc>> {
     let ts = ts.trim_end_matches('Z');
@@ -219,23 +265,46 @@ fn parse_iso(ts: &str) -> Option<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{created, fake_vault, not_found, FakeRunner, Output};
+    use crate::testutil::{fake_vault, item_id, summary_json, FakeRunner, Output};
 
     const ALICE: &str = r#"{"id":"U1","email":"alice@example.com","name":"Alice"}"#;
-    const CONFLICT: &str = "[ERROR] item already exists";
 
-    fn lock_item(email: &str, acquired_at: &str) -> Output {
-        Output::ok(crate::testutil::item_json(
-            "CA_Lock",
-            &[
-                (FIELD_HOLDER_EMAIL, email),
-                (FIELD_HOLDER_NAME, "Bob"),
-                (FIELD_ACQUIRED_AT, acquired_at),
-                (FIELD_OPERATION, "cert_revoke"),
-                (FIELD_HOSTNAME, "bobs-mac"),
-                (FIELD_TTL, "300"),
-            ],
-        ))
+    /// `op item get` for a lock, with the server's full-precision `created_at`.
+    fn lock_item(id: &str, created_at: &str, email: &str, acquired_at: &str) -> Output {
+        Output::ok(
+            serde_json::json!({
+                "id": id,
+                "created_at": created_at,
+                "title": "CA_Lock",
+                "vault": {"id": crate::testutil::VAULT_ID},
+                "fields": [
+                    {"label": FIELD_HOLDER_EMAIL, "value": email},
+                    {"label": FIELD_HOLDER_NAME, "value": "Bob"},
+                    {"label": FIELD_ACQUIRED_AT, "value": acquired_at},
+                    {"label": FIELD_OPERATION, "value": "cert_revoke"},
+                    {"label": FIELD_HOSTNAME, "value": "bobs-mac"},
+                    {"label": FIELD_TTL, "value": "300"},
+                ]
+            })
+            .to_string(),
+        )
+    }
+
+    /// A server creation time within one second, `micros` into it.
+    fn server_at(micros: u32) -> String {
+        format!("2026-10-23T12:00:00.{micros:06}+11:00")
+    }
+
+    fn summary(id: &str, created_at: &str) -> serde_json::Value {
+        let mut item: serde_json::Value = serde_json::from_str(&summary_json(id, "CA_Lock")).unwrap();
+        item["created_at"] = created_at.into();
+        item
+    }
+
+    /// `op item list` answering these locks, its `created_at` rounded to the second.
+    fn listed(ids: &[&str]) -> Output {
+        let items: Vec<_> = ids.iter().map(|id| summary(id, "2026-10-23T01:00:00Z")).collect();
+        Output::ok(serde_json::to_string(&items).unwrap())
     }
 
     fn timestamp(offset_secs: i64) -> String {
@@ -244,27 +313,61 @@ mod tests {
             .to_string()
     }
 
-    /// A fake that has answered who the user is and created the lock.
-    fn acquired() -> FakeRunner {
+    /// A fake answering who the user is and creating the lock `mine` at `created_at`.
+    fn creating(mine: &str, created_at: &str) -> FakeRunner {
         let fake = FakeRunner::new();
-        fake.respond(Output::ok(ALICE)).respond(created("CA_Lock"));
+        fake.respond(Output::ok(ALICE))
+            .respond(Output::ok(summary(mine, created_at).to_string()));
         fake
+    }
+
+    /// A fake that has created the lone lock `item_id(1)`.
+    fn alone() -> (FakeRunner, String) {
+        let a = item_id(1);
+        let fake = creating(&a, &server_at(1));
+        fake.respond(listed(&[&a]));
+        (fake, a)
+    }
+
+    fn args(fake: &FakeRunner, call: usize) -> Vec<String> {
+        fake.calls()[call].args().to_vec()
+    }
+
+    fn deleted(fake: &FakeRunner) -> Vec<String> {
+        fake.calls()
+            .iter()
+            .filter(|c| c.args()[..2] == ["item", "delete"])
+            .map(|c| c.args()[2].clone())
+            .collect()
+    }
+
+    fn holder(err: OpcaError) -> String {
+        match err {
+            OpcaError::VaultLocked { holder_email, .. } => holder_email,
+            other => panic!("Expected VaultLocked, got: {other:?}"),
+        }
     }
 
     // -- acquire ----------------------------------------------------------
 
     #[test]
-    fn acquire_succeeds() {
-        let fake = acquired();
+    fn a_lone_acquire_creates_lists_and_holds() {
+        let (fake, _) = alone();
+
         let mut lock = VaultLock::new(None);
         lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
+
         assert!(lock.held());
+        assert_eq!(fake.calls().len(), 3);
+        assert_eq!(args(&fake, 0)[..3], ["user", "get", "--me"]);
+        assert_eq!(args(&fake, 2)[..2], ["item", "list"]);
         assert!(fake.is_done());
     }
 
     #[test]
     fn the_lock_fields_go_on_stdin_with_their_python_labels() {
-        let fake = acquired();
+        let (fake, _) = alone();
+
         VaultLock::new(None)
             .acquire(&fake_vault(&fake), "cert_create", 300)
             .unwrap();
@@ -272,6 +375,7 @@ mod tests {
         let create = &fake.calls()[1];
         assert_eq!(create.args()[..3], ["item", "create", "-"]);
         assert!(create.args().contains(&"--title=CA_Lock".to_string()));
+        assert!(create.args().contains(&"--category=Secure Note".to_string()));
         let template: serde_json::Value = serde_json::from_slice(create.stdin().unwrap()).unwrap();
         let field = |label: &str| {
             template["fields"]
@@ -279,22 +383,25 @@ mod tests {
                 .unwrap()
                 .iter()
                 .find(|f| f["label"] == label)
-                .map(|f| f["value"].as_str().unwrap().to_string())
+                .cloned()
                 .unwrap()
         };
-        assert_eq!(field(FIELD_HOLDER_EMAIL), "alice@example.com");
-        assert_eq!(field(FIELD_HOLDER_NAME), "Alice");
-        assert_eq!(field(FIELD_OPERATION), "cert_create");
-        assert_eq!(field(FIELD_TTL), "300");
-        assert!(parse_iso(&field(FIELD_ACQUIRED_AT)).is_some());
+        assert_eq!(field(FIELD_HOLDER_EMAIL)["value"], "alice@example.com");
+        assert_eq!(field(FIELD_HOLDER_NAME)["value"], "Alice");
+        assert_eq!(field(FIELD_OPERATION)["value"], "cert_create");
+        assert_eq!(field(FIELD_TTL)["value"], "300");
+        assert_eq!(field(FIELD_ACQUIRED_AT)["type"], "STRING");
+        assert!(parse_iso(field(FIELD_ACQUIRED_AT)["value"].as_str().unwrap()).is_some());
+        assert!(!create.to_string().contains("alice@example.com"));
     }
 
     #[test]
-    fn vault_locked_when_held_by_another() {
-        let fake = FakeRunner::new();
-        fake.respond(Output::ok(ALICE))
-            .respond(Output::fail(CONFLICT))
-            .respond(lock_item("bob@example.com", &timestamp(0)));
+    fn losing_a_race_deletes_our_copy_and_names_the_winner() {
+        let (winner, mine) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(2));
+        fake.respond(listed(&[&mine, &winner]))
+            .respond(lock_item(&winner, &server_at(1), "bob@example.com", &timestamp(0)))
+            .respond(Output::ok(""));
 
         let mut lock = VaultLock::new(None);
         let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
@@ -309,80 +416,221 @@ mod tests {
             }
             other => panic!("Expected VaultLocked, got: {other:?}"),
         }
-    }
-
-    #[test]
-    fn breaks_stale_lock_and_reacquires() {
-        let fake = FakeRunner::new();
-        fake.respond(Output::ok(ALICE))
-            .respond(Output::fail(CONFLICT))
-            .respond(lock_item("bob@example.com", &timestamp(-600)))
-            .respond(Output::ok(""))
-            .respond(created("CA_Lock"));
-
-        let mut lock = VaultLock::new(None);
-        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
-        assert!(lock.held());
+        assert_eq!(args(&fake, 3)[2], winner);
+        assert_eq!(deleted(&fake), [mine]);
         assert!(fake.is_done());
     }
 
     #[test]
-    fn corrupt_lock_treated_as_stale() {
+    fn a_create_refused_by_a_concurrent_write_retries_and_loses_to_the_winner() {
+        let (winner, mine) = (item_id(1), item_id(2));
         let fake = FakeRunner::new();
         fake.respond(Output::ok(ALICE))
-            .respond(Output::fail(CONFLICT))
-            .respond(lock_item("bob@example.com", "not-a-valid-date"))
+            .respond(Output::fail(
+                "[ERROR] 2026/10/23 12:41:55 unable to process line 1: Network: (DB: (409) (Conflict), \
+                 Internal server conflict.), DB: (409) (Conflict), Internal server conflict.",
+            ))
+            .respond(Output::ok(summary(&mine, &server_at(2)).to_string()))
+            .respond(listed(&[&winner, &mine]))
+            .respond(lock_item(&winner, &server_at(1), "bob@example.com", &timestamp(-1)))
+            .respond(Output::ok(""));
+
+        let mut lock = VaultLock::new(None);
+        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
+
+        assert_eq!(holder(err), "bob@example.com");
+        assert_eq!(deleted(&fake), [mine]);
+        assert!(fake.is_done());
+    }
+
+    #[test]
+    fn an_earlier_create_wins_whatever_its_id() {
+        let (mine, earlier) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(2));
+        fake.respond(listed(&[&mine, &earlier]))
+            .respond(lock_item(&earlier, &server_at(1), "bob@example.com", &timestamp(0)))
+            .respond(Output::ok(""));
+
+        let mut lock = VaultLock::new(None);
+        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
+        assert_eq!(holder(err), "bob@example.com");
+        assert_eq!(deleted(&fake), [mine]);
+    }
+
+    #[test]
+    fn a_later_create_in_the_same_second_wins_nothing_whatever_its_id() {
+        let (mine, first) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(900_000));
+        fake.respond(listed(&[&first, &mine]))
+            .respond(lock_item(&first, &server_at(100), "bob@example.com", &now_utc_iso()))
+            .respond(Output::ok(""));
+
+        let mut lock = VaultLock::new(None);
+        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
+
+        assert_eq!(holder(err), "bob@example.com");
+        assert_eq!(deleted(&fake), [mine]);
+    }
+
+    #[test]
+    fn winning_a_race_keeps_our_copy_and_leaves_theirs() {
+        let (later, mine) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(1));
+        fake.respond(listed(&[&later, &mine]))
+            .respond(lock_item(&later, &server_at(2), "bob@example.com", &timestamp(0)));
+
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
+
+        assert!(lock.held());
+        assert!(deleted(&fake).is_empty());
+        assert!(fake.is_done());
+    }
+
+    #[test]
+    fn without_a_server_time_the_earlier_acquired_at_wins() {
+        let (mine, rival) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(1));
+        fake.respond(listed(&[&mine, &rival]))
+            .respond(lock_item(&rival, "", "bob@example.com", &timestamp(-60)))
+            .respond(Output::ok(""));
+
+        let mut lock = VaultLock::new(None);
+        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
+        assert_eq!(holder(err), "bob@example.com");
+    }
+
+    #[test]
+    fn ranking_falls_back_to_acquired_at_then_the_lowest_id() {
+        let lock = |id: u32, created: Option<&str>| Lock {
+            id: item_id(id),
+            created: created.and_then(parse_rfc3339),
+            fields: HashMap::from([(FIELD_ACQUIRED_AT.to_string(), "2026-10-23T10:00:00Z".to_string())]),
+        };
+        let first = server_at(1);
+        let second = server_at(2);
+        assert!(lock(2, Some(&first)).rank(true) < lock(1, Some(&second)).rank(true));
+        assert!(lock(1, None).rank(false) < lock(2, None).rank(false));
+        let unreadable = Lock { id: item_id(9), created: None, fields: HashMap::new() };
+        assert!(unreadable.rank(false) < lock(1, None).rank(false));
+    }
+
+    #[test]
+    fn a_stale_lock_among_duplicates_is_broken_by_id() {
+        let (stale, mine, later) = (item_id(1), item_id(2), item_id(3));
+        let fake = creating(&mine, &server_at(2));
+        fake.respond(listed(&[&stale, &mine, &later]))
+            .respond(lock_item(&stale, &server_at(1), "bob@example.com", &timestamp(-600)))
+            .respond(lock_item(&later, &server_at(3), "carol@example.com", &timestamp(0)))
+            .respond(Output::ok(""));
+
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
+
+        assert!(lock.held());
+        assert_eq!(deleted(&fake), [stale]);
+        assert!(fake.calls().iter().all(|c| !c.args().contains(&"CA_Lock".to_string())));
+        assert!(fake.is_done());
+    }
+
+    #[test]
+    fn a_fresh_lock_behind_a_stale_one_still_wins() {
+        let (stale, earlier, mine) = (item_id(1), item_id(2), item_id(3));
+        let fake = creating(&mine, &server_at(3));
+        fake.respond(listed(&[&stale, &earlier, &mine]))
+            .respond(lock_item(&stale, &server_at(1), "bob@example.com", &timestamp(-600)))
+            .respond(lock_item(&earlier, &server_at(2), "carol@example.com", &timestamp(-5)))
             .respond(Output::ok(""))
-            .respond(created("CA_Lock"));
+            .respond(Output::ok(""));
+
+        let mut lock = VaultLock::new(None);
+        let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
+
+        assert_eq!(holder(err), "carol@example.com");
+        assert_eq!(deleted(&fake), [stale, mine]);
+    }
+
+    #[test]
+    fn a_corrupt_lock_is_treated_as_stale() {
+        let (corrupt, mine) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(2));
+        fake.respond(listed(&[&corrupt, &mine]))
+            .respond(lock_item(&corrupt, &server_at(1), "bob@example.com", "not-a-valid-date"))
+            .respond(Output::ok(""));
+
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
+        assert_eq!(deleted(&fake), [corrupt]);
+    }
+
+    #[test]
+    fn a_rival_deleted_before_we_read_it_is_ignored() {
+        let (gone, mine) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(2));
+        fake.respond(listed(&[&gone, &mine]))
+            .respond(Output::fail("[ERROR] \"00000000000000000000000001\" isn't an item in the \"TestVault\" vault."));
 
         let mut lock = VaultLock::new(None);
         lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
         assert!(lock.held());
+        assert!(deleted(&fake).is_empty());
     }
 
     #[test]
-    fn acquire_propagates_read_lock_error() {
-        let fake = FakeRunner::new();
-        fake.respond(Output::ok(ALICE))
-            .respond(Output::fail(CONFLICT))
-            .respond(Output::fail("You are not currently signed in"));
+    fn a_failure_after_the_create_deletes_our_copy() {
+        let (rival, mine) = (item_id(1), item_id(2));
+        let fake = creating(&mine, &server_at(2));
+        fake.respond(listed(&[&rival, &mine]))
+            .respond(Output::fail("You are not currently signed in"))
+            .respond(Output::ok(""));
 
         let mut lock = VaultLock::new(None);
         let err = lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap_err();
 
         assert!(!lock.held());
         assert!(matches!(err, OpcaError::AuthenticationFailed), "{err:?}");
+        assert_eq!(deleted(&fake), [mine]);
     }
 
     #[test]
-    fn acquire_treats_disappeared_lock_as_stale() {
+    fn duplicates_read_by_title_are_ambiguous_with_their_ids() {
         let fake = FakeRunner::new();
-        fake.respond(Output::ok(ALICE))
-            .respond(Output::fail(CONFLICT))
-            .respond(not_found("CA_Lock"))
-            .respond(not_found("CA_Lock"))
-            .respond(created("CA_Lock"));
-
-        let mut lock = VaultLock::new(None);
-        lock.acquire(&fake_vault(&fake), "cert_create", 300).unwrap();
-        assert!(lock.held());
-        assert!(fake.is_done());
+        fake.respond(Output::fail(
+            "[ERROR] 2026/10/23 10:00:00 More than one item matches \"CA_Lock\". Try again and specify the item by its ID:\n\
+             \t* for the item \"CA_Lock\" in vault TestVault: 4ld6tdxnvj5kgsbjbb4e3opyua\n\
+             \t* for the item \"CA_Lock\" in vault TestVault: ubvcz6g3xb4bkmrkbs2xq6cfzi\n",
+        ));
+        let err: OpcaError = fake_vault(&fake)
+            .item(&ItemRef::title("CA_Lock"))
+            .unwrap_err()
+            .into();
+        match err {
+            OpcaError::AmbiguousItem { title, ids } => {
+                assert_eq!(title, "CA_Lock");
+                assert_eq!(ids, ["4ld6tdxnvj5kgsbjbb4e3opyua", "ubvcz6g3xb4bkmrkbs2xq6cfzi"]);
+            }
+            other => panic!("Expected AmbiguousItem, got: {other:?}"),
+        }
     }
 
     #[test]
     fn custom_lock_title() {
-        let fake = acquired();
+        let a = item_id(1);
+        let fake = creating(&a, &server_at(1));
+        fake.respond(Output::ok("[]"));
+
         VaultLock::new(Some("Custom_Lock"))
             .acquire(&fake_vault(&fake), "test", 300)
             .unwrap();
-        assert!(fake.calls()[1].args().contains(&"--title=Custom_Lock".to_string()));
+
+        assert!(args(&fake, 1).contains(&"--title=Custom_Lock".to_string()));
     }
 
     // -- release ----------------------------------------------------------
 
     #[test]
-    fn release_deletes_without_archive() {
-        let fake = acquired();
+    fn release_deletes_our_lock_by_id_without_archive() {
+        let (fake, a) = alone();
         fake.respond(Output::ok(""));
 
         let vault = fake_vault(&fake);
@@ -391,12 +639,12 @@ mod tests {
         lock.release(&vault).unwrap();
 
         assert!(!lock.held());
-        assert_eq!(fake.calls()[2].args(), ["item", "delete", "CA_Lock", "--vault=testvault"]);
+        assert_eq!(args(&fake, 3), ["item", "delete", &a, "--vault=testvault"]);
     }
 
     #[test]
     fn release_idempotent() {
-        let fake = acquired();
+        let (fake, _) = alone();
         fake.respond(Output::ok(""));
 
         let vault = fake_vault(&fake);
@@ -405,19 +653,31 @@ mod tests {
         lock.release(&vault).unwrap();
         lock.release(&vault).unwrap();
 
-        assert_eq!(fake.calls().len(), 3);
+        assert_eq!(fake.calls().len(), 4);
     }
 
     #[test]
-    fn release_ignores_item_not_found() {
-        let fake = acquired();
-        fake.respond(not_found("CA_Lock"));
+    fn release_when_the_lock_is_already_gone() {
+        let (fake, _) = alone();
+        fake.respond(Output::fail("[ERROR] \"00000000000000000000000001\" isn't an item in the \"TestVault\" vault."));
 
         let vault = fake_vault(&fake);
         let mut lock = VaultLock::new(None);
         lock.acquire(&vault, "test", 300).unwrap();
         lock.release(&vault).unwrap();
         assert!(!lock.held());
+    }
+
+    #[test]
+    fn a_failed_release_keeps_the_lock_held() {
+        let (fake, _) = alone();
+        fake.respond(Output::fail("[ERROR] boom"));
+
+        let vault = fake_vault(&fake);
+        let mut lock = VaultLock::new(None);
+        lock.acquire(&vault, "test", 300).unwrap();
+        assert!(lock.release(&vault).is_err());
+        assert!(lock.held());
     }
 
     // -- is_stale ---------------------------------------------------------

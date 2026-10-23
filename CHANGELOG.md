@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `openssl` is now 0.10.81, and subject text is read with `to_string` instead
   of the deprecated `as_utf8`, so the workspace builds without warnings.
 
+### Fixed
+
+- The vault lock now excludes a second holder. `op` allows two items one title,
+  so creating `CA_Lock` never failed: the lock 1Password created first now wins
+  and a loser deletes its own copy, and release and stale-lock breaking address
+  the lock by id, so duplicates no longer fail with "More than one item matches".
+
 ## [0.102.3] - 2026-10-10
 
 ### Added
