@@ -50,13 +50,17 @@ Two workspace crates plus a frontend make up the desktop app:
 
 Organised by concern under [src/](../crates/opca-core/src):
 
-- [op.rs](../crates/opca-core/src/op.rs) — thin wrapper around the
-  1Password CLI. The `CommandRunner` trait abstracts process invocation;
-  `ShellRunner` shells out to `op`, and unit tests inject a `MockRunner` to
-  avoid real CLI calls. Private-key arguments are redacted from debug logs.
+- [op.rs](../crates/opca-core/src/op.rs) — opCA's side of `wslib-1password`,
+  which runs `op`: `connect` (sign in, then open the CA vault, whose `Vault`
+  names itself by id on every call), the duplicate-name refusal for new vaults,
+  `assign` for `DEFAULT_OP_CONF` labels, and `put_document`/`put_item`, which
+  edit and create only when there is nothing to edit. The crate's `Error` maps
+  into `OpcaError` in [error.rs](../crates/opca-core/src/error.rs). Item creates
+  send their values as a JSON template on stdin; edits still pass them in argv.
 - [vault_lock.rs](../crates/opca-core/src/vault_lock.rs) — advisory lock
-  implemented as a 1Password Secure Note (`CA_Lock`). `op item create` acts as
-  an atomic compare-and-swap; stale locks past TTL are broken automatically.
+  implemented as a 1Password Secure Note (`CA_Lock`). `op` never refuses a
+  duplicate title, so each acquirer creates its own lock and the one 1Password
+  created first wins; stale locks past TTL are broken automatically.
 - [crypto/](../crates/opca-core/src/crypto) — key generation, CRL/DKIM/
   OpenVPN helpers, and PKCS#12 packaging via the `openssl` crate.
 - [services/](../crates/opca-core/src/services):
@@ -382,12 +386,16 @@ next upload.
 
 Any mutating operation goes through `VaultLock`:
 
-1. Acquire — `op item create CA_Lock …` fails if a lock already exists. If it
-   does, OPCA parses the holder metadata (email, hostname, acquired-at, TTL)
-   and either waits, breaks a stale lock, or refuses the operation.
+1. Acquire — create a `CA_Lock`, then list every item of that title and read
+   each rival with `op item get`. The lock with the earliest server
+   `created_at` wins, then the lowest item id (by the holder's `acquired_at`
+   when a creation time is missing or unreadable); a rival ahead of ours that
+   is past its TTL is deleted by id. A loser deletes its own copy and refuses
+   the operation, naming the winner's holder (email, hostname, acquired-at).
+   A create that a concurrent write refuses (409) is retried once.
 2. Perform the mutation through the command queue.
 3. Flush the queue to 1Password.
-4. Release — delete `CA_Lock`.
+4. Release — delete the held `CA_Lock` by its id.
 
 The frontend wraps write calls in `withLock()` in
 [api/tauri.ts](../frontend/src/api/tauri.ts) so the lock lifetime always
@@ -662,7 +670,7 @@ shared behaviour and each wrapper's test asserts just its wiring.
 
 Re-signing the CA earns a confirmation despite keeping the key, subject and
 serial (so issued certificates still chain): `re_sign_ca` overwrites the vault
-item with `StoreAction::Edit` and takes no snapshot, so **opCA cannot undo it** —
+item with `op item edit` and takes no snapshot, so **opCA cannot undo it** —
 recovery means 1Password's own item history or a vault restore. It also does not
 publish, so the CA page offers to upload afterwards, the same way the CRL page
 does after Generate.
@@ -744,15 +752,16 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
 
 ## Testing
 
-- **Unit** — `cargo test -p opca-core`. Uses `MockRunner` to feed canned `op`
-  output; no network, no `op` binary required.
+- **Unit** — `cargo test -p opca-core`. Uses `wslib-1password`'s `FakeRunner`
+  to script `op` output; an unscripted call fails. No network, no `op` binary.
 - **Tauri commands** — `cargo test -p opca-tauri`. Under `cfg(test)`
-  `state::Runner` is core's `MockRunner` (via core's `test-support` feature),
+  `state::Runner` is the `FakeRunner` (via core's `test-support` feature), each
+  test scripting the calls it makes,
   and `test_harness::Harness` builds a `tauri::test::mock_builder` app over a
   loaded in-memory CA, invokes commands over IPC with the frontend's argument
   names, and exposes the recorded `op` calls, action log and emitted events.
 - **Integration** — `OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test
-  op_integration`. Exercises the low-level `Op` wrapper against a real `op`
+  op_integration`. Exercises the 1Password client against a real `op`
   session and test vault (`OPCA_TEST_VAULT`, optionally `OPCA_TEST_ACCOUNT`).
 - **End-to-end** — `OPCA_INTEGRATION_TEST=1 cargo test -p opca-core --test e2e
   -- --test-threads=1`. Runs the full CA lifecycle (init → issue → renew/rekey
