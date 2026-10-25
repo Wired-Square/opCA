@@ -1,13 +1,13 @@
 import { Show, For, createSignal, createResource, createUniqueId, onMount, onCleanup } from "solid-js";
+import { DateModeToggle } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
 import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, recordCaCertCopy } from "../api/ca";
 import { listAwsCredentials, getAwsCredential, setAwsCredential } from "../api/aws";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import PageError from "../components/PageError";
@@ -149,6 +149,7 @@ export default function CA() {
 }
 
 function CertificateTab(props: { info: () => CaInfo | undefined }) {
+  const dateText = useDateText();
   const [copied, markCopied] = createCopiedSignal();
 
   function copyPem() {
@@ -170,8 +171,8 @@ function CertificateTab(props: { info: () => CaInfo | undefined }) {
               <DetailRow label="Subject" value={info().subject} mono />
               <DetailRow label="Issuer" value={info().issuer} mono />
               <DetailRow label="Serial" value={info().serial} mono />
-              <DetailRow label={<>Valid From <TzToggle /></>} value={formatDate(info().not_before)} />
-              <DetailRow label="Valid Until" value={formatDate(info().not_after)} />
+              <DetailRow label={<>Valid From <DateModeToggle /></>} value={dateText(info().not_before)} />
+              <DetailRow label="Valid Until" value={dateText(info().not_after)} />
               <DetailRow label="Key Type" value={info().key_type} />
               <DetailRow label="Key Size" value={info().key_size} />
               <div class="detail-row">

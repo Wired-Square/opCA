@@ -1,4 +1,5 @@
 import { Show, createEffect, createResource, createSignal } from "solid-js";
+import { DateModeToggle } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import {
   getCrlInfo,
@@ -8,9 +9,8 @@ import {
   inspectCrl,
   recordCrlCopy,
 } from "../api/crl";
-import { formatDate } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import { ActionResultBanner } from "../components/ResultBanner";
@@ -179,12 +179,12 @@ export default function CRL() {
                   <span class="detail-value mono">{d().issuer ?? "—"}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Last Update <TzToggle /></span>
-                  <span class="detail-value mono">{formatDate(d().last_update)}</span>
+                  <span class="detail-label">Last Update <DateModeToggle /></span>
+                  <span class="detail-value mono"><StoredDate value={d().last_update} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Next Update</span>
-                  <span class="detail-value mono">{formatDate(d().next_update)}</span>
+                  <span class="detail-value mono"><StoredDate value={d().next_update} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">CRL Number</span>
@@ -230,7 +230,7 @@ export default function CRL() {
                       </div>
                       <div class="detail-row">
                         <span class="detail-label">Signed Until</span>
-                        <span class="detail-value mono">{formatDate(b().signed_until)}</span>
+                        <span class="detail-value mono"><StoredDate value={b().signed_until} /></span>
                       </div>
                       <div class="detail-row">
                         <span class="detail-label">Unreleased</span>
@@ -296,12 +296,12 @@ export default function CRL() {
                     <span class="detail-value mono">{r().issuer || "—"}</span>
                   </div>
                   <div class="detail-row">
-                    <span class="detail-label">Last Update <TzToggle /></span>
-                    <span class="detail-value mono">{formatDate(r().last_update)}</span>
+                    <span class="detail-label">Last Update <DateModeToggle /></span>
+                    <span class="detail-value mono"><StoredDate value={r().last_update} /></span>
                   </div>
                   <div class="detail-row">
                     <span class="detail-label">Next Update</span>
-                    <span class="detail-value mono">{formatDate(r().next_update)}</span>
+                    <span class="detail-value mono"><StoredDate value={r().next_update} /></span>
                   </div>
                   <div class="detail-row">
                     <span class="detail-label">CRL Number</span>

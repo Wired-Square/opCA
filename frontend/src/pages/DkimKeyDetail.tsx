@@ -1,4 +1,5 @@
 import { Show, createSignal, createResource, createEffect } from "solid-js";
+import { DateModeToggle } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useParams, useNavigate } from "@solidjs/router";
 import {
@@ -10,9 +11,8 @@ import {
   deployDkimRoute53,
   deleteDkimKey,
 } from "../api/dkim";
-import { formatDate } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import PageError from "../components/PageError";
@@ -212,8 +212,8 @@ export default function DkimKeyDetailPage() {
                   <span class="detail-value">{d().key_size != null ? `${d().key_size} bits` : "—"}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Created <TzToggle /></span>
-                  <span class="detail-value mono">{formatDate(d().created_at)}</span>
+                  <span class="detail-label">Created <DateModeToggle /></span>
+                  <span class="detail-value mono"><StoredDate value={d().created_at} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Key Pair</span>

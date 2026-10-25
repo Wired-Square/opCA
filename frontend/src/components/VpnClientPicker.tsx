@@ -2,7 +2,7 @@ import { Show, For, createSignal, createMemo } from "solid-js";
 import { Popover, PopoverOption } from "@wired-square/kit";
 import CertStatusBadge from "./CertStatusBadge";
 import Spinner from "./Spinner";
-import { formatDate } from "../utils/dates";
+import StoredDate from "./StoredDate";
 import type { CertListItem } from "../api/types";
 import "../styles/components/vpn-client-picker.css";
 
@@ -27,7 +27,7 @@ function ClientRow(props: { cert: CertListItem }) {
         label={`#${props.cert.serial ?? "?"}`}
       />
       <span class="vpn-picker-cn">{props.cert.cn ?? "—"}</span>
-      <span class="vpn-picker-expiry">{formatDate(props.cert.expiry_date)}</span>
+      <span class="vpn-picker-expiry"><StoredDate value={props.cert.expiry_date} /></span>
     </>
   );
 }

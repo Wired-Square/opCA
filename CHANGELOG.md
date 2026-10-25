@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CSRs are now built by `wslib-crypto-ca` 0.1 from the `wired-square`
   registry, signed through the `rustls-openssl` provider, and a CSR's SANs are
   read without OpenSSL FFI.
+- Dates and the UTC / Local / Relative toggle are now the kit's; the strings
+  shown are unchanged.
 - Certificates are now issued by `wslib-crypto-ca`, with one profile per
   certificate type; the extensions issued are unchanged. A SHA-1-signed CSR can
   still be read, but signing it is refused, as the provider has no SHA-1.

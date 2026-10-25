@@ -585,6 +585,12 @@ win. Key conventions:
   (`valid_ca` / `empty_vault` / `invalid_ca`) returned by `connect`. Empty
   vaults are steered to CA initialisation; broken vaults to the dashboard
   with an error banner.
+  It also wraps every page in the kit's `DateModes` (UTC first, `en-AU`,
+  opca's countdown / time-ago wording for relative), which the
+  `DateModeToggle` beside a date cycles. Stored ASN.1 dates are read by
+  `asn1Date` in [utils/dates.ts](../frontend/src/utils/dates.ts) and shown by
+  `StoredDate` (the kit's `When`); `useDateText` gives the same text for row
+  search filters and string-valued detail rows.
 - [pages/Connect.tsx](../frontend/src/pages/Connect.tsx) picks the vault
   from previously-used logins (localStorage) or the account's vaults, and the
   account from `list_accounts` — `op account list`, which reads local CLI

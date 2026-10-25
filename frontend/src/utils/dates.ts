@@ -1,46 +1,7 @@
-/**
- * Date display utilities for opCA.
- *
- * Dates are stored in ASN1 GeneralizedTime format: "20270415051336Z"
- * We parse them and display in a human-friendly format, with the ability
- * to toggle between UTC, local time, and relative time.
- */
+import { formatWhen, useDateModes } from "@wired-square/kit";
 
-import { createSignal, createEffect, createRoot, onCleanup } from "solid-js";
-
-export type TimeZoneMode = "utc" | "local" | "relative";
-
-const [tzMode, setTzMode] = createSignal<TimeZoneMode>("utc");
-
-export { tzMode };
-
-export function toggleTzMode() {
-  setTzMode((m) => {
-    if (m === "utc") return "local";
-    if (m === "local") return "relative";
-    return "utc";
-  });
-}
-
-// Tick signal — updates every second while in relative mode so that
-// all formatDate() call sites reactively re-render their countdowns.
-const [now, setNow] = createSignal(Date.now());
-
-createRoot(() => {
-  createEffect(() => {
-    if (tzMode() === "relative") {
-      const id = setInterval(() => setNow(Date.now()), 1000);
-      onCleanup(() => clearInterval(id));
-    }
-  });
-});
-
-/**
- * Parse an ASN1 GeneralizedTime string ("20270415051336Z") into a Date.
- * Falls back to trying Date.parse for other formats.
- */
-function parseAsn1Date(value: string): Date | null {
-  // ASN1 format: YYYYMMDDHHmmSSZ (15 chars)
+/** An ASN.1 GeneralizedTime ("20270415051336Z"), or any form `Date` reads, as a `Date`. */
+export function asn1Date(value: string): Date | null {
   const m = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/);
   if (m) {
     return new Date(
@@ -54,7 +15,6 @@ function parseAsn1Date(value: string): Date | null {
       ),
     );
   }
-  // Fallback: try native parsing (handles "Apr 15 05:13:36 2027 GMT" etc.)
   const d = new Date(value);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -110,7 +70,7 @@ function formatCountdown(target: Date, nowMs: number): string {
 }
 
 /**
- * Format a past date as a human-friendly "time ago" string.
+ * A countdown for a future date, or how long ago a past one was:
  *
  *   < 60s:    "just now"
  *   < 1h:     "X minutes ago"
@@ -119,7 +79,7 @@ function formatCountdown(target: Date, nowMs: number): string {
  *   < 365d:   "X months ago"
  *   >= 1y:    "X years, X months ago" or "X years ago"
  */
-export function formatTimeAgo(target: Date, nowMs: number): string {
+export function formatRelativeTime(target: Date, nowMs: number): string {
   const diffMs = nowMs - target.getTime();
   if (diffMs < 0) return formatCountdown(target, nowMs);
 
@@ -169,62 +129,6 @@ export function formatTimeAgo(target: Date, nowMs: number): string {
   return months <= 1 ? "1 month ago" : `${months} months ago`;
 }
 
-/**
- * Format a date as a relative time string.
- * Future dates use compact countdown; past dates use natural language.
- */
-function formatRelativeTime(date: Date, nowMs: number): string {
-  if (date.getTime() > nowMs) {
-    return formatCountdown(date, nowMs);
-  }
-  return formatTimeAgo(date, nowMs);
-}
-
-/**
- * Format a date string for display.
- *
- * Returns a human-friendly string in UTC, local time, or relative time,
- * depending on the current timezone mode.
- */
-export function formatDate(
-  value: string | null | undefined,
-  mode?: TimeZoneMode,
-): string {
-  if (!value) return "\u2014";
-  const date = parseAsn1Date(value);
-  if (!date) return value; // Can't parse — return raw
-
-  const tz = mode ?? tzMode();
-
-  if (tz === "relative") {
-    return formatRelativeTime(date, now());
-  }
-
-  if (tz === "utc") {
-    return date.toLocaleString("en-AU", {
-      timeZone: "UTC",
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }) + " UTC";
-  }
-
-  return date.toLocaleString("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZoneName: "short",
-  });
-}
-
 /** Full local date and time, e.g. "Tue 29 Sep 2026, 11:57 pm AEST". */
 export function formatLocalDateTime(date: Date): string {
   return date.toLocaleString("en-AU", {
@@ -236,4 +140,16 @@ export function formatLocalDateTime(date: Date): string {
     minute: "2-digit",
     timeZoneName: "short",
   });
+}
+
+/** A stored date as text in the current `DateModes` mode: "—" when missing, as stored when unreadable. */
+export function useDateText(): (value: string | null | undefined) => string {
+  const modes = useDateModes();
+  return (value) => {
+    if (!value) return "\u2014";
+    const at = asn1Date(value);
+    return at
+      ? formatWhen(at, modes.mode(), { now: modes.now(), locale: modes.locale, relative: modes.relative })
+      : value;
+  };
 }

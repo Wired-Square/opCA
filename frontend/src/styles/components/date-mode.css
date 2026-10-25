@@ -1,4 +1,4 @@
-.tz-toggle {
+.app-date-mode {
   display: inline-flex;
   align-items: center;
   min-width: 52px;
@@ -18,7 +18,7 @@
   line-height: 1.4;
 }
 
-.tz-toggle:hover {
+.app-date-mode:hover {
   background: var(--app-accent);
   color: var(--app-accent-contrast);
 }

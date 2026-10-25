@@ -1,5 +1,6 @@
 import { Show, createEffect, onMount, type ParentProps } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
+import { DateModes } from "@wired-square/kit";
 import { appState } from "./stores/app";
 import { initOperationListener } from "./stores/operation";
 import { initQuitListener, quitPending } from "./stores/quit";
@@ -7,7 +8,9 @@ import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import DatabaseRecoveryDialog, { recoveryOpen, setRecoveryOpen } from "./components/DatabaseRecoveryDialog";
+import { formatRelativeTime } from "./utils/dates";
 import "./styles/pages/app.css";
+import "./styles/components/date-mode.css";
 
 /** Routes accessible when the vault is empty (no CA). */
 const EMPTY_VAULT_ROUTES = ["/", "/ca", "/vault", "/log"];
@@ -69,17 +72,18 @@ export default function App(props: ParentProps) {
   );
 
   return (
-    <Show when={!isConnectPage()} fallback={<>{quitNotice()}{outlet()}</>}>
-      <Sidebar />
-      <div class="main-area">
-        <Header />
-        {quitNotice()}
-        <main class="content">{outlet()}</main>
-      </div>
-      <Show when={recoveryOpen()}>
-        <DatabaseRecoveryDialog />
+    <DateModes initial="utc" locale="en-AU" relative={formatRelativeTime}>
+      <Show when={!isConnectPage()} fallback={<>{quitNotice()}{outlet()}</>}>
+        <Sidebar />
+        <div class="main-area">
+          <Header />
+          {quitNotice()}
+          <main class="content">{outlet()}</main>
+        </div>
+        <Show when={recoveryOpen()}>
+          <DatabaseRecoveryDialog />
+        </Show>
       </Show>
-
-    </Show>
+    </DateModes>
   );
 }

@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { Confirm, createSelection } from "@wired-square/kit";
+import { Confirm, createSelection, DateModeToggle } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
@@ -8,7 +8,8 @@ import {
 } from "../api/certs";
 import { canDeleteCert, certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { generateCsrFromCert } from "../api/csr";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
@@ -19,7 +20,6 @@ import RevokeCertDialog from "../components/RevokeCertDialog";
 import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
-import TzToggle from "../components/TzToggle";
 import TableTick from "../components/TableTick";
 import PageError from "../components/PageError";
 import { createActionResult } from "../utils/actionResult";
@@ -48,6 +48,7 @@ const VALID_FILTERS = new Set([
 let sessionFilter = "valid";
 
 export default function Certs() {
+  const dateText = useDateText();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialFilter = typeof searchParams.filter === "string" && VALID_FILTERS.has(searchParams.filter)
@@ -95,7 +96,7 @@ export default function Certs() {
     }
     const q = search().toLowerCase();
     if (q) items = items.filter((c) =>
-      [c.serial, c.cn, c.cert_type, c.status, c.expiry_date ? formatDate(c.expiry_date) : null]
+      [c.serial, c.cn, c.cert_type, c.status, c.expiry_date ? dateText(c.expiry_date) : null]
         .some((v) => v?.toLowerCase().includes(q))
     );
     return items;
@@ -107,7 +108,7 @@ export default function Certs() {
     if (f !== "all") items = items.filter((c) => c.status?.toLowerCase() === f);
     const q = search().toLowerCase();
     if (q) items = items.filter((c) =>
-      [c.serial, c.cn, c.issuer, c.status, c.expiry_date ? formatDate(c.expiry_date) : null, c.import_date ? formatDate(c.import_date) : null]
+      [c.serial, c.cn, c.issuer, c.status, c.expiry_date ? dateText(c.expiry_date) : null, c.import_date ? dateText(c.import_date) : null]
         .some((v) => v?.toLowerCase().includes(q))
     );
     return items;
@@ -407,7 +408,7 @@ export default function Certs() {
                   <th>Common Name</th>
                   <th>Type</th>
                   <th>Status</th>
-                  <th>Expiry <TzToggle /></th>
+                  <th>Expiry <DateModeToggle /></th>
                   <th class="kebab-col"></th>
                 </tr>
               </thead>
@@ -444,7 +445,7 @@ export default function Certs() {
                           <span class="status-badge status-superseded">superseded</span>
                         </Show>
                       </td>
-                      <td class="mono">{formatDate(cert.expiry_date)}</td>
+                      <td class="mono"><StoredDate value={cert.expiry_date} /></td>
                       <td class="kebab-col" onClick={(e) => e.stopPropagation()}>
                         <ActionMenu items={certMenuItems(cert)} />
                       </td>
@@ -476,7 +477,7 @@ export default function Certs() {
                   <th>Common Name</th>
                   <th>Issuer</th>
                   <th>Status</th>
-                  <th>Expiry <TzToggle /></th>
+                  <th>Expiry <DateModeToggle /></th>
                   <th>Imported</th>
                   <th>Actions</th>
                 </tr>
@@ -492,8 +493,8 @@ export default function Certs() {
                       <td>{cert.cn ?? "\u2014"}</td>
                       <td>{cert.issuer ?? "\u2014"}</td>
                       <td><span class={statusBadgeClass(cert.status)}>{cert.status ?? "\u2014"}</span></td>
-                      <td class="mono">{formatDate(cert.expiry_date)}</td>
-                      <td class="mono">{formatDate(cert.import_date)}</td>
+                      <td class="mono"><StoredDate value={cert.expiry_date} /></td>
+                      <td class="mono"><StoredDate value={cert.import_date} /></td>
                       <td>
                         <button
                           class="btn-ghost btn-sm"
@@ -566,12 +567,12 @@ export default function Certs() {
                   <span class="detail-value mono">{r().serial ?? "\u2014"}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Valid From <TzToggle /></span>
-                  <span class="detail-value mono">{formatDate(r().not_before)}</span>
+                  <span class="detail-label">Valid From <DateModeToggle /></span>
+                  <span class="detail-value mono"><StoredDate value={r().not_before} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Valid Until</span>
-                  <span class="detail-value mono">{formatDate(r().not_after)}</span>
+                  <span class="detail-value mono"><StoredDate value={r().not_after} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Key</span>

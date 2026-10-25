@@ -21,7 +21,8 @@ import {
   deleteOpenVpnProfile,
   bulkDeleteOpenVpnProfiles,
 } from "../api/openvpn";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import AddProfileModal from "../components/AddProfileModal";
@@ -62,6 +63,7 @@ type Tab = "profiles" | "templates" | "config";
 type ProfileFilter = "all" | "client" | "server";
 
 export default function OpenVPN() {
+  const dateText = useDateText();
   const [tab, setTab] = createSignal<Tab>("profiles");
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
@@ -171,7 +173,7 @@ export default function OpenVPN() {
       .filter((p) => {
         if (f !== "all" && (p.profile_type ?? "").toLowerCase() !== f) return false;
         if (!q) return true;
-        return [p.cn, p.created_date ? formatDate(p.created_date) : null].some((v) =>
+        return [p.cn, p.created_date ? dateText(p.created_date) : null].some((v) =>
           v?.toLowerCase().includes(q),
         );
       })
@@ -564,7 +566,7 @@ export default function OpenVPN() {
                         <td>
                           <span class={`status-badge ${badge.cls}`}>{badge.label}</span>
                         </td>
-                        <td class="mono">{formatDate(profile.created_date)}</td>
+                        <td class="mono"><StoredDate value={profile.created_date} /></td>
                         <td class="kebab-col">
                           <ActionMenu items={profileMenuItems(profile)} />
                         </td>
@@ -700,7 +702,7 @@ export default function OpenVPN() {
                       >
                         <td>{t.name}</td>
                         <td>{profilesUsingTemplate(t.name)}</td>
-                        <td class="mono">{formatDate(t.updated_date)}</td>
+                        <td class="mono"><StoredDate value={t.updated_date} /></td>
                       </tr>
                     )}
                   </For>

@@ -7,7 +7,7 @@ import {
   createDkimKey,
   deployDkimRoute53,
 } from "../api/dkim";
-import { formatDate } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
@@ -200,7 +200,7 @@ export default function DKIM() {
                         <td>{key.domain}</td>
                         <td class="mono">{key.selector}</td>
                         <td class="mono">{key.key_size != null ? `${key.key_size}` : "—"}</td>
-                        <td class="mono">{formatDate(key.created_at)}</td>
+                        <td class="mono"><StoredDate value={key.created_at} /></td>
                       </tr>
                     )}
                   </For>
