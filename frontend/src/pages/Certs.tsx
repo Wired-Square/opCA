@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { Confirm, createSelection, DateModeToggle } from "@wired-square/kit";
+import { Confirm, createAction, createSelection, DateModeToggle, Notice } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
@@ -19,12 +19,9 @@ import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
 import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
-import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
+import ResultBanner, { ActionOutcome } from "../components/ResultBanner";
 import TableTick from "../components/TableTick";
-import PageError from "../components/PageError";
-import { createActionResult } from "../utils/actionResult";
-import { createAction, type ActionMessages } from "../utils/action";
-import { createActing } from "../utils/acting";
+import { createActing, failureOf, headed } from "../utils/acting";
 import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult, KeyAlgorithm } from "../api/types";
 import "../styles/pages/certs.css";
 
@@ -127,8 +124,7 @@ export default function Certs() {
 
   // Per-row certificate actions (kebab menu). Rekey/Renew navigate away to the
   // new cert; Rekey/Revoke/Delete/Ignore use shared dialogs; Unignore acts immediately.
-  const outcome = createActionResult();
-  const action = createAction(outcome);
+  const action = createAction();
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
   const [deleteTarget, setDeleteTarget] = createSignal<CertListItem | null>(null);
@@ -211,19 +207,23 @@ export default function Certs() {
     // Wrap a row action: no-op without a serial, otherwise run it through the
     // list-level banner. Renew reports no success — it navigates away
     // to a page that says so via its fresh-banner.
-    const act = (messages: ActionMessages<void>, fn: () => Promise<void>) => () => {
-      if (serial) void action.run(messages, fn);
+    const act = (failure: string, fn: () => Promise<void>, success?: string) => () => {
+      if (serial) void action.run(headed(failure, fn), () => success && action.succeed(success));
     };
     return certKebabItems(cert, {
       onRekey: () => setRekeyTarget(cert),
-      onRenew: act({ failure: "Renew failed" }, async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
+      onRenew: act("Renew failed", async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
       onRevoke: () => setRevokeTarget(cert),
       onDelete: () => setDeleteTarget(cert),
       onIgnore: () => setIgnoreTarget(cert),
-      onUnignore: act({ failure: "Unignore failed", success: `Unignored ${label}` }, async () => {
-        await unignoreCert(serial!);
-        await finishListAction(cert);
-      }),
+      onUnignore: act(
+        "Unignore failed",
+        async () => {
+          await unignoreCert(serial!);
+          await finishListAction(cert);
+        },
+        `Unignored ${label}`,
+      ),
     });
   }
 
@@ -274,7 +274,7 @@ export default function Certs() {
       await generateCsrFromCert({ serial: cert.serial });
       navigate("/csrs");
     } catch (err) {
-      setGenerateError(String(err));
+      setGenerateError(errorMessage(err));
     } finally {
       setGeneratingSerial(null);
     }
@@ -339,7 +339,7 @@ export default function Certs() {
         </button>
       </div>
 
-      <PageError message={certs().error} />
+      <Notice tone="bad">{failureOf(certs().error)}</Notice>
 
       <Show when={loading()}>
         <Spinner message="Loading…" />
@@ -347,7 +347,7 @@ export default function Certs() {
 
       {/* Local certificates tab */}
       <Show when={tab() === "local"}>
-        <ActionResultBanner outcome={outcome} />
+        <ActionOutcome action={action} />
 
         <Show when={bulkResults()}>
           {(results) => (
@@ -466,7 +466,7 @@ export default function Certs() {
           </p>
         </Show>
 
-        <PageError message={generateError()} />
+        <Notice tone="bad">{generateError()}</Notice>
 
         <Show when={filteredExternal().length > 0}>
           <div class="data-table-wrap">
@@ -544,7 +544,7 @@ export default function Certs() {
           </button>
         </div>
 
-        <PageError message={inspectError()} />
+        <Notice tone="bad">{inspectError()}</Notice>
 
         <Show when={inspectResult()}>
           {(r) => (
@@ -628,7 +628,7 @@ export default function Certs() {
         serial={ignoreTarget()?.serial ?? null}
         cn={ignoreTarget()?.cn ?? null}
         onClose={() => setIgnoreTarget(null)}
-        onDone={() => { const c = ignoreTarget(); if (c) { outcome.report(`Ignored ${certLabel(c)}`); void finishListAction(c); } }}
+        onDone={() => { const c = ignoreTarget(); if (c) { action.succeed(`Ignored ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
       <RevokeCertDialog
@@ -636,7 +636,7 @@ export default function Certs() {
         serial={revokeTarget()?.serial ?? null}
         cn={revokeTarget()?.cn ?? null}
         onClose={() => setRevokeTarget(null)}
-        onDone={() => { const c = revokeTarget(); if (c) { outcome.report(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
+        onDone={() => { const c = revokeTarget(); if (c) { action.succeed(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
       <DeleteCertDialog
@@ -644,7 +644,7 @@ export default function Certs() {
         serial={deleteTarget()?.serial ?? null}
         cn={deleteTarget()?.cn ?? null}
         onClose={() => setDeleteTarget(null)}
-        onDone={() => { const c = deleteTarget(); if (c) { outcome.report(`Deleted ${certLabel(c)}`); refetchLocal(); } }}
+        onDone={() => { const c = deleteTarget(); if (c) { action.succeed(`Deleted ${certLabel(c)}`); refetchLocal(); } }}
       />
 
       <RekeyDialog

@@ -6,7 +6,7 @@
   box-sizing: border-box;
 }
 
-.page-csr .page-error,
+.page-csr .app-notice,
 .page-csr .page-success {
   margin-top: 12px;
   margin-bottom: 0;

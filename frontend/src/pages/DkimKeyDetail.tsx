@@ -1,5 +1,6 @@
 import { Show, createSignal, createResource, createEffect } from "solid-js";
-import { DateModeToggle } from "@wired-square/kit";
+import { DateModeToggle, Notice } from "@wired-square/kit";
+import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import { useParams, useNavigate } from "@solidjs/router";
 import {
@@ -15,7 +16,6 @@ import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
-import PageError from "../components/PageError";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import type { DkimKeyDetail, DkimVerifyResult } from "../api/types";
 import "../styles/pages/cert-info.css";
@@ -173,7 +173,7 @@ export default function DkimKeyDetailPage() {
       </div>
 
       <div class="cert-info-scroll">
-        <PageError message={detail.error} />
+        <Notice tone="bad">{failureOf(detail.error)}</Notice>
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />
@@ -272,7 +272,7 @@ export default function DkimKeyDetailPage() {
                 </div>
               </Show>
 
-              <PageError message={error()} class="mt-3" />
+              <Notice tone="bad" class="mt-3">{error()}</Notice>
 
               <CopyPrivateKeyDialog
                 open={showKeyCopy()}

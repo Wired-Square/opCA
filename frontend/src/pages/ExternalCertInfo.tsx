@@ -1,5 +1,6 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
-import { DateModeToggle } from "@wired-square/kit";
+import { DateModeToggle, Notice } from "@wired-square/kit";
+import { failureOf } from "../utils/acting";
 import { useParams, useNavigate } from "@solidjs/router";
 import {
   getExternalCertInfo,
@@ -13,7 +14,6 @@ import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import type { ExternalCertDetail } from "../api/types";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
-import PageError from "../components/PageError";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import "../styles/pages/cert-info.css";
 
@@ -94,7 +94,7 @@ export default function ExternalCertInfo() {
       </div>
 
       <div class="cert-info-scroll">
-        <PageError message={detail.error} />
+        <Notice tone="bad">{failureOf(detail.error)}</Notice>
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />

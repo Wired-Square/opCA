@@ -1,7 +1,6 @@
 import { Show, For, createSignal, createMemo, createEffect } from "solid-js";
-import { Dialog } from "@wired-square/kit";
+import { Dialog, Notice } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
-import PageError from "./PageError";
 import VpnClientPicker from "./VpnClientPicker";
 import SendToVault from "./SendToVault";
 import {
@@ -236,7 +235,7 @@ function AddProfileDialog(props: Omit<AddProfileModalProps, "open">) {
           <span>Generate Profile</span>
         </label>
 
-        <PageError message={error()} />
+        <Notice tone="bad">{error()}</Notice>
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleAdd} disabled={acting()}>

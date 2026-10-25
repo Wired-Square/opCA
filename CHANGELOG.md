@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   read without OpenSSL FFI.
 - Dates and the UTC / Local / Relative toggle are now the kit's; the strings
   shown are unchanged.
+- Action outcomes, page errors and a page that fails to render are now the
+  kit's notices and screen boundary. A failure reads as one sentence, such as
+  "Save failed: vault locked", and stays until that action next succeeds; the
+  Dismiss button on single-action outcomes is gone.
 - Certificates are now issued by `wslib-crypto-ca`, with one profile per
   certificate type; the extensions issued are unchanged. A SHA-1-signed CSR can
   still be read, but signing it is refused, as the provider has no SHA-1.

@@ -12,8 +12,8 @@
   background: var(--app-bg);
 }
 
-/* Shown by RouteErrorBoundary when a page throws; padding/spacing come from
-   the .p-4 and .mb-3 utilities. */
-.page-crash {
+/* ScreenBoundary's failure, in place of the page that threw. */
+.content > .app-notice {
+  margin: 32px;
   max-width: 640px;
 }

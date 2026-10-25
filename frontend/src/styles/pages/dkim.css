@@ -6,7 +6,7 @@
   box-sizing: border-box;
 }
 
-.page-dkim .page-error,
+.page-dkim .app-notice,
 .page-dkim .page-success {
   margin-top: 12px;
   margin-bottom: 0;

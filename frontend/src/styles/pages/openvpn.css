@@ -6,7 +6,7 @@
   box-sizing: border-box;
 }
 
-.page-openvpn .page-error,
+.page-openvpn .app-notice,
 .page-openvpn .page-success {
   margin-top: 12px;
   margin-bottom: 0;

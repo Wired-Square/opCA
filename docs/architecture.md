@@ -696,22 +696,22 @@ Generating a CRL, re-signing the CA and mutating the database all leave the
 copy in the store stale — the backend does not upload as a side effect. That
 follow-up is one mechanism, not three:
 [utils/publishFlow.ts](../frontend/src/utils/publishFlow.ts)'s
-`createPublishFlow({ upload, success, outcome })` owns the in-flight flag and
-the offer-to-upload state, and reports through the page's existing banner
-controller rather than a second one — the CRL page narrates generate *and*
-upload in one place. [components/UploadPrompt.tsx](../frontend/src/components/UploadPrompt.tsx)
-renders the amber prompt from it. Same state-here / rendering-there split as
-`createActionResult` and `ResultBanner`.
+`createPublishFlow({ upload, success })` is the upload's own kit action plus
+the offer-to-upload state; the page renders its outcome with `ActionOutcome`
+beside its other actions', and the CA page reports a re-sign through it.
+[components/UploadPrompt.tsx](../frontend/src/components/UploadPrompt.tsx)
+renders the amber prompt from it.
 
 ### When a page throws
 
 Resource getters rethrow on read, so a failed load would otherwise blank the
-window. [components/RouteErrorBoundary.tsx](../frontend/src/components/RouteErrorBoundary.tsx)
-wraps the route outlet *inside* the layout, so the sidebar and header stay
-usable and the user can navigate away — which recovers on its own, because the
-router rebuilds the outlet. "Try again" is for retrying in place. This catches
+window. The kit's `ScreenBoundary` wraps the route outlet *inside* the layout
+(`App.tsx`), so the sidebar and header stay usable and the user can navigate
+away — which recovers on its own, because the router rebuilds the outlet, so
+it takes no `pathname`. It shows the `Refusal`'s sentence, or the kit's generic
+one for anything else, with "Try again" for retrying in place. This catches
 render-time throws only; failures inside async event handlers, which is where
-nearly every command lives, are reported by the page through its result banner.
+nearly every command lives, are reported by the page through its action.
 
 ### Confirming destructive actions
 
@@ -740,41 +740,36 @@ does after Generate.
 
 The operation indicator above is strictly *in-flight* — it clears the moment a
 command returns and carries no terminal state. Actions that change the vault
-therefore report their own outcome through
-[utils/actionResult.ts](../frontend/src/utils/actionResult.ts):
-`createActionResult()` holds one `{summary, error}` result, auto-clears a
-success after a few seconds, and keeps a failure until dismissed so the error
-stays readable. It owns state only; three renderers in
+therefore report their own outcome through the kit's `createAction()`: one per
+button so `pending()` gates just that button, or one shared across a group that
+is enabled and disabled together (the certificate detail page's kebab). `run()`
+never throws; its `then` calls `succeed(sentence)`, which clears itself after
+four seconds, and a failure stays as `failed()` until the action next
+succeeds. [utils/acting.ts](../frontend/src/utils/acting.ts)'s
+`headed(headline, act)` turns the act's failure into a `Refusal` reading
+`headline: reason`, so the sentence names the action that failed. The headline
+is read after the act fails, so it can say how far a partial failure got —
+"generated, but the upload failed".
+
 [components/ResultBanner.tsx](../frontend/src/components/ResultBanner.tsx)
-share one `BannerShell`:
+renders through the kit's `Notice`:
 
 | Renderer | Used for |
 | --- | --- |
-| `ActionResultBanner` | one action — green, or red with the error beneath |
-| `ActionResultLine` | the CA tabs, whose established idiom is a line under the form |
-| `ResultBanner` | bulk runs — a neutral `n succeeded` count plus per-item failures |
+| `ActionOutcome` | one action — a good notice for its success, a bad one for its failure |
+| `ResultBanner` | bulk runs — a neutral `n succeeded` count plus per-item failures, dismissable |
 
-A bulk count is reported neutrally rather than green: a partially-failed run
-should not read as simply "good".
+A bulk count is reported neutrally rather than good: a partially-failed run
+should not read as simply "good". A page whose actions each have their own
+button (CRL's Generate and Upload, the certificate detail's kebab and VPN
+regenerate) renders one `ActionOutcome` per action.
 
-Reporting is one half; running is the other.
-[utils/action.ts](../frontend/src/utils/action.ts)'s
-`createAction(outcome)` owns an action's in-flight flag and the
-clear/try/report dance around its body. Take one per button so `busy()` gates
-just that button, or share one across a group that is enabled and disabled
-together (the certificate detail page's kebab). The success headline is built
-from whatever the body returned, and the failure headline is resolved after the
-body too, so it can say how far a partial failure got — "generated, but the
-upload failed". `run()` never throws, so whatever used to sit in `finally` is
-simply the code after the await. `createPublishFlow` is built on it.
-
-An error that belongs to the page rather than to one action is rendered by
-[components/PageError.tsx](../frontend/src/components/PageError.tsx). It
-coerces whatever it is given and renders nothing for null, undefined or an
-empty string, so a resource error goes straight in with no `<Show>` and no
-`String()` around it. An error under a form (the CA tabs, the create/import
-pages) is the same component with `placement="form"`, which swaps the page
-spacing for the form's.
+An error that belongs to the page rather than to one action is
+`<Notice tone="bad">`, which renders nothing when empty; a resource's error
+goes through `failureOf` (in `utils/acting.ts`), which is nothing until the
+load fails and the refusal's sentence after. An error under a form (the CA
+tabs, the create/import pages) adds the `form-notice` class for the form's
+spacing.
 
 Two cases deliberately do **not** use this. Rekey and renew navigate to the new
 serial, where `CertInfo`'s `.fresh-banner` reports the outcome from

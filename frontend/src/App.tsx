@@ -1,12 +1,11 @@
 import { Show, createEffect, onMount, type ParentProps } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
-import { DateModes } from "@wired-square/kit";
+import { DateModes, ScreenBoundary } from "@wired-square/kit";
 import { appState } from "./stores/app";
 import { initOperationListener } from "./stores/operation";
 import { initQuitListener, quitPending } from "./stores/quit";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
-import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import DatabaseRecoveryDialog, { recoveryOpen, setRecoveryOpen } from "./components/DatabaseRecoveryDialog";
 import { formatRelativeTime } from "./utils/dates";
 import "./styles/pages/app.css";
@@ -61,7 +60,7 @@ export default function App(props: ParentProps) {
   });
 
   // Inside the layout, so a page crash leaves the sidebar and header usable.
-  const outlet = () => <RouteErrorBoundary>{props.children}</RouteErrorBoundary>;
+  const outlet = () => <ScreenBoundary>{props.children}</ScreenBoundary>;
 
   const quitNotice = () => (
     <Show when={quitPending()}>

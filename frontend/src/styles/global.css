@@ -274,7 +274,6 @@ input[aria-invalid="true"]:focus {
   align-items: center;
 }
 
-.page-error,
 .page-success,
 .page-warning,
 .form-success {
@@ -283,19 +282,12 @@ input[aria-invalid="true"]:focus {
   border-radius: var(--radius-md);
 }
 
-.page-error,
 .page-success {
   margin-bottom: 16px;
 }
 
-.page-error--form {
-  margin-top: 16px;
-  margin-bottom: 0;
-}
-
-.page-error {
-  color: var(--app-bad);
-  background: var(--error-tint);
+.form-notice {
+  margin: 16px 0 0;
 }
 
 .page-success,
@@ -706,35 +698,18 @@ input[aria-invalid="true"]:focus {
   color: var(--app-text-muted);
 }
 
-.result-banner {
-  margin: 12px 0;
-  padding: 8px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-md);
-  font-size: 0.875rem;
-}
-
-.result-banner-error {
-  border-color: var(--app-bad);
-}
-
-.result-banner-success {
-  border-color: var(--app-good);
-}
-
-.result-banner-head {
+.notice-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.result-banner-detail {
+.notice-detail {
   margin: 8px 0 0;
   color: var(--app-text-muted);
 }
 
-/* Shared by the banner and the modals that list per-item failures. */
+/* Shared by the bulk result notice and the modals that list per-item failures. */
 .failure-list {
   margin: 8px 0 0;
   padding-left: 18px;

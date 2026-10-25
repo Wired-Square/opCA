@@ -4,10 +4,9 @@ import { appState } from "../stores/app";
 import { getDashboard } from "../api/dashboard";
 import { generateCrl, uploadCrl } from "../api/crl";
 import StatusBubble, { type StatusTone } from "../components/StatusBubble";
-import PageError from "../components/PageError";
-import { ActionResultBanner } from "../components/ResultBanner";
-import { createActionResult } from "../utils/actionResult";
-import { createAction } from "../utils/action";
+import { Notice, createAction } from "@wired-square/kit";
+import { ActionOutcome } from "../components/ResultBanner";
+import { failureOf, headed } from "../utils/acting";
 import { setRecoveryOpen } from "../components/DatabaseRecoveryDialog";
 import type {
   ActionItem,
@@ -49,8 +48,7 @@ export default function Dashboard() {
     getDashboard,
   );
   const [pending, setPending] = createSignal<string | null>(null);
-  const outcome = createActionResult();
-  const action = createAction(outcome);
+  const action = createAction();
 
   async function runAction(item: ActionItem) {
     const routeMap: Partial<Record<ActionKind, string>> = {
@@ -72,19 +70,15 @@ export default function Dashboard() {
     const withUpload = item.action === "regenerate_and_upload_crl";
     let generated: CrlInfo | undefined;
     await action.run(
-      {
-        success: (crl) => `CRL #${crlNumber(crl)} generated${withUpload ? " and uploaded" : ""}`,
-        // Only reached once the generate has landed and the upload has not.
-        failure: () =>
-          generated
-            ? `CRL #${crlNumber(generated)} generated, but the upload failed`
-            : "Generate failed",
-      },
-      async () => {
-        generated = await generateCrl();
-        if (withUpload) await uploadCrl();
-        return generated;
-      },
+      headed(
+        () => (generated ? `CRL #${crlNumber(generated)} generated, but the upload failed` : "Generate failed"),
+        async () => {
+          generated = await generateCrl();
+          if (withUpload) await uploadCrl();
+          return generated;
+        },
+      ),
+      (crl) => action.succeed(`CRL #${crlNumber(crl)} generated${withUpload ? " and uploaded" : ""}`),
     );
     await refetch();
     setPending(null);
@@ -99,9 +93,9 @@ export default function Dashboard() {
         </button>
       </div>
 
-      <PageError message={data.error} />
+      <Notice tone="bad">{failureOf(data.error)}</Notice>
 
-      <ActionResultBanner outcome={outcome} />
+      <ActionOutcome action={action} />
 
       <Show when={appState.vaultState === "empty_vault"}>
         <div class="dashboard-notice">
@@ -149,7 +143,7 @@ export default function Dashboard() {
                       <button
                         class="btn-primary action-item-button"
                         onClick={() => runAction(item)}
-                        disabled={pending() === item.id}
+                        disabled={pending() !== null}
                       >
                         {pending() === item.id ? "Working\u2026" : item.button_label}
                       </button>

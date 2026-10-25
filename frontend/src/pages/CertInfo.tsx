@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
-import { DateModeToggle } from "@wired-square/kit";
+import { DateModeToggle, Notice, createAction } from "@wired-square/kit";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
 import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy, forgetPreloadedKey } from "../api/certs";
 import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
@@ -18,10 +18,8 @@ import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import ActionMenu, { type MenuAction } from "../components/ActionMenu";
-import { ActionResultBanner } from "../components/ResultBanner";
-import PageError from "../components/PageError";
-import { createActionResult } from "../utils/actionResult";
-import { createAction } from "../utils/action";
+import { ActionOutcome } from "../components/ResultBanner";
+import { failureOf, headed } from "../utils/acting";
 import "../styles/pages/cert-info.css";
 
 export default function CertInfo() {
@@ -39,13 +37,12 @@ export default function CertInfo() {
   const [showRevoke, setShowRevoke] = createSignal(false);
   const [showDelete, setShowDelete] = createSignal(false);
   const [showRekey, setShowRekey] = createSignal(false);
-  const outcome = createActionResult();
   /** Renew and unignore share one action: the kebab disables all of its
    *  items together, so there is nothing to tell their busy states apart. */
-  const headerAction = createAction(outcome);
+  const headerAction = createAction();
   const [showKeyCopy, setShowKeyCopy] = createSignal(false);
   onCleanup(() => void forgetPreloadedKey());
-  const regenerateVpn = createAction(outcome);
+  const regenerateVpn = createAction();
   const label = () => certLabel({ cn: detail()?.cn, serial: params.serial as string });
   const [copied, markCopied] = createCopiedSignal();
   const [copiedKey, markKeyCopied] = createCopiedSignal();
@@ -84,11 +81,10 @@ export default function CertInfo() {
 
   function handleRegenerateVpn(cn: string, template: string) {
     return regenerateVpn.run(
-      {
-        success: (profile) => `Regenerated VPN profile for ${cn} (stored as ${profile.title})`,
-        failure: "VPN profile regeneration failed",
-      },
-      () => generateOpenVpnProfile({ cn, serial: params.serial as string, template_name: template }),
+      headed("VPN profile regeneration failed", () =>
+        generateOpenVpnProfile({ cn, serial: params.serial as string, template_name: template }),
+      ),
+      (profile) => regenerateVpn.succeed(`Regenerated VPN profile for ${cn} (stored as ${profile.title})`),
     );
   }
 
@@ -97,19 +93,16 @@ export default function CertInfo() {
   function handleRenew() {
     const serial = params.serial as string;
     if (!serial) return;
-    void headerAction.run({ failure: "Renew failed" }, () => renewAndGo(navigate, serial));
+    void headerAction.run(headed("Renew failed", () => renewAndGo(navigate, serial)));
   }
 
   function handleUnignore() {
     const serial = params.serial as string;
     if (!serial) return;
-    void headerAction.run(
-      { success: `Unignored ${label()}`, failure: "Unignore failed" },
-      async () => {
-        await unignoreCert(serial);
-        refetch();
-      },
-    );
+    void headerAction.run(headed("Unignore failed", () => unignoreCert(serial)), () => {
+      refetch();
+      headerAction.succeed(`Unignored ${label()}`);
+    });
   }
 
   // Header actions menu — gating shared with the certificates list kebab.
@@ -121,7 +114,7 @@ export default function CertInfo() {
       onDelete: () => setShowDelete(true),
       onIgnore: () => setShowIgnore(true),
       onUnignore: handleUnignore,
-    }, headerAction.busy());
+    }, headerAction.pending());
   }
 
   function copyPem() {
@@ -182,9 +175,10 @@ export default function CertInfo() {
       </div>
 
       <div class="cert-info-scroll">
-        <PageError message={detail.error} />
+        <Notice tone="bad">{failureOf(detail.error)}</Notice>
 
-        <ActionResultBanner outcome={outcome} />
+        <ActionOutcome action={headerAction} />
+        <ActionOutcome action={regenerateVpn} />
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />
@@ -281,10 +275,10 @@ export default function CertInfo() {
                         <div class="vpn-regen-actions">
                           <button
                             class="btn-primary btn-sm"
-                            disabled={regenerateVpn.busy() || !profile().template}
+                            disabled={regenerateVpn.pending() || !profile().template}
                             onClick={() => handleRegenerateVpn(profile().cn, profile().template!)}
                           >
-                            {regenerateVpn.busy() ? "Regenerating…" : "Regenerate VPN profile"}
+                            {regenerateVpn.pending() ? "Regenerating…" : "Regenerate VPN profile"}
                           </button>
                         </div>
                         <div class="vpn-regen-caveat">
@@ -390,7 +384,7 @@ export default function CertInfo() {
                 serial={d().serial}
                 cn={d().cn}
                 onClose={() => setShowIgnore(false)}
-                onDone={() => { outcome.report(`Ignored ${label()}`); refetch(); }}
+                onDone={() => { headerAction.succeed(`Ignored ${label()}`); refetch(); }}
               />
 
               <RekeyDialog
@@ -406,7 +400,7 @@ export default function CertInfo() {
                 serial={d().serial}
                 cn={d().cn}
                 onClose={() => setShowRevoke(false)}
-                onDone={() => { outcome.report(`Revoked ${label()}`); refetch(); }}
+                onDone={() => { headerAction.succeed(`Revoked ${label()}`); refetch(); }}
               />
 
               <DeleteCertDialog

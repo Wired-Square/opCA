@@ -6,7 +6,7 @@ import { beginOp, endOp, isVisibleOp } from "../stores/operation";
  * Typed wrapper around Tauri's invoke.
  * Normalises the rejection to a `Refusal` carrying the backend's message and tracks the
  * active operation in the sidebar status indicator. Callers surface the
- * failure themselves — through a result banner or a page-error line.
+ * failure themselves, through a `Notice`.
  */
 export async function tauriInvoke<T>(
   cmd: string,

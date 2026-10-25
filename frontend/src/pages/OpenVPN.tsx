@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createMemo, createResource, onMount } from "solid-js";
-import { Confirm, createSelection } from "@wired-square/kit";
+import { Confirm, createSelection, Notice } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useSearchParams } from "@solidjs/router";
 import {
@@ -30,7 +30,6 @@ import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
 import ResultBanner from "../components/ResultBanner";
 import TableTick from "../components/TableTick";
-import PageError from "../components/PageError";
 import { createActing } from "../utils/acting";
 import type {
   BulkProfileResult,
@@ -799,7 +798,7 @@ export default function OpenVPN() {
       </Show>
 
       {/* ── Feedback ───────────────────────────────────────────── */}
-      <PageError message={error()} />
+      <Notice tone="bad">{error()}</Notice>
       <Show when={success()}>
         <p class="page-success">{success()}</p>
       </Show>
@@ -831,11 +830,9 @@ function VaultTemplatesNotice(props: {
 }) {
   const count = () => props.names.length;
   return (
-    <div class="result-banner result-banner-success" role="status">
-      <div class="result-banner-head">
-        <span>OpenVPN templates imported into the CA database</span>
-      </div>
-      <p class="result-banner-detail">
+    <Notice tone="good">
+      <div class="notice-head">OpenVPN templates imported into the CA database</div>
+      <p class="notice-detail">
         All {count()} template(s) on the 1Password <code>OpenVPN</code> item are now
         in the CA database: {props.names.join(", ")}. Archive moves the {count()} old
         template field(s) into an archived Secure Note that can be restored from
@@ -849,6 +846,6 @@ function VaultTemplatesNotice(props: {
           Keep in 1Password
         </button>
       </div>
-    </div>
+    </Notice>
   );
 }

@@ -46,7 +46,7 @@ const matches = async (selector, text) => (await app.call("query", { selector, t
 // Polls until `done()` holds, failing fast on an error the UI shows.
 async function settle(what, done, ms = OP_MS) {
   for (const deadline = Date.now() + ms; Date.now() < deadline; await sleep(500)) {
-    const [error] = await matches(".page-error, .connect-error");
+    const [error] = await matches(".app-notice--bad, .connect-error");
     if (error) throw new Error(`${what}: ${error.text}`);
     if (await done()) return;
   }

@@ -1,13 +1,13 @@
 import { Show, For, createSignal, createResource, type Resource } from "solid-js";
+import { Notice } from "@wired-square/kit";
+import { failureOf } from "../utils/acting";
 import { getDatabaseInfo, getActionLog } from "../api/database";
 import { uploadCaDatabase } from "../api/ca";
 import { errorMessage } from "../api/tauri";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import type { DatabaseInfo, LocalBackupsInfo, LogEntry } from "../api/types";
-import { ActionResultBanner } from "../components/ResultBanner";
-import PageError from "../components/PageError";
-import { createActionResult } from "../utils/actionResult";
+import { ActionOutcome } from "../components/ResultBanner";
 import { createPublishFlow } from "../utils/publishFlow";
 import BackupAge from "../components/BackupAge";
 import { getLocalBackups, openLocalBackupsFolder, setLocalBackupEnabled } from "../api/localBackups";
@@ -20,12 +20,7 @@ export default function Database() {
   const [info, { refetch }] = createResource<DatabaseInfo>(getDatabaseInfo);
   const [log, { refetch: refetchLog }] = createResource<LogEntry[]>(getActionLog);
   const [logSearch, setLogSearch] = createSignal("");
-  const outcome = createActionResult();
-  const publish = createPublishFlow({
-    upload: uploadCaDatabase,
-    success: "Database uploaded to private store.",
-    outcome,
-  });
+  const publish = createPublishFlow({ upload: uploadCaDatabase, success: "Database uploaded to private store." });
 
   const filteredLog = () => {
     const items = log() ?? [];
@@ -62,14 +57,14 @@ export default function Database() {
             {info.loading ? "Loading\u2026" : "Refresh"}
           </button>
           <Show when={hasPrivateStore()}>
-            <button class="btn-ghost" onClick={uploadAndRefreshLog} disabled={publish.uploading()}>
-              {publish.uploading() ? "Uploading\u2026" : "Upload Database"}
+            <button class="btn-ghost" onClick={uploadAndRefreshLog} disabled={publish.pending()}>
+              {publish.pending() ? "Uploading\u2026" : "Upload Database"}
             </button>
           </Show>
         </div>
       </div>
 
-      <ActionResultBanner outcome={outcome} />
+      <ActionOutcome action={publish} />
 
       <div class="tab-bar">
         <button
@@ -137,7 +132,7 @@ function LogTab(props: { entries: () => LogEntry[]; loading: boolean }) {
 function StatisticsTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
-      <PageError message={props.info.error} />
+      <Notice tone="bad">{failureOf(props.info.error)}</Notice>
 
       <Show when={props.info()} fallback={<Spinner message="Loading…" />}>
         {(d) => (
@@ -155,7 +150,7 @@ function StatisticsTab(props: { info: Resource<DatabaseInfo> }) {
 function ConfigTab(props: { info: Resource<DatabaseInfo> }) {
   return (
     <>
-      <PageError message={props.info.error} />
+      <Notice tone="bad">{failureOf(props.info.error)}</Notice>
 
       <Show when={props.info()} fallback={<Spinner message="Loading…" />}>
         {(d) => (
@@ -198,7 +193,7 @@ function BackupsTab() {
 
   return (
     <>
-      <PageError message={error() ?? backups.error} />
+      <Notice tone="bad">{error() ?? failureOf(backups.error)}</Notice>
 
       <Show when={backups()} fallback={<Spinner message="Loading…" />}>
         {(b) => (
