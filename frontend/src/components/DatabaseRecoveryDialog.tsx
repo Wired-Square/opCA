@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createResource, createSignal } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import Modal from "./Modal";
+import { Dialog } from "@wired-square/kit";
 import Spinner from "./Spinner";
 import PageError from "./PageError";
 import BackupAge, { backupAgePhrase } from "./BackupAge";
@@ -23,7 +23,7 @@ function formatSize(bytes: number): string {
  */
 export default function DatabaseRecoveryDialog() {
   const navigate = useNavigate();
-  const [info] = createResource(recoveryOpen, getLocalBackups);
+  const [info] = createResource(getLocalBackups);
   const [selected, setSelected] = createSignal<LocalBackupEntry | null>(null);
   const [confirming, setConfirming] = createSignal(false);
   const [restoring, setRestoring] = createSignal(false);
@@ -61,7 +61,7 @@ export default function DatabaseRecoveryDialog() {
   }
 
   return (
-    <Modal open={recoveryOpen()} onClose={() => !restoring() && setRecoveryOpen(false)} title="CA Database Unreadable">
+    <Dialog title="CA Database Unreadable" wide pending={restoring()} onClose={() => setRecoveryOpen(false)}>
       <p class="confirm-message">
         The CA database in <span class="mono">{appState.vault}</span> can't be read, so the CA can't be loaded.
       </p>
@@ -170,7 +170,10 @@ export default function DatabaseRecoveryDialog() {
         <button class="btn-ghost" onClick={handleDisconnect} disabled={restoring()}>
           Disconnect
         </button>
+        <button class="btn-ghost" onClick={() => setRecoveryOpen(false)} disabled={restoring()}>
+          Close
+        </button>
       </div>
-    </Modal>
+    </Dialog>
   );
 }

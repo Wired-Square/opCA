@@ -618,8 +618,8 @@ win. Key conventions:
   roughly 1-to-1.
 - [components/](../frontend/src/components) — reusable UI. Mutating
   actions on the certificate list/detail and the OpenVPN Profiles list share a
-  per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
-  `Modal` dialogs reused across those pages.
+  per-row `ActionMenu`; Ignore / Revoke / Send-to-Vault are self-contained
+  dialogs on the kit's `Dialog` or `Confirm`, reused across those pages.
 
 ### Styling tokens
 
@@ -641,26 +641,31 @@ once. Everything that does not vary by theme is a static `:root` variable in
 edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
 the kit tokens opca derives from its own (`--app-surface-sunken`,
 `--app-*-bg`, `--app-alert`, `--app-radius`, `--app-shadow`, `--app-focus`, …),
-`--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and the stacking order
-`--z-sticky` < `--z-modal` < `--z-popover`. New styles use these; a raw hex or
-pixel radius in a component stylesheet is a regression.
+`--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and `--z-sticky`.
+Dialogs, popovers and menus need no z-index: they sit in the platform's top
+layer, each above the one opened before it. opca's CSS reset is in a `reset`
+cascade layer ordered below the kit's, so the kit's components keep their
+spacing. New styles use these tokens; a raw hex or pixel radius in a component
+stylesheet is a regression.
 
 ### Popovers
 
-Anything that floats over the page — the row `KebabMenu`, `VaultPicker`,
-`VpnClientPicker` and Connect's saved-login and account pickers — renders
-through [components/Popover.tsx](../frontend/src/components/Popover.tsx).
-It portals to `body` at `--z-popover`, so it escapes the `overflow` of a
-`.modal-dialog` or the page, and positions itself with the pure
-[utils/placePopover.ts](../frontend/src/utils/placePopover.ts): below the
-anchor, else above, else on the larger side with a capped height, clamped
-8px inside the window horizontally. It closes on outside mousedown, Escape,
-outside scroll or resize, hands focus back to the anchor if it held it, and
-handles arrow / Home / End between items. Clicks stop at its root and Escape
-is captured on `window`, so a popover in a table row or a `Modal` triggers
-neither the row nor the dialog. List rows use `PopoverOption`
-(`role="option"`, Enter / Space to activate) and the shared `.popover-option`
-styles in `styles/components/popover.css`.
+Anything that floats over the page — the row and header action menus,
+`VaultPicker`, `VpnClientPicker` and Connect's saved-login and account pickers —
+is the kit's. [components/ActionMenu.tsx](../frontend/src/components/ActionMenu.tsx)
+renders a `MenuAction[]` (built by `certKebabItems` for certificates) as the
+kit's `Menu` / `MenuItem`: a ⋮ trigger, a `popover="auto"` panel the platform
+light-dismisses, arrow keys over every item including disabled ones, Escape
+and a chosen item handing focus back to the trigger. Pickers use the kit's
+`Popover` and `PopoverOption`: mounted while open, on `popover="manual"`
+pinned to an anchor (a press on the anchor counts as inside), focus left where
+it was so a field keeps typing, and closed on an outside press, Escape, an
+outside scroll or a resize. Both are top-layer, so one opened in a dialog is
+drawn above it with no portal, and both prevent Escape's default so a
+surrounding dialog stays open. [styles/components/popover.css](../frontend/src/styles/components/popover.css)
+restyles the kit's `app-popover` / `app-menu` classes in opca's look; the
+kit's `PopoverOption` takes no class, so a row's own layout class goes on an
+element inside it.
 
 ### Publishing to a store
 
@@ -687,14 +692,19 @@ nearly every command lives, are reported by the page through its result banner.
 
 ### Confirming destructive actions
 
-Anything irreversible goes through a `Modal`, never a bare button. `ConfirmDialog`
-is the generic gate: it owns the acting/error state, renders a `danger` confirm,
-closes only on success, and takes a `children` slot plus a `canConfirm` predicate
-for callers that need their own field. Bulk cert and OpenVPN actions use it with
-a reason field; `ResignCaDialog` uses it with a validity-days field;
+Anything irreversible goes through the kit's `Confirm`, never a bare button. It
+sits on the kit's `Dialog`, a native modal `<dialog>` in the top layer that is
+open while mounted, so each wrapper renders it inside a `<Show>` and every open
+starts fresh. `Confirm` owns the pending and error state, holds Escape and
+Cancel while the act runs, closes only on success, shows the act's `Refusal` in
+the dialog, and takes a `children` slot plus a reactive `disabled` for callers
+that need their own field. [utils/acting.ts](../frontend/src/utils/acting.ts)'s
+`createActing()` adds opca's "Revoking…" verb while the act runs and keeps any
+other failure's message as written. Bulk cert actions use `Confirm` with a
+`reason` field when ignoring; `ResignCaDialog` adds a validity-days field;
 `RevokeCertDialog`, `DeleteCertDialog` and `IgnoreCertDialog` wrap it with a `certLabel` message.
-Every wrapper is prop-passing only, so `ConfirmDialog`'s own test owns the
-shared behaviour and each wrapper's test asserts just its wiring.
+The wrappers only pass props, so `confirm.test` owns the shared behaviour and
+each wrapper's test asserts just its wiring.
 
 Re-signing the CA earns a confirmation despite keeping the key, subject and
 serial (so issued certificates still chain): `re_sign_ca` overwrites the vault

@@ -105,11 +105,14 @@
   opacity: 0.85;
 }
 
+.app-popover__option:has(> .dropdown-item) {
+  padding-block: 10px;
+}
+
 .dropdown-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-block: 10px;
 }
 
 .dropdown-item-lines {

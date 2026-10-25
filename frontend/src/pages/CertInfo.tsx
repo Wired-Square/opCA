@@ -16,7 +16,7 @@ import RevokeCertDialog from "../components/RevokeCertDialog";
 import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
-import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import { ActionResultBanner } from "../components/ResultBanner";
 import PageError from "../components/PageError";
 import { createActionResult } from "../utils/actionResult";
@@ -111,7 +111,7 @@ export default function CertInfo() {
   }
 
   // Header actions menu — gating shared with the certificates list kebab.
-  function certActions(d: CertDetail): KebabItem[] {
+  function certActions(d: CertDetail): MenuAction[] {
     return certKebabItems(d, {
       onRekey: () => setShowRekey(true),
       onRenew: handleRenew,
@@ -174,7 +174,7 @@ export default function CertInfo() {
             Back to list
           </button>
           <Show when={detail()}>
-            {(d) => <KebabMenu items={certActions(d())} ariaLabel="Certificate actions" />}
+            {(d) => <ActionMenu items={certActions(d())} aria-label="Certificate actions" />}
           </Show>
         </div>
       </div>

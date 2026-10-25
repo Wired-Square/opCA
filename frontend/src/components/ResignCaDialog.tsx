@@ -1,6 +1,7 @@
-import { createEffect, createSignal } from "solid-js";
+import { Show, createSignal } from "solid-js";
+import { Confirm } from "@wired-square/kit";
 import { resignCa } from "../api/ca";
-import ConfirmDialog from "./ConfirmDialog";
+import { createActing } from "../utils/acting";
 
 interface ResignCaDialogProps {
   open: boolean;
@@ -10,8 +11,6 @@ interface ResignCaDialogProps {
   onDone: (days: number) => void;
 }
 
-const DEFAULT_DAYS = "3650";
-
 /**
  * Confirmation for re-signing the CA certificate. Re-sign keeps the key,
  * subject and serial — so issued certificates still chain — but it overwrites
@@ -20,13 +19,16 @@ const DEFAULT_DAYS = "3650";
  * expanding panel.
  */
 export default function ResignCaDialog(props: ResignCaDialogProps) {
-  const [days, setDays] = createSignal(DEFAULT_DAYS);
+  return (
+    <Show when={props.open}>
+      <ResignCaConfirm {...props} />
+    </Show>
+  );
+}
 
-  // The dialog stays mounted, so a typed-then-cancelled value would otherwise
-  // survive into the next open.
-  createEffect(() => {
-    if (props.open) setDays(DEFAULT_DAYS);
-  });
+function ResignCaConfirm(props: Omit<ResignCaDialogProps, "open">) {
+  const [days, setDays] = createSignal("3650");
+  const acting = createActing();
 
   const parsedDays = () => {
     const n = parseInt(days(), 10);
@@ -34,29 +36,24 @@ export default function ResignCaDialog(props: ResignCaDialogProps) {
   };
 
   return (
-    <ConfirmDialog
-      open={props.open}
+    <Confirm
       title="Re-sign CA Certificate"
-      message={
-        <>
-          Re-signs with the same key, subject and serial, so certificates
-          already issued by this CA still chain to it. The existing CA
-          certificate is replaced in 1Password and{" "}
-          <strong>cannot be recovered</strong>.
-        </>
-      }
-      confirmLabel="Re-sign CA"
-      actingLabel="Re-signing…"
-      danger
-      canConfirm={() => parsedDays() !== null}
+      verb={acting.verb("Re-sign CA", "Re-signing…")}
+      disabled={parsedDays() === null}
       onClose={props.onClose}
-      onConfirm={async () => {
+      act={acting.act(async () => {
         const validity = parsedDays();
         if (validity === null) return;
         await resignCa(validity);
         props.onDone(validity);
-      }}
+      })}
     >
+      <p class="confirm-message">
+        Re-signs with the same key, subject and serial, so certificates
+        already issued by this CA still chain to it. The existing CA
+        certificate is replaced in 1Password and{" "}
+        <strong>cannot be recovered</strong>.
+      </p>
       <div class="form-group">
         <label class="form-label" for="resign-days">New validity (days)</label>
         <input
@@ -68,6 +65,6 @@ export default function ResignCaDialog(props: ResignCaDialogProps) {
           onInput={(e) => setDays(e.currentTarget.value)}
         />
       </div>
-    </ConfirmDialog>
+    </Confirm>
   );
 }

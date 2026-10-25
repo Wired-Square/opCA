@@ -1,10 +1,12 @@
 /* ── Reset ─────────────────────────────────────────────────────────── */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 /* ── Base ──────────────────────────────────────────────────────────── */
@@ -62,8 +64,6 @@
   --overlay: rgba(0, 0, 0, 0.5);
 
   --z-sticky: 2;
-  --z-modal: 100;
-  --z-popover: 200;
 }
 
 body {
@@ -178,6 +178,10 @@ a:focus-visible,
 select:focus-visible {
   outline: 2px solid var(--app-accent);
   outline-offset: 2px;
+}
+
+.app-btn:focus-visible {
+  box-shadow: none;
 }
 
 /* ── Form Inputs ───────────────────────────────────────────────────── */
@@ -838,51 +842,16 @@ input[aria-invalid="true"]:focus {
   background: var(--text-tertiary);
 }
 
-/* ── Modal ────────────────────────────────────────────────── */
+/* ── Dialogs ──────────────────────────────────────────────── */
 
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal);
-}
-
-.modal-dialog {
-  background: var(--app-surface);
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-xl);
-  min-width: 480px;
-  max-width: 640px;
-  max-height: 80vh;
-  overflow-y: auto;
+.app-dialog {
   box-shadow: var(--shadow-dialog);
 }
 
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px 0;
-}
-
-.modal-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.modal-close {
-  font-size: 1.25rem;
-  line-height: 1;
-  padding: 4px 8px;
-  margin-left: auto;
-}
-
-.modal-body {
-  padding: 16px 20px 20px;
+.app-dialog::backdrop {
+  backdrop-filter: none;
+  background: var(--overlay);
+  opacity: 1;
 }
 
 .confirm-message {

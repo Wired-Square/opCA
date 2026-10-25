@@ -1,6 +1,8 @@
+import { Show } from "solid-js";
+import { Confirm } from "@wired-square/kit";
 import { revokeCert } from "../api/certs";
-import ConfirmDialog from "./ConfirmDialog";
 import { certLabel } from "../api/certActions";
+import { createActing } from "../utils/acting";
 
 interface RevokeCertDialogProps {
   open: boolean;
@@ -17,27 +19,24 @@ interface RevokeCertDialogProps {
  * single element.
  */
 export default function RevokeCertDialog(props: RevokeCertDialogProps) {
+  const acting = createActing();
   return (
-    <ConfirmDialog
-      open={props.open}
-      title="Revoke Certificate"
-      message={
-        <>
-          Revoke <span class="mono">{certLabel(props)}</span>? This cannot be
-          undone.
-        </>
-      }
-      confirmLabel="Revoke"
-      actingLabel="Revoking…"
-      danger
-      canConfirm={() => !!props.serial}
-      onClose={props.onClose}
-      onConfirm={async () => {
-        const serial = props.serial;
-        if (!serial) return;
-        await revokeCert(serial);
-        props.onDone();
-      }}
-    />
+    <Show when={props.open}>
+      <Confirm
+        title="Revoke Certificate"
+        verb={acting.verb("Revoke", "Revoking…")}
+        disabled={!props.serial}
+        onClose={props.onClose}
+        act={acting.act(async () => {
+          const serial = props.serial;
+          if (!serial) return;
+          await revokeCert(serial);
+          props.onDone();
+        })}
+      >
+        Revoke <span class="mono">{certLabel(props)}</span>? This cannot be
+        undone.
+      </Confirm>
+    </Show>
   );
 }

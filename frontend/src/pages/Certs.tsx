@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
+import { Confirm } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
@@ -13,18 +14,18 @@ import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import CertStatusBadge from "../components/CertStatusBadge";
-import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
 import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
-import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
 import PageError from "../components/PageError";
 import { createSelection } from "../utils/selection";
 import { createActionResult } from "../utils/actionResult";
 import { createAction, type ActionMessages } from "../utils/action";
+import { createActing } from "../utils/acting";
 import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult, KeyAlgorithm } from "../api/types";
 import "../styles/pages/certs.css";
 
@@ -175,6 +176,8 @@ export default function Certs() {
     refetchLocal();
   }
 
+  const bulkActing = createActing();
+
   // Per-action copy for the shared confirm dialog.
   const bulkDialogConfig = () => {
     const n = selectedSerials().length;
@@ -202,7 +205,7 @@ export default function Certs() {
     if (await backfillTypeIfMissing(cert)) refetchLocal();
   }
 
-  function certMenuItems(cert: CertListItem): KebabItem[] {
+  function certMenuItems(cert: CertListItem): MenuAction[] {
     const serial = cert.serial;
     const label = certLabel(cert);
     // Wrap a row action: no-op without a serial, otherwise run it through the
@@ -446,7 +449,7 @@ export default function Certs() {
                       </td>
                       <td class="mono">{formatDate(cert.expiry_date)}</td>
                       <td class="kebab-col" onClick={(e) => e.stopPropagation()}>
-                        <KebabMenu items={certMenuItems(cert)} />
+                        <ActionMenu items={certMenuItems(cert)} />
                       </td>
                     </tr>
                   )}
@@ -667,17 +670,18 @@ export default function Certs() {
         onConfirm={(keyAlgorithm) => runBulk("", keyAlgorithm)}
       />
 
-      <ConfirmDialog
-        open={!!bulkAction() && bulkAction() !== "rekey"}
-        title={bulkDialogConfig().title}
-        message={bulkDialogConfig().message}
-        confirmLabel={bulkDialogConfig().confirmLabel}
-        actingLabel={bulkDialogConfig().actingLabel}
-        danger={bulkDialogConfig().danger}
-        requireReason={bulkDialogConfig().requireReason}
-        onClose={() => setBulkAction(null)}
-        onConfirm={(reason) => runBulk(reason, null)}
-      />
+      <Show when={bulkAction() && bulkAction() !== "rekey"}>
+        <Confirm
+          title={bulkDialogConfig().title}
+          verb={bulkActing.verb(bulkDialogConfig().confirmLabel, bulkDialogConfig().actingLabel)}
+          tone={bulkDialogConfig().danger ? "danger" : "primary"}
+          reason={bulkDialogConfig().requireReason ? { label: "Reason", placeholder: "Reason for the audit trail" } : undefined}
+          onClose={() => setBulkAction(null)}
+          act={bulkActing.act((reason: string) => runBulk(reason, null))}
+        >
+          {bulkDialogConfig().message}
+        </Confirm>
+      </Show>
 
     </div>
   );

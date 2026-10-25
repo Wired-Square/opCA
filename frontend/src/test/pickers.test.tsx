@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import VaultPicker from "../components/VaultPicker";
 import VpnClientPicker from "../components/VpnClientPicker";
-import Modal from "../components/Modal";
+import { Dialog } from "@wired-square/kit";
 import type { CertListItem } from "../api/types";
 
 const listVaults = vi.hoisted(() =>
@@ -24,22 +24,48 @@ describe("VaultPicker", () => {
     const onChange = vi.fn();
     const onModalClose = vi.fn();
     render(() => (
-      <Modal open onClose={onModalClose}>
+      <Dialog onClose={onModalClose}>
         <VaultPicker value="" onChange={onChange} />
-      </Modal>
+      </Dialog>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Browse" }));
     return { onChange, onModalClose };
   }
 
-  it("portals out of the dialog and closes on an outside mousedown", async () => {
+  it("opens in the top layer from inside the dialog and closes on an outside press", async () => {
     const { onModalClose } = mount();
     await screen.findByRole("option", { name: "Clients" });
-    expect(screen.getByRole("dialog")).not.toContainElement(listbox());
+    const panel = listbox()!.closest(".app-popover");
+    expect(panel).toHaveAttribute("popover", "manual");
+    expect(screen.getByRole("dialog")).toContainElement(listbox());
 
-    fireEvent.mouseDown(document.body);
+    fireEvent.pointerDown(document.body);
     expect(listbox()).not.toBeInTheDocument();
     expect(onModalClose).not.toHaveBeenCalled();
+  });
+
+  it("stays open on a press on its own field row", async () => {
+    mount();
+    await screen.findByRole("option", { name: "Clients" });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Browse" }));
+    expect(listbox()).toBeInTheDocument();
+  });
+
+  it("Escape closes the picker but not the dialog around it", async () => {
+    const { onModalClose } = mount();
+    const clients = await screen.findByRole("option", { name: "Clients" });
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    clients.dispatchEvent(escape);
+    expect(listbox()).not.toBeInTheDocument();
+    expect(escape.defaultPrevented).toBe(true);
+    expect(screen.getByRole("dialog")).toHaveAttribute("open");
+    expect(onModalClose).not.toHaveBeenCalled();
+  });
+
+  it("does not take focus when it opens", async () => {
+    mount();
+    await screen.findByRole("option", { name: "Clients" });
+    expect(listbox()).not.toContainElement(document.activeElement as HTMLElement);
   });
 
   it("selects a vault by keyboard", async () => {

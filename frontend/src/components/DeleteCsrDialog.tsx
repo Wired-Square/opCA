@@ -1,34 +1,34 @@
 import { Show } from "solid-js";
-import ConfirmDialog from "./ConfirmDialog";
+import { Confirm } from "@wired-square/kit";
 import { deleteCsr } from "../api/csr";
 import type { CsrListItem } from "../api/types";
+import { createActing } from "../utils/acting";
 
 export default function DeleteCsrDialog(props: {
   csr: CsrListItem | null;
   onClose: () => void;
   onDone: () => void;
 }) {
+  const acting = createActing();
   return (
-    <ConfirmDialog
-      open={!!props.csr}
-      title="Delete CSR"
-      message={
-        <>
-          Delete the CSR for <span class="mono">{props.csr?.cn ?? "—"}</span>?
-          <Show when={props.csr?.status === "Pending"}>
+    <Show when={props.csr}>
+      {(csr) => (
+        <Confirm
+          title="Delete CSR"
+          verb={acting.verb("Delete", "Deleting…")}
+          onClose={props.onClose}
+          act={acting.act(async () => {
+            await deleteCsr(csr().id!);
+            props.onDone();
+          })}
+        >
+          Delete the CSR for <span class="mono">{csr().cn ?? "—"}</span>?
+          <Show when={csr().status === "Pending"}>
             {" "}Its private key is archived in 1Password, so a certificate signed from it
             can no longer be imported.
           </Show>
-        </>
-      }
-      confirmLabel="Delete"
-      actingLabel="Deleting…"
-      danger
-      onClose={props.onClose}
-      onConfirm={async () => {
-        await deleteCsr(props.csr!.id!);
-        props.onDone();
-      }}
-    />
+        </Confirm>
+      )}
+    </Show>
   );
 }

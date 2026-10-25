@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createMemo, createResource, onMount } from "solid-js";
+import { Confirm } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useSearchParams } from "@solidjs/router";
 import {
@@ -24,13 +25,13 @@ import { formatDate } from "../utils/dates";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import AddProfileModal from "../components/AddProfileModal";
-import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
-import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner from "../components/ResultBanner";
 import SelectAllCheckbox from "../components/SelectAllCheckbox";
 import PageError from "../components/PageError";
 import { createSelection } from "../utils/selection";
+import { createActing } from "../utils/acting";
 import type {
   BulkProfileResult,
   CertListItem,
@@ -214,6 +215,8 @@ export default function OpenVPN() {
     }
   }
 
+  const deleteActing = createActing();
+
   async function runConfirmDelete() {
     const target = confirmDelete();
     if (target === "bulk") {
@@ -328,6 +331,8 @@ export default function OpenVPN() {
     }
   }
 
+  const deleteTemplateActing = createActing();
+
   async function runDeleteTemplate() {
     const name = confirmDeleteTemplate();
     if (!name) return;
@@ -418,7 +423,7 @@ export default function OpenVPN() {
     }
   }
 
-  function profileMenuItems(profile: OpenVpnProfileItem): KebabItem[] {
+  function profileMenuItems(profile: OpenVpnProfileItem): MenuAction[] {
     return [
       { label: "Send to Vault", onSelect: () => setSendProfiles([{ title: profile.title, cn: profile.cn }]) },
       { label: "Regenerate", disabled: !profile.template, onSelect: () => void handleRegenerate(profile) },
@@ -564,7 +569,7 @@ export default function OpenVPN() {
                         </td>
                         <td class="mono">{formatDate(profile.created_date)}</td>
                         <td class="kebab-col">
-                          <KebabMenu items={profileMenuItems(profile)} />
+                          <ActionMenu items={profileMenuItems(profile)} />
                         </td>
                       </tr>
                       );
@@ -766,31 +771,33 @@ export default function OpenVPN() {
         }}
       />
 
-      <ConfirmDialog
-        open={!!confirmDelete()}
-        title="Delete VPN Profile"
-        message={
-          confirmDelete() === "bulk"
-            ? `Remove ${sel.selectedItems().length} profile(s) from the list? The stored .ovpn document(s) stay in the vault.`
-            : `Remove the profile for ${(confirmDelete() as OpenVpnProfileItem | null)?.cn ?? "this CN"} from the list? The stored .ovpn document stays in the vault.`
-        }
-        confirmLabel="Delete"
-        actingLabel="Deleting…"
-        danger
-        onClose={() => setConfirmDelete(null)}
-        onConfirm={runConfirmDelete}
-      />
+      <Show when={confirmDelete()}>
+        {(target) => (
+          <Confirm
+            title="Delete VPN Profile"
+            verb={deleteActing.verb("Delete", "Deleting…")}
+            onClose={() => setConfirmDelete(null)}
+            act={deleteActing.act(runConfirmDelete)}
+          >
+            {target() === "bulk"
+              ? `Remove ${sel.selectedItems().length} profile(s) from the list? The stored .ovpn document(s) stay in the vault.`
+              : `Remove the profile for ${(target() as OpenVpnProfileItem).cn ?? "this CN"} from the list? The stored .ovpn document stays in the vault.`}
+          </Confirm>
+        )}
+      </Show>
 
-      <ConfirmDialog
-        open={!!confirmDeleteTemplate()}
-        title="Delete Template"
-        message={deleteTemplateMessage(confirmDeleteTemplate() ?? "")}
-        confirmLabel="Delete"
-        actingLabel="Deleting…"
-        danger
-        onClose={() => setConfirmDeleteTemplate(null)}
-        onConfirm={runDeleteTemplate}
-      />
+      <Show when={confirmDeleteTemplate()}>
+        {(name) => (
+          <Confirm
+            title="Delete Template"
+            verb={deleteTemplateActing.verb("Delete", "Deleting…")}
+            onClose={() => setConfirmDeleteTemplate(null)}
+            act={deleteTemplateActing.act(runDeleteTemplate)}
+          >
+            {deleteTemplateMessage(name())}
+          </Confirm>
+        )}
+      </Show>
 
       {/* ── Feedback ───────────────────────────────────────────── */}
       <PageError message={error()} />

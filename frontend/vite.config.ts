@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["./src/test/setup.ts"],
+    setupFiles: ["@wired-square/kit/testing/setup", "./src/test/setup.ts"],
     deps: {
       optimizer: {
         web: {

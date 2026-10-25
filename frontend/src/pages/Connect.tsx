@@ -11,7 +11,7 @@ import { themeMode, toggleTheme } from "../stores/theme";
 import { availableUpdate, fetchUpdate } from "../stores/update";
 import Icon from "../components/Icon";
 import Spinner from "../components/Spinner";
-import Popover, { PopoverOption } from "../components/Popover";
+import { Popover, PopoverOption } from "@wired-square/kit";
 import "../styles/pages/connect.css";
 
 interface ConnectionInfo {
@@ -136,14 +136,16 @@ function DropdownItem(props: {
   children?: JSX.Element;
 }) {
   return (
-    <PopoverOption class="dropdown-item" onSelect={props.onSelect}>
-      <div class="dropdown-item-lines">
-        <span class="dropdown-item-primary">{props.primary}</span>
-        <Show when={props.secondary}>
-          <span class="dropdown-item-secondary">{props.secondary}</span>
-        </Show>
+    <PopoverOption onSelect={props.onSelect}>
+      <div class="dropdown-item">
+        <div class="dropdown-item-lines">
+          <span class="dropdown-item-primary">{props.primary}</span>
+          <Show when={props.secondary}>
+            <span class="dropdown-item-secondary">{props.secondary}</span>
+          </Show>
+        </div>
+        {props.children}
       </div>
-      {props.children}
     </PopoverOption>
   );
 }

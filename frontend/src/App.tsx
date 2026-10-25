@@ -6,7 +6,7 @@ import { initQuitListener, quitPending } from "./stores/quit";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
-import DatabaseRecoveryDialog, { setRecoveryOpen } from "./components/DatabaseRecoveryDialog";
+import DatabaseRecoveryDialog, { recoveryOpen, setRecoveryOpen } from "./components/DatabaseRecoveryDialog";
 import "./styles/pages/app.css";
 
 /** Routes accessible when the vault is empty (no CA). */
@@ -76,7 +76,9 @@ export default function App(props: ParentProps) {
         {quitNotice()}
         <main class="content">{outlet()}</main>
       </div>
-      <DatabaseRecoveryDialog />
+      <Show when={recoveryOpen()}>
+        <DatabaseRecoveryDialog />
+      </Show>
 
     </Show>
   );

@@ -19,9 +19,9 @@ const CA_SUBJECT = {
 };
 const UI_MS = 15000;
 const OP_MS = 180000;
-const DIALOG = '[role="dialog"]';
-const MENU_ITEM = '.popover [role="menuitem"]';
-const SAVED_LOGIN = ".popover .dropdown-item:has(.saved-forget)";
+const DIALOG = "dialog[open]";
+const MENU_ITEM = '.app-menu [role="menuitem"]';
+const SAVED_LOGIN = ".app-popover .dropdown-item:has(.saved-forget)";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const assert = (ok, message) => {
@@ -65,12 +65,12 @@ async function openVaultPicker() {
   // Lists only this account's vaults, so no other account is asked to unlock.
   await app.type("#account", ACCOUNT);
   await app.click('[aria-label="Show vaults"]');
-  await app.waitFor(".popover", "visible", UI_MS);
+  await app.waitFor(".app-popover", "visible", UI_MS);
 }
 
 async function closePopover() {
   await app.press("Escape");
-  await app.waitFor(".popover", "gone", UI_MS);
+  await app.waitFor(".app-popover", "gone", UI_MS);
 }
 
 async function savedLogins() {
@@ -92,10 +92,10 @@ async function pickAccount() {
   await app.type("#account", "");
   await app.waitFor('[aria-label="Show 1Password accounts"]', "visible", UI_MS);
   await app.click('[aria-label="Show 1Password accounts"]');
-  await app.waitFor(".popover .dropdown-item", "visible", UI_MS);
-  const rows = await matches(".popover .dropdown-item");
-  assert((await matches(".popover .dropdown-item-secondary")).length === rows.length, "an account row has no address");
-  await app.click(".popover .dropdown-item", await onlyIndex(".popover .dropdown-item-secondary", (m) => m.text === ACCOUNT, `account rows read ${ACCOUNT}`));
+  await app.waitFor(".app-popover .dropdown-item", "visible", UI_MS);
+  const rows = await matches(".app-popover .dropdown-item");
+  assert((await matches(".app-popover .dropdown-item-secondary")).length === rows.length, "an account row has no address");
+  await app.click(".app-popover .dropdown-item", await onlyIndex(".app-popover .dropdown-item-secondary", (m) => m.text === ACCOUNT, `account rows read ${ACCOUNT}`));
   const [field] = await matches("#account");
   assert(field.value === ACCOUNT, `account field reads "${field.value}"`);
 }
@@ -156,11 +156,11 @@ async function issue() {
 
 async function rowAction(label) {
   const index = await onlyIndex(".data-table-row", (m) => m.text.includes(CN), `rows for ${CN}`);
-  await app.click(".data-table-row .kebab-btn", index);
+  await app.click(".data-table-row .app-menu__trigger", index);
   await app.waitFor(MENU_ITEM, "visible", UI_MS);
   await app.click(MENU_ITEM, await onlyIndex(MENU_ITEM, (m) => m.text === label, `${label} menu items`));
   await app.waitFor(DIALOG, "visible", UI_MS);
-  await app.click(`${DIALOG} .btn-danger`);
+  await app.click(`${DIALOG} .app-btn--danger`);
   await settle(label, async () => (await matches(DIALOG)).length === 0);
 }
 

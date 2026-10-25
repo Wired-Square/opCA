@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The frontend's colour tokens now use the kit's `--app-*` names and reach the
   page through the kit's adopted-stylesheet theme and `data-app-scheme`; the
   saved dark or light choice carries over.
+- Dialogs are now the kit's native modal dialogs, closed with Escape or their
+  own buttons; the corner × and closing on a click outside are gone.
 - 1Password access now goes through `wslib-1password`. Item fields reach `op`
   on stdin when an item is created, every call names the vault by id, a title
   two items share fails naming both ids, and a signed-out `op` is reported
@@ -21,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The MCP dev harness now comes from `wslib-mcp` 0.1.0 on the private
   `wired-square` cargo registry, replacing the `wslib-ai-mcp` git dependency.
   It adds a read-only `console` tool for the page's errors and warnings.
+- Action menus and pickers are now the kit's, drawn in the platform's top
+  layer; a disabled menu item can now be reached with the arrow keys.
 - The harness's Tauri event bridge now comes from `wslib-mcp`'s `tauri-bridge`
   feature, replacing opCA's own.
 - Builds fetch `wslib-mcp` from the registry instead of over SSH; CI reads it

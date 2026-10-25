@@ -1,30 +1,33 @@
-import { createEffect, createSignal, createUniqueId, Show } from "solid-js";
-import ConfirmDialog from "./ConfirmDialog";
+import { createSignal, createUniqueId, Show } from "solid-js";
+import { Confirm } from "@wired-square/kit";
 import { generatePassword } from "../api/vault-backup";
+import { createActing } from "../utils/acting";
 
-/** Gate on copying a private key to the clipboard, optionally passphrase-encrypted
- * (PKCS#8) by the backend first. Replaces a plugin confirm that existed only
- * because `window.confirm` doesn't block in a webview. */
-export default function CopyPrivateKeyDialog(props: {
+interface CopyPrivateKeyDialogProps {
   open: boolean;
   label: string;
   onClose: () => void;
   onCopy: (passphrase?: string) => Promise<void>;
-}) {
+}
+
+/** Gate on copying a private key to the clipboard, optionally passphrase-encrypted
+ * (PKCS#8) by the backend first. Replaces a plugin confirm that existed only
+ * because `window.confirm` doesn't block in a webview. */
+export default function CopyPrivateKeyDialog(props: CopyPrivateKeyDialogProps) {
+  return (
+    <Show when={props.open}>
+      <CopyPrivateKeyConfirm {...props} />
+    </Show>
+  );
+}
+
+function CopyPrivateKeyConfirm(props: Omit<CopyPrivateKeyDialogProps, "open">) {
   const id = createUniqueId();
+  const acting = createActing();
   const [encrypt, setEncrypt] = createSignal(false);
   const [passphrase, setPassphrase] = createSignal("");
   const [confirmation, setConfirmation] = createSignal("");
   const [reveal, setReveal] = createSignal(false);
-
-  createEffect(() => {
-    if (props.open) {
-      setEncrypt(false);
-      setPassphrase("");
-      setConfirmation("");
-      setReveal(false);
-    }
-  });
 
   const mismatch = () => encrypt() && !!confirmation() && confirmation() !== passphrase();
   const ready = () => !encrypt() || (!!passphrase() && confirmation() === passphrase());
@@ -37,25 +40,20 @@ export default function CopyPrivateKeyDialog(props: {
   }
 
   return (
-    <ConfirmDialog
-      open={props.open}
+    <Confirm
       title="Copy Private Key?"
-      message={
-        <>
-          Copy the private key for <span class="mono">{props.label}</span> to the clipboard?
-          Anything that can read your clipboard (clipboard managers, screen-sharing tools,
-          AV/EDR agents, the next app you accidentally paste into) will see the entire key.
-          Only do this if you need to install the cert elsewhere, and clear your clipboard
-          afterwards.
-        </>
-      }
-      confirmLabel={encrypt() ? "Copy encrypted key" : "Copy"}
-      actingLabel="Copying…"
-      danger
-      canConfirm={ready}
+      verb={acting.verb(encrypt() ? "Copy encrypted key" : "Copy", "Copying…")}
+      disabled={!ready()}
       onClose={props.onClose}
-      onConfirm={() => props.onCopy(encrypt() ? passphrase() : undefined)}
+      act={acting.act(() => props.onCopy(encrypt() ? passphrase() : undefined))}
     >
+      <p class="confirm-message">
+        Copy the private key for <span class="mono">{props.label}</span> to the clipboard?
+        Anything that can read your clipboard (clipboard managers, screen-sharing tools,
+        AV/EDR agents, the next app you accidentally paste into) will see the entire key.
+        Only do this if you need to install the cert elsewhere, and clear your clipboard
+        afterwards.
+      </p>
       <label class="checkbox-row">
         <input type="checkbox" checked={encrypt()} onChange={(e) => setEncrypt(e.currentTarget.checked)} />
         Encrypt with a passphrase
@@ -97,6 +95,6 @@ export default function CopyPrivateKeyDialog(props: {
           Show passphrase
         </label>
       </Show>
-    </ConfirmDialog>
+    </Confirm>
   );
 }

@@ -1,32 +1,40 @@
-import { createEffect, createSignal } from "solid-js";
+import { Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
-import ConfirmDialog from "./ConfirmDialog";
+import { Confirm } from "@wired-square/kit";
 import KeyAlgorithmSelect from "./KeyAlgorithmSelect";
 import type { KeyAlgorithm } from "../api/types";
+import { createActing } from "../utils/acting";
 
-export default function RekeyDialog(props: {
+interface RekeyDialogProps {
   open: boolean;
   title: string;
   message: JSX.Element | string;
   onClose: () => void;
   onConfirm: (keyAlgorithm: KeyAlgorithm | null) => Promise<void>;
-}) {
+}
+
+export default function RekeyDialog(props: RekeyDialogProps) {
+  return (
+    <Show when={props.open}>
+      <RekeyConfirm {...props} />
+    </Show>
+  );
+}
+
+function RekeyConfirm(props: Omit<RekeyDialogProps, "open">) {
   const [keyAlgorithm, setKeyAlgorithm] = createSignal<KeyAlgorithm | null>(null);
-  createEffect(() => {
-    if (props.open) setKeyAlgorithm(null);
-  });
+  const acting = createActing();
 
   return (
-    <ConfirmDialog
-      open={props.open}
+    <Confirm
       title={props.title}
-      message={props.message}
-      confirmLabel="Rekey"
-      actingLabel="Rekeying…"
+      verb={acting.verb("Rekey", "Rekeying…")}
+      tone="primary"
       onClose={props.onClose}
-      onConfirm={() => props.onConfirm(keyAlgorithm())}
+      act={acting.act(() => props.onConfirm(keyAlgorithm()))}
     >
+      <p class="confirm-message">{props.message}</p>
       <KeyAlgorithmSelect value={keyAlgorithm()} onChange={setKeyAlgorithm} keepCurrent />
-    </ConfirmDialog>
+    </Confirm>
   );
 }

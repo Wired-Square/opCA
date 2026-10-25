@@ -1,4 +1,5 @@
 /* @refresh reload */
+import "./styles/layers.css";
 import { render } from "solid-js/web";
 import { Router, Route } from "@solidjs/router";
 import App from "./App";
@@ -19,6 +20,7 @@ import "@fontsource/ubuntu/700.css";
 import "@wired-square/kit/theme.css";
 import "@wired-square/kit/kit.css";
 import "./styles/global.css";
+import "./styles/components/popover.css";
 // Initialise theme on load
 import "./stores/theme";
 

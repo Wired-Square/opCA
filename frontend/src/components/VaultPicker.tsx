@@ -3,7 +3,7 @@ import { errorMessage } from "../api/tauri";
 import { listVaults, createVault } from "../api/vaults";
 import Spinner from "./Spinner";
 import { appState } from "../stores/app";
-import Popover, { PopoverOption } from "./Popover";
+import { Popover, PopoverOption } from "@wired-square/kit";
 import type { VaultInfo } from "../api/types";
 import "../styles/components/vault-picker.css";
 
@@ -107,73 +107,72 @@ export default function VaultPicker(props: VaultPickerProps) {
       </div>
 
       <Show when={open()}>
-        <Popover anchor={rowEl} matchWidth onClose={() => setOpen(false)} class="vault-picker-menu">
-          <Show when={showCreate()}>
-            <div class="vault-picker-create-form">
-              <input
-                autofocus
-                type="text"
-                placeholder="Vault name"
-                value={newVaultName()}
-                onInput={(e) => setNewVaultName(e.currentTarget.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleCreateVault(); }}
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                spellcheck={false}
-              />
-              <button
-                class="btn-primary btn-sm"
-                onClick={handleCreateVault}
-                disabled={creating() || !newVaultName().trim()}
-              >
-                {creating() ? "Creating..." : "Create"}
-              </button>
-              <button
-                class="btn-ghost btn-sm"
-                onClick={() => { setShowCreate(false); setCreateError(null); }}
-              >
-                Cancel
-              </button>
-            </div>
-            <Show when={createError()}>
-              <div class="popover-note popover-error">{createError()}</div>
+        <Popover anchor={rowEl} matchWidth onClose={() => setOpen(false)}>
+          <div class="vault-picker-menu">
+            <Show when={showCreate()}>
+              <div class="vault-picker-create-form">
+                <input
+                  autofocus
+                  type="text"
+                  placeholder="Vault name"
+                  value={newVaultName()}
+                  onInput={(e) => setNewVaultName(e.currentTarget.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleCreateVault(); }}
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck={false}
+                />
+                <button
+                  class="btn-primary btn-sm"
+                  onClick={handleCreateVault}
+                  disabled={creating() || !newVaultName().trim()}
+                >
+                  {creating() ? "Creating..." : "Create"}
+                </button>
+                <button
+                  class="btn-ghost btn-sm"
+                  onClick={() => { setShowCreate(false); setCreateError(null); }}
+                >
+                  Cancel
+                </button>
+              </div>
+              <Show when={createError()}>
+                <div class="popover-note popover-error">{createError()}</div>
+              </Show>
             </Show>
-          </Show>
 
-          <div role="listbox" aria-label="Vaults">
-            <Show when={!showCreate()}>
-              <PopoverOption
-                class="vault-picker-new"
-                onSelect={() => { setShowCreate(true); setNewVaultName(""); setCreateError(null); }}
-              >
-                + New vault
-              </PopoverOption>
+            <div role="listbox" aria-label="Vaults">
+              <Show when={!showCreate()}>
+                <PopoverOption onSelect={() => { setShowCreate(true); setNewVaultName(""); setCreateError(null); }}>
+                  <span class="vault-picker-new">+ New vault</span>
+                </PopoverOption>
+              </Show>
+              <Show when={!loading()}>
+                <For each={vaultList()}>
+                  {(v) => (
+                    <PopoverOption selected={v.name === props.value} onSelect={() => selectVault(v.name)}>
+                      {v.name}
+                    </PopoverOption>
+                  )}
+                </For>
+              </Show>
+            </div>
+
+            <Show when={loading()}>
+              <div class="popover-note">
+                <Spinner message="Loading vaults..." small />
+              </div>
             </Show>
-            <Show when={!loading()}>
-              <For each={vaultList()}>
-                {(v) => (
-                  <PopoverOption selected={v.name === props.value} onSelect={() => selectVault(v.name)}>
-                    {v.name}
-                  </PopoverOption>
-                )}
-              </For>
+
+            <Show when={fetchError()}>
+              <div class="popover-note popover-error">{fetchError()}</div>
+            </Show>
+
+            <Show when={!loading() && !fetchError() && vaultList().length === 0}>
+              <div class="popover-note">No vaults found</div>
             </Show>
           </div>
-
-          <Show when={loading()}>
-            <div class="popover-note">
-              <Spinner message="Loading vaults..." small />
-            </div>
-          </Show>
-
-          <Show when={fetchError()}>
-            <div class="popover-note popover-error">{fetchError()}</div>
-          </Show>
-
-          <Show when={!loading() && !fetchError() && vaultList().length === 0}>
-            <div class="popover-note">No vaults found</div>
-          </Show>
         </Popover>
       </Show>
     </>
