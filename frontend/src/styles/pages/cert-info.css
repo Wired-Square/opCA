@@ -14,7 +14,7 @@
 
 .san-entry {
   font-size: 0.875rem;
-  color: var(--text-primary);
+  color: var(--app-text);
 }
 
 .san-copy-all {
@@ -22,15 +22,15 @@
   padding: 1px 6px;
   font: inherit;
   font-size: 0.6875rem;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--app-border);
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
 .san-copy-all:hover {
-  color: var(--text-primary);
+  color: var(--app-text);
   background: var(--bg-elevated);
 }
 
@@ -52,7 +52,7 @@
   border-radius: var(--radius-lg);
   margin-bottom: 16px;
   font-size: 0.875rem;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
 }
 
 .ignored-banner-label {
@@ -60,15 +60,15 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.75rem;
-  color: var(--text-primary);
+  color: var(--app-text);
 }
 
 .superseded-banner {
-  border-left-color: var(--accent);
+  border-left-color: var(--app-accent);
 }
 
 .superseded-link {
-  color: var(--accent);
+  color: var(--app-accent);
   text-decoration: underline;
 }
 
@@ -81,16 +81,16 @@
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
-  background: var(--bg-primary);
+  background: var(--app-bg);
 }
 
 .fresh-banner {
-  border-left-color: var(--success);
-  background: color-mix(in srgb, var(--success) 8%, var(--bg-primary));
+  border-left-color: var(--app-good);
+  background: color-mix(in srgb, var(--app-good) 8%, var(--app-bg));
 }
 
 .vpn-regen-banner {
-  border-left-color: var(--accent);
+  border-left-color: var(--app-accent);
 }
 
 .vpn-regen-actions {

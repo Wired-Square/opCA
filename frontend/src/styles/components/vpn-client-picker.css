@@ -20,7 +20,7 @@
 }
 
 .vpn-picker-placeholder {
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
 }
 
 /* Equal-width badge column so the CNs line up vertically across rows
@@ -43,14 +43,14 @@
 .vpn-picker-expiry {
   flex-shrink: 0;
   font-size: 0.75rem;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   white-space: nowrap;
 }
 
 /* Search header stays put; only the rows below it scroll. */
 .vpn-picker-search {
   padding: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .vpn-picker-search .form-input {

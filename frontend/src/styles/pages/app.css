@@ -9,7 +9,7 @@
 .content {
   flex: 1;
   overflow-y: auto;
-  background: var(--bg-primary);
+  background: var(--app-bg);
 }
 
 /* Shown by RouteErrorBoundary when a page throws; padding/spacing come from

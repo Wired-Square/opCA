@@ -46,8 +46,8 @@
 
 .dns-record {
   padding: 10px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   border-radius: var(--radius-md);
   font-size: 0.6875rem;
   line-height: 1.5;

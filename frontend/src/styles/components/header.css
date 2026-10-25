@@ -5,8 +5,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--app-surface);
+  border-bottom: 1px solid var(--app-border);
   font-size: 0.8125rem;
 }
 
@@ -22,7 +22,7 @@
 }
 
 .header-value {
-  color: var(--text-primary);
+  color: var(--app-text);
   font-family: var(--font-mono);
   font-size: 0.8125rem;
 }
@@ -37,17 +37,17 @@
 }
 
 .header-badge-valid {
-  color: var(--success);
+  color: var(--app-good);
   background: var(--success-tint);
 }
 
 .header-badge-warning {
-  color: var(--warning);
+  color: var(--app-warn);
   background: var(--warning-tint);
 }
 
 .header-badge-error {
-  color: var(--error);
+  color: var(--app-bad);
   background: var(--error-tint);
 }
 
@@ -79,6 +79,6 @@
 }
 
 .disconnect-btn:hover {
-  color: var(--error);
+  color: var(--app-bad);
   background: var(--error-tint);
 }

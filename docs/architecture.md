@@ -626,12 +626,20 @@ The CSP forbids static inline styles, so all styling lives in
 [styles/](../frontend/src/styles) and refers to tokens rather than
 literals. Colours that differ by theme are defined in
 [styles/theme.ts](../frontend/src/styles/theme.ts) (`darkTheme` /
-`lightTheme`), which the `theme` store writes onto `:root`, along with a
-`data-theme` attribute that sets `color-scheme` so native controls follow the
-app's theme rather than the OS appearance. Everything that
-does not vary by theme is a static `:root` variable in
+`lightTheme`). Those the kit shares carry its names (`--app-bg`,
+`--app-surface`, `--app-text`, `--app-text-muted`, `--app-accent`,
+`--app-good` / `-warn` / `-bad` / `-neutral`, `--app-border`, …); opca's own
+keep theirs (`--bg-elevated`, `--text-tertiary`, `--info`, `--caution`,
+`--link`, …). The `theme` store hands both sets to the kit's `applyTheme` once,
+as an adopted stylesheet, and switches between them with the kit's
+`data-app-scheme` attribute, which also sets `color-scheme` so native controls
+follow the app's theme rather than the OS appearance. The choice is kept under
+the kit's storage key; a value under the old `opca-theme` key is carried over
+once. Everything that does not vary by theme is a static `:root` variable in
 [styles/global.css](../frontend/src/styles/global.css): status tints and
 edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
+the kit tokens opca derives from its own (`--app-surface-sunken`,
+`--app-*-bg`, `--app-alert`, `--app-radius`, `--app-shadow`, `--app-focus`, …),
 `--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and the stacking order
 `--z-sticky` < `--z-modal` < `--z-popover`. New styles use these; a raw hex or
 pixel radius in a component stylesheet is a regression.

@@ -4,15 +4,15 @@
   justify-content: center;
   height: 100vh;
   width: 100vw;
-  background: var(--bg-primary);
+  background: var(--app-bg);
 }
 
 .connect-card {
   width: 100%;
   max-width: 420px;
   padding: 48px 40px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-card);
 }
@@ -44,16 +44,16 @@
 }
 
 .brand-op {
-  color: var(--text-primary);
+  color: var(--app-text);
 }
 
 .brand-ca {
-  color: var(--accent);
+  color: var(--app-accent);
 }
 
 .connect-subtitle {
   font-family: "Ubuntu", sans-serif;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   font-size: 0.9375rem;
   margin-bottom: 4px;
 }
@@ -87,10 +87,10 @@
   top: 1px;
   bottom: 1px;
   width: 34px;
-  background: var(--accent);
+  background: var(--app-accent);
   border: none;
-  border-left: 1px solid var(--border);
-  color: var(--on-accent);
+  border-left: 1px solid var(--app-border);
+  color: var(--app-accent-contrast);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -131,7 +131,7 @@
 .dropdown-item-primary {
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--app-text);
 }
 
 .dropdown-item-secondary {
@@ -156,12 +156,12 @@
 }
 
 .saved-forget:hover {
-  color: var(--error);
+  color: var(--app-bad);
   background: var(--error-tint);
 }
 
 .connect-error {
-  color: var(--error);
+  color: var(--app-bad);
   font-size: 0.875rem;
   padding: 8px 12px;
   background: var(--error-tint);
@@ -204,13 +204,13 @@
 }
 
 .op-cli-found .op-cli-dot {
-  background: var(--success);
-  box-shadow: 0 0 6px var(--success);
+  background: var(--app-good);
+  box-shadow: 0 0 6px var(--app-good);
 }
 
 .op-cli-missing .op-cli-dot {
-  background: var(--error);
-  box-shadow: 0 0 6px var(--error);
+  background: var(--app-bad);
+  box-shadow: 0 0 6px var(--app-bad);
 }
 
 .op-cli-text {

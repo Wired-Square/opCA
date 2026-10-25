@@ -7,9 +7,9 @@
   font-size: 0.6875rem;
   font-weight: 600;
   font-family: var(--font-mono);
-  color: var(--accent);
+  color: var(--app-accent);
   background: var(--accent-glow);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--app-accent);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -19,6 +19,6 @@
 }
 
 .tz-toggle:hover {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--app-accent);
+  color: var(--app-accent-contrast);
 }

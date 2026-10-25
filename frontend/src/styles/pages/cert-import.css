@@ -17,6 +17,6 @@
 
 .hint-encrypted {
   font-size: 0.8125rem;
-  color: var(--warning);
+  color: var(--app-warn);
   margin-top: -12px;
 }

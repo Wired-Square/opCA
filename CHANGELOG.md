@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The frontend's colour tokens now use the kit's `--app-*` names and reach the
+  page through the kit's adopted-stylesheet theme and `data-app-scheme`; the
+  saved dark or light choice carries over.
 - 1Password access now goes through `wslib-1password`. Item fields reach `op`
   on stdin when an item is created, every call names the vault by id, a title
   two items share fails naming both ids, and a signed-out `op` is reported
