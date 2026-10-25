@@ -16,6 +16,8 @@ import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/ubuntu/400.css";
 import "@fontsource/ubuntu/500.css";
 import "@fontsource/ubuntu/700.css";
+import "@wired-square/kit/theme.css";
+import "@wired-square/kit/kit.css";
 import "./styles/global.css";
 // Initialise theme on load
 import "./stores/theme";

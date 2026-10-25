@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   on OpenSSL.
 - Local CA database backups are written through `wslib-file-atomic`, still
   replaced whole and readable by their owner alone.
+- The frontend now depends on `@wired-square/kit` 0.2.0, vendored as a tarball
+  in `frontend/vendor/`, and loads its stylesheets ahead of opca's own.
 
 ### Fixed
 

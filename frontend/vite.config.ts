@@ -20,6 +20,7 @@ export default defineConfig({
     },
   },
   resolve: {
+    dedupe: ["solid-js"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
