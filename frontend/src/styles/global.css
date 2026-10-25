@@ -678,6 +678,16 @@ input[aria-invalid="true"]:focus {
   pointer-events: none;
 }
 
+.checkbox-col .app-tick__label {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.checkbox-col .app-tick__box {
+  margin: 0;
+  cursor: pointer;
+}
+
 /* ── Bulk action bar + result summary ─────────────────────────────── */
 .bulk-action-bar {
   display: flex;

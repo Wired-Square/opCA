@@ -622,6 +622,9 @@ win. Key conventions:
   actions on the certificate list/detail and the OpenVPN Profiles list share a
   per-row `ActionMenu`; Ignore / Revoke / Send-to-Vault are self-contained
   dialogs on the kit's `Dialog` or `Confirm`, reused across those pages.
+  Multi-select tables keep their selection in the kit's `createSelection`,
+  cleared on a refetch, and tick rows with `TableTick`, the kit's `Tick`
+  named for screen readers only.
 
 ### Styling tokens
 

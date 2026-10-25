@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { Confirm } from "@wired-square/kit";
+import { Confirm, createSelection } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
@@ -10,7 +10,6 @@ import { canDeleteCert, certKebabItems, certLabel, rekeyAndGo, renewAndGo } from
 import { generateCsrFromCert } from "../api/csr";
 import { formatDate } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import CertStatusBadge from "../components/CertStatusBadge";
@@ -20,9 +19,9 @@ import RevokeCertDialog from "../components/RevokeCertDialog";
 import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
-import SelectAllCheckbox from "../components/SelectAllCheckbox";
+import TzToggle from "../components/TzToggle";
+import TableTick from "../components/TableTick";
 import PageError from "../components/PageError";
-import { createSelection } from "../utils/selection";
 import { createActionResult } from "../utils/actionResult";
 import { createAction, type ActionMessages } from "../utils/action";
 import { createActing } from "../utils/acting";
@@ -402,7 +401,7 @@ export default function Certs() {
               <thead>
                 <tr>
                   <th class="checkbox-col">
-                    <SelectAllCheckbox all={sel.allSelected()} some={sel.someSelected()} onToggle={sel.toggleAll} />
+                    <TableTick label="Select all" checked={sel.allSelected()} mixed={sel.someSelected() && !sel.allSelected()} onChange={sel.toggleAll} />
                   </th>
                   <th>Serial</th>
                   <th>Common Name</th>
@@ -426,13 +425,11 @@ export default function Certs() {
                       onClick={() => cert.serial && navigate(`/certs/${cert.serial}`)}
                     >
                       <td class="checkbox-col" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          class="table-checkbox"
+                        <TableTick
+                          label={`Select ${cert.cn ?? cert.serial ?? "certificate"}`}
                           checked={!!cert.serial && sel.isSelected(cert.serial)}
                           disabled={!cert.serial}
                           onChange={() => cert.serial && sel.toggle(cert.serial)}
-                          aria-label={`Select ${cert.cn ?? cert.serial ?? "certificate"}`}
                         />
                       </td>
                       <td class="mono">{cert.serial ?? "\u2014"}</td>

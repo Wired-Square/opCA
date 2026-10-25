@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createMemo, createResource, onMount } from "solid-js";
-import { Confirm } from "@wired-square/kit";
+import { Confirm, createSelection } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useSearchParams } from "@solidjs/router";
 import {
@@ -28,9 +28,8 @@ import AddProfileModal from "../components/AddProfileModal";
 import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
 import ResultBanner from "../components/ResultBanner";
-import SelectAllCheckbox from "../components/SelectAllCheckbox";
+import TableTick from "../components/TableTick";
 import PageError from "../components/PageError";
-import { createSelection } from "../utils/selection";
 import { createActing } from "../utils/acting";
 import type {
   BulkProfileResult,
@@ -530,7 +529,7 @@ export default function OpenVPN() {
                 <thead>
                   <tr>
                     <th class="checkbox-col">
-                      <SelectAllCheckbox all={sel.allSelected()} some={sel.someSelected()} onToggle={sel.toggleAll} />
+                      <TableTick label="Select all" checked={sel.allSelected()} mixed={sel.someSelected() && !sel.allSelected()} onChange={sel.toggleAll} />
                     </th>
                     <For each={sortColumns}>
                       {(col) => (
@@ -552,12 +551,10 @@ export default function OpenVPN() {
                         classList={{ "data-table-row-selected": sel.isSelected(profile.title) }}
                       >
                         <td class="checkbox-col">
-                          <input
-                            type="checkbox"
-                            class="table-checkbox"
+                          <TableTick
+                            label={`Select ${profile.cn}`}
                             checked={sel.isSelected(profile.title)}
                             onChange={() => sel.toggle(profile.title)}
-                            aria-label={`Select ${profile.cn}`}
                           />
                         </td>
                         <td>{profile.profile_type ?? "—"}</td>

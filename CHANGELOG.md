@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   It adds a read-only `console` tool for the page's errors and warnings.
 - Action menus and pickers are now the kit's, drawn in the platform's top
   layer; a disabled menu item can now be reached with the arrow keys.
+- Table selection and its tickboxes are now the kit's.
 - The harness's Tauri event bridge now comes from `wslib-mcp`'s `tauri-bridge`
   feature, replacing opCA's own.
 - Builds fetch `wslib-mcp` from the registry instead of over SSH; CI reads it
