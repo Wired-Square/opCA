@@ -605,7 +605,8 @@ win. Key conventions:
 - [api/](../frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
   [api/tauri.ts](../frontend/src/api/tauri.ts). `tauriInvoke` normalises
-  the rejection to an `Error` and tracks the in-flight operation — kept
+  the rejection to the kit's `Refusal`, carrying the backend's message so kit
+  components show it as written, and tracks the in-flight operation — kept
   as a stack in [stores/operation.ts](../frontend/src/stores/operation.ts)
   (the side-nav shows the most recent op and never blanks mid-flight, and a
   finishing background task can't clear a running foreground one). `withLock()`

@@ -1,9 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
+import { Refusal } from "@wired-square/kit";
 import { beginOp, endOp, isVisibleOp } from "../stores/operation";
 
 /**
  * Typed wrapper around Tauri's invoke.
- * Normalises the rejection to an `Error` with a clean message and tracks the
+ * Normalises the rejection to a `Refusal` carrying the backend's message and tracks the
  * active operation in the sidebar status indicator. Callers surface the
  * failure themselves — through a result banner or a page-error line.
  */
@@ -16,7 +17,7 @@ export async function tauriInvoke<T>(
     if (visible) beginOp(cmd);
     return await invoke<T>(cmd, args);
   } catch (err) {
-    throw new Error(typeof err === "string" ? err : String(err));
+    throw new Refusal(String(err));
   } finally {
     if (visible) endOp(cmd);
   }
