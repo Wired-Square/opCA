@@ -574,8 +574,10 @@ accepted for now; batching the flushes is future work.
 ## Frontend (`frontend`)
 
 A single-page SolidJS app. Shared primitives come from `@wired-square/kit`,
-vendored as `frontend/vendor/wired-square-kit-<version>.tgz` because CI cannot
-reach the Forgejo registry. Its `theme.css` and `kit.css` load before opca's
+read from the `mirror.wiredsquare.com/npm/` registry mirror:
+`frontend/.npmrc` names the registry for the scope, and the token lives in the
+user's `~/.npmrc` (CI writes it there from the same secret as the cargo
+mirror). Its `theme.css` and `kit.css` load before opca's
 stylesheets, and `kit.css` sits in a cascade layer, so opca's unlayered rules
 win. Key conventions:
 

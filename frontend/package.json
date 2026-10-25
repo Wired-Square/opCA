@@ -21,7 +21,7 @@
     "@tauri-apps/plugin-clipboard-manager": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
-    "@wired-square/kit": "file:vendor/wired-square-kit-0.2.0.tgz",
+    "@wired-square/kit": "^0.2.0",
     "solid-js": "^1.9.11"
   },
   "devDependencies": {
