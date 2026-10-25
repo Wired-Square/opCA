@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   saved dark or light choice carries over.
 - Dialogs are now the kit's native modal dialogs, closed with Escape or their
   own buttons; the corner × and closing on a click outside are gone.
+- A copyable detail value is now the kit's copy button, and says "Copied" only
+  once the clipboard has taken the value.
 - 1Password access now goes through `wslib-1password`. Item fields reach `op`
   on stdin when an item is created, every call names the vault by id, a title
   two items share fails naming both ids, and a signed-out `op` is reported

@@ -2,7 +2,9 @@
 import "./styles/layers.css";
 import { render } from "solid-js/web";
 import { Router, Route } from "@solidjs/router";
+import { IconSet } from "@wired-square/kit";
 import App from "./App";
+import CopyIcon from "./components/CopyIcon";
 import { routes } from "./router";
 // Fonts (self-hosted via @fontsource)
 import "@fontsource/dm-sans/400.css";
@@ -28,11 +30,13 @@ const root = document.getElementById("root");
 
 render(
   () => (
-    <Router root={App}>
-      {routes.map((r) => (
-        <Route path={r.path} component={r.component} />
-      ))}
-    </Router>
+    <IconSet icons={{ copy: CopyIcon }}>
+      <Router root={App}>
+        {routes.map((r) => (
+          <Route path={r.path} component={r.component} />
+        ))}
+      </Router>
+    </IconSet>
   ),
   root!,
 );

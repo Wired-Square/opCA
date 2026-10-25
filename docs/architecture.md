@@ -669,6 +669,18 @@ restyles the kit's `app-popover` / `app-menu` classes in opca's look; the
 kit's `PopoverOption` takes no class, so a row's own layout class goes on an
 element inside it.
 
+### Copying
+
+Every copy writes through `writeClipboard` in
+[utils/clipboard.ts](../frontend/src/utils/clipboard.ts), the Tauri
+clipboard plugin, because WKWebView refuses `navigator.clipboard` once an
+`await` separates the write from the click. `CopyableValue` is the kit's
+`CopyButton` with that writer, flashing "Copied" in place of opca's glyph
+(given to the kit through `IconSet` at the root) once the write lands.
+Availability tags and the labelled Copy buttons keep `createCopiedSignal`:
+their value is fetched on click, or they are disabled, busy or labelled in
+ways `CopyButton` does not draw.
+
 ### Publishing to a store
 
 Generating a CRL, re-signing the CA and mutating the database all leave the
