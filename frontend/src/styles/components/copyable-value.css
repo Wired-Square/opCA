@@ -1,3 +1,8 @@
+.copyable-value {
+  flex: 1;
+  min-width: 0;
+}
+
 .copyable-value .app-copy {
   gap: 6px;
   margin: -2px -6px;

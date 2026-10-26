@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   escaped). The text dump is unchanged.
 - DKIM records are split into 255-octet TXT strings by `wslib-dns`, which
   splits only between characters and escapes quotes and backslashes.
+- Copyable detail values use the row's width again, instead of wrapping short
+  values such as "CA" mid-word.
+
 - The frontend's colour tokens now use the kit's `--app-*` names and reach the
   page through the kit's adopted-stylesheet theme and `data-app-scheme`; the
   saved dark or light choice carries over.
