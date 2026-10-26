@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Holding a quit until 1Password work finishes now comes from `wslib-tauri`
+  0.1.0's quit guard; the app menu reads "Quit opCA" as before.
 - The frontend's colour tokens now use the kit's `--app-*` names and reach the
   page through the kit's adopted-stylesheet theme and `data-app-scheme`; the
   saved dark or light choice carries over.

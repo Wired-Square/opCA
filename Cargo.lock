@@ -2888,7 +2888,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -4065,6 +4065,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "wslib-mcp",
+ "wslib-tauri",
  "zeroize",
 ]
 
@@ -8391,6 +8392,15 @@ checksum = "1cecb90fec3688b4d4e14cfcd6aca61f6b41500f1244f65e3e697abf1b0da931"
 dependencies = [
  "serde",
  "subtle",
+]
+
+[[package]]
+name = "wslib-tauri"
+version = "0.1.0"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "2f72e239c246bac8657a3213b3b619398e12ccb20b0c94c8d769e810f65e4924"
+dependencies = [
+ "tauri",
 ]
 
 [[package]]

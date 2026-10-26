@@ -478,8 +478,8 @@ the webview and `opca-core`.
 
 ### Holding a quit during 1Password work
 
-[quit_guard.rs](../crates/opca-tauri/src/quit_guard.rs) keeps the app from
-exiting part-way through an `op` operation. `AppState::is_busy` is true while
+`wslib-tauri`'s `quit_guard` plugin, given `AppState::is_busy` in `main.rs`,
+keeps the app from exiting part-way through an `op` operation. `AppState::is_busy` is true while
 the `conn` mutex (held by every `op` call) or `private_store_lock` is held. An
 `ExitRequested` or window `CloseRequested` arriving then is prevented, the
 frontend is sent `quit-pending` (shown as a notice), and a watcher exits once

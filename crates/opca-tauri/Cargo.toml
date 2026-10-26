@@ -11,6 +11,7 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
+wslib-tauri = { version = "0.1", registry = "wired-square" }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

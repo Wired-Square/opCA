@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -68,8 +67,6 @@ pub struct AppState {
     /// Why the connected vault's `CA_Database` could not be loaded, shown by
     /// the recovery dialog.
     pub database_error: Mutex<Option<String>>,
-    /// A quit is waiting for in-flight 1Password work (see `quit_guard`).
-    pub quit_pending: AtomicBool,
 }
 
 fn is_held<T>(mutex: &Mutex<T>) -> bool {
@@ -222,7 +219,6 @@ impl Default for AppState {
             fresh_cert_pems: Mutex::new(HashMap::new()),
             preloaded_key: Mutex::new(None),
             database_error: Mutex::new(None),
-            quit_pending: AtomicBool::new(false),
         }
     }
 }
