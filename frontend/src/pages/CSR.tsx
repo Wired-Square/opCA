@@ -11,6 +11,7 @@ import {
   importCsrCert,
   inspectCsr,
 } from "../api/csr";
+import { signSubordinate } from "../api/subordinate";
 import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import PemInput from "../components/PemInput";
@@ -23,7 +24,6 @@ import type {
   CsrListItem,
   CreateCsrResult,
   DecodeCsrResult,
-  SignCsrResult,
   CertListItem,
   InspectCsrResult,
 } from "../api/types";
@@ -35,6 +35,8 @@ const CSR_TYPES = [
   { value: "appledev", label: "Apple Development" },
   ...CERT_TYPES,
 ];
+
+const SIGN_TYPES = [...CSR_TYPES, { value: "subordinateca", label: "Subordinate CA" }];
 
 export default function CSR() {
   const [tab, setTab] = createSignal<Tab>("list");
@@ -63,11 +65,14 @@ export default function CSR() {
   const signLifetime = createCertDays(signType);
   const [signing, setSigning] = createSignal(false);
   const [signError, setSignError] = createSignal<string | null>(null);
-  const [signResult, setSignResult] = createSignal<SignCsrResult | null>(null);
+  const [signResult, setSignResult] = createSignal<{ serial: string | null; cert_pem: string } | null>(null);
   const [decoded, setDecoded] = createSignal<DecodeCsrResult | null>(null);
   const [decoding, setDecoding] = createSignal(false);
   const [signSanInput, setSignSanInput] = createSignal("");
   const [signSans, setSignSans] = createSignal<string[]>([]);
+  const [signDomains, setSignDomains] = createSignal("");
+  const subordinate = () => signType() === "subordinateca";
+  const permittedDomains = () => signDomains().split(/\s+/).filter(Boolean);
 
   // Import-signed-cert form (List tab, visible only for Pending CSRs)
   const [importOpen, setImportOpen] = createSignal(false);
@@ -245,13 +250,23 @@ export default function CSR() {
 
     setSigning(true);
     try {
-      const result = await signCsr({
-        csr_pem: pem,
-        csr_type: signType(),
-        cn: signCn().trim() || undefined,
-        days: signLifetime.days(),
-      });
-      setSignResult(result);
+      if (subordinate()) {
+        const result = await signSubordinate({
+          csr_pem: pem,
+          domains: permittedDomains(),
+          days: signLifetime.days(),
+        });
+        setSignResult({ serial: result.broker.subordinate_serial, cert_pem: result.cert_pem });
+        setSignDomains("");
+      } else {
+        const result = await signCsr({
+          csr_pem: pem,
+          csr_type: signType(),
+          cn: signCn().trim() || undefined,
+          days: signLifetime.days(),
+        });
+        setSignResult({ serial: result.cert.serial, cert_pem: result.cert_pem });
+      }
       setSignPem("");
       setSignCn("");
       signLifetime.setEntered(null);
@@ -598,22 +613,9 @@ export default function CSR() {
                   </div>
 
                   <div class="form-group">
-                    <label class="form-label">Common Name</label>
-                    <input
-                      type="text"
-                      value={signCn()}
-                      onInput={(e) => setSignCn(e.currentTarget.value)}
-                      autocomplete="off"
-                      autocorrect="off"
-                      autocapitalize="off"
-                      spellcheck={false}
-                    />
-                  </div>
-
-                  <div class="form-group">
-                    <label class="form-label">Certificate Type</label>
-                    <select value={signType()} onChange={(e) => setSignType(e.currentTarget.value)}>
-                      <For each={CSR_TYPES}>
+                    <label class="form-label" for="sign-type">Certificate Type</label>
+                    <select id="sign-type" value={signType()} onChange={(e) => setSignType(e.currentTarget.value)}>
+                      <For each={SIGN_TYPES}>
                         {(t) => <option value={t.value}>{t.label}</option>}
                       </For>
                     </select>
@@ -621,45 +623,88 @@ export default function CSR() {
 
                   <CertDaysField state={signLifetime} />
 
-                  <div class="form-group">
-                    <label class="form-label">Subject Alternative Names</label>
-                    <div class="san-input-row">
+                  <Show
+                    when={!subordinate()}
+                    fallback={
+                      <div class="form-group">
+                        <label class="form-label" for="sign-domains">Permitted Domains</label>
+                        <textarea
+                          id="sign-domains"
+                          rows={4}
+                          placeholder={"home.arpa\nlab.example.com"}
+                          value={signDomains()}
+                          onInput={(e) => setSignDomains(e.currentTarget.value)}
+                          aria-describedby="sign-domains-hint"
+                          autocomplete="off"
+                          autocorrect="off"
+                          autocapitalize="off"
+                          spellcheck={false}
+                        />
+                        <p id="sign-domains-hint" class="form-hint">
+                          One per line. Each covers itself and every name below it; IP addresses are
+                          always excluded. The common name comes from the CSR, and its alternative
+                          names are not copied.
+                        </p>
+                      </div>
+                    }
+                  >
+                    <div class="form-group">
+                      <label class="form-label">Common Name</label>
                       <input
                         type="text"
-                        placeholder="e.g. alt.example.com"
-                        value={signSanInput()}
-                        onInput={(e) => setSignSanInput(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") { e.preventDefault(); addSignSan(); }
-                        }}
+                        value={signCn()}
+                        onInput={(e) => setSignCn(e.currentTarget.value)}
                         autocomplete="off"
                         autocorrect="off"
                         autocapitalize="off"
                         spellcheck={false}
                       />
-                      <button type="button" class="btn-ghost" onClick={addSignSan}>Add</button>
                     </div>
-                    <Show when={signSans().length > 0}>
-                      <div class="san-list">
-                        <For each={signSans()}>
-                          {(san, i) => (
-                            <span class="san-tag">
-                              {san}
-                              <button type="button" class="san-remove" onClick={() => removeSignSan(i())}>
-                                &times;
-                              </button>
-                            </span>
-                          )}
-                        </For>
+
+                    <div class="form-group">
+                      <label class="form-label">Subject Alternative Names</label>
+                      <div class="san-input-row">
+                        <input
+                          type="text"
+                          placeholder="e.g. alt.example.com"
+                          value={signSanInput()}
+                          onInput={(e) => setSignSanInput(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); addSignSan(); }
+                          }}
+                          autocomplete="off"
+                          autocorrect="off"
+                          autocapitalize="off"
+                          spellcheck={false}
+                        />
+                        <button type="button" class="btn-ghost" onClick={addSignSan}>Add</button>
                       </div>
-                    </Show>
-                    <Show when={signSans().length === 0}>
-                      <p class="text-muted text-sm mt-1">No alternative names.</p>
-                    </Show>
-                  </div>
+                      <Show when={signSans().length > 0}>
+                        <div class="san-list">
+                          <For each={signSans()}>
+                            {(san, i) => (
+                              <span class="san-tag">
+                                {san}
+                                <button type="button" class="san-remove" onClick={() => removeSignSan(i())}>
+                                  &times;
+                                </button>
+                              </span>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                      <Show when={signSans().length === 0}>
+                        <p class="text-muted text-sm mt-1">No alternative names.</p>
+                      </Show>
+                    </div>
+                  </Show>
 
                   <div class="form-actions">
-                    <button class="btn-primary" type="submit" disabled={signing()}>
+                    <button
+                      class="btn-primary"
+                      type="submit"
+                      disabled={signing() || (subordinate() && permittedDomains().length === 0)}
+                    >
                       {signing() ? "Signing..." : "Sign CSR"}
                     </button>
                   </div>
@@ -671,7 +716,7 @@ export default function CSR() {
               {(r) => (
                 <div class="create-success">
                   <p class="page-success">
-                    Certificate signed successfully (serial {r().cert.serial}).
+                    Certificate signed successfully (serial {r().serial}).
                   </p>
                   <div class="pem-section">
                     <div class="pem-header">

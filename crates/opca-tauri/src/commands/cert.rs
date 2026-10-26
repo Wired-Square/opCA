@@ -234,7 +234,7 @@ pub async fn backfill_cert(
     Ok(result)
 }
 
-fn record_to_detail(
+pub(super) fn record_to_detail(
     record: &CertRecord,
     cert_pem: Option<String>,
     chain_pem: Option<String>,
@@ -249,6 +249,10 @@ fn record_to_detail(
         .is_some_and(|r| !r.is_empty())
         || record.status.as_deref() == Some("Revoked");
     let expiring_soon = !revoked && record.expiry_date.as_deref().is_some_and(is_expiring_soon);
+    let name_constraints = cert_pem
+        .as_deref()
+        .and_then(|pem| wslib_crypto_x509::inspect_pem(pem).ok()?.name_constraints)
+        .map(Into::into);
     CertDetail {
         serial: Some(record.serial.clone()),
         cn: record.cn.clone(),
@@ -273,6 +277,7 @@ fn record_to_detail(
         has_chain: record.has_chain,
         chain_pem,
         expiring_soon,
+        name_constraints,
     }
 }
 
@@ -443,7 +448,7 @@ pub async fn revoke_cert(state: State<'_, AppState>, serial: String) -> Result<b
 
 /// Store a fresh CRL once revocations are in, as the CLI does; publishing it stays a separate
 /// step, except that a CRL batch goes to the private store at once.
-fn regenerate_crl_after_revoke(
+pub(crate) fn regenerate_crl_after_revoke(
     state: &AppState,
     label: &str,
     ca: &mut CertificateAuthority<Runner>,

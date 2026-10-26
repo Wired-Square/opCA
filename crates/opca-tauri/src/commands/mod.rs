@@ -18,5 +18,6 @@ pub mod inspect_helpers;
 pub mod lock;
 pub mod logs;
 pub mod openvpn;
+pub mod subordinate;
 pub mod update;
 pub mod vault;

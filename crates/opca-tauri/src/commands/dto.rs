@@ -180,6 +180,27 @@ pub struct CertDetail {
     /// Whether this (still-Valid) cert is inside the expiry-warning window —
     /// the detail page renders it as "Expiring Soon" and offers Ignore.
     pub expiring_soon: bool,
+    /// Read from `cert_pem`, so only once the backfill has fetched it.
+    pub name_constraints: Option<NameConstraintsDto>,
+}
+
+/// Subtrees as `example.com` or `10.0.0.0/8`.
+#[derive(Debug, Serialize)]
+pub struct NameConstraintsDto {
+    pub permitted: Vec<String>,
+    pub excluded: Vec<String>,
+}
+
+impl From<wslib_crypto_x509::NameConstraints> for NameConstraintsDto {
+    fn from(constraints: wslib_crypto_x509::NameConstraints) -> Self {
+        let text = |subtrees: Vec<wslib_crypto_x509::NameSubtree>| {
+            subtrees.iter().map(ToString::to_string).collect()
+        };
+        Self {
+            permitted: text(constraints.permitted),
+            excluded: text(constraints.excluded),
+        }
+    }
 }
 
 /// Result of a renew or rekey — the freshly issued certificate lives at a new
@@ -370,6 +391,24 @@ pub struct SignCsrRequest {
     pub csr_pem: String,
     pub csr_type: String,
     pub cn: Option<String>,
+    pub days: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SignSubordinateRequest {
+    pub csr_pem: String,
+    pub domains: Vec<String>,
+    pub days: Option<u32>,
+}
+
+/// `domains` replaces the recorded ones only with `change_domains`.
+#[derive(Debug, Deserialize)]
+pub struct RenewSubordinateRequest {
+    pub id: i64,
+    pub csr_pem: String,
+    pub domains: Option<Vec<String>>,
+    #[serde(default)]
+    pub change_domains: bool,
     pub days: Option<u32>,
 }
 

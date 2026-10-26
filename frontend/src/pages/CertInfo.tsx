@@ -341,6 +341,14 @@ export default function CertInfo() {
                     </div>
                   </Show>
                 </div>
+                <Show when={d().name_constraints}>
+                  {(nc) => (
+                    <>
+                      <Row label="Permitted Names" value={nc().permitted.join(", ") || null} mono />
+                      <Row label="Excluded Names" value={nc().excluded.join(", ") || null} mono />
+                    </>
+                  )}
+                </Show>
               </div>
 
               <Show when={d().cert_pem}>
