@@ -82,6 +82,9 @@ Organised by concern under [src/](../crates/opca-core/src):
     `name_attributes`. A SHA-1-signed CSR can be read but not signed: the
     provider has no SHA-1. `crl_to_text` stays on `openssl-sys`
     (`X509_CRL_print`).
+  - [ca/subordinate.rs](../crates/opca-core/src/services/ca/subordinate.rs)
+    — signing, renewing, revoking and listing name-constrained subordinate CAs
+    (see [Subordinate CAs](#subordinate-cas)).
   - [cert.rs](../crates/opca-core/src/services/cert.rs) —
     per-certificate bundle operations (build, sign, import/export, inspect).
     `KeyAlgorithm` (`ec-p256`, `ec-p384`, `rsa-2048`, `rsa-4096`) picks the key,
@@ -109,7 +112,7 @@ Organised by concern under [src/](../crates/opca-core/src):
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v16). A dump that fails to
+    automatic, forward-only migrations (currently v17). A dump that fails to
     parse or never reaches its `COMMIT` (truncated) is rejected as
     `OpcaError::DatabaseUnreadable`.
   - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
@@ -342,6 +345,45 @@ notification Lambda) can publish fresh CRLs while the desktop is closed:
   a CRL Batch tile and judges CRL expiry (warning and action item) by its
   signed-until rather than CRL 0's `nextUpdate`.
 
+### Subordinate CAs
+
+A subordinate CA (`CertType::SubordinateCa`, `subordinateca`) is signed from a
+CSR made where its key lives (an ACME broker host, or plain step-ca by hand),
+so the key never passes through opCA. `sign_subordinate` takes the CSR and a
+list of permitted domains, which `permitted_domains` lowercases and dedupes,
+refusing wildcards, IP literals and anything not a DNS name. The profile
+(`profile_for` plus the domains) is `CA:TRUE, pathlen:0` and keyCertSign +
+cRLSign (both critical), `serverAuth` (not critical: a critical EKU on a CA
+breaks some verifiers), critical name constraints permitting a DNS subtree per
+domain and excluding `0.0.0.0/0` and `::/0`, and the CA's CRL and issuer URLs.
+The CN comes from the CSR. Its SANs are never copied, and a CSR whose SANs or
+host-like CN fall outside the domains is refused, after its signature is
+verified and before a serial is spent. The lifetime is 90 days
+(`SUBORDINATE_CA_DAYS`) unless asked, and one that would outlive the root is
+refused rather than clamped. The Apple 825-day rule does not apply.
+`issue_certificate` refuses the type, so the generic CSR sign and the
+certificate list's Renew and Rekey can't make a subordinate without
+constraints.
+
+Each subordinate has a row in the `brokers` table (schema v17): its current
+`subordinate_serial`, the broker's `url` and `pinned_key` (both `NULL` for one
+signed by hand), `permitted_domains` as JSON, `state` (`active` / `revoked`),
+`last_contact`, and `created_at` / `updated_at`. Expiry and CN are read from
+the certificate row by serial, not stored twice. `renew_subordinate` signs a
+fresh CSR for the row's domains and moves the row to the new serial. Different
+domains need `change_domains`, so a renewal never widens on its own. The old
+certificate stays valid and is auto-ignored as `renewed`, as a renewed leaf is.
+`revoke_certificate` marks the row of the subordinate it revokes, so revoking
+from the certificate list does too; `revoke_subordinate` goes through it, and
+its callers regenerate the CRL as after any revoke.
+
+Surfaces: `opca subordinate sign|renew|revoke|list` (each write under the vault
+lock), the Tauri commands `sign_subordinate`, `renew_subordinate`,
+`revoke_subordinate` and `list_subordinates`, and the CSR page's Sign tab,
+which offers Subordinate CA with a permitted-domains field. `CertDetail`
+carries `name_constraints` (read with `CertificateView::name_constraints`
+once the backfill has the PEM), shown on the certificate page.
+
 ### AWS credentials
 
 `s3://` stores and Route53 DKIM deployment need AWS credentials. These are
@@ -470,7 +512,7 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
     loaded, shown by the recovery dialog. Cleared with the connection.
 - [commands/](../crates/opca-tauri/src/commands) — one module per
   feature area (`aws`, `backup`, `ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
-  `vault`, `lock`, `connect`, `dashboard`, `files`, `logs`, `update`). Each
+  `subordinate`, `vault`, `lock`, `connect`, `dashboard`, `files`, `logs`, `update`). Each
   module exposes `#[tauri::command]` async functions that deserialise DTOs,
   call into `opca-core`, and return serialisable results. DTO shapes are
   defined in [commands/dto.rs](../crates/opca-tauri/src/commands/dto.rs).
