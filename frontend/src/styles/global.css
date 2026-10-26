@@ -7,6 +7,53 @@
     margin: 0;
     padding: 0;
   }
+
+  button {
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border: none;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    padding: 8px 16px;
+    transition: all 0.15s ease;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--app-accent);
+    outline-offset: 2px;
+  }
+
+  input, select, textarea {
+    font-family: inherit;
+    font-size: 0.9375rem;
+    background: var(--app-surface);
+    color: var(--app-text);
+    border: 1px solid var(--app-border);
+    border-radius: var(--radius-lg);
+    padding: 8px 12px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--app-accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+
+  input::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  input[aria-invalid="true"] {
+    border-color: var(--app-bad);
+  }
+
+  input[aria-invalid="true"]:focus {
+    box-shadow: 0 0 0 3px var(--error-tint);
+  }
 }
 
 /* ── Base ──────────────────────────────────────────────────────────── */
@@ -112,17 +159,6 @@ a:hover {
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
-button {
-  font-family: inherit;
-  font-size: 0.875rem;
-  font-weight: 500;
-  border: none;
-  border-radius: var(--radius-lg);
-  cursor: pointer;
-  padding: 8px 16px;
-  transition: all 0.15s ease;
-}
-
 .btn-primary {
   background: var(--app-accent);
   color: var(--app-accent-contrast);
@@ -170,48 +206,6 @@ button {
 .btn-ghost:hover {
   color: var(--app-text);
   background: var(--accent-glow);
-}
-
-/* ── Focus ─────────────────────────────────────────────────────────── */
-button:focus-visible,
-a:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--app-accent);
-  outline-offset: 2px;
-}
-
-.app-btn:focus-visible {
-  box-shadow: none;
-}
-
-/* ── Form Inputs ───────────────────────────────────────────────────── */
-input, select, textarea {
-  font-family: inherit;
-  font-size: 0.9375rem;
-  background: var(--app-surface);
-  color: var(--app-text);
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-lg);
-  padding: 8px 12px;
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-input:focus, select:focus, textarea:focus {
-  border-color: var(--app-accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-input::placeholder {
-  color: var(--text-tertiary);
-}
-
-input[aria-invalid="true"] {
-  border-color: var(--app-bad);
-}
-
-input[aria-invalid="true"]:focus {
-  box-shadow: 0 0 0 3px var(--error-tint);
 }
 
 .form-hint {
@@ -272,18 +266,6 @@ input[aria-invalid="true"]:focus {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-
-/* The unlayered `input` and `button` rules outrank the kit's, so its search box is sized here. */
-.app-search__input {
-  min-width: 160px;
-  padding: 6px 2rem 6px 10px;
-  font-size: 0.8125rem;
-  border-radius: var(--radius-md);
-}
-
-.app-search__clear {
-  padding: 2px;
 }
 
 .page-success,
