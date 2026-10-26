@@ -6,11 +6,11 @@ description = "OPCA desktop application — Tauri 2 GUI"
 
 [dependencies]
 opca-core = { path = "../opca-core" }
-tauri = { version = "2", features = [] }
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-log = "2"
-tauri-plugin-shell = "2"
+tauri = { version = "2.12", features = [] }
+tauri-plugin-clipboard-manager = "2.5"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-log = "2.10"
+tauri-plugin-shell = "2.5"
 wslib-tauri = { version = "0.1", registry = "wired-square" }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -31,7 +31,7 @@ wslib-mcp = { version = "0.1", registry = "wired-square", features = ["http", "d
 
 [dev-dependencies]
 opca-core = { path = "../opca-core", features = ["test-support"] }
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2.12", features = ["test"] }
 tempfile = "3"
 
 [features]
@@ -39,4 +39,4 @@ tempfile = "3"
 mcp = ["dep:wslib-mcp"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Tauri is updated to 2.12.
 - Holding a quit until 1Password work finishes now comes from `wslib-tauri`
   0.1.0's quit guard; the app menu reads "Quit opCA" as before.
 - Inspect reads a certificate's, CSR's or CRL's signature algorithm, key and
