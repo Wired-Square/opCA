@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource, onMount } from "solid-js";
-import { Notice, createAction } from "@wired-square/kit";
+import { CopyButton, Notice, SearchInput, createAction } from "@wired-square/kit";
 import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import { useLocation, useNavigate } from "@solidjs/router";
@@ -10,9 +10,8 @@ import {
   deployDkimRoute53,
 } from "../api/dkim";
 import StoredDate from "../components/StoredDate";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import { ActionOutcome } from "../components/ResultBanner";
 import type { DkimKeyItem } from "../api/types";
 import "../styles/pages/dkim.css";
@@ -37,7 +36,6 @@ export default function DKIM() {
   const [syncing, setSyncing] = createSignal(false);
   const [syncError, setSyncError] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
-  const [copied, markCopied] = createCopiedSignal();
 
   async function handleRefresh() {
     setSyncing(true);
@@ -74,6 +72,8 @@ export default function DKIM() {
     dns_record_chunked: string;
   } | null>(null);
   const [chunked, setChunked] = createSignal(false);
+  const dnsRecord = (r: { dns_record: string; dns_record_chunked: string }) =>
+    chunked() ? r.dns_record_chunked : r.dns_record;
   const [deploying, setDeploying] = createSignal(false);
 
   async function handleCreate(e: Event) {
@@ -125,21 +125,13 @@ export default function DKIM() {
     }
   }
 
-  function copyDnsRecord() {
-    const r = createResult();
-    if (!r) return;
-    const value = chunked() ? r.dns_record_chunked : r.dns_record;
-    void writeClipboard(value);
-    markCopied();
-  }
-
   return (
     <div class="page-dkim">
       <div class="page-header">
         <h2>DKIM Key Management</h2>
         <Show when={tab() === "keys"}>
           <div class="header-actions">
-            <SearchInput value={search()} onInput={setSearch} />
+            <SearchInput label="Search DKIM keys" value={search()} onValue={setSearch} placeholder="Search…" />
             <button class="btn-ghost" onClick={handleRefresh} disabled={keys.loading || syncing()}>
               {syncing() ? "Syncing…" : "Refresh"}
             </button>
@@ -255,10 +247,12 @@ export default function DKIM() {
                       <span class="detail-value mono">{r().dns_name}</span>
                     </div>
                     <div class="detail-row">
-                      <span class="detail-label">DNS Record</span>
+                      <span class="detail-label">
+                        <CopyButton value={dnsRecord(r())} write={writeClipboard}>DNS Record</CopyButton>
+                      </span>
                       <div class="dns-record-wrap">
                         <pre class="dns-record mono">
-                          {chunked() ? r().dns_record_chunked : r().dns_record}
+                          {dnsRecord(r())}
                         </pre>
                         <div class="dns-record-actions">
                           <button
@@ -269,9 +263,6 @@ export default function DKIM() {
                             aria-pressed={chunked()}
                           >
                             {chunked() ? "Single" : "AWS chunks"}
-                          </button>
-                          <button type="button" class="btn-ghost btn-sm" onClick={copyDnsRecord}>
-                            {copied() ? "Copied" : "Copy"}
                           </button>
                         </div>
                       </div>

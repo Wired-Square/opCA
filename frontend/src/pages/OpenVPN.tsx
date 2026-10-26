@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createMemo, createResource, onMount } from "solid-js";
-import { Confirm, createSelection, Notice } from "@wired-square/kit";
+import { Confirm, createSelection, Notice, SearchInput } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useSearchParams } from "@solidjs/router";
 import {
@@ -24,7 +24,6 @@ import {
 import { useDateText } from "../utils/dates";
 import StoredDate from "../components/StoredDate";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import AddProfileModal from "../components/AddProfileModal";
 import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
@@ -475,7 +474,7 @@ export default function OpenVPN() {
               </For>
             </div>
             <div class="profiles-actions">
-              <SearchInput value={profileSearch()} onInput={setProfileSearch} />
+              <SearchInput label="Search profiles" value={profileSearch()} onValue={setProfileSearch} placeholder="Search…" />
               <button class="btn-ghost" onClick={() => refetchProfiles()} disabled={profiles.loading}>
                 Refresh
               </button>

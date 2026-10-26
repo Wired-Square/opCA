@@ -1,6 +1,7 @@
 import { Show, createSignal, createResource, For } from "solid-js";
+import { CopyButton } from "@wired-square/kit";
 import { getLogContents, getLogPath } from "../api/logs";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import "../styles/pages/log.css";
 
@@ -15,18 +16,9 @@ function logLevel(line: string): string {
 export default function Log() {
   const [contents, { refetch }] = createResource(getLogContents);
   const [logPath] = createResource(getLogPath);
-  const [copied, markCopied] = createCopiedSignal();
   const [autoScroll, setAutoScroll] = createSignal(true);
 
   let scrollRef: HTMLPreElement | undefined;
-
-  function copyAll() {
-    const text = contents();
-    if (text) {
-      void writeClipboard(text);
-      markCopied();
-    }
-  }
 
   function handleRefresh() {
     refetch();
@@ -84,9 +76,7 @@ export default function Log() {
                 />{" "}
                 Auto-scroll
               </label>
-              <button class="btn-ghost btn-sm" onClick={copyAll}>
-                {copied() ? "Copied" : "Copy all"}
-              </button>
+              <CopyButton value={contents()!} write={writeClipboard}>Copy all</CopyButton>
             </div>
           </div>
         </Show>

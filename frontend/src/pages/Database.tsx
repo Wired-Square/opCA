@@ -1,11 +1,10 @@
 import { Show, For, createSignal, createResource, type Resource } from "solid-js";
-import { Notice } from "@wired-square/kit";
+import { Notice, SearchInput } from "@wired-square/kit";
 import { failureOf } from "../utils/acting";
 import { getDatabaseInfo, getActionLog } from "../api/database";
 import { uploadCaDatabase } from "../api/ca";
 import { errorMessage } from "../api/tauri";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import type { DatabaseInfo, LocalBackupsInfo, LogEntry } from "../api/types";
 import { ActionOutcome } from "../components/ResultBanner";
 import { createPublishFlow } from "../utils/publishFlow";
@@ -51,7 +50,7 @@ export default function Database() {
         <h2>Database</h2>
         <div class="header-actions">
           <Show when={tab() === "log"}>
-            <SearchInput value={logSearch()} onInput={setLogSearch} />
+            <SearchInput label="Search the action log" value={logSearch()} onValue={setLogSearch} placeholder="Search…" />
           </Show>
           <button class="btn-ghost" onClick={refresh} disabled={info.loading}>
             {info.loading ? "Loading\u2026" : "Refresh"}

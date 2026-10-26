@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { Confirm, createAction, createSelection, DateModeToggle, Notice } from "@wired-square/kit";
+import { Confirm, CopyButton, createAction, createSelection, DateModeToggle, Notice, SearchInput } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
@@ -10,9 +10,8 @@ import { canDeleteCert, certKebabItems, certLabel, rekeyAndGo, renewAndGo } from
 import { generateCsrFromCert } from "../api/csr";
 import { useDateText } from "../utils/dates";
 import StoredDate from "../components/StoredDate";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import CertStatusBadge from "../components/CertStatusBadge";
 import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
@@ -231,7 +230,6 @@ export default function Certs() {
   const [inspecting, setInspecting] = createSignal(false);
   const [inspectError, setInspectError] = createSignal<string | null>(null);
   const [inspectResult, setInspectResult] = createSignal<InspectCertificateResult | null>(null);
-  const [inspectCopied, markInspectCopied] = createCopiedSignal();
 
   async function handleInspect() {
     const pem = inspectPem().trim();
@@ -249,14 +247,6 @@ export default function Certs() {
       setInspectError(errorMessage(e));
     } finally {
       setInspecting(false);
-    }
-  }
-
-  function copyInspectDump() {
-    const dump = inspectResult()?.text_dump;
-    if (dump) {
-      void writeClipboard(dump);
-      markInspectCopied();
     }
   }
 
@@ -289,7 +279,7 @@ export default function Certs() {
               visible on every tab so the header keeps a constant height and the
               tabs/table below don't shift when switching to Inspect. */}
           <Show when={tab() !== "inspect"}>
-            <SearchInput value={search()} onInput={setSearch} />
+            <SearchInput label="Search certificates" value={search()} onValue={setSearch} placeholder="Search…" />
             <select
               class="status-filter"
               value={filter()}
@@ -607,14 +597,9 @@ export default function Certs() {
 
               <div class="pem-section">
                 <div class="pem-header">
-                  <span class="detail-label">Text Dump</span>
-                  <button
-                    type="button"
-                    class="btn-ghost btn-sm"
-                    onClick={copyInspectDump}
-                  >
-                    {inspectCopied() ? "Copied" : "Copy"}
-                  </button>
+                  <span class="detail-label">
+                    <CopyButton value={r().text_dump} write={writeClipboard}>Text Dump</CopyButton>
+                  </span>
                 </div>
                 <pre class="text-dump mono">{r().text_dump}</pre>
               </div>

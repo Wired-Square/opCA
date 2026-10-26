@@ -1,5 +1,5 @@
 import { Show, createSignal, createResource, createEffect } from "solid-js";
-import { DateModeToggle, Notice } from "@wired-square/kit";
+import { DateModeToggle, Notice, createFlash } from "@wired-square/kit";
 import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import { useParams, useNavigate } from "@solidjs/router";
@@ -13,7 +13,7 @@ import {
   deleteDkimKey,
 } from "../api/dkim";
 import StoredDate from "../components/StoredDate";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { copyThenRecord, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
@@ -42,10 +42,10 @@ export default function DkimKeyDetailPage() {
   const [chunked, setChunked] = createSignal(false);
   const [showKeyCopy, setShowKeyCopy] = createSignal(false);
 
-  const [copiedSelector, markSelectorCopied] = createCopiedSignal();
-  const [copiedPublicKey, markPublicKeyCopied] = createCopiedSignal();
-  const [copiedDnsRecord, markDnsRecordCopied] = createCopiedSignal();
-  const [copiedKey, markKeyCopied] = createCopiedSignal();
+  const [copiedSelector, flashSelectorAfter] = createFlash();
+  const [copiedPublicKey, flashPublicKeyAfter] = createFlash();
+  const [copiedDnsRecord, flashDnsRecordAfter] = createFlash();
+  const [copiedKey, flashKeyAfter] = createFlash();
 
   let enriched = false;
   createEffect(() => {
@@ -63,18 +63,13 @@ export default function DkimKeyDetailPage() {
   function copySelector() {
     const d = detail();
     if (!d) return;
-    const value = `${d.selector}._domainkey`;
-    void writeClipboard(value);
-    markSelectorCopied();
-    void recordDkimCopy(d.domain, d.selector, "selector");
+    copyThenRecord(flashSelectorAfter, `${d.selector}._domainkey`, () => recordDkimCopy(d.domain, d.selector, "selector"));
   }
 
   function copyPublicKey() {
     const d = detail();
     if (!d?.public_key) return;
-    void writeClipboard(d.public_key);
-    markPublicKeyCopied();
-    void recordDkimCopy(d.domain, d.selector, "public_key");
+    copyThenRecord(flashPublicKeyAfter, d.public_key, () => recordDkimCopy(d.domain, d.selector, "public_key"));
   }
 
   function copyDnsRecord() {
@@ -82,16 +77,13 @@ export default function DkimKeyDetailPage() {
     if (!d) return;
     const value = chunked() ? d.dns_record_chunked ?? d.dns_record : d.dns_record;
     if (!value) return;
-    void writeClipboard(value);
-    markDnsRecordCopied();
-    void recordDkimCopy(d.domain, d.selector, "dns_record");
+    copyThenRecord(flashDnsRecordAfter, value, () => recordDkimCopy(d.domain, d.selector, "dns_record"));
   }
 
   async function copyPrivateKey(passphrase?: string) {
     const d = detail()!;
     // No recordDkimCopy() here: get_dkim_private_key audits server-side.
-    await writeClipboard(await getDkimPrivateKey(d.domain, d.selector, passphrase));
-    markKeyCopied();
+    await flashKeyAfter(writeClipboard(await getDkimPrivateKey(d.domain, d.selector, passphrase)));
   }
 
   async function handleVerify() {
