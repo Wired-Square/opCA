@@ -1,40 +1,12 @@
 //! Route53 DNS TXT record management.
 //!
-//! Pure helpers (`split_txt_value`, `format_txt_value`, `extract_dkim_key`)
-//! and the DKIM DNS check (`check_dkim_record`) are always available.  The
-//! [`Route53Client`] uses the AWS SDK directly with credentials sourced from
-//! 1Password.
+//! The pure helper `extract_dkim_key` and the DKIM DNS check
+//! (`check_dkim_record`) are always available.  The [`Route53Client`] uses
+//! the AWS SDK directly with credentials sourced from 1Password.
 
 // ---------------------------------------------------------------------------
 // Pure helpers (always available)
 // ---------------------------------------------------------------------------
-
-/// Split a long TXT record value into chunks for DNS.
-///
-/// DNS TXT records have a 255-character limit per string. Long values
-/// must be split into multiple quoted strings per RFC 4408.
-pub fn split_txt_value(value: &str, max_len: usize) -> Vec<String> {
-    if value.len() <= max_len {
-        return vec![value.to_string()];
-    }
-
-    value
-        .as_bytes()
-        .chunks(max_len)
-        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
-        .collect()
-}
-
-/// Format TXT record chunks as a quoted string suitable for Route53.
-///
-/// e.g. `["chunk1", "chunk2"]` → `"chunk1" "chunk2"`
-pub fn format_txt_value(chunks: &[String]) -> String {
-    chunks
-        .iter()
-        .map(|c| format!("\"{c}\""))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
 /// The decoded public key (`p=`) of a DKIM record value; `None` when absent, revoked or unreadable.
 pub fn extract_dkim_key(value: &str) -> Option<Vec<u8>> {
@@ -85,7 +57,7 @@ async fn compare_dkim_record(
 // ---------------------------------------------------------------------------
 
 use log::{debug, error, info};
-use wslib_dns::{HickoryOptions, HickoryResolver, Resolver, Txt};
+use wslib_dns::{txt, HickoryOptions, HickoryResolver, Resolver, Txt};
 
 use crate::error::OpcaError;
 use crate::services::storage::AwsCredentials;
@@ -221,8 +193,8 @@ impl Route53Client {
         info!("[route53] upserting TXT record for '{name}' in zone {zone_id} (TTL={ttl})");
         let client = self.sdk_client();
 
-        let chunks = split_txt_value(value, 255);
-        let formatted = format_txt_value(&chunks);
+        let chunks = txt::split(value);
+        let formatted = txt::quote(&chunks);
         debug!("[route53] TXT value ({} chunks): {}", chunks.len(), &formatted[..formatted.len().min(120)]);
 
         let record = ResourceRecord::builder()
@@ -305,45 +277,26 @@ mod tests {
     use wslib_dns::{FakeResolver, LookupError};
 
     #[test]
-    fn test_split_short_value() {
-        let chunks = split_txt_value("hello", 255);
-        assert_eq!(chunks, vec!["hello"]);
+    fn a_txt_value_quotes_as_one_string_up_to_255_octets() {
+        assert_eq!(txt::quote(txt::split("hello")), r#""hello""#);
+        let exact = "a".repeat(255);
+        assert_eq!(txt::split(&exact), [exact.as_str()]);
     }
 
     #[test]
-    fn test_split_exact_boundary() {
-        let value = "a".repeat(255);
-        let chunks = split_txt_value(&value, 255);
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].len(), 255);
-    }
-
-    #[test]
-    fn test_split_long_value() {
+    fn a_long_txt_value_splits_into_255_octet_quoted_strings() {
         let value = "a".repeat(600);
-        let chunks = split_txt_value(&value, 255);
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0].len(), 255);
-        assert_eq!(chunks[1].len(), 255);
-        assert_eq!(chunks[2].len(), 90);
+        let chunks = txt::split(&value);
+        assert_eq!(chunks.iter().map(|c| c.len()).collect::<Vec<_>>(), [255, 255, 90]);
+        assert_eq!(
+            txt::quote(&chunks),
+            format!(r#""{}" "{}" "{}""#, "a".repeat(255), "a".repeat(255), "a".repeat(90))
+        );
     }
 
     #[test]
-    fn test_split_empty_value() {
-        let chunks = split_txt_value("", 255);
-        assert_eq!(chunks, vec![""]);
-    }
-
-    #[test]
-    fn test_format_txt_value() {
-        let chunks = vec!["part1".to_string(), "part2".to_string()];
-        assert_eq!(format_txt_value(&chunks), r#""part1" "part2""#);
-    }
-
-    #[test]
-    fn test_format_txt_single() {
-        let chunks = vec!["only".to_string()];
-        assert_eq!(format_txt_value(&chunks), r#""only""#);
+    fn an_empty_txt_value_quotes_as_one_empty_string() {
+        assert_eq!(txt::quote(txt::split("")), r#""""#);
     }
 
     #[test]

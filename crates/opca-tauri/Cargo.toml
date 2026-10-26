@@ -11,6 +11,7 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
+wslib-tauri = { version = "0.1", registry = "wired-square" }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -23,6 +24,9 @@ reqwest = { version = "0.12", features = ["json"] }
 rand = "0.9"
 base64 = "0.22"
 md5 = "0.7"
+wslib-crypto-x509 = { version = "0.1.2", registry = "wired-square" }
+wslib-crypto-ca = { version = "0.1.1", registry = "wired-square" }
+wslib-dns = { version = "0.2.1", registry = "wired-square" }
 wslib-mcp = { version = "0.1", registry = "wired-square", features = ["http", "dom", "tauri-bridge"], optional = true }
 
 [dev-dependencies]

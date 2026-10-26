@@ -69,6 +69,7 @@ struct NavigateParams {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum ThemeMode {
+    System,
     Dark,
     Light,
 }

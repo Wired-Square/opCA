@@ -1,8 +1,11 @@
+use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 use opca_core::services::database::{CaConfig, CertLookup};
 use opca_core::testutil::{created, Output};
 use serde_json::{json, Value};
 
 use super::cert::*;
+use super::csr::inspect_csr;
+use super::dto::InspectCertificateResult;
 use crate::test_harness::{Handler, Harness};
 
 fn handler() -> impl Handler {
@@ -212,4 +215,89 @@ fn bulk_delete_archives_every_revoked_cert() {
 fn a_bulk_op_fails_whole_when_not_connected() {
     let h = Harness::disconnected(handler());
     assert_eq!(h.invoke("bulk_delete_certs", json!({ "serials": ["2"] })), Err(json!("Not connected")));
+}
+
+fn inspected_bundle(key_algorithm: KeyAlgorithm) -> CertificateBundle {
+    let config = CertBundleConfig {
+        cn: Some("Inspect CA".into()),
+        key_algorithm: Some(key_algorithm),
+        org: Some("Wired Square".into()),
+        email: Some("ca@example.com".into()),
+        country: Some("AU".into()),
+        next_serial: Some(0xfedc_ba98),
+        ca_days: Some(1),
+        ..CertBundleConfig::default()
+    };
+    let mut bundle = CertificateBundle::generate(CertType::Ca, "t", config).unwrap();
+    bundle.self_sign_ca().unwrap();
+    bundle
+}
+
+fn openssl_key_fingerprint(pem: &str) -> String {
+    let key = openssl::x509::X509::from_pem(pem.as_bytes()).unwrap().public_key().unwrap();
+    let digest = openssl::sha::sha256(&key.public_key_to_der().unwrap());
+    digest.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":")
+}
+
+fn inspect(pem: String) -> InspectCertificateResult {
+    tauri::async_runtime::block_on(inspect_certificate(pem)).unwrap()
+}
+
+#[test]
+fn inspecting_a_certificate_reports_its_key_signature_and_decimal_serial() {
+    for (algorithm, key_type, key_size, signature) in [
+        (KeyAlgorithm::EcP256, "EC", 256, "ecdsa-with-SHA256"),
+        (KeyAlgorithm::Rsa2048, "RSA", 2048, "sha256WithRSAEncryption"),
+    ] {
+        let bundle = inspected_bundle(algorithm);
+        let pem = bundle.certificate_pem().unwrap();
+        let result = inspect(pem.clone());
+
+        assert_eq!(result.serial.as_deref(), Some("4275878552"));
+        assert_eq!(result.serial, bundle.get_certificate_attrib("serial").unwrap());
+        assert_eq!((result.key_type.as_str(), result.key_size), (key_type, Some(key_size)));
+        assert_eq!(result.key_type, bundle.get_certificate_attrib("key_type").unwrap().unwrap());
+        assert_eq!(result.signature_algorithm, signature);
+        assert_eq!(result.public_key_fingerprint_sha256, openssl_key_fingerprint(&pem));
+        assert!(result.is_ca);
+        assert!(result.text_dump.contains("Signature Algorithm"));
+    }
+}
+
+#[test]
+fn an_inspected_subject_is_rfc_4514_with_upper_case_short_names() {
+    let bundle = inspected_bundle(KeyAlgorithm::EcP256);
+    let result = inspect(bundle.certificate_pem().unwrap());
+    assert_eq!(result.subject, "EMAIL=ca@example.com,O=Wired Square,C=AU,CN=Inspect CA");
+    assert_eq!(
+        bundle.get_certificate_attrib("subject").unwrap().as_deref(),
+        Some("emailAddress=ca@example.com,O=Wired Square,C=AU,CN=Inspect CA")
+    );
+    assert_eq!(result.issuer, result.subject);
+}
+
+#[test]
+fn an_issued_leaf_inspects_as_not_a_ca() {
+    let h = Harness::with_ca(vec![], handler());
+    let ca_bundle = inspected_bundle(KeyAlgorithm::EcP256);
+    let csr = openssl::x509::X509Req::from_pem(ca_bundle.csr_pem().unwrap().as_bytes()).unwrap();
+    let state = h.state();
+    let mut conn = state.conn.lock().unwrap();
+    let (leaf, _) = conn.ca.as_mut().unwrap().issue_certificate(&csr, &CertType::WebServer, Some(1)).unwrap();
+    let result = inspect(String::from_utf8(leaf.to_pem().unwrap()).unwrap());
+    assert!(!result.is_ca);
+}
+
+#[test]
+fn inspecting_a_csr_reports_its_subject_key_and_signature() {
+    let bundle = inspected_bundle(KeyAlgorithm::Rsa2048);
+    let csr_pem = bundle.csr_pem().unwrap();
+    let result = tauri::async_runtime::block_on(inspect_csr(csr_pem)).unwrap();
+    let cert = inspect(bundle.certificate_pem().unwrap());
+
+    assert_eq!(result.subject, cert.subject);
+    assert_eq!((result.key_type.as_str(), result.key_size), ("RSA", Some(2048)));
+    assert_eq!(result.signature_algorithm, "sha256WithRSAEncryption");
+    assert_eq!(result.public_key_fingerprint_sha256, cert.public_key_fingerprint_sha256);
+    assert!(result.text_dump.contains("Certificate Request"));
 }

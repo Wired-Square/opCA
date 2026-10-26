@@ -12,15 +12,14 @@ use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
 use opca_core::services::database::{CertLookup, CsrLookup, CsrRecord};
 use opca_core::services::san;
 use opca_core::utils::datetime::{now_utc_str, DateTimeFormat};
+use wslib_crypto_ca::CsrView;
 
 use crate::commands::dto::{
     CertListItem, CreateCsrRequest, CreateCsrResult, CsrListItem, DecodeCsrResult,
     GenerateCsrFromCertRequest, ImportCsrCertRequest, InspectCsrResult, SignCsrRequest,
     SignCsrResult,
 };
-use crate::commands::inspect_helpers::{
-    public_key_summary, signature_algorithm_from_text, x509_name_to_rdn_string,
-};
+use crate::commands::inspect_helpers::{key_type, spki_fingerprint};
 use crate::state::AppState;
 
 fn record_to_list_item(r: &CsrRecord) -> CsrListItem {
@@ -516,21 +515,19 @@ pub async fn inspect_csr(csr_pem: String) -> Result<InspectCsrResult, String> {
         .map_err(|e| format!("Failed to render CSR text: {e}"))?;
     let text_dump = String::from_utf8_lossy(&text_bytes).to_string();
 
-    let public_key = csr
-        .public_key()
-        .map_err(|e| format!("Failed to read public key: {e}"))?;
-    let (key_type, key_size, public_key_fingerprint_sha256) = public_key_summary(&public_key)?;
-
-    let signature_algorithm = signature_algorithm_from_text(&text_dump);
+    let der = csr
+        .to_der()
+        .map_err(|e| format!("Failed to encode CSR: {e}"))?;
+    let view = CsrView::from_der(&der).map_err(|e| format!("Failed to read CSR: {e}"))?;
 
     Ok(InspectCsrResult {
         cn: csr_cn(&csr),
         alt_names: csr_sans(&csr),
-        subject: x509_name_to_rdn_string(csr.subject_name()),
-        key_type,
-        key_size,
-        signature_algorithm,
-        public_key_fingerprint_sha256,
+        subject: view.subject_text().to_string(),
+        key_type: key_type(view.key()),
+        key_size: view.key().bits(),
+        signature_algorithm: view.signature_algorithm().to_string(),
+        public_key_fingerprint_sha256: spki_fingerprint(view.spki()),
         text_dump,
     })
 }

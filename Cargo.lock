@@ -2888,7 +2888,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -4064,7 +4064,11 @@ dependencies = [
  "tauri-plugin-shell",
  "tempfile",
  "tokio",
+ "wslib-crypto-ca",
+ "wslib-crypto-x509",
+ "wslib-dns",
  "wslib-mcp",
+ "wslib-tauri",
  "zeroize",
 ]
 
@@ -8299,9 +8303,9 @@ dependencies = [
 
 [[package]]
 name = "wslib-crypto-ca"
-version = "0.1.0"
+version = "0.1.1"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
-checksum = "49c9df47a311a40fcb0cf5a5175e11fd52c102c63aa3b4fad3ae97134b4663c8"
+checksum = "7ad84ae951ff6f6a589db6a98e9817ff46977f7b2c7269e8f85321d2f7e72f01"
 dependencies = [
  "const-oid",
  "rcgen",
@@ -8317,9 +8321,9 @@ dependencies = [
 
 [[package]]
 name = "wslib-crypto-x509"
-version = "0.1.1"
+version = "0.1.2"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
-checksum = "a8fdb1db55d504b89323275011f8ecae0179598c57c2acf5d81b1e8c027188f4"
+checksum = "e056fce1aaabc38deabdc88d0c976726d20ace3f7a4b1d5ef90f916a1882d951"
 dependencies = [
  "const-oid",
  "pem",
@@ -8332,9 +8336,9 @@ dependencies = [
 
 [[package]]
 name = "wslib-dns"
-version = "0.2.0"
+version = "0.2.1"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
-checksum = "5ccea111c0f413f6a7dc9aebdfdfad71d91c808d4d108e3cdc6f586462fa74e7"
+checksum = "c4166e700e86a4a932153a6083e37dbbf444402c02fa11f9bfc82a0baedf9679"
 dependencies = [
  "hickory-resolver",
  "idna",
@@ -8391,6 +8395,15 @@ checksum = "1cecb90fec3688b4d4e14cfcd6aca61f6b41500f1244f65e3e697abf1b0da931"
 dependencies = [
  "serde",
  "subtle",
+]
+
+[[package]]
+name = "wslib-tauri"
+version = "0.1.0"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "2f72e239c246bac8657a3213b3b619398e12ccb20b0c94c8d769e810f65e4924"
+dependencies = [
+ "tauri",
 ]
 
 [[package]]

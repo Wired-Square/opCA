@@ -3,7 +3,6 @@
 mod commands;
 #[cfg(feature = "mcp")]
 mod mcp;
-mod quit_guard;
 mod state;
 #[cfg(test)]
 mod test_harness;
@@ -12,6 +11,7 @@ mod test_harness;
 compile_error!("the `mcp` feature is for development builds only");
 
 use log::info;
+use tauri::{Listener, Manager};
 use state::AppState;
 
 /// Spawn a background `op --version` so that macOS caches the AMFI / code-
@@ -79,6 +79,7 @@ fn main() {
                 ])
                 .build(),
         )
+        .plugin(wslib_tauri::quit_guard::init(|app| app.state::<AppState>().is_busy()))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -197,18 +198,14 @@ fn main() {
         ])
         .setup(|_app| {
             info!("opCA v{} starting", env!("CARGO_PKG_VERSION"));
-            #[cfg(target_os = "macos")]
-            quit_guard::install_quit_menu(_app.handle())?;
+            _app.listen_any(wslib_tauri::quit_guard::QUIT_PENDING_EVENT, |_| {
+                info!("[tauri] quit requested during a 1Password operation; waiting for it to finish");
+            });
             #[cfg(feature = "mcp")]
             mcp::start(_app.handle().clone());
             Ok(())
         })
-        .on_menu_event(|app, event| {
-            if event.id() == quit_guard::QUIT_MENU_ID {
-                quit_guard::request_quit(app);
-            }
-        })
         .build(tauri::generate_context!())
         .expect("failed to build opCA desktop application")
-        .run(quit_guard::on_run_event);
+        .run(|_, _| {});
 }

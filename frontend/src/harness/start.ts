@@ -1,5 +1,5 @@
 import type { Navigator } from "@solidjs/router";
-import { setThemeMode, type ThemeMode } from "../stores/theme";
+import { chooseScheme, type Scheme } from "@wired-square/kit/core";
 import { startHarnessBridge } from "./tauri-bridge";
 
 let navigate: Navigator;
@@ -9,7 +9,7 @@ export function startHarness(nav: Navigator) {
   navigate = nav;
   stop ??= startHarnessBridge({
     navigate: ({ path }) => (navigate(String(path)), {}),
-    set_theme: ({ mode }) => (setThemeMode(mode as ThemeMode), {}),
+    set_theme: ({ mode }) => (chooseScheme(mode as Scheme), {}),
   });
 }
 

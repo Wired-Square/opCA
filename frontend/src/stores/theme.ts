@@ -1,12 +1,9 @@
-import { createSignal, createEffect } from "solid-js";
-import { SCHEME_KEY, applyTheme, chooseScheme, storedScheme } from "@wired-square/kit/core";
+import { SCHEME_KEY, applyScheme, applyTheme, storedScheme } from "@wired-square/kit/core";
 import { darkTheme, lightTheme } from "../styles/theme";
-
-export type ThemeMode = "dark" | "light";
 
 const LEGACY_KEY = "opca-theme";
 
-export function initialThemeMode(): ThemeMode {
+export function carryOverLegacyTheme() {
   try {
     const legacy = localStorage.getItem(LEGACY_KEY);
     if (legacy !== null) {
@@ -16,17 +13,8 @@ export function initialThemeMode(): ThemeMode {
   } catch {
     // Storage blocked: nothing to carry over.
   }
-  return storedScheme("dark") === "light" ? "light" : "dark";
 }
 
+carryOverLegacyTheme();
 applyTheme(lightTheme, darkTheme);
-
-const [themeMode, setThemeMode] = createSignal<ThemeMode>(initialThemeMode());
-
-createEffect(() => chooseScheme(themeMode()));
-
-export function toggleTheme() {
-  setThemeMode((prev) => (prev === "dark" ? "light" : "dark"));
-}
-
-export { themeMode, setThemeMode };
+applyScheme(storedScheme("system"));

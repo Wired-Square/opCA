@@ -21,7 +21,7 @@ import RekeyDialog from "../components/RekeyDialog";
 import ResultBanner, { ActionOutcome } from "../components/ResultBanner";
 import TableTick from "../components/TableTick";
 import { createActing, failureOf, headed } from "../utils/acting";
-import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult, KeyAlgorithm } from "../api/types";
+import { keyText, type BulkCertResult, type CertListItem, type ExternalCertListItem, type InspectCertificateResult, type KeyAlgorithm } from "../api/types";
 import "../styles/pages/certs.css";
 
 type BulkAction = "rekey" | "renew" | "revoke" | "delete" | "ignore";
@@ -566,7 +566,7 @@ export default function Certs() {
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Key</span>
-                  <span class="detail-value">{r().key_type} {r().key_size} bits</span>
+                  <span class="detail-value">{keyText(r())}</span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Signature Algorithm</span>

@@ -97,3 +97,13 @@ fn crl_batches_cannot_be_turned_on_without_a_private_store() {
     let info = h.invoke("get_crl_info", json!({})).unwrap();
     assert_eq!(info["crl_batch_enabled"], json!(false));
 }
+
+#[test]
+fn inspecting_a_crl_reports_its_signature_algorithm() {
+    let h = Harness::with_ca(vec![], handler());
+    h.answer_writes(2);
+    let crl_pem = h.invoke("generate_crl", json!({})).unwrap()["crl_pem"].as_str().unwrap().to_string();
+    let result = tauri::async_runtime::block_on(inspect_crl(crl_pem)).unwrap();
+    assert_eq!(result.signature_algorithm, "ecdsa-with-SHA256");
+    assert_eq!((result.crl_number, result.revoked_count), (Some(1), 0));
+}
