@@ -231,7 +231,11 @@ describe("Connect account list", () => {
 describe("Connect recent logins", () => {
   const saveLogins = (logins: { vault: string; account: string | null }[]) =>
     localStorage.setItem("opca_saved_logins", JSON.stringify(logins));
-  const recent = () => screen.queryByRole("region", { name: "Recent" });
+  const toggle = () => screen.queryByRole("button", { name: /^Recent logins/ });
+  const openRecent = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: /^Recent logins/ }));
+    return screen.getByRole("listbox", { name: "Recent logins" });
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -239,40 +243,48 @@ describe("Connect recent logins", () => {
     listAccounts.mockResolvedValue([]);
   });
 
-  it("fills both fields from a row without listing", async () => {
+  it("is a closed dropdown until asked for", async () => {
+    saveLogins([{ vault: "Clients", account: null }]);
+    render(() => <Connect />);
+    expect(await screen.findByRole("button", { name: /^Recent logins/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox", { name: "Recent logins" })).not.toBeInTheDocument();
+  });
+
+  it("fills both fields from a row without listing, and closes", async () => {
     saveLogins([{ vault: "Clients", account: "acme.1password.com" }, { vault: "Home", account: null }]);
     render(() => <Connect />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Clients/ }));
+    fireEvent.click(within(await openRecent()).getByText("Clients"));
     expect(vaultField()).toHaveValue("Clients");
     expect(accountField()).toHaveValue("acme.1password.com");
-    fireEvent.click(screen.getByRole("button", { name: /^Home/ }));
+    expect(screen.queryByRole("listbox", { name: "Recent logins" })).not.toBeInTheDocument();
+    fireEvent.click(within(await openRecent()).getByText("Home"));
     expect(vaultField()).toHaveValue("Home");
     expect(accountField()).toHaveValue("");
     expect(listVaults).not.toHaveBeenCalled();
   });
 
-  it("forgets a login from its ×", async () => {
+  it("forgets a login from its × without picking it", async () => {
     saveLogins([{ vault: "Clients", account: "acme.1password.com" }, { vault: "Home", account: null }]);
     render(() => <Connect />);
-    fireEvent.click(await screen.findByRole("button", { name: "Forget Clients in acme.1password.com" }));
-    expect(screen.queryByRole("button", { name: /^Clients/ })).not.toBeInTheDocument();
+    const list = await openRecent();
+    fireEvent.click(within(list).getByRole("button", { name: "Forget Clients in acme.1password.com" }));
+    expect(within(list).queryByText("Clients")).not.toBeInTheDocument();
     expect(vaultField()).toHaveValue("");
     expect(JSON.parse(localStorage.getItem("opca_saved_logins")!)).toEqual([{ vault: "Home", account: null }]);
   });
 
-  it("lists every login, newest first, and nothing when there are none or when creating", async () => {
+  it("lists every login, newest first, and offers nothing when there are none or when creating", async () => {
     saveLogins(Array.from({ length: 7 }, (_, i) => ({ vault: `V${i}`, account: null })));
     const { unmount } = render(() => <Connect />);
-    await screen.findByRole("region", { name: "Recent" });
-    expect(within(recent()!).getAllByRole("listitem").map((row) => row.textContent?.replace("×", "")))
+    expect(within(await openRecent()).getAllByRole("option").map((row) => row.textContent?.replace("×", "")))
       .toEqual(Array.from({ length: 7 }, (_, i) => `V${i}default account`));
     fireEvent.click(screen.getByRole("button", { name: "New CA in a new vault…" }));
-    expect(recent()).not.toBeInTheDocument();
+    expect(toggle()).not.toBeInTheDocument();
     unmount();
 
     localStorage.clear();
     render(() => <Connect />);
-    expect(recent()).not.toBeInTheDocument();
+    expect(toggle()).not.toBeInTheDocument();
   });
 
   it("records a login after connecting", async () => {

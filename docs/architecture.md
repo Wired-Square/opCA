@@ -605,8 +605,8 @@ win. Key conventions:
   the page that runs `list_vaults` (`op vault list`, which needs a sign-in),
   for the account in the field, kept per account value, so focusing or typing
   never lists and a failure retries on the next browse. Previously-used logins
-  (localStorage, newest first) sit below the form as a Recent list that fills
-  both fields without calling `op`. The account field
+  (localStorage, newest first) are in a "Recent logins" dropdown below the form
+  that fills both fields without calling `op`. The account field
   takes the sign-in address, falling back to that account's UUID when two configured
   accounts share an address (see `accountValue` in
   [api/accounts.ts](../frontend/src/api/accounts.ts)) — `op --account`

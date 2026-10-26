@@ -21,7 +21,7 @@ const UI_MS = 15000;
 const OP_MS = 180000;
 const DIALOG = "dialog[open]";
 const MENU_ITEM = '.app-menu [role="menuitem"]';
-const SAVED_LOGIN = ".connect-recent-row";
+const SAVED_LOGIN = '[aria-label="Recent logins"] [role="option"]';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const assert = (ok, message) => {
@@ -64,13 +64,21 @@ async function openConnect() {
   await app.waitFor(".connect-form", "visible", UI_MS);
 }
 
-async function savedLogins() {
+async function openRecent() {
   await openConnect();
+  if ((await matches(".connect-recent-toggle")).length === 0) return false;
+  await app.click(".connect-recent-toggle");
+  await app.waitFor(SAVED_LOGIN, "visible", UI_MS);
+  return true;
+}
+
+async function savedLogins() {
+  if (!(await openRecent())) return [];
   return (await matches(SAVED_LOGIN)).map((m) => m.text);
 }
 
 async function forgetFlowLogin() {
-  await openConnect();
+  if (!(await openRecent())) return;
   const rows = await matches(`${SAVED_LOGIN} .dropdown-item-primary`);
   const index = rows.findIndex((m) => m.text === VAULT);
   if (index >= 0) await app.click(`${SAVED_LOGIN} .saved-forget`, index);

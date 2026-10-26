@@ -31,7 +31,7 @@ interface SavedLogin {
 }
 
 /** Which field's list is open — only ever one at a time. */
-type Dropdown = "vault" | "account";
+type Dropdown = "vault" | "account" | "recent";
 
 
 const STORAGE_KEY = "opca_saved_logins";
@@ -130,15 +130,24 @@ function PickerField(props: {
   );
 }
 
-/** One row of either list: a primary line with an optional smaller one beneath. */
-function DropdownItem(props: { primary: string; secondary?: string | null; onSelect: () => void }) {
+/** One row of a list: a primary line with an optional smaller one beneath, and
+ *  an optional trailing control. */
+function DropdownItem(props: {
+  primary: string;
+  secondary?: string | null;
+  onSelect: () => void;
+  children?: JSX.Element;
+}) {
   return (
     <PopoverOption onSelect={props.onSelect}>
       <div class="dropdown-item">
-        <span class="dropdown-item-primary">{props.primary}</span>
-        <Show when={props.secondary}>
-          <span class="dropdown-item-secondary">{props.secondary}</span>
-        </Show>
+        <div class="dropdown-item-lines">
+          <span class="dropdown-item-primary">{props.primary}</span>
+          <Show when={props.secondary}>
+            <span class="dropdown-item-secondary">{props.secondary}</span>
+          </Show>
+        </div>
+        {props.children}
       </div>
     </PopoverOption>
   );
@@ -153,6 +162,7 @@ export default function Connect() {
   const [saved, setSaved] = createSignal<SavedLogin[]>([]);
   const [accounts, setAccounts] = createSignal<AccountInfo[]>([]);
   const [openDropdown, setOpenDropdown] = createSignal<Dropdown | null>(null);
+  let recentEl!: HTMLDivElement;
   const [opCli, setOpCli] = createSignal<OpCliStatus | null>(null);
   const [creating, setCreating] = createSignal(false);
 
@@ -332,33 +342,44 @@ export default function Connect() {
         </form>
 
         <Show when={!creating() && saved().length > 0}>
-          <section class="connect-recent" aria-labelledby="connect-recent-title">
-            <h2 id="connect-recent-title" class="connect-recent-title">Recent</h2>
-            <ul class="connect-recent-list">
-              <For each={saved()}>
-                {(login) => {
-                  const label = () => accountLabel(login.account, accounts()) ?? "default account";
-                  return (
-                    <li class="connect-recent-row">
-                      <button type="button" class="connect-recent-pick" onClick={() => selectLogin(login)}>
-                        <span class="dropdown-item-primary">{login.vault}</span>
-                        <span class="dropdown-item-secondary">{label()}</span>
-                      </button>
-                      <button
-                        type="button"
-                        class="saved-forget"
-                        aria-label={`Forget ${login.vault} in ${label()}`}
-                        title="Forget this login"
-                        onClick={() => setSaved(removeLogin(login.vault, login.account))}
-                      >
-                        &times;
-                      </button>
-                    </li>
-                  );
-                }}
-              </For>
-            </ul>
-          </section>
+          <div ref={recentEl} class="connect-recent">
+            <button
+              type="button"
+              class="btn-secondary connect-recent-toggle"
+              aria-haspopup="listbox"
+              aria-expanded={openDropdown() === "recent"}
+              onClick={() => setOpenDropdown(openDropdown() === "recent" ? null : "recent")}
+            >
+              Recent logins ▾
+            </button>
+            <Show when={openDropdown() === "recent"}>
+              <Popover anchor={recentEl} matchWidth onClose={() => setOpenDropdown(null)}>
+                <div role="listbox" aria-label="Recent logins">
+                  <For each={saved()}>
+                    {(login) => {
+                      const label = () => accountLabel(login.account, accounts()) ?? "default account";
+                      return (
+                        <DropdownItem primary={login.vault} secondary={label()} onSelect={() => selectLogin(login)}>
+                          <button
+                            type="button"
+                            class="saved-forget"
+                            aria-label={`Forget ${login.vault} in ${label()}`}
+                            title="Forget this login"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSaved(removeLogin(login.vault, login.account));
+                            }}
+                          >
+                            &times;
+                          </button>
+                        </DropdownItem>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Popover>
+            </Show>
+          </div>
         </Show>
 
         <button class="btn-ghost connect-mode-switch" type="button" onClick={switchMode} disabled={loading()}>

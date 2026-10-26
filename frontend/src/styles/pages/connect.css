@@ -102,9 +102,17 @@
 
 .dropdown-item {
   display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dropdown-item-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 0;
 }
 
 /* The two lines of a row — a vault over its account, or an account's email
@@ -128,54 +136,11 @@
 }
 
 .connect-recent {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 
-.connect-recent-title {
-  margin-bottom: 6px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--app-text-muted);
-}
-
-.connect-recent-list {
-  list-style: none;
-  max-height: 10.5rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-lg);
-}
-
-.connect-recent-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding-right: 8px;
-}
-
-.connect-recent-row + .connect-recent-row {
-  border-top: 1px solid var(--app-border);
-}
-
-.connect-recent-row:hover {
-  background: var(--bg-elevated);
-}
-
-.connect-recent-pick {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-  text-align: left;
-  background: none;
-  border-radius: 0;
-}
-
-.connect-recent-pick:focus-visible {
-  outline-offset: -2px;
+.connect-recent-toggle {
+  width: 100%;
 }
 
 .saved-forget {

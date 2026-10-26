@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   picks dependency versions that build on the declared `rust-version`.
 - The Connect page asks for the account first, then the vault. Each has a
   Browse button, and vaults are listed only when you press it, for the account
-  in the field; recent logins sit below the form and fill both fields.
+  in the field; a Recent logins dropdown fills both fields.
 - Tauri is updated to 2.12.
 - The MCP dev harness's page code now comes from `@wired-square/mcp-bridge`
   0.1.0, beside `wslib-mcp` 0.2.0, instead of copies kept in step by tests.
