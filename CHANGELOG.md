@@ -20,10 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   splits only between characters and escapes quotes and backslashes.
 - The colour scheme follows macOS unless you pick light or dark: the header
   and Connect page offer system, light and dark.
-
 - Copyable detail values use the row's width again, instead of wrapping short
   values such as "CA" mid-word.
-
 - The frontend's colour tokens now use the kit's `--app-*` names and reach the
   page through the kit's adopted-stylesheet theme and `data-app-scheme`; the
   saved dark or light choice carries over.
