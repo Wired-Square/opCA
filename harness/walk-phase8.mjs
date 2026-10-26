@@ -140,16 +140,15 @@ async function walk(theme) {
     return `opened ${side}`;
   });
 
-  for (const [field, label, anchorIndex] of [
-    ["saved-login", "Show saved vaults", 0],
-    ["account", "Show 1Password accounts", 1],
+  for (const [field, trigger, anchorIndex] of [
+    ["account", '[aria-label="Browse 1Password accounts"]:not(:disabled)', 0],
+    ["vault", '[aria-label^="Browse vaults in"]', 1],
   ]) {
     await check(t(`Connect: ${field} dropdown`), async () => {
       await visit("/", ".connect-form");
-      const trigger = `[aria-label="${label}"]`;
       await app.waitFor(trigger, "visible", 15000).catch(() => skip(`no ${field} choices to offer`));
       await dismissAll();
-      const { side } = await openPanel({ trigger, anchor: ".input-with-dropdown", anchorIndex });
+      const { side } = await openPanel({ trigger, anchor: ".picker-row", anchorIndex });
       await escapeCloses();
       return `opened ${side}`;
     });

@@ -597,14 +597,16 @@ win. Key conventions:
   `asn1Date` in [utils/dates.ts](../frontend/src/utils/dates.ts) and shown by
   `StoredDate` (the kit's `When`); `useDateText` gives the same text for row
   search filters and string-valued detail rows.
-- [pages/Connect.tsx](../frontend/src/pages/Connect.tsx) picks the vault
-  from previously-used logins (localStorage) or the account's vaults, and the
-  account from `list_accounts` — `op account list`, which reads local CLI
-  config and so works signed out. Both dropdowns run before there is a
-  connection, alongside `check_op_cli`; a failure just hides the account
-  picker. The vault list is `list_vaults` (`op vault list`, which needs a
-  sign-in), fetched when the dropdown opens and kept per account value, so
-  typing never lists and a failure retries on the next open. The account field
+- [pages/Connect.tsx](../frontend/src/pages/Connect.tsx) asks for the
+  account first, then the vault, each with a Browse button. The account list
+  is `list_accounts` — `op account list`, which reads local CLI config and so
+  works signed out — loaded on mount alongside `check_op_cli`; a failure or an
+  empty list disables the account Browse. The vault Browse is the only thing on
+  the page that runs `list_vaults` (`op vault list`, which needs a sign-in),
+  for the account in the field, kept per account value, so focusing or typing
+  never lists and a failure retries on the next browse. Previously-used logins
+  (localStorage, newest first) sit below the form as a Recent list that fills
+  both fields without calling `op`. The account field
   takes the sign-in address, falling back to that account's UUID when two configured
   accounts share an address (see `accountValue` in
   [api/accounts.ts](../frontend/src/api/accounts.ts)) — `op --account`
@@ -669,7 +671,7 @@ stylesheet is a regression.
 ### Popovers
 
 Anything that floats over the page — the row and header action menus,
-`VaultPicker`, `VpnClientPicker` and Connect's saved-login and account pickers —
+`VaultPicker`, `VpnClientPicker` and Connect's account and vault pickers —
 is the kit's. [components/ActionMenu.tsx](../frontend/src/components/ActionMenu.tsx)
 renders a `MenuAction[]` (built by `certKebabItems` for certificates) as the
 kit's `Menu` / `MenuItem`: a ⋮ trigger, a `popover="auto"` panel the platform
