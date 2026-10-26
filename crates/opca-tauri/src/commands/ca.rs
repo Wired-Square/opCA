@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use log::{info, warn, error, debug};
+use log::{debug, error, info, warn};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use opca_core::op::{self, ShellRunner};
-use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
+use opca_core::services::ca::{CertificateAuthority, check_crl_batch_update};
 use opca_core::services::database::CaConfig;
 use opca_core::services::local_backup::LocalBackup;
 use opca_core::services::storage::{
@@ -28,12 +28,10 @@ pub async fn get_ca_info(state: State<'_, AppState>) -> Result<CaInfo, String> {
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
-    let bundle = ca.ca_bundle.as_ref()
-        .ok_or("CA certificate not loaded")?;
+    let bundle = ca.ca_bundle.as_ref().ok_or("CA certificate not loaded")?;
 
-    let attr = |name: &str| -> Option<String> {
-        bundle.get_certificate_attrib(name).ok().flatten()
-    };
+    let attr =
+        |name: &str| -> Option<String> { bundle.get_certificate_attrib(name).ok().flatten() };
 
     let is_valid = ca.is_valid().unwrap_or(false);
     let cert_pem = bundle.certificate_pem().ok();
@@ -59,8 +57,7 @@ pub async fn get_ca_config(state: State<'_, AppState>) -> Result<CaConfigDto, St
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
-    let db = ca.ca_database.as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
 
     let config = db.get_config().map_err(|e| e.to_string())?;
     Ok(ca_config_to_dto(&config))
@@ -78,8 +75,7 @@ pub async fn update_ca_config(
     let updates = dto_to_ca_config(&config);
 
     {
-        let db = ca.ca_database.as_ref()
-            .ok_or("Database not loaded")?;
+        let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
         let current = db.get_config().map_err(|e| e.to_string())?;
         check_crl_batch_update(&current, &updates).map_err(|e| e.to_string())?;
         db.update_config(&updates).map_err(|e| e.to_string())?;
@@ -91,16 +87,19 @@ pub async fn update_ca_config(
         e.to_string()
     })?;
 
-    state.log_ok("update_config", Some("CA configuration updated".to_string()));
+    state.log_ok(
+        "update_config",
+        Some("CA configuration updated".to_string()),
+    );
     Ok(())
 }
 
 #[tauri::command]
-pub async fn init_ca(
-    state: State<'_, AppState>,
-    config: CaConfigDto,
-) -> Result<(), String> {
-    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
+pub async fn init_ca(state: State<'_, AppState>, config: CaConfigDto) -> Result<(), String> {
+    let mut conn = state
+        .conn
+        .lock()
+        .expect("mutex poisoned — a prior operation panicked");
     let vault = conn.vault.clone().ok_or("Not connected")?;
 
     info!("[tauri] init_ca");
@@ -111,7 +110,10 @@ pub async fn init_ca(
             ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
             conn.ca = Some(ca);
             conn.vault = None;
-            state.log_ok("init_ca", Some("Certificate Authority initialised".to_string()));
+            state.log_ok(
+                "init_ca",
+                Some("Certificate Authority initialised".to_string()),
+            );
             Ok(())
         }
         Err(e) => {
@@ -123,9 +125,7 @@ pub async fn init_ca(
 }
 
 #[tauri::command]
-pub async fn test_stores(
-    state: State<'_, AppState>,
-) -> Result<HashMap<String, String>, String> {
+pub async fn test_stores(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
@@ -145,7 +145,10 @@ pub async fn upload_ca_cert(state: State<'_, AppState>) -> Result<(), String> {
         e.to_string()
     })?;
 
-    state.log_ok("upload_ca_cert", Some("CA certificate uploaded to public store".to_string()));
+    state.log_ok(
+        "upload_ca_cert",
+        Some("CA certificate uploaded to public store".to_string()),
+    );
     Ok(())
 }
 
@@ -161,7 +164,10 @@ pub async fn upload_ca_database(state: State<'_, AppState>) -> Result<(), String
         e.to_string()
     })?;
 
-    state.log_ok("upload_ca_database", Some("Database uploaded to private store".to_string()));
+    state.log_ok(
+        "upload_ca_database",
+        Some("Database uploaded to private store".to_string()),
+    );
     Ok(())
 }
 
@@ -182,7 +188,11 @@ pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> R
     let Some(job) = job else { return Ok(()) };
 
     // Nothing changed since the last sync — skip the upload.
-    if state.last_private_store_sync.lock().expect("mutex poisoned").as_deref()
+    if state
+        .last_private_store_sync
+        .lock()
+        .expect("mutex poisoned")
+        .as_deref()
         == Some(job.fingerprint.as_str())
     {
         return Ok(());
@@ -195,16 +205,24 @@ pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> R
         let _ = app.emit("op-status", Some("sync_private_store"));
         let result = needs_aws_credentials(&job.uri)
             .then(|| {
-                get_aws_credentials(&op::client(ShellRunner::new(), job.account.as_deref()), job.region.as_deref())
+                get_aws_credentials(
+                    &op::client(ShellRunner::new(), job.account.as_deref()),
+                    job.region.as_deref(),
+                )
             })
             .transpose()
             .and_then(|creds| storage_from_uri_with_creds(&job.uri, creds.as_ref()))
             .and_then(|backend| backend.upload(&job.bytes, &job.uri));
         match result {
             Ok(()) => {
-                *state.last_private_store_sync.lock().expect("mutex poisoned") =
-                    Some(job.fingerprint);
-                state.log_ok("sync_private_store", Some("Database synced to private store".to_string()));
+                *state
+                    .last_private_store_sync
+                    .lock()
+                    .expect("mutex poisoned") = Some(job.fingerprint);
+                state.log_ok(
+                    "sync_private_store",
+                    Some("Database synced to private store".to_string()),
+                );
             }
             Err(e) => {
                 warn!("[tauri] sync_private_store failed: {e}");
@@ -218,10 +236,7 @@ pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> R
 }
 
 #[tauri::command]
-pub async fn resign_ca(
-    state: State<'_, AppState>,
-    ca_days: i64,
-) -> Result<CaInfo, String> {
+pub async fn resign_ca(state: State<'_, AppState>, ca_days: i64) -> Result<CaInfo, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
@@ -232,14 +247,15 @@ pub async fn resign_ca(
         e.to_string()
     })?;
 
-    state.log_ok("resign_ca", Some(format!("CA certificate re-signed for {ca_days} days")));
+    state.log_ok(
+        "resign_ca",
+        Some(format!("CA certificate re-signed for {ca_days} days")),
+    );
 
-    let bundle = ca.ca_bundle.as_ref()
-        .ok_or("CA certificate not loaded")?;
+    let bundle = ca.ca_bundle.as_ref().ok_or("CA certificate not loaded")?;
 
-    let attr = |name: &str| -> Option<String> {
-        bundle.get_certificate_attrib(name).ok().flatten()
-    };
+    let attr =
+        |name: &str| -> Option<String> { bundle.get_certificate_attrib(name).ok().flatten() };
 
     let is_valid = ca.is_valid().unwrap_or(false);
     let cert_pem = bundle.certificate_pem().ok();

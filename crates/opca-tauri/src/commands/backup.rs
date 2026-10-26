@@ -4,8 +4,8 @@ use log::{info, warn};
 use serde::Serialize;
 use tauri::State;
 
-use opca_core::services::ca::CertificateAuthority;
 use opca_core::op::Vault;
+use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::local_backup::{BackupEntry, BackupSource, LocalBackup};
 use opca_core::settings;
 
@@ -39,11 +39,17 @@ pub async fn get_local_backups(state: State<'_, AppState>) -> Result<LocalBackup
 }
 
 #[tauri::command]
-pub async fn set_local_backup_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+pub async fn set_local_backup_enabled(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
     info!("[tauri] set_local_backup_enabled: {enabled}");
     settings::set_local_backup_enabled(enabled).map_err(|e| e.to_string())?;
 
-    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
+    let mut conn = state
+        .conn
+        .lock()
+        .expect("mutex poisoned — a prior operation panicked");
     if let Some(ca) = conn.ca.as_mut() {
         ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
     }
@@ -73,11 +79,20 @@ pub async fn open_local_backups_folder(state: State<'_, AppState>) -> Result<(),
 /// Replace the connected vault's unreadable `CA_Database` with a local backup
 /// and load the CA from it.
 #[tauri::command]
-pub async fn restore_local_backup(state: State<'_, AppState>, path: String) -> Result<String, String> {
+pub async fn restore_local_backup(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
     info!("[tauri] restore_local_backup: {path}");
-    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
+    let mut conn = state
+        .conn
+        .lock()
+        .expect("mutex poisoned — a prior operation panicked");
     if conn.ca.is_some() {
-        return Err("The CA database is already loaded; restore is only offered when it can't be read".into());
+        return Err(
+            "The CA database is already loaded; restore is only offered when it can't be read"
+                .into(),
+        );
     }
     let vault = conn.vault.clone().ok_or("Not connected")?;
     let (store, source) = connected_store(&vault)?;
@@ -88,17 +103,24 @@ pub async fn restore_local_backup(state: State<'_, AppState>, path: String) -> R
     }
     let contents = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
 
-    let mut ca = CertificateAuthority::restore_from_backup(vault, &contents, &store).map_err(|e| {
-        warn!("[tauri] restore_local_backup failed: {e}");
-        state.log_err("restore_local_backup", Some(e.to_string()));
-        e.to_string()
-    })?;
+    let mut ca =
+        CertificateAuthority::restore_from_backup(vault, &contents, &store).map_err(|e| {
+            warn!("[tauri] restore_local_backup failed: {e}");
+            state.log_err("restore_local_backup", Some(e.to_string()));
+            e.to_string()
+        })?;
     ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
     conn.vault = None;
     conn.ca = Some(ca);
     *state.database_error.lock().expect("mutex poisoned") = None;
 
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    state.log_ok("restore_local_backup", Some(format!("CA database restored from {name}")));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    state.log_ok(
+        "restore_local_backup",
+        Some(format!("CA database restored from {name}")),
+    );
     Ok("valid_ca".to_string())
 }

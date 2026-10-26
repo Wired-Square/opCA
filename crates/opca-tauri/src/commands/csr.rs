@@ -3,15 +3,15 @@ use tauri::State;
 
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::x509::{X509Req, X509};
+use openssl::x509::{X509, X509Req};
 
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::op::{self, ItemRef};
 use opca_core::services::ca::csr_item_fields;
-use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType};
+use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle};
 use opca_core::services::database::{CertLookup, CsrLookup, CsrRecord};
 use opca_core::services::san;
-use opca_core::utils::datetime::{now_utc_str, DateTimeFormat};
+use opca_core::utils::datetime::{DateTimeFormat, now_utc_str};
 use wslib_crypto_ca::CsrView;
 
 use crate::commands::dto::{
@@ -120,10 +120,7 @@ pub async fn list_csrs(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    let db = ca
-        .ca_database
-        .as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
 
     let records = db
         .query_all_csrs(status.as_deref())
@@ -156,10 +153,7 @@ pub async fn get_csr_info(
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
-    let db = ca
-        .ca_database
-        .as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
 
     let record = db
         .query_csr(&CsrLookup::Cn(cn))
@@ -178,7 +172,10 @@ pub async fn create_csr(
     state: State<'_, AppState>,
     request: CreateCsrRequest,
 ) -> Result<CreateCsrResult, String> {
-    info!("[tauri] create_csr: cn='{}' type='{}'", request.cn, request.csr_type);
+    info!(
+        "[tauri] create_csr: cn='{}' type='{}'",
+        request.cn, request.csr_type
+    );
     let cert_type: CertType = request
         .csr_type
         .parse()
@@ -187,15 +184,16 @@ pub async fn create_csr(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    let db = ca
-        .ca_database
-        .as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     let ca_config = db.get_config().map_err(|e| e.to_string())?;
 
     // Check for duplicate
     let op_title = format!("CSR_{}", request.cn);
-    if ca.vault.item_exists(&ItemRef::title(&op_title)).map_err(|e| e.to_string())? {
+    if ca
+        .vault
+        .item_exists(&ItemRef::title(&op_title))
+        .map_err(|e| e.to_string())?
+    {
         return Err(format!("Item '{}' already exists in 1Password", op_title));
     }
 
@@ -228,7 +226,11 @@ pub async fn create_csr(
 
     // Store private key + CSR in 1Password (no certificate)
     csr_item_fields(&cert_type, &request.cn, &key_pem, &csr_pem)
-        .and_then(|fields| Ok(ca.vault.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?))
+        .and_then(|fields| {
+            Ok(ca
+                .vault
+                .create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?)
+        })
         .map_err(|e| {
             state.log_err("create_csr", Some(e.to_string()));
             e.to_string()
@@ -254,10 +256,7 @@ pub async fn create_csr(
         csr_pem: Some(csr_pem.clone()),
     };
 
-    let db = ca
-        .ca_database
-        .as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     db.add_csr(&record).map_err(|e| e.to_string())?;
 
     ca.store_ca_database().map_err(|e| {
@@ -281,7 +280,10 @@ pub async fn sign_csr(
     state: State<'_, AppState>,
     request: SignCsrRequest,
 ) -> Result<SignCsrResult, String> {
-    info!("[tauri] sign_csr: type='{}' cn={:?}", request.csr_type, request.cn);
+    info!(
+        "[tauri] sign_csr: type='{}' cn={:?}",
+        request.csr_type, request.cn
+    );
     let cert_type: CertType = request
         .csr_type
         .parse()
@@ -301,10 +303,12 @@ pub async fn sign_csr(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     // Sign CSR with CA
-    let (signed_cert, issuance_warnings) = ca.issue_certificate(&csr, &cert_type, request.days).map_err(|e| {
-        state.log_err("sign_csr", Some(e.to_string()));
-        e.to_string()
-    })?;
+    let (signed_cert, issuance_warnings) = ca
+        .issue_certificate(&csr, &cert_type, request.days)
+        .map_err(|e| {
+            state.log_err("sign_csr", Some(e.to_string()));
+            e.to_string()
+        })?;
     state.log_warnings("sign_csr", issuance_warnings);
 
     let cert_pem_bytes = signed_cert
@@ -459,10 +463,7 @@ pub async fn import_csr_cert(
         })?;
 
     // Update CSR status
-    let db = ca
-        .ca_database
-        .as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     db.update_csr(&CsrRecord {
         cn: Some(cn.clone()),
         status: Some("Complete".to_string()),
@@ -537,7 +538,10 @@ pub async fn generate_csr_from_cert(
     state: State<'_, AppState>,
     request: GenerateCsrFromCertRequest,
 ) -> Result<CreateCsrResult, String> {
-    info!("[tauri] generate_csr_from_cert: serial='{}'", request.serial);
+    info!(
+        "[tauri] generate_csr_from_cert: serial='{}'",
+        request.serial
+    );
 
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
@@ -554,7 +558,11 @@ pub async fn generate_csr_from_cert(
     let title = format!("EXT_{cn}");
 
     let csr_title = format!("CSR_{}", cn);
-    if ca.vault.item_exists(&ItemRef::title(&csr_title)).map_err(|e| e.to_string())? {
+    if ca
+        .vault
+        .item_exists(&ItemRef::title(&csr_title))
+        .map_err(|e| e.to_string())?
+    {
         return Err(format!(
             "Item '{}' already exists in 1Password — delete or rename the existing CSR first",
             csr_title
@@ -576,7 +584,11 @@ pub async fn generate_csr_from_cert(
 
     let cert_type = bundle.cert_type.clone();
     csr_item_fields(&cert_type, &cn, &key_pem, &csr_pem)
-        .and_then(|fields| Ok(ca.vault.create_item(&csr_title, DEFAULT_OP_CONF.category, &fields)?))
+        .and_then(|fields| {
+            Ok(ca
+                .vault
+                .create_item(&csr_title, DEFAULT_OP_CONF.category, &fields)?)
+        })
         .map_err(|e| {
             state.log_err("generate_csr_from_cert", Some(e.to_string()));
             e.to_string()

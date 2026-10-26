@@ -128,10 +128,7 @@ fn t01_setup() {
     let account = test_account();
     let bin = opca_bin();
 
-    let vault_name = format!(
-        "opca-cli-e2e-{}",
-        chrono::Utc::now().format("%Y%m%d%H%M%S")
-    );
+    let vault_name = format!("opca-cli-e2e-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
 
     let mut cmd = Command::new("op");
     if let Some(ref acct) = account {
@@ -173,21 +170,37 @@ fn t10_ca_init() {
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
 
-    let output = run_opca(s, &[
-        "ca", "init",
-        "-e", "no1@home.com",
-        "-o", "Test Organisation",
-        "-n", "Test Certificate Authority",
-        "--ou", "Web Services",
-        "--city", "Canberra",
-        "--state", "ACT",
-        "--country", "AU",
-        "--ca-days", "3650",
-        "--crl-days", "45",
-        "--days", "365",
-        "--ca-url", "https://ca.home.com/ca.crt",
-        "--crl-url", "https://ca.home.com/crl.pem",
-    ]);
+    let output = run_opca(
+        s,
+        &[
+            "ca",
+            "init",
+            "-e",
+            "no1@home.com",
+            "-o",
+            "Test Organisation",
+            "-n",
+            "Test Certificate Authority",
+            "--ou",
+            "Web Services",
+            "--city",
+            "Canberra",
+            "--state",
+            "ACT",
+            "--country",
+            "AU",
+            "--ca-days",
+            "3650",
+            "--crl-days",
+            "45",
+            "--days",
+            "365",
+            "--ca-url",
+            "https://ca.home.com/ca.crt",
+            "--crl-url",
+            "https://ca.home.com/crl.pem",
+        ],
+    );
     assert_ok(&output, "CA init");
 }
 
@@ -197,11 +210,28 @@ fn t11_ca_init_create_vault() {
     bail_if_failed!();
     let mut state = get_state();
     let s = state.as_mut().expect("t01 must run first");
-    let init = ["ca", "init", "--create-vault", "-o", "Test Organisation",
-        "-n", "Created Vault CA", "--ca-days", "365", "--crl-days", "30", "--days", "90"];
+    let init = [
+        "ca",
+        "init",
+        "--create-vault",
+        "-o",
+        "Test Organisation",
+        "-n",
+        "Created Vault CA",
+        "--ca-days",
+        "365",
+        "--crl-days",
+        "30",
+        "--days",
+        "90",
+    ];
 
     let output = run_opca(s, &init);
-    assert_eq!(output.status.code(), Some(1), "an existing vault must be refused");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "an existing vault must be refused"
+    );
     assert!(
         combined_output(&output).contains("Vault already exists"),
         "unexpected refusal:\n{}",
@@ -212,7 +242,10 @@ fn t11_ca_init_create_vault() {
     let output = run_opca_vault(s, &s.created_vault, &init);
     assert_ok(&output, "CA init --create-vault");
     let text = combined_output(&output);
-    assert!(text.contains(&format!("Created vault {}", s.created_vault)), "{text}");
+    assert!(
+        text.contains(&format!("Created vault {}", s.created_vault)),
+        "{text}"
+    );
     assert!(text.contains("CA certificate validation: OK"), "{text}");
 }
 
@@ -226,12 +259,18 @@ fn t12_ca_export() {
     let cert_path = s.tmp_dir.join("exported-ca.crt");
     let key_path = s.tmp_dir.join("exported-ca.key");
 
-    let output = run_opca(s, &[
-        "ca", "export",
-        "--with-key",
-        "--cert-out", cert_path.to_str().unwrap(),
-        "--key-out", key_path.to_str().unwrap(),
-    ]);
+    let output = run_opca(
+        s,
+        &[
+            "ca",
+            "export",
+            "--with-key",
+            "--cert-out",
+            cert_path.to_str().unwrap(),
+            "--key-out",
+            key_path.to_str().unwrap(),
+        ],
+    );
     assert_ok(&output, "CA export with key");
 
     assert!(cert_path.exists(), "Exported certificate file is missing");
@@ -273,13 +312,22 @@ fn t15_ca_import_into_new_vault() {
     let cert_path = s.tmp_dir.join("exported-ca.crt");
     let key_path = s.tmp_dir.join("exported-ca.key");
 
-    let output = run_opca_vault(s, &import_vault_name, &[
-        "ca", "import",
-        "-c", cert_path.to_str().unwrap(),
-        "-k", key_path.to_str().unwrap(),
-        "--days", "365",
-        "--crl-days", "30",
-    ]);
+    let output = run_opca_vault(
+        s,
+        &import_vault_name,
+        &[
+            "ca",
+            "import",
+            "-c",
+            cert_path.to_str().unwrap(),
+            "-k",
+            key_path.to_str().unwrap(),
+            "--days",
+            "365",
+            "--crl-days",
+            "30",
+        ],
+    );
     assert_ok(&output, "CA import into new vault");
 }
 
@@ -293,7 +341,19 @@ fn t20_cert_create_vpnserver() {
     bail_if_failed!();
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
-    let output = run_opca(s, &["cert", "create", "-t", "vpnserver", "-n", "vpnserver-cert", "--key", "rsa-2048"]);
+    let output = run_opca(
+        s,
+        &[
+            "cert",
+            "create",
+            "-t",
+            "vpnserver",
+            "-n",
+            "vpnserver-cert",
+            "--key",
+            "rsa-2048",
+        ],
+    );
     assert_ok(&output, "cert create vpnserver");
 }
 
@@ -303,7 +363,10 @@ fn t21_cert_create_vpnclient() {
     bail_if_failed!();
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
-    let output = run_opca(s, &["cert", "create", "-t", "vpnclient", "-n", "vpnclient-cert"]);
+    let output = run_opca(
+        s,
+        &["cert", "create", "-t", "vpnclient", "-n", "vpnclient-cert"],
+    );
     assert_ok(&output, "cert create vpnclient");
 }
 
@@ -313,10 +376,21 @@ fn t22_cert_create_webserver_a() {
     bail_if_failed!();
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
-    let output = run_opca(s, &[
-        "cert", "create", "-t", "webserver", "-n", "webserver-cert",
-        "--alt", "www.webserver.com", "--alt", "10.0.0.1",
-    ]);
+    let output = run_opca(
+        s,
+        &[
+            "cert",
+            "create",
+            "-t",
+            "webserver",
+            "-n",
+            "webserver-cert",
+            "--alt",
+            "www.webserver.com",
+            "--alt",
+            "10.0.0.1",
+        ],
+    );
     assert_ok(&output, "cert create webserver-cert");
 }
 
@@ -326,10 +400,21 @@ fn t23_cert_create_webserver_b() {
     bail_if_failed!();
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
-    let output = run_opca(s, &[
-        "cert", "create", "-t", "webserver", "-n", "mailserver-cert",
-        "--alt", "mail.webserver.com", "--days", "900",
-    ]);
+    let output = run_opca(
+        s,
+        &[
+            "cert",
+            "create",
+            "-t",
+            "webserver",
+            "-n",
+            "mailserver-cert",
+            "--alt",
+            "mail.webserver.com",
+            "--days",
+            "900",
+        ],
+    );
     assert_ok(&output, "cert create mailserver-cert");
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("825-day limit"),
@@ -343,7 +428,10 @@ fn t24_cert_renew_mailserver() {
     bail_if_failed!();
     let state = get_state();
     let s = state.as_ref().expect("t01 must run first");
-    let output = run_opca(s, &["cert", "renew", "-n", "mailserver-cert", "--days", "30"]);
+    let output = run_opca(
+        s,
+        &["cert", "renew", "-n", "mailserver-cert", "--days", "30"],
+    );
     assert_ok(&output, "cert renew mailserver-cert");
     assert!(!String::from_utf8_lossy(&output.stderr).contains("825-day limit"));
 }
@@ -378,16 +466,27 @@ fn t27_cert_export_vpnclient() {
     let cert_path = s.tmp_dir.join("vpnclient-cert.crt");
     let key_path = s.tmp_dir.join("vpnclient-cert.key");
 
-    let output = run_opca(s, &[
-        "cert", "export", "-n", "vpnclient-cert",
-        "--with-key",
-        "--cert-out", cert_path.to_str().unwrap(),
-        "--key-out", key_path.to_str().unwrap(),
-    ]);
+    let output = run_opca(
+        s,
+        &[
+            "cert",
+            "export",
+            "-n",
+            "vpnclient-cert",
+            "--with-key",
+            "--cert-out",
+            cert_path.to_str().unwrap(),
+            "--key-out",
+            key_path.to_str().unwrap(),
+        ],
+    );
     assert_ok(&output, "cert export vpnclient-cert");
 
     assert!(cert_path.exists(), "Exported cert file is missing");
-    assert!(std::fs::metadata(&cert_path).unwrap().len() > 0, "Exported cert file is empty");
+    assert!(
+        std::fs::metadata(&cert_path).unwrap().len() > 0,
+        "Exported cert file is empty"
+    );
     assert!(key_path.exists(), "Exported key file is missing");
 
     #[cfg(unix)]
@@ -413,18 +512,34 @@ fn t28_cert_import_into_new_vault() {
     let cert_path = s.tmp_dir.join("vpnclient-cert.crt");
     let key_path = s.tmp_dir.join("vpnclient-cert.key");
 
-    let output = run_opca_vault(s, &s.import_vault, &[
-        "cert", "import",
-        "-n", "vpnclient-cert",
-        "-c", cert_path.to_str().unwrap(),
-        "-k", key_path.to_str().unwrap(),
-    ]);
+    let output = run_opca_vault(
+        s,
+        &s.import_vault,
+        &[
+            "cert",
+            "import",
+            "-n",
+            "vpnclient-cert",
+            "-c",
+            cert_path.to_str().unwrap(),
+            "-k",
+            key_path.to_str().unwrap(),
+        ],
+    );
     assert_ok(&output, "cert import into new vault");
 
-    let output = run_opca_vault(s, &s.import_vault, &[
-        "cert", "export", "-n", "vpnclient-cert",
-        "--cert-only", "--to-stdout",
-    ]);
+    let output = run_opca_vault(
+        s,
+        &s.import_vault,
+        &[
+            "cert",
+            "export",
+            "-n",
+            "vpnclient-cert",
+            "--cert-only",
+            "--to-stdout",
+        ],
+    );
     assert_ok(&output, "cert export from import vault");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -439,7 +554,10 @@ fn t29_cert_delete_revoked() {
     let s = state.as_ref().expect("t01 must run first");
 
     let output = run_opca(s, &["cert", "delete", "-n", "vpnclient-cert"]);
-    assert!(!output.status.success(), "a valid certificate must not be deletable");
+    assert!(
+        !output.status.success(),
+        "a valid certificate must not be deletable"
+    );
 
     let output = run_opca(s, &["cert", "delete", "-n", "webserver-cert"]);
     assert_ok(&output, "cert delete webserver-cert");
@@ -459,7 +577,8 @@ fn t29_cert_delete_revoked() {
     );
     let output = Command::new("openssl")
         .args(["crl", "-in", crl_path.to_str().unwrap(), "-noout", "-text"])
-        .output().expect("failed to run openssl");
+        .output()
+        .expect("failed to run openssl");
     let crl_text = String::from_utf8_lossy(&output.stdout);
     assert!(
         crl_text.contains(&format!("Serial Number: {serial:02X}")),
@@ -490,9 +609,10 @@ fn t31_crl_export_and_verify() {
 
     let ca_pem_path = s.tmp_dir.join("ca-verify.pem");
     if !ca_pem_path.exists() {
-        let output = run_opca(s, &[
-            "ca", "export", "--cert-out", ca_pem_path.to_str().unwrap(),
-        ]);
+        let output = run_opca(
+            s,
+            &["ca", "export", "--cert-out", ca_pem_path.to_str().unwrap()],
+        );
         assert_ok(&output, "ca export for CRL verification");
     }
 
@@ -502,19 +622,57 @@ fn t31_crl_export_and_verify() {
     assert!(crl_pem_path.exists());
 
     let crl_der_path = s.tmp_dir.join("crl.der");
-    let output = run_opca(s, &["crl", "export", "-f", "der", "-o", crl_der_path.to_str().unwrap()]);
+    let output = run_opca(
+        s,
+        &[
+            "crl",
+            "export",
+            "-f",
+            "der",
+            "-o",
+            crl_der_path.to_str().unwrap(),
+        ],
+    );
     assert_ok(&output, "crl export DER");
     assert!(crl_der_path.exists());
 
     let output = Command::new("openssl")
-        .args(["crl", "-in", crl_pem_path.to_str().unwrap(), "-noout", "-verify", "-CAfile", ca_pem_path.to_str().unwrap()])
-        .output().expect("failed to run openssl");
-    assert!(output.status.success(), "openssl CRL PEM verify failed: {}", String::from_utf8_lossy(&output.stderr));
+        .args([
+            "crl",
+            "-in",
+            crl_pem_path.to_str().unwrap(),
+            "-noout",
+            "-verify",
+            "-CAfile",
+            ca_pem_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to run openssl");
+    assert!(
+        output.status.success(),
+        "openssl CRL PEM verify failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let output = Command::new("openssl")
-        .args(["crl", "-in", crl_der_path.to_str().unwrap(), "-inform", "der", "-noout", "-verify", "-CAfile", ca_pem_path.to_str().unwrap()])
-        .output().expect("failed to run openssl");
-    assert!(output.status.success(), "openssl CRL DER verify failed: {}", String::from_utf8_lossy(&output.stderr));
+        .args([
+            "crl",
+            "-in",
+            crl_der_path.to_str().unwrap(),
+            "-inform",
+            "der",
+            "-noout",
+            "-verify",
+            "-CAfile",
+            ca_pem_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to run openssl");
+    assert!(
+        output.status.success(),
+        "openssl CRL DER verify failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     eprintln!("[e2e] CRL verified with openssl (PEM + DER)");
 }
@@ -563,7 +721,10 @@ fn revoked_count(crl: &openssl::x509::X509Crl) -> usize {
 
 fn crl_number(crl: &openssl::x509::X509Crl) -> i64 {
     let pem = String::from_utf8(crl.to_pem().expect("CRL PEM")).expect("CRL PEM");
-    opca_core::services::ca::parse_crl_metadata(&pem).expect("CRL metadata").crl_number.expect("CRL Number")
+    opca_core::services::ca::parse_crl_metadata(&pem)
+        .expect("CRL metadata")
+        .crl_number
+        .expect("CRL Number")
 }
 
 #[test]
@@ -577,7 +738,20 @@ fn t34_crl_batch() {
     let batch_path = store.join("pending-crl/crl-batch.pem");
     let store_conf = format!("ca_private_store=rsync://{}", store.display());
 
-    assert_ok(&run_opca(s, &["database", "config-set", "--conf", "crl_batch_enabled=true", "--conf", &store_conf]), "enable CRL batches");
+    assert_ok(
+        &run_opca(
+            s,
+            &[
+                "database",
+                "config-set",
+                "--conf",
+                "crl_batch_enabled=true",
+                "--conf",
+                &store_conf,
+            ],
+        ),
+        "enable CRL batches",
+    );
     let output = run_opca(s, &["crl", "create"]);
     assert_ok(&output, "crl create (batch)");
     assert!(combined_output(&output).contains("CRL batch upload to the private store: OK"));
@@ -585,17 +759,43 @@ fn t34_crl_batch() {
     assert_eq!(first.len(), 5);
 
     let info = combined_output(&run_opca(s, &["crl", "info"]));
-    assert!(info.contains("Pre-signed CRL Batch") && info.contains("Unreleased: 4 of 5"), "{info}");
+    assert!(
+        info.contains("Pre-signed CRL Batch") && info.contains("Unreleased: 4 of 5"),
+        "{info}"
+    );
 
-    assert_ok(&run_opca(s, &["cert", "create", "-t", "vpnclient", "-n", "batch-cert"]), "cert create batch-cert");
-    assert_ok(&run_opca(s, &["cert", "revoke", "-n", "batch-cert"]), "cert revoke batch-cert (batch)");
+    assert_ok(
+        &run_opca(
+            s,
+            &["cert", "create", "-t", "vpnclient", "-n", "batch-cert"],
+        ),
+        "cert create batch-cert",
+    );
+    assert_ok(
+        &run_opca(s, &["cert", "revoke", "-n", "batch-cert"]),
+        "cert revoke batch-cert (batch)",
+    );
     let resigned = crl_batch(&batch_path);
     assert_eq!(resigned.len(), 5);
-    assert!(resigned.iter().all(|crl| revoked_count(crl) == revoked_count(&first[0]) + 1));
+    assert!(
+        resigned
+            .iter()
+            .all(|crl| revoked_count(crl) == revoked_count(&first[0]) + 1)
+    );
     assert_eq!(crl_number(&resigned[0]), crl_number(&first[4]) + 1);
 
     assert_ok(
-        &run_opca(s, &["database", "config-set", "--conf", "crl_batch_enabled=false", "--conf", "ca_private_store="]),
+        &run_opca(
+            s,
+            &[
+                "database",
+                "config-set",
+                "--conf",
+                "crl_batch_enabled=false",
+                "--conf",
+                "ca_private_store=",
+            ],
+        ),
         "disable CRL batches",
     );
     let output = run_opca(s, &["crl", "create"]);
@@ -693,7 +893,10 @@ fn t90_cleanup() {
         cmd.args(["vault", "delete", name]);
         match cmd.output() {
             Ok(o) if o.status.success() => eprintln!("[e2e] Deleted vault: {name}"),
-            Ok(o) => eprintln!("[e2e] Warning: delete '{name}': {}", String::from_utf8_lossy(&o.stderr)),
+            Ok(o) => eprintln!(
+                "[e2e] Warning: delete '{name}': {}",
+                String::from_utf8_lossy(&o.stderr)
+            ),
             Err(e) => eprintln!("[e2e] Warning: op failed for '{name}': {e}"),
         }
     };

@@ -260,7 +260,9 @@ impl CrlBatch {
     }
 
     pub fn status(&self, now: DateTime<Utc>) -> CrlBatchStatus {
-        let released = (0..self.count).filter(|&i| self.this_update(i) <= now).count() as i64;
+        let released = (0..self.count)
+            .filter(|&i| self.this_update(i) <= now)
+            .count() as i64;
         CrlBatchStatus {
             due_number: self.first_number + (released - 1).max(0),
             signed_until: self.next_update(self.count - 1),

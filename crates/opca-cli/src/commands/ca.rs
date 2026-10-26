@@ -4,7 +4,7 @@ use opca_core::services::ca::{CaExpiryWarning, CertificateAuthority};
 use opca_core::services::cert::KeyAlgorithm;
 use opca_core::services::database::CaConfig;
 
-use crate::app::{with_lock, AppContext};
+use crate::app::{AppContext, with_lock};
 use crate::output;
 use crate::{CaAction, CaArgs};
 
@@ -123,10 +123,16 @@ fn handle_import<R: Runner>(
     output::title("Importing a Certificate Authority from file");
 
     let cert_pem = std::fs::read(&cert_file)?;
-    output::print_result(&format!("Read certificate from {cert_file}"), !cert_pem.is_empty());
+    output::print_result(
+        &format!("Read certificate from {cert_file}"),
+        !cert_pem.is_empty(),
+    );
 
     let key_pem = std::fs::read(&key_file)?;
-    output::print_result(&format!("Read private key from {key_file}"), !key_pem.is_empty());
+    output::print_result(
+        &format!("Read private key from {key_file}"),
+        !key_pem.is_empty(),
+    );
 
     if cert_pem.is_empty() || key_pem.is_empty() {
         return Err(OpcaError::Other("Certificate or key file is empty".into()));
@@ -180,9 +186,7 @@ fn handle_export<R: Runner>(
         ));
     }
     if key_out.is_some() && !with_key {
-        return Err(OpcaError::Other(
-            "--key-out requires --with-key".into(),
-        ));
+        return Err(OpcaError::Other("--key-out requires --with-key".into()));
     }
 
     // File output
@@ -191,10 +195,11 @@ fn handle_export<R: Runner>(
         output::print_result(&format!("Certificate written to {path}"), true);
     }
     if let Some(ref path) = key_out
-        && let Some(ref kp) = key_pem {
-            write_file(path, kp.as_bytes(), 0o600)?;
-            output::print_result(&format!("Private key written to {path}"), true);
-        }
+        && let Some(ref kp) = key_pem
+    {
+        write_file(path, kp.as_bytes(), 0o600)?;
+        output::print_result(&format!("Private key written to {path}"), true);
+    }
 
     // Stdout output
     if to_stdout || (cert_out.is_none() && key_out.is_none()) {
@@ -217,7 +222,9 @@ fn handle_list<R: Runner>(
     serial: Option<String>,
 ) -> Result<(), OpcaError> {
     let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-    let db = ca.ca_database.as_mut()
+    let db = ca
+        .ca_database
+        .as_mut()
         .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
 
     db.process_ca_database(None, false)?;
@@ -262,13 +269,15 @@ fn handle_list<R: Runner>(
 
         // Apply filters
         if let Some(ref filter_cn) = cn
-            && cert.cn.as_deref() != Some(filter_cn.as_str()) {
-                continue;
-            }
+            && cert.cn.as_deref() != Some(filter_cn.as_str())
+        {
+            continue;
+        }
         if let Some(ref filter_serial) = serial
-            && cert.serial != *filter_serial {
-                continue;
-            }
+            && cert.serial != *filter_serial
+        {
+            continue;
+        }
 
         let include = match mode {
             "expired" => status == "Expired",
@@ -318,7 +327,9 @@ fn handle_list<R: Runner>(
                 ext.serial.clone(),
                 ext.cn.clone().unwrap_or_default(),
                 format!("EXT_{}", ext.cn.clone().unwrap_or_default()),
-                ext.cert_type.clone().unwrap_or_else(|| "external".to_string()),
+                ext.cert_type
+                    .clone()
+                    .unwrap_or_else(|| "external".to_string()),
                 display_status.to_string(),
                 ext.expiry_date.clone().unwrap_or_default(),
             ]);
@@ -332,10 +343,7 @@ fn handle_list<R: Runner>(
     Ok(())
 }
 
-fn handle_upload<R: Runner>(
-    app: &mut AppContext<R>,
-    stores: Vec<String>,
-) -> Result<(), OpcaError> {
+fn handle_upload<R: Runner>(app: &mut AppContext<R>, stores: Vec<String>) -> Result<(), OpcaError> {
     output::title("Uploading CA Certificate");
 
     let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
@@ -353,10 +361,7 @@ fn handle_upload<R: Runner>(
     Ok(())
 }
 
-fn handle_resign<R: Runner>(
-    app: &mut AppContext<R>,
-    ca_days: i64,
-) -> Result<(), OpcaError> {
+fn handle_resign<R: Runner>(app: &mut AppContext<R>, ca_days: i64) -> Result<(), OpcaError> {
     output::title("Re-signing the CA Certificate");
 
     with_lock(app, "ca_resign", |app| {
@@ -385,9 +390,7 @@ pub fn warn_ca_expiry<R: Runner>(app: &AppContext<R>) {
                 ));
             }
             CaExpiryWarning::Prominent { days_remaining } => {
-                output::warning(&format!(
-                    "CA certificate expires in {days_remaining} days"
-                ));
+                output::warning(&format!("CA certificate expires in {days_remaining} days"));
             }
             CaExpiryWarning::CertLifetimeExceedsCa {
                 days_remaining,

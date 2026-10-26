@@ -15,7 +15,7 @@ use tauri::State;
 
 use opca_core::op::{self, ShellRunner};
 use opca_core::services::storage::{
-    get_aws_credentials_for_item, list_aws_credential_items, AwsItemRef,
+    AwsItemRef, get_aws_credentials_for_item, list_aws_credential_items,
 };
 use opca_core::settings;
 
@@ -32,9 +32,7 @@ pub struct AwsCredentialSelection {
 }
 
 #[tauri::command]
-pub async fn list_aws_credentials(
-    state: State<'_, AppState>,
-) -> Result<Vec<AwsItemRef>, String> {
+pub async fn list_aws_credentials(state: State<'_, AppState>) -> Result<Vec<AwsItemRef>, String> {
     info!("[tauri] list_aws_credentials");
 
     // `op item list` takes seconds on a large account, so copy the account

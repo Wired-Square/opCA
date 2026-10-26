@@ -54,7 +54,13 @@ pub fn encrypt_payload(plaintext: &[u8], password: &str) -> Result<Vec<u8>, Opca
 
     // aes-gcm crate's encrypt returns ciphertext || tag (tag appended)
     let ct_with_tag = cipher
-        .encrypt(nonce, Payload { msg: plaintext, aad: b"" })
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad: b"",
+            },
+        )
         .map_err(|e| OpcaError::Crypto(format!("Encryption failed: {e}")))?;
 
     // Split: ciphertext is everything except the last TAG_LENGTH bytes
@@ -114,7 +120,13 @@ pub fn decrypt_payload(data: &[u8], password: &str) -> Result<Vec<u8>, OpcaError
     ct_with_tag.extend_from_slice(tag);
 
     let plaintext = cipher
-        .decrypt(nonce, Payload { msg: &ct_with_tag, aad: b"" })
+        .decrypt(
+            nonce,
+            Payload {
+                msg: &ct_with_tag,
+                aad: b"",
+            },
+        )
         .map_err(|_| OpcaError::BackupDecryption)?;
 
     Ok(plaintext)

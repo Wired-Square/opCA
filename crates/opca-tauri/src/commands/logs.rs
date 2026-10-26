@@ -4,9 +4,8 @@ use tauri::{AppHandle, Manager};
 #[tauri::command]
 pub async fn get_log_contents(app: AppHandle) -> Result<String, String> {
     let log_path = log_file_path(&app)?;
-    std::fs::read_to_string(&log_path).map_err(|e| {
-        format!("Failed to read log file at {}: {e}", log_path.display())
-    })
+    std::fs::read_to_string(&log_path)
+        .map_err(|e| format!("Failed to read log file at {}: {e}", log_path.display()))
 }
 
 /// Return the absolute path of the log file (for display in the UI).

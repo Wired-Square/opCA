@@ -273,7 +273,9 @@ fn execute<R: Runner>(vault: &Vault<R>, cmd: &QueuedCommand) -> Result<(), OpcaE
             }
         }
         QueueOp::StoreDocument => match parse_store_action(&p.action) {
-            StoreAction::Create => vault.create_document(&cmd.target_id, &p.filename, p.content.as_bytes())?,
+            StoreAction::Create => {
+                vault.create_document(&cmd.target_id, &p.filename, p.content.as_bytes())?
+            }
             StoreAction::Edit => vault.edit_document(&title, &p.filename, p.content.as_bytes())?,
             StoreAction::Auto => op::put_document(vault, &cmd.target_id, &p.filename, &p.content)?,
         },
@@ -316,9 +318,21 @@ mod tests {
     #[test]
     fn test_enqueue_increments_count() {
         let mut q = CommandQueue::new();
-        q.enqueue_store_item("item1", vec!["cn=test".into()], "certbundle", "create", "Secure Note");
+        q.enqueue_store_item(
+            "item1",
+            vec!["cn=test".into()],
+            "certbundle",
+            "create",
+            "Secure Note",
+        );
         assert_eq!(q.pending_count(), 1);
-        q.enqueue_store_item("item2", vec!["cn=test2".into()], "certbundle", "create", "Secure Note");
+        q.enqueue_store_item(
+            "item2",
+            vec!["cn=test2".into()],
+            "certbundle",
+            "create",
+            "Secure Note",
+        );
         assert_eq!(q.pending_count(), 2);
     }
 
@@ -361,7 +375,13 @@ mod tests {
     #[test]
     fn test_collapse_preserves_non_document_ops() {
         let mut q = CommandQueue::new();
-        q.enqueue_store_item("cert1", vec!["cn=a".into()], "certbundle", "create", "Secure Note");
+        q.enqueue_store_item(
+            "cert1",
+            vec!["cn=a".into()],
+            "certbundle",
+            "create",
+            "Secure Note",
+        );
         q.enqueue_store_document("CA_Database", "db.sql", "v1", "database", "auto");
         q.enqueue_rename_item("cert1", "cert1_revoked");
         q.enqueue_store_document("CA_Database", "db.sql", "v2", "database", "auto");
@@ -398,13 +418,19 @@ mod tests {
 
     #[test]
     fn test_flush_with_fake_runner() {
-        use crate::testutil::{created, fake_vault, FakeRunner};
+        use crate::testutil::{FakeRunner, created, fake_vault};
 
         let fake = FakeRunner::new();
         fake.respond(created("test_cert"));
 
         let mut q = CommandQueue::new();
-        q.enqueue_store_item("test_cert", vec!["cn[text]=test".into()], "certbundle", "create", "Secure Note");
+        q.enqueue_store_item(
+            "test_cert",
+            vec!["cn[text]=test".into()],
+            "certbundle",
+            "create",
+            "Secure Note",
+        );
 
         let results = q.flush(&fake_vault(&fake));
         assert_eq!(results.len(), 1);
@@ -417,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_flush_auto_store_item_checks_then_edits_or_creates() {
-        use crate::testutil::{created, fake_vault, item_json, not_found, FakeRunner, Output};
+        use crate::testutil::{FakeRunner, Output, created, fake_vault, item_json, not_found};
 
         let fake = FakeRunner::new();
         fake.respond(Output::ok(item_json("old", &[])))
@@ -426,8 +452,20 @@ mod tests {
             .respond(created("new"));
 
         let mut q = CommandQueue::new();
-        q.enqueue_store_item("old", vec!["cn[text]=a".into()], "certbundle", "auto", "Secure Note");
-        q.enqueue_store_item("new", vec!["cn[text]=b".into()], "certbundle", "auto", "Secure Note");
+        q.enqueue_store_item(
+            "old",
+            vec!["cn[text]=a".into()],
+            "certbundle",
+            "auto",
+            "Secure Note",
+        );
+        q.enqueue_store_item(
+            "new",
+            vec!["cn[text]=b".into()],
+            "certbundle",
+            "auto",
+            "Secure Note",
+        );
         let results = q.flush(&fake_vault(&fake));
 
         assert!(results.iter().all(|r| r.success), "{results:?}");
@@ -437,24 +475,28 @@ mod tests {
 
     #[test]
     fn test_flush_reports_a_failure_and_carries_on() {
-        use crate::testutil::{fake_vault, FakeRunner, Output};
+        use crate::testutil::{FakeRunner, Output, fake_vault};
 
         let fake = FakeRunner::new();
-        fake.respond(Output::fail("[ERROR] boom")).respond(Output::ok(""));
+        fake.respond(Output::fail("[ERROR] boom"))
+            .respond(Output::ok(""));
 
         let mut q = CommandQueue::new();
         q.enqueue_rename_item("a", "b");
         q.enqueue_delete_item("c", false);
         let results = q.flush(&fake_vault(&fake));
 
-        assert_eq!(results[0].error.as_deref(), Some("1Password CLI error: [ERROR] boom"));
+        assert_eq!(
+            results[0].error.as_deref(),
+            Some("1Password CLI error: [ERROR] boom")
+        );
         assert!(results[1].success);
         assert!(!fake.calls()[1].args().contains(&"--archive".to_string()));
     }
 
     #[test]
     fn test_flush_empty_queue() {
-        use crate::testutil::{fake_vault, FakeRunner};
+        use crate::testutil::{FakeRunner, fake_vault};
 
         let fake = FakeRunner::new();
 

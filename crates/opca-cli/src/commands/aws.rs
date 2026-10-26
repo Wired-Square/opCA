@@ -41,7 +41,11 @@ fn list(app: &AppContext<ShellRunner>, pattern: Option<String>) -> Result<(), Op
         .iter()
         .map(|item| {
             vec![
-                if Some(&item.id) == selected.as_ref() { "*".into() } else { String::new() },
+                if Some(&item.id) == selected.as_ref() {
+                    "*".into()
+                } else {
+                    String::new()
+                },
                 item.id.clone(),
                 item.title.clone(),
                 item.vault.clone(),
@@ -75,7 +79,10 @@ fn show(app: &AppContext<ShellRunner>) -> Result<(), OpcaError> {
             let creds = get_aws_credentials_for_item(op, &item_id)?;
             output::info("Item", &item_id);
             output::info("Access key ID", &creds.access_key_id);
-            output::info("Settings file", &settings::settings_path()?.display().to_string());
+            output::info(
+                "Settings file",
+                &settings::settings_path()?.display().to_string(),
+            );
         }
         None => output::warning("No AWS credential selected — run 'opca aws use <item>'"),
     }

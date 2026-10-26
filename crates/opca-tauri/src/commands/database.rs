@@ -9,8 +9,7 @@ pub async fn get_database_info(state: State<'_, AppState>) -> Result<DatabaseInf
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
-    let db = ca.ca_database.as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
 
     let config = db.get_config().map_err(|e| e.to_string())?;
     let total_certs = db.count_certs().map_err(|e| e.to_string())?;
@@ -27,6 +26,9 @@ pub async fn get_database_info(state: State<'_, AppState>) -> Result<DatabaseInf
 
 #[tauri::command]
 pub async fn get_action_log(state: State<'_, AppState>) -> Result<Vec<LogEntry>, String> {
-    let log = state.action_log.lock().expect("mutex poisoned — a prior operation panicked");
+    let log = state
+        .action_log
+        .lock()
+        .expect("mutex poisoned — a prior operation panicked");
     Ok(log.clone())
 }

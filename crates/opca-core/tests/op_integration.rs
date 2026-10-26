@@ -22,7 +22,8 @@ fn test_account() -> Option<String> {
 }
 
 fn connect() -> Vault {
-    op::connect(ShellRunner::new(), &test_vault(), test_account().as_deref()).expect("could not connect")
+    op::connect(ShellRunner::new(), &test_vault(), test_account().as_deref())
+        .expect("could not connect")
 }
 
 /// Skip the test if `OPCA_INTEGRATION_TEST` is not set.
@@ -45,15 +46,25 @@ fn connect_succeeds_with_valid_vault() {
 #[test]
 fn connect_fails_with_nonexistent_vault() {
     skip_unless_integration!();
-    let result = op::connect(ShellRunner::new(), "__nonexistent_vault_99999__", test_account().as_deref());
-    assert!(matches!(result, Err(opca_core::error::OpcaError::VaultNotFound(_))));
+    let result = op::connect(
+        ShellRunner::new(),
+        "__nonexistent_vault_99999__",
+        test_account().as_deref(),
+    );
+    assert!(matches!(
+        result,
+        Err(opca_core::error::OpcaError::VaultNotFound(_))
+    ));
 }
 
 #[test]
 fn whoami_names_a_user() {
     skip_unless_integration!();
     let who = connect().op().whoami().unwrap();
-    assert!(!who.user_uuid.is_empty(), "whoami reported no user_uuid: {who:?}");
+    assert!(
+        !who.user_uuid.is_empty(),
+        "whoami reported no user_uuid: {who:?}"
+    );
 }
 
 /// The settings account key is a `user_uuid` from `op account list`, matched
@@ -66,7 +77,10 @@ fn whoami_user_uuid_appears_in_the_account_list() {
     let vault = connect();
 
     let who = vault.op().whoami().expect("op whoami --format=json failed");
-    assert!(!who.user_uuid.is_empty(), "whoami reported no user_uuid: {who:?}");
+    assert!(
+        !who.user_uuid.is_empty(),
+        "whoami reported no user_uuid: {who:?}"
+    );
 
     let accounts = op::accounts(&ShellRunner::new()).expect("op account list failed");
     assert!(
@@ -74,7 +88,11 @@ fn whoami_user_uuid_appears_in_the_account_list() {
         "whoami user_uuid {} is in no configured account: {accounts:?}",
         who.user_uuid,
     );
-    assert!(accounts.iter().any(|a| a.url == who.url), "whoami url {} matches no account", who.url);
+    assert!(
+        accounts.iter().any(|a| a.url == who.url),
+        "whoami url {} matches no account",
+        who.url
+    );
 }
 
 #[test]
@@ -87,7 +105,11 @@ fn vault_list_returns_at_least_one() {
 #[test]
 fn item_exists_returns_false_for_nonexistent() {
     skip_unless_integration!();
-    assert!(!connect().item_exists(&ItemRef::title("__nonexistent_item_99999__")).unwrap());
+    assert!(
+        !connect()
+            .item_exists(&ItemRef::title("__nonexistent_item_99999__"))
+            .unwrap()
+    );
 }
 
 #[test]
@@ -103,7 +125,9 @@ fn put_document_creates_then_replaces_documents_larger_than_a_pipe_buffer() {
     skip_unless_integration!();
     let vault = connect();
     let title = format!("__opca_large_doc_{}__", std::process::id());
-    let content: String = (0..4000).map(|i| format!("INSERT INTO t VALUES({i});\n")).collect();
+    let content: String = (0..4000)
+        .map(|i| format!("INSERT INTO t VALUES({i});\n"))
+        .collect();
     assert!(content.len() > 64 * 1024);
 
     op::put_document(&vault, &title, "large.sql", &content).unwrap();
@@ -111,11 +135,17 @@ fn put_document_creates_then_replaces_documents_larger_than_a_pipe_buffer() {
     op::put_document(&vault, &title, "large.sql", "replaced\n").unwrap();
     let replaced = op::document_text(&vault, &title);
     let found = vault.items_titled(&title).unwrap();
-    vault.delete_item_permanently(&ItemRef::title(&title)).unwrap();
+    vault
+        .delete_item_permanently(&ItemRef::title(&title))
+        .unwrap();
 
     assert_eq!(created.unwrap(), content);
     assert_eq!(replaced.unwrap(), "replaced\n");
-    assert_eq!(found.len(), 1, "put_document must edit, not add a second document");
+    assert_eq!(
+        found.len(),
+        1,
+        "put_document must edit, not add a second document"
+    );
 }
 
 #[test]
@@ -130,7 +160,10 @@ fn openvpn_templates_import_then_archive_without_losing_any() {
     let vault = connect();
     // The flow writes the fixed `OpenVPN` and `CA_Database` titles, so never
     // run it in a vault that holds a real CA.
-    for title in [DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.ca_database_title] {
+    for title in [
+        DEFAULT_OP_CONF.openvpn_title,
+        DEFAULT_OP_CONF.ca_database_title,
+    ] {
         assert!(
             !vault.item_exists(&ItemRef::title(title)).unwrap(),
             "'{title}' already exists in the test vault; use a scratch vault"
@@ -160,29 +193,63 @@ fn openvpn_templates_import_then_archive_without_losing_any() {
     };
 
     let result = || {
-        assert_eq!(openvpn::import_templates_from_vault(&mut ca).unwrap(), Some(2));
-        assert_eq!(openvpn::get_template(&mut ca, "default").unwrap().content, multi_line);
-        assert_eq!(openvpn::templates_awaiting_cleanup(&mut ca).unwrap(), vec!["default", "tcp"]);
+        assert_eq!(
+            openvpn::import_templates_from_vault(&mut ca).unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            openvpn::get_template(&mut ca, "default").unwrap().content,
+            multi_line
+        );
+        assert_eq!(
+            openvpn::templates_awaiting_cleanup(&mut ca).unwrap(),
+            vec!["default", "tcp"]
+        );
 
         assert_eq!(openvpn::archive_vault_templates(&mut ca).unwrap(), 2);
 
-        let item = ca.vault.item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)).unwrap();
+        let item = ca
+            .vault
+            .item(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title))
+            .unwrap();
         let labels: Vec<&str> = item.fields.iter().map(|f| f.label.as_str()).collect();
-        assert!(labels.contains(&"hostname"), "server settings must survive: {labels:?}");
-        assert!(!labels.contains(&"default") && !labels.contains(&"tcp"), "templates left behind: {labels:?}");
+        assert!(
+            labels.contains(&"hostname"),
+            "server settings must survive: {labels:?}"
+        );
+        assert!(
+            !labels.contains(&"default") && !labels.contains(&"tcp"),
+            "templates left behind: {labels:?}"
+        );
 
         let archive = ca.vault.clone().including_archive();
-        let note = archive.items(&[]).unwrap().into_iter()
+        let note = archive
+            .items(&[])
+            .unwrap()
+            .into_iter()
             .find(|i| i.title.starts_with("OpenVPN_Templates_"))
             .expect("archived templates note");
         let json: serde_json::Value =
-            serde_json::from_str(archive.item_json(&ItemRef::from(&note)).unwrap().expose()).unwrap();
+            serde_json::from_str(archive.item_json(&ItemRef::from(&note)).unwrap().expose())
+                .unwrap();
         assert_eq!(json["state"].as_str(), Some("ARCHIVED"));
         let archived = archive.item(&ItemRef::from(&note)).unwrap();
-        assert_eq!(op::field_text(&archived, "default").expect("archived default template").trim(), multi_line);
+        assert_eq!(
+            op::field_text(&archived, "default")
+                .expect("archived default template")
+                .trim(),
+            multi_line
+        );
         let note_id = note.id;
 
-        assert_eq!(ca.ca_database.as_ref().unwrap().openvpn_template_import().unwrap(), TemplateImport::Settled);
+        assert_eq!(
+            ca.ca_database
+                .as_ref()
+                .unwrap()
+                .openvpn_template_import()
+                .unwrap(),
+            TemplateImport::Settled
+        );
         note_id
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(result));
@@ -190,8 +257,12 @@ fn openvpn_templates_import_then_archive_without_losing_any() {
     if let Ok(note_id) = &outcome {
         ca.vault.delete_item_permanently(&ItemRef::id(note_id)).ok();
     }
-    ca.vault.delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title)).ok();
-    ca.vault.delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.ca_database_title)).ok();
+    ca.vault
+        .delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.openvpn_title))
+        .ok();
+    ca.vault
+        .delete_item_permanently(&ItemRef::title(DEFAULT_OP_CONF.ca_database_title))
+        .ok();
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);
     }

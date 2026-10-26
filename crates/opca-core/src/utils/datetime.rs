@@ -39,12 +39,7 @@ pub fn now_utc_str(fmt: DateTimeFormat) -> String {
 }
 
 /// Return the current UTC time plus the given offset.
-pub fn now_utc_plus(
-    days: i64,
-    hours: i64,
-    minutes: i64,
-    seconds: i64,
-) -> DateTime<Utc> {
+pub fn now_utc_plus(days: i64, hours: i64, minutes: i64, seconds: i64) -> DateTime<Utc> {
     now_utc()
         + Duration::days(days)
         + Duration::hours(hours)

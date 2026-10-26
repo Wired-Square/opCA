@@ -11,8 +11,8 @@ mod test_harness;
 compile_error!("the `mcp` feature is for development builds only");
 
 use log::info;
-use tauri::{Listener, Manager};
 use state::AppState;
+use tauri::{Listener, Manager};
 
 /// Spawn a background `op --version` so that macOS caches the AMFI / code-
 /// signature verification for the `op` binary.  Subsequent spawns in the same
@@ -34,11 +34,7 @@ fn warmup_op_cli() {
 /// common package managers.
 #[cfg(target_os = "macos")]
 fn extend_path() {
-    let extra_dirs: &[&str] = &[
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        "/usr/local/sbin",
-    ];
+    let extra_dirs: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/usr/local/sbin"];
 
     let current = std::env::var("PATH").unwrap_or_default();
     let mut dirs: Vec<&str> = current.split(':').collect();
@@ -68,18 +64,16 @@ fn main() {
                 .max_file_size(5_000_000) // 5 MB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .targets([
-                    tauri_plugin_log::Target::new(
-                        tauri_plugin_log::TargetKind::LogDir {
-                            file_name: Some("opca".to_string()),
-                        },
-                    ),
-                    tauri_plugin_log::Target::new(
-                        tauri_plugin_log::TargetKind::Stdout,
-                    ),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("opca".to_string()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                 ])
                 .build(),
         )
-        .plugin(wslib_tauri::quit_guard::init(|app| app.state::<AppState>().is_busy()))
+        .plugin(wslib_tauri::quit_guard::init(|app| {
+            app.state::<AppState>().is_busy()
+        }))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -199,7 +193,9 @@ fn main() {
         .setup(|_app| {
             info!("opCA v{} starting", env!("CARGO_PKG_VERSION"));
             _app.listen_any(wslib_tauri::quit_guard::QUIT_PENDING_EVENT, |_| {
-                info!("[tauri] quit requested during a 1Password operation; waiting for it to finish");
+                info!(
+                    "[tauri] quit requested during a 1Password operation; waiting for it to finish"
+                );
             });
             #[cfg(feature = "mcp")]
             mcp::start(_app.handle().clone());

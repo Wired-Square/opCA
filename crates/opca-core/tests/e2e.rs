@@ -47,7 +47,11 @@ fn make_vault(vault: &str) -> Vault {
 }
 
 fn create_vault(name: &str) -> VaultInfo {
-    op::create_vault(&op::client(ShellRunner::new(), test_account().as_deref()), name).expect("vault create failed")
+    op::create_vault(
+        &op::client(ShellRunner::new(), test_account().as_deref()),
+        name,
+    )
+    .expect("vault create failed")
 }
 
 /// Skip the test if `OPCA_INTEGRATION_TEST` is not set.
@@ -89,7 +93,11 @@ fn cert_title_for_serial<R: Runner>(ca: &CertificateAuthority<R>, serial: &str) 
 
 /// State of `title` in the vault (`ACTIVE`/`ARCHIVED`), including archived items.
 fn item_state(vault: &Vault, title: &str) -> String {
-    let json = vault.clone().including_archive().item_json(&ItemRef::title(title)).expect("op item get failed");
+    let json = vault
+        .clone()
+        .including_archive()
+        .item_json(&ItemRef::title(title))
+        .expect("op item get failed");
     let item: serde_json::Value = serde_json::from_str(json.expose()).expect("item json");
     item["state"].as_str().unwrap_or("ACTIVE").to_string()
 }
@@ -190,7 +198,11 @@ fn t11_ca_retrieve() {
         .and_then(|e| e.data().to_string().ok());
     assert_eq!(org.as_deref(), Some("OPCA E2E Test"));
     let key = cert.public_key().expect("CA public key");
-    assert_eq!((key.id(), key.bits()), (openssl::pkey::Id::EC, 384), "new CA must default to EC P-384");
+    assert_eq!(
+        (key.id(), key.bits()),
+        (openssl::pkey::Id::EC, 384),
+        "new CA must default to EC P-384"
+    );
     eprintln!("[e2e] CA retrieved — org={:?}", org);
 }
 
@@ -227,7 +239,10 @@ fn t20_cert_create_server() {
     let config = opca_core::services::cert::CertBundleConfig {
         cn: Some("e2e-webserver.example.com".to_string()),
         key_algorithm: Some(KeyAlgorithm::Rsa2048),
-        alt_names: Some(vec!["www.e2e-webserver.example.com".to_string(), "10.0.0.1".to_string()]),
+        alt_names: Some(vec![
+            "www.e2e-webserver.example.com".to_string(),
+            "10.0.0.1".to_string(),
+        ]),
         ..Default::default()
     };
 
@@ -237,8 +252,16 @@ fn t20_cert_create_server() {
         .expect("generate webserver cert failed");
 
     let cert = bundle.certificate.as_ref().expect("certificate missing");
-    assert_eq!(cert.signature_algorithm().object().nid(), openssl::nid::Nid::ECDSA_WITH_SHA384);
-    let ips: Vec<_> = cert.subject_alt_names().into_iter().flatten().filter_map(|n| n.ipaddress().map(<[u8]>::to_vec)).collect();
+    assert_eq!(
+        cert.signature_algorithm().object().nid(),
+        openssl::nid::Nid::ECDSA_WITH_SHA384
+    );
+    let ips: Vec<_> = cert
+        .subject_alt_names()
+        .into_iter()
+        .flatten()
+        .filter_map(|n| n.ipaddress().map(<[u8]>::to_vec))
+        .collect();
     assert_eq!(ips, vec![vec![10, 0, 0, 1]], "IP SAN must survive signing");
     let pem = bundle.certificate_pem().expect("cert pem");
     assert!(pem.contains("BEGIN CERTIFICATE"));
@@ -269,7 +292,11 @@ fn t21_cert_create_client() {
         .expect("generate vpnclient cert failed");
 
     assert!(bundle.certificate.is_some());
-    assert_eq!(bundle.public_key_type_str().unwrap(), "EC", "default key should be EC");
+    assert_eq!(
+        bundle.public_key_type_str().unwrap(),
+        "EC",
+        "default key should be EC"
+    );
     s.client_cert_title = bundle.title.clone();
     eprintln!("[e2e] VPN client cert created: {}", bundle.title);
 }
@@ -382,7 +409,10 @@ fn t25_cert_create_with_days() {
         .expect("generate short-lived cert failed");
 
     let cert = bundle.certificate.as_ref().expect("certificate missing");
-    let span = cert.not_before().diff(cert.not_after()).expect("validity diff");
+    let span = cert
+        .not_before()
+        .diff(cert.not_after())
+        .expect("validity diff");
     assert_eq!(span.days, 30, "explicit days must set the validity span");
     assert!(span.secs.abs() <= 1, "validity span off by {}s", span.secs);
     eprintln!("[e2e] Short-lived cert created: {}", bundle.title);
@@ -398,7 +428,10 @@ fn t26_cert_delete_revoked() {
     let mut ca = CertificateAuthority::retrieve(vault.clone()).expect("CA retrieve failed");
 
     let valid_serial = cert_serial(&ca, &CertLookup::Title(s.server_cert_title.clone()));
-    assert!(ca.delete_certificate(&valid_serial).is_err(), "a valid certificate must not be deletable");
+    assert!(
+        ca.delete_certificate(&valid_serial).is_err(),
+        "a valid certificate must not be deletable"
+    );
 
     let lookup = CertLookup::Cn("e2e-shortlived".to_string());
     let serial = cert_serial(&ca, &lookup);
@@ -414,7 +447,10 @@ fn t26_cert_delete_revoked() {
         .query_cert(&CertLookup::Serial(serial.clone()), false)
         .expect("query_cert failed")
         .expect("deleted row kept");
-    assert!(row.deleted_at.is_some(), "deleted row must carry deleted_at");
+    assert!(
+        row.deleted_at.is_some(),
+        "deleted row must carry deleted_at"
+    );
 
     s.deleted_serial = serial;
     eprintln!("[e2e] Deleted revoked cert {} ({title})", s.deleted_serial);
@@ -438,16 +474,32 @@ fn t30_crl_generate() {
         .get_revoked()
         .into_iter()
         .flatten()
-        .map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string())
+        .map(|r| {
+            r.serial_number()
+                .to_bn()
+                .unwrap()
+                .to_dec_str()
+                .unwrap()
+                .to_string()
+        })
         .collect();
     assert!(
         revoked.contains(&s.deleted_serial),
         "deleted revoked serial {} must stay on the CRL: {revoked:?}",
         s.deleted_serial
     );
-    let stored = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().expect("CRL metadata");
+    let stored = ca
+        .ca_database
+        .as_ref()
+        .unwrap()
+        .get_crl_metadata()
+        .unwrap()
+        .expect("CRL metadata");
     let parsed = opca_core::services::ca::parse_crl_metadata(&crl_pem).unwrap();
-    assert_eq!((parsed.crl_number, stored.revoked_count), (stored.crl_number, Some(revoked.len() as i64)));
+    assert_eq!(
+        (parsed.crl_number, stored.revoked_count),
+        (stored.crl_number, Some(revoked.len() as i64))
+    );
     eprintln!("[e2e] CRL generated ({} bytes)", crl_pem.len());
 }
 
@@ -486,8 +538,14 @@ fn t32_crl_batch_generate_and_revoke() {
     let batch_path = store.path().join(DEFAULT_STORAGE_CONF.crl_batch_file);
     let mut ca = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
     let set_batches = |ca: &mut CertificateAuthority<_>, on: bool, store: String| {
-        ca.ca_database.as_ref().unwrap()
-            .update_config(&CaConfig { crl_batch_enabled: Some(on), ca_private_store: Some(store), ..CaConfig::default() })
+        ca.ca_database
+            .as_ref()
+            .unwrap()
+            .update_config(&CaConfig {
+                crl_batch_enabled: Some(on),
+                ca_private_store: Some(store),
+                ..CaConfig::default()
+            })
             .unwrap();
         ca.store_ca_database().unwrap();
     };
@@ -502,26 +560,53 @@ fn t32_crl_batch_generate_and_revoke() {
         .generate_certificate_bundle(
             CertType::VpnClient,
             "e2e-batch",
-            opca_core::services::cert::CertBundleConfig { cn: Some("e2e-batch".into()), ..Default::default() },
+            opca_core::services::cert::CertBundleConfig {
+                cn: Some("e2e-batch".into()),
+                ..Default::default()
+            },
             None,
         )
         .expect("create e2e-batch failed");
     let serial = bundle.get_certificate_attrib("serial").unwrap().unwrap();
-    assert!(ca.revoke_certificate(&CertLookup::Serial(serial.clone())).unwrap());
+    assert!(
+        ca.revoke_certificate(&CertLookup::Serial(serial.clone()))
+            .unwrap()
+    );
     ca.generate_crl().expect("re-sign on revoke failed");
 
     let resigned = crl_batch(&batch_path);
     let number = |crl: &openssl::x509::X509Crl| {
         let pem = String::from_utf8(crl.to_pem().unwrap()).unwrap();
-        opca_core::services::ca::parse_crl_metadata(&pem).unwrap().crl_number.unwrap()
+        opca_core::services::ca::parse_crl_metadata(&pem)
+            .unwrap()
+            .crl_number
+            .unwrap()
     };
     assert_eq!(number(&resigned[0]), number(&first[4]) + 1);
     let revoked = |crl: &openssl::x509::X509Crl| -> Vec<String> {
-        crl.get_revoked().into_iter().flatten().map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string()).collect()
+        crl.get_revoked()
+            .into_iter()
+            .flatten()
+            .map(|r| {
+                r.serial_number()
+                    .to_bn()
+                    .unwrap()
+                    .to_dec_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
     };
     assert!(resigned.iter().all(|crl| revoked(crl).contains(&serial)));
-    let reloaded = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
-    let batch = reloaded.ca_database.as_ref().unwrap().get_crl_batch().unwrap().expect("batch recorded");
+    let reloaded =
+        CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
+    let batch = reloaded
+        .ca_database
+        .as_ref()
+        .unwrap()
+        .get_crl_batch()
+        .unwrap()
+        .expect("batch recorded");
     assert_eq!(batch.first_number, number(&resigned[0]));
 
     set_batches(&mut ca, false, String::new());
@@ -538,7 +623,8 @@ fn t40_database_counts() {
 
     let mut ca = CertificateAuthority::retrieve(vault).expect("CA retrieve failed");
     let db = ca.ca_database.as_mut().expect("database missing");
-    db.process_ca_database(None, false).expect("process_ca_database failed");
+    db.process_ca_database(None, false)
+        .expect("process_ca_database failed");
 
     let total = db.count_certs().expect("count_certs failed");
     assert!(total >= 2, "Expected at least 2 certs, got {total}");
@@ -574,7 +660,10 @@ fn t50_vault_backup_restore() {
     let vb = VaultBackup::new(&vault_src, &DEFAULT_OP_CONF);
     let payload = vb.create_backup().expect("create_backup failed");
 
-    assert!(payload.items.len() >= 3, "Expected at least CA + DB + certs");
+    assert!(
+        payload.items.len() >= 3,
+        "Expected at least CA + DB + certs"
+    );
     assert_eq!(payload.metadata.vault_name, s.vault);
     eprintln!(
         "[e2e] Backup created: {} items from '{}'",
@@ -604,13 +693,19 @@ fn t50_vault_backup_restore() {
 
     // --- Verify CA exists in restored vault ---
     assert!(
-        vault_dst.item_exists(&ItemRef::title(DEFAULT_OP_CONF.ca_title)).unwrap(),
+        vault_dst
+            .item_exists(&ItemRef::title(DEFAULT_OP_CONF.ca_title))
+            .unwrap(),
         "CA item not found in restored vault"
     );
 
-    let ca = CertificateAuthority::retrieve(vault_dst).expect("retrieve from restored vault failed");
+    let ca =
+        CertificateAuthority::retrieve(vault_dst).expect("retrieve from restored vault failed");
     let bundle = ca.ca_bundle.as_ref().expect("CA bundle missing");
-    assert!(bundle.certificate.is_some(), "Restored CA has no certificate");
+    assert!(
+        bundle.certificate.is_some(),
+        "Restored CA has no certificate"
+    );
     eprintln!("[e2e] Verified CA in restored vault");
 }
 
@@ -626,7 +721,10 @@ fn t90_cleanup() {
     // `op vault delete` is account-wide, so the test vault's own `Op` can
     // delete the restore vault and then itself.
     let test_vault = make_vault(&s.vault);
-    for vault in [&s.restore_vault, &s.vault].into_iter().filter(|v| !v.is_empty()) {
+    for vault in [&s.restore_vault, &s.vault]
+        .into_iter()
+        .filter(|v| !v.is_empty())
+    {
         match test_vault.op().delete_vault_permanently(vault) {
             Ok(()) => eprintln!("[e2e] Deleted vault: {vault}"),
             Err(e) => eprintln!("[e2e] Warning: failed to delete vault '{vault}': {e}"),

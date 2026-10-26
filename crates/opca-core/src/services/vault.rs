@@ -89,7 +89,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
             None => {
                 return Err(OpcaError::Other(
                     "CA item not found — nothing to back up.".to_string(),
-                ))
+                ));
             }
         }
 
@@ -168,7 +168,10 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
         payload: &BackupPayload,
         on_progress: Option<&dyn Fn(&str, &str)>,
     ) -> Result<RestoreCounts, OpcaError> {
-        if self.vault.item_exists(&ItemRef::title(self.op_config.ca_title))? {
+        if self
+            .vault
+            .item_exists(&ItemRef::title(self.op_config.ca_title))?
+        {
             return Err(OpcaError::Other(
                 "Target vault already contains a CA. Restore requires an empty vault.".to_string(),
             ));
@@ -240,22 +243,23 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
             title
         };
 
-        self.vault.create_document(title, filename, content.as_bytes())?;
+        self.vault
+            .create_document(title, filename, content.as_bytes())?;
         Ok(())
     }
 
     /// Re-create a Secure Note item from its saved JSON.
     fn restore_secure_note(&self, title: &str, item_json: &str) -> Result<(), OpcaError> {
-        let obj: serde_json::Value = serde_json::from_str(item_json).map_err(|e| {
-            OpcaError::Other(format!("Invalid JSON for item {title:?}: {e}"))
-        })?;
+        let obj: serde_json::Value = serde_json::from_str(item_json)
+            .map_err(|e| OpcaError::Other(format!("Invalid JSON for item {title:?}: {e}")))?;
 
         let fields = extract_attributes(&obj)
             .iter()
             .map(|token| Assignment::parse(token))
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.vault.create_item(title, self.op_config.category, &fields)?;
+        self.vault
+            .create_item(title, self.op_config.category, &fields)?;
         Ok(())
     }
 }
@@ -327,14 +331,8 @@ pub fn extract_attributes(item_obj: &serde_json::Value) -> Vec<String> {
     let mut attrs = Vec::new();
 
     for field in fields {
-        let label = field
-            .get("label")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let value = field
-            .get("value")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let label = field.get("label").and_then(|v| v.as_str()).unwrap_or("");
+        let value = field.get("value").and_then(|v| v.as_str()).unwrap_or("");
         let field_id = field.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
         if label.is_empty() || skip_labels.contains(label) {
@@ -361,10 +359,7 @@ pub fn extract_attributes(item_obj: &serde_json::Value) -> Vec<String> {
         };
 
         // STRING fields need [text] suffix
-        let field_type = field
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let field_type = field.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if field_type == "STRING" && !qualified.contains("[text]") {
             qualified = format!("{qualified}[text]");
         }
@@ -383,7 +378,9 @@ pub fn extract_attributes(item_obj: &serde_json::Value) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::constants::DEFAULT_OP_CONF;
-    use crate::testutil::{created, fake_vault, item_id, item_json, not_found, summary_json, FakeRunner, Output};
+    use crate::testutil::{
+        FakeRunner, Output, created, fake_vault, item_id, item_json, not_found, summary_json,
+    };
 
     #[test]
     fn test_classify_certificate() {
@@ -393,15 +390,17 @@ mod tests {
 
     #[test]
     fn test_classify_csr() {
-        let json =
-            r#"{"fields":[{"label":"certificate_signing_request","value":"csr-data"}]}"#;
+        let json = r#"{"fields":[{"label":"certificate_signing_request","value":"csr-data"}]}"#;
         assert_eq!(classify_item("my_csr", json), ITEM_TYPE_CSR);
     }
 
     #[test]
     fn test_classify_external_cert() {
         let json = r#"{"fields":[{"label":"certificate","value":"pem-data"}]}"#;
-        assert_eq!(classify_item("EXT_example.com", json), ITEM_TYPE_EXTERNAL_CERT);
+        assert_eq!(
+            classify_item("EXT_example.com", json),
+            ITEM_TYPE_EXTERNAL_CERT
+        );
     }
 
     #[test]
@@ -515,22 +514,35 @@ mod tests {
     }
 
     fn lock_free(fake: &FakeRunner) -> bool {
-        fake.calls().iter().all(|c| !c.args().iter().any(|a| a.contains(DEFAULT_OP_CONF.lock_title)))
+        fake.calls().iter().all(|c| {
+            !c.args()
+                .iter()
+                .any(|a| a.contains(DEFAULT_OP_CONF.lock_title))
+        })
     }
 
     #[test]
     fn a_backup_leaves_out_the_vault_lock() {
         let fake = FakeRunner::new();
-        let listed = [summary_json(&item_id(1), "CA"), summary_json(&item_id(2), "CRT_1_a"), summary_json(&item_id(3), "CA_Lock")];
+        let listed = [
+            summary_json(&item_id(1), "CA"),
+            summary_json(&item_id(2), "CRT_1_a"),
+            summary_json(&item_id(3), "CA_Lock"),
+        ];
         fake.respond(Output::ok(item_json("CA", &[("cn", "Test CA")])))
             .respond(Output::ok("db"))
             .respond(Output::ok("crl"))
             .respond(not_found("OpenVPN"))
             .respond(Output::ok(format!("[{}]", listed.join(","))))
             .respond(Output::ok(item_json("CRT_1_a", &[("certificate", "pem")])))
-            .respond(Output::ok(item_json("CA_Lock", &[("operation", "vault_backup")])));
+            .respond(Output::ok(item_json(
+                "CA_Lock",
+                &[("operation", "vault_backup")],
+            )));
 
-        let payload = VaultBackup::new(&fake_vault(&fake), &DEFAULT_OP_CONF).create_backup().unwrap();
+        let payload = VaultBackup::new(&fake_vault(&fake), &DEFAULT_OP_CONF)
+            .create_backup()
+            .unwrap();
 
         let titles: Vec<_> = payload.items.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(titles, ["CA", "CA_Database", "CRL", "CRT_1_a"]);
@@ -540,7 +552,9 @@ mod tests {
     #[test]
     fn a_restore_skips_a_vault_lock_the_backup_carries() {
         let fake = FakeRunner::new();
-        fake.respond(not_found("CA")).respond(created("CA")).respond(created("CA_Lock"));
+        fake.respond(not_found("CA"))
+            .respond(created("CA"))
+            .respond(created("CA_Lock"));
         let item = |item_type: &str, title: &str| BackupItem {
             item_type: item_type.into(),
             title: title.into(),
@@ -553,10 +567,15 @@ mod tests {
                 vault_name: "TestVault".into(),
                 item_count: 2,
             },
-            items: vec![item(ITEM_TYPE_CA, "CA"), item(ITEM_TYPE_CERTIFICATE, "CA_Lock")],
+            items: vec![
+                item(ITEM_TYPE_CA, "CA"),
+                item(ITEM_TYPE_CERTIFICATE, "CA_Lock"),
+            ],
         };
 
-        let counts = VaultBackup::new(&fake_vault(&fake), &DEFAULT_OP_CONF).restore_backup(&payload, None).unwrap();
+        let counts = VaultBackup::new(&fake_vault(&fake), &DEFAULT_OP_CONF)
+            .restore_backup(&payload, None)
+            .unwrap();
 
         assert_eq!(counts.values().sum::<usize>(), 1);
         assert!(lock_free(&fake));

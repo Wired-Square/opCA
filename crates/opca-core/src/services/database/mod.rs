@@ -167,7 +167,9 @@ impl CertificateAuthorityDB {
         }
 
         let version: i64 = conn
-            .query_row("SELECT schema_version FROM config LIMIT 1", [], |row| row.get(0))
+            .query_row("SELECT schema_version FROM config LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .map_err(|e| unreadable(e.into()))?;
 
         let info = schema::migrate(&conn, version)?;
@@ -198,17 +200,13 @@ impl CertificateAuthorityDB {
     /// Insert the initial config row (id=1) into the config table.
     fn insert_config(conn: &Connection, config: &CaConfig) -> Result<(), OpcaError> {
         let mut columns = vec!["id", "schema_version"];
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
-            Box::new(1i64),
-            Box::new(DEFAULT_SCHEMA_VERSION),
-        ];
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(1i64), Box::new(DEFAULT_SCHEMA_VERSION)];
 
         macro_rules! push_field {
             ($field:ident, $col:expr, str) => {
                 columns.push($col);
-                values.push(Box::new(
-                    config.$field.as_deref().unwrap_or("").to_string(),
-                ));
+                values.push(Box::new(config.$field.as_deref().unwrap_or("").to_string()));
             };
             ($field:ident, $col:expr, serial) => {
                 columns.push($col);
@@ -405,9 +403,10 @@ impl CertificateAuthorityDB {
 
         // Bump forward if caller supplies an explicit serial
         if let Some(sn) = serial_number
-            && sn > current_value {
-                current_value = sn;
-            }
+            && sn > current_value
+        {
+            current_value = sn;
+        }
 
         let next_serial = current_value + 1;
         self.conn.execute(
@@ -527,9 +526,8 @@ impl CertificateAuthorityDB {
         by: &str,
         note: Option<&str>,
     ) -> Result<(), OpcaError> {
-        let now = crate::utils::datetime::now_utc_str(
-            crate::utils::datetime::DateTimeFormat::Openssl,
-        );
+        let now =
+            crate::utils::datetime::now_utc_str(crate::utils::datetime::DateTimeFormat::Openssl);
         let rows = self.conn.execute(
             "UPDATE certificate_authority SET
                 ignored_at = ?1, ignored_by = ?2, ignored_reason = ?3, ignored_note = ?4
@@ -569,9 +567,8 @@ impl CertificateAuthorityDB {
 
     /// Hide a certificate from listings. The row stays for the CRL and VPN profile status.
     pub fn mark_cert_deleted(&mut self, serial: &str) -> Result<(), OpcaError> {
-        let now = crate::utils::datetime::now_utc_str(
-            crate::utils::datetime::DateTimeFormat::Openssl,
-        );
+        let now =
+            crate::utils::datetime::now_utc_str(crate::utils::datetime::DateTimeFormat::Openssl);
         let rows = self.conn.execute(
             "UPDATE certificate_authority SET deleted_at = ?1
              WHERE serial = ?2 AND deleted_at IS NULL",
@@ -822,11 +819,11 @@ impl CertificateAuthorityDB {
 
     /// Count external certificates.
     pub fn count_external_certs(&self) -> Result<i64, OpcaError> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM external_certificate",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM external_certificate", [], |row| {
+                    row.get(0)
+                })?;
         Ok(count)
     }
 
@@ -1118,9 +1115,9 @@ impl CertificateAuthorityDB {
 
     /// Return a single OpenVPN template by name.
     pub fn get_openvpn_template(&self, name: &str) -> Result<Option<OpenVpnTemplate>, OpcaError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, content, updated_date FROM openvpn_template WHERE name = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, content, updated_date FROM openvpn_template WHERE name = ?1",
+        )?;
 
         let result = stmt.query_row([name], |row| {
             Ok(OpenVpnTemplate {
@@ -1140,9 +1137,9 @@ impl CertificateAuthorityDB {
 
     /// Return all OpenVPN templates ordered by name.
     pub fn query_all_openvpn_templates(&self) -> Result<Vec<OpenVpnTemplate>, OpcaError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, content, updated_date FROM openvpn_template ORDER BY name")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, content, updated_date FROM openvpn_template ORDER BY name",
+        )?;
 
         let rows = stmt.query_map([], |row| {
             Ok(OpenVpnTemplate {
@@ -1328,7 +1325,10 @@ impl CertificateAuthorityDB {
         }
         let mut removed = 0;
         for row in &before {
-            if !live.iter().any(|r| r.domain == row.domain && r.selector == row.selector) {
+            if !live
+                .iter()
+                .any(|r| r.domain == row.domain && r.selector == row.selector)
+            {
                 self.delete_dkim(&row.domain, &row.selector)?;
                 removed += 1;
             }
@@ -1371,9 +1371,9 @@ impl CertificateAuthorityDB {
     }
 
     pub fn count_dkim(&self) -> Result<i64, OpcaError> {
-        let count: i64 =
-            self.conn
-                .query_row("SELECT COUNT(*) FROM dkim_key", [], |row| row.get(0))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM dkim_key", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -1429,10 +1429,8 @@ impl CertificateAuthorityDB {
         self.ext_certs_valid.clear();
 
         let now = Utc::now().naive_utc();
-        let warning_boundary =
-            now + chrono::Duration::days(EXPIRY_WARNING_DAYS);
-        let caution_boundary =
-            now + chrono::Duration::days(EXPIRY_CAUTION_DAYS);
+        let warning_boundary = now + chrono::Duration::days(EXPIRY_WARNING_DAYS);
+        let caution_boundary = now + chrono::Duration::days(EXPIRY_CAUTION_DAYS);
 
         // Process CA-issued certificates
         let certs = self.query_all_certs_including_deleted()?;
@@ -1446,9 +1444,10 @@ impl CertificateAuthorityDB {
                 continue;
             }
             if let Some(rev_serial) = revoke_serial
-                && rev_serial == cert.serial {
-                    continue; // about to be revoked — not a replacement
-                }
+                && rev_serial == cert.serial
+            {
+                continue; // about to be revoked — not a replacement
+            }
             let Some(expiry_str) = cert.expiry_date.as_deref() else {
                 continue;
             };
@@ -1506,17 +1505,22 @@ impl CertificateAuthorityDB {
 
             let expired = now > expiry_date;
             let expires_soon = warning_boundary > expiry_date;
-            let mut revoked = cert.revocation_date.as_ref().is_some_and(|rd| !rd.is_empty())
+            let mut revoked = cert
+                .revocation_date
+                .as_ref()
+                .is_some_and(|rd| !rd.is_empty())
                 || cert.status.as_deref() == Some("Revoked");
 
             if let Some(rev_serial) = revoke_serial
-                && !expired && !revoked && rev_serial == cert.serial {
-                    revoked = true;
-                    cert_changed = true;
-                    db_changed = true;
-                    cert.revocation_date =
-                        Some(datetime::now_utc_str(DateTimeFormat::Openssl));
-                }
+                && !expired
+                && !revoked
+                && rev_serial == cert.serial
+            {
+                revoked = true;
+                cert_changed = true;
+                db_changed = true;
+                cert.revocation_date = Some(datetime::now_utc_str(DateTimeFormat::Openssl));
+            }
 
             let expires_warning = caution_boundary > expiry_date;
 
@@ -1536,10 +1540,8 @@ impl CertificateAuthorityDB {
                     db_changed = true;
                     cert.status = Some("Expired".to_string());
                 }
-                if let Some(replacement) = cert
-                    .cn
-                    .as_deref()
-                    .and_then(|cn| valid_cn_to_serial.get(cn))
+                if let Some(replacement) =
+                    cert.cn.as_deref().and_then(|cn| valid_cn_to_serial.get(cn))
                 {
                     self.certs_superseded.insert(cert.serial.clone());
                     self.replacements
@@ -1623,7 +1625,10 @@ impl CertificateAuthorityDB {
                 .and_then(|c| c.revocation_date)
                 .filter(|d| !d.is_empty());
             if let Some(revocation_date) = revocation_date {
-                entries.push(CrlEntry { serial: serial.clone(), revocation_date });
+                entries.push(CrlEntry {
+                    serial: serial.clone(),
+                    revocation_date,
+                });
             }
         }
         Ok(entries)
@@ -1681,9 +1686,10 @@ impl CertificateAuthorityDB {
         // against it. `valid_cn_to_serial` omits ignored certs, so this only
         // fires when a genuine replacement exists.
         if let Some(cur) = current_valid
-            && cur != serial {
-                return (VpnProfileStatus::NeedsRegen, Some(cur.to_string()));
-            }
+            && cur != serial
+        {
+            return (VpnProfileStatus::NeedsRegen, Some(cur.to_string()));
+        }
 
         // Expired-but-replaced → regen against the replacement; expired with no
         // replacement → expired.

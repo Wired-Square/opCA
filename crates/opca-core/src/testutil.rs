@@ -1,7 +1,7 @@
 //! A scripted `op` and the CA vault it answers for.
 
-pub use wslib_1password::testing::FakeRunner;
 pub use wslib_1password::Output;
+pub use wslib_1password::testing::FakeRunner;
 
 use crate::op::{Vault, VaultInfo};
 
@@ -21,7 +21,13 @@ pub fn item_id(n: u32) -> String {
 
 /// `op item get --format=json` for an item with these `(label, value)` fields.
 pub fn item_json(title: &str, fields: &[(&str, &str)]) -> String {
-    item_with_sections(title, &fields.iter().map(|&(l, v)| (None, l, v)).collect::<Vec<_>>())
+    item_with_sections(
+        title,
+        &fields
+            .iter()
+            .map(|&(l, v)| (None, l, v))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// [`item_json`] with each field in an optional section.
@@ -56,5 +62,7 @@ pub fn summary_json(id: &str, title: &str) -> String {
 }
 
 pub fn not_found(title: &str) -> Output {
-    Output::fail(format!("[ERROR] \"{title}\" isn't an item in the \"TestVault\" vault."))
+    Output::fail(format!(
+        "[ERROR] \"{title}\" isn't an item in the \"TestVault\" vault."
+    ))
 }

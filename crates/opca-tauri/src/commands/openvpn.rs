@@ -5,18 +5,20 @@ use log::{info, warn};
 use tauri::{AppHandle, State};
 
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
-use opca_core::crypto::utils::{generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key};
+use opca_core::crypto::utils::{
+    generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key,
+};
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Assignment, Error, Item, ItemRef, Vault};
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::CertType;
-use opca_core::services::database::models::OpenVpnProfile;
 use opca_core::services::database::CertLookup;
+use opca_core::services::database::models::OpenVpnProfile;
 use opca_core::services::openvpn;
 
 use crate::commands::cert::cert_list_item;
 use crate::commands::dto::{
-    BulkGenerateProfileItem, BulkProgress, BulkProfileResult, CertListItem, GenerateProfileRequest,
+    BulkGenerateProfileItem, BulkProfileResult, BulkProgress, CertListItem, GenerateProfileRequest,
     OpenVpnProfileItem, OpenVpnServerParams, OpenVpnTemplateDetail, OpenVpnTemplateItem,
     ServerSetupRequest,
 };
@@ -39,12 +41,20 @@ fn openvpn_item(vault: &Vault<Runner>) -> Result<Option<Item>, String> {
 /// (`section.label[type]`); a bare label matches in any section.
 fn conf_field(item: Option<&Item>, conf_label: &str) -> Option<String> {
     let item = item?;
-    let name = conf_label.split_once('[').map_or(conf_label, |(name, _)| name);
+    let name = conf_label
+        .split_once('[')
+        .map_or(conf_label, |(name, _)| name);
     let field = match name.split_once('.') {
         Some((section, label)) => item.field_in(section, label),
         None => item.field(name),
     };
-    field.map(|f| f.value.as_ref().map_or("", |v| v.expose()).trim().to_string())
+    field.map(|f| {
+        f.value
+            .as_ref()
+            .map_or("", |v| v.expose())
+            .trim()
+            .to_string()
+    })
 }
 
 fn server_params(item: Option<&Item>) -> OpenVpnServerParams {
@@ -63,7 +73,12 @@ fn server_params(item: Option<&Item>) -> OpenVpnServerParams {
 }
 
 fn store_openvpn(vault: &Vault<Runner>, fields: &[Assignment]) -> Result<(), OpcaError> {
-    op::put_item(vault, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
+    op::put_item(
+        vault,
+        DEFAULT_OP_CONF.openvpn_title,
+        DEFAULT_OP_CONF.category,
+        fields,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -72,9 +87,7 @@ fn store_openvpn(vault: &Vault<Runner>, fields: &[Assignment]) -> Result<(), Opc
 
 /// Get OpenVPN server parameters (DH, TA, server config) from 1Password.
 #[tauri::command]
-pub async fn get_openvpn_params(
-    state: State<'_, AppState>,
-) -> Result<OpenVpnServerParams, String> {
+pub async fn get_openvpn_params(state: State<'_, AppState>) -> Result<OpenVpnServerParams, String> {
     state.with_vault(|vault| Ok(server_params(openvpn_item(vault)?.as_ref())))
 }
 
@@ -96,7 +109,12 @@ pub async fn generate_openvpn_dh(
         }
 
         op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)
-            .and_then(|dh| Ok([dh, op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?]))
+            .and_then(|dh| {
+                Ok([
+                    dh,
+                    op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?,
+                ])
+            })
             .and_then(|fields| store_openvpn(vault, &fields))
             .map_err(|e| format!("Failed to store DH parameters: {e}"))
     })?;
@@ -123,12 +141,20 @@ pub async fn generate_openvpn_ta(
         }
 
         op::assign(DEFAULT_OP_CONF.ta_item, &ta_pem)
-            .and_then(|ta| Ok([ta, op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?]))
+            .and_then(|ta| {
+                Ok([
+                    ta,
+                    op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?,
+                ])
+            })
             .and_then(|fields| store_openvpn(vault, &fields))
             .map_err(|e| format!("Failed to store TA key: {e}"))
     })?;
 
-    state.log_ok("generate_ta", Some("Generated TLS Authentication key".to_string()));
+    state.log_ok(
+        "generate_ta",
+        Some("Generated TLS Authentication key".to_string()),
+    );
     get_openvpn_params(state).await
 }
 
@@ -145,7 +171,9 @@ pub async fn setup_openvpn_server(
     state.with_vault(|vault| {
         let item = openvpn_item(vault)?;
         let has = |label: &str| conf_field(item.as_ref(), label).is_some();
-        let assign = |label: &str, value: &dyn std::fmt::Display| op::assign(label, value).map_err(|e| e.to_string());
+        let assign = |label: &str, value: &dyn std::fmt::Display| {
+            op::assign(label, value).map_err(|e| e.to_string())
+        };
         let mut attrs: Vec<Assignment> = Vec::new();
 
         // Server defaults — only add if missing
@@ -186,16 +214,31 @@ pub async fn setup_openvpn_server(
 
         let stored = match item {
             Some(item) => vault.edit_item(&ItemRef::from(&item), &attrs),
-            None => vault.create_item(DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, &attrs).map(drop),
+            None => vault
+                .create_item(
+                    DEFAULT_OP_CONF.openvpn_title,
+                    DEFAULT_OP_CONF.category,
+                    &attrs,
+                )
+                .map(drop),
         };
-        stored.map_err(|e| format!("Failed to store OpenVPN configuration: {}", OpcaError::from(e)))
+        stored.map_err(|e| {
+            format!(
+                "Failed to store OpenVPN configuration: {}",
+                OpcaError::from(e)
+            )
+        })
     })?;
 
-    with_ca(&state, "setup_openvpn", |ca| openvpn::add_starter_template(ca, &template_name))?;
+    with_ca(&state, "setup_openvpn", |ca| {
+        openvpn::add_starter_template(ca, &template_name)
+    })?;
 
     state.log_ok(
         "setup_openvpn",
-        Some(format!("OpenVPN server setup complete (template: {template_name})")),
+        Some(format!(
+            "OpenVPN server setup complete (template: {template_name})"
+        )),
     );
     get_openvpn_params(state).await
 }
@@ -240,7 +283,9 @@ pub async fn get_openvpn_template(
     state: State<'_, AppState>,
     name: String,
 ) -> Result<OpenVpnTemplateDetail, String> {
-    let t = with_ca(&state, "get_template", |ca| openvpn::get_template(ca, &name))?;
+    let t = with_ca(&state, "get_template", |ca| {
+        openvpn::get_template(ca, &name)
+    })?;
     Ok(OpenVpnTemplateDetail {
         name: t.name,
         content: t.content,
@@ -262,8 +307,13 @@ pub async fn save_openvpn_template(
     }
 
     info!("[tauri] save_openvpn_template: name='{name}'");
-    with_ca(&state, "save_template", |ca| openvpn::save_template(ca, &name, &content))?;
-    state.log_ok("save_template", Some(format!("Saved OpenVPN template '{name}'")));
+    with_ca(&state, "save_template", |ca| {
+        openvpn::save_template(ca, &name, &content)
+    })?;
+    state.log_ok(
+        "save_template",
+        Some(format!("Saved OpenVPN template '{name}'")),
+    );
     Ok(true)
 }
 
@@ -273,9 +323,14 @@ pub async fn delete_openvpn_template(
     name: String,
 ) -> Result<bool, String> {
     info!("[tauri] delete_openvpn_template: name='{name}'");
-    let deleted = with_ca(&state, "delete_template", |ca| openvpn::delete_template(ca, &name))?;
+    let deleted = with_ca(&state, "delete_template", |ca| {
+        openvpn::delete_template(ca, &name)
+    })?;
     if deleted {
-        state.log_ok("delete_template", Some(format!("Deleted OpenVPN template '{name}'")));
+        state.log_ok(
+            "delete_template",
+            Some(format!("Deleted OpenVPN template '{name}'")),
+        );
     }
     Ok(deleted)
 }
@@ -284,16 +339,28 @@ pub async fn delete_openvpn_template(
 /// successful import, each confirmed present in the database. Empty when
 /// there is nothing to ask the operator about.
 #[tauri::command]
-pub async fn list_openvpn_vault_templates(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    with_ca(&state, "import_templates", openvpn::templates_awaiting_cleanup)
+pub async fn list_openvpn_vault_templates(
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    with_ca(
+        &state,
+        "import_templates",
+        openvpn::templates_awaiting_cleanup,
+    )
 }
 
 #[tauri::command]
 pub async fn archive_openvpn_vault_templates(state: State<'_, AppState>) -> Result<usize, String> {
-    let n = with_ca(&state, "archive_templates", openvpn::archive_vault_templates)?;
+    let n = with_ca(
+        &state,
+        "archive_templates",
+        openvpn::archive_vault_templates,
+    )?;
     state.log_ok(
         "archive_templates",
-        Some(format!("Archived {n} OpenVPN template(s) from the 1Password OpenVPN item")),
+        Some(format!(
+            "Archived {n} OpenVPN template(s) from the 1Password OpenVPN item"
+        )),
     );
     Ok(n)
 }
@@ -316,18 +383,14 @@ pub async fn keep_openvpn_vault_templates(state: State<'_, AppState>) -> Result<
 /// then serial descending so the current (highest-serial) cert leads within a
 /// duplicated CN.
 #[tauri::command]
-pub async fn list_vpn_certs(
-    state: State<'_, AppState>,
-) -> Result<Vec<CertListItem>, String> {
+pub async fn list_vpn_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    let db = ca
-        .ca_database
-        .as_mut()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
 
-    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
+    db.process_ca_database(None, false)
+        .map_err(|e| e.to_string())?;
 
     let certs = db.query_all_certs().map_err(|e| e.to_string())?;
     let replacements = db.replacements.clone();
@@ -347,8 +410,7 @@ pub async fn list_vpn_certs(
         .collect();
 
     vpn_certs.sort_by(|a, b| {
-        a.cn
-            .cmp(&b.cn)
+        a.cn.cmp(&b.cn)
             .then_with(|| serial_sort_key(&b.serial).cmp(&serial_sort_key(&a.serial)))
     });
     Ok(vpn_certs)
@@ -441,21 +503,33 @@ fn do_generate_openvpn_profile(
 
     let title = profile_title(cn, serial);
 
-    let template_content =
-        with_ca(state, "generate_profile", |ca| openvpn::get_template(ca, template_name))?.content;
+    let template_content = with_ca(state, "generate_profile", |ca| {
+        openvpn::get_template(ca, template_name)
+    })?
+    .content;
 
     state.with_vault(|vault| {
         // Inject op:// references with OPCA_USER pointing at the resolved item.
         let profile_content = vault
             .op()
             .inject(&template_content, &[("OPCA_USER", &opca_user)])
-            .map_err(|e| format!("Failed to inject template references: {}", OpcaError::from(e)))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to inject template references: {}",
+                    OpcaError::from(e)
+                )
+            })?;
 
         // Create-or-edit so regenerating the same cert overwrites its
         // existing document instead of failing/duplicating.
         dest_or_own(vault, dest_vault)
             .and_then(|dest| {
-                op::put_document(&dest, &title, &format!("{cn}-{template_name}.ovpn"), profile_content.expose())
+                op::put_document(
+                    &dest,
+                    &title,
+                    &format!("{cn}-{template_name}.ovpn"),
+                    profile_content.expose(),
+                )
             })
             .map_err(|e| format!("Failed to store VPN profile: {e}"))
     })?;
@@ -480,8 +554,10 @@ fn do_generate_openvpn_profile(
         let mut conn = state.ensure_ca()?;
         let ca = conn.ca.as_mut().ok_or("CA not available")?;
         let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
-        db.delete_openvpn_profile(&title).map_err(|e| e.to_string())?;
-        db.add_openvpn_profile(&profile).map_err(|e| e.to_string())?;
+        db.delete_openvpn_profile(&title)
+            .map_err(|e| e.to_string())?;
+        db.add_openvpn_profile(&profile)
+            .map_err(|e| e.to_string())?;
         ca.store_ca_database().map_err(|e| {
             state.log_err("generate_profile", Some(e.to_string()));
             e.to_string()
@@ -510,7 +586,9 @@ pub async fn generate_openvpn_profile(
 
     state.log_ok(
         "generate_profile",
-        Some(format!("Generated VPN profile for '{cn}' with template '{template_name}'")),
+        Some(format!(
+            "Generated VPN profile for '{cn}' with template '{template_name}'"
+        )),
     );
     Ok(OpenVpnProfileItem {
         cn: profile.cn,
@@ -548,18 +626,34 @@ pub async fn bulk_generate_openvpn_profiles(
             it.dest_vault.as_deref(),
         ) {
             Ok(profile) => {
-                results.push(BulkProfileResult { cn: it.cn, title: Some(profile.title), ok: true, error: None });
+                results.push(BulkProfileResult {
+                    cn: it.cn,
+                    title: Some(profile.title),
+                    ok: true,
+                    error: None,
+                });
                 ok += 1;
             }
             Err(e) => {
-                warn!("[tauri] bulk_generate_openvpn_profiles: {} failed: {e}", it.cn);
-                results.push(BulkProfileResult { cn: it.cn, title: None, ok: false, error: Some(e) });
+                warn!(
+                    "[tauri] bulk_generate_openvpn_profiles: {} failed: {e}",
+                    it.cn
+                );
+                results.push(BulkProfileResult {
+                    cn: it.cn,
+                    title: None,
+                    ok: false,
+                    error: Some(e),
+                });
                 fail += 1;
             }
         }
     }
 
-    state.log_ok("bulk_generate_profile", Some(format!("Bulk regenerate: {ok} ok, {fail} failed")));
+    state.log_ok(
+        "bulk_generate_profile",
+        Some(format!("Bulk regenerate: {ok} ok, {fail} failed")),
+    );
     Ok(results)
 }
 
@@ -600,10 +694,23 @@ pub async fn add_openvpn_profile_entries(
             })
         });
         match res {
-            Ok(_) => { results.push(BulkProfileResult { cn: it.cn, title: Some(title), ok: true, error: None }); ok += 1; }
+            Ok(_) => {
+                results.push(BulkProfileResult {
+                    cn: it.cn,
+                    title: Some(title),
+                    ok: true,
+                    error: None,
+                });
+                ok += 1;
+            }
             Err(e) => {
                 warn!("[tauri] add_openvpn_profile_entries: {} failed: {e}", it.cn);
-                results.push(BulkProfileResult { cn: it.cn, title: None, ok: false, error: Some(e.to_string()) });
+                results.push(BulkProfileResult {
+                    cn: it.cn,
+                    title: None,
+                    ok: false,
+                    error: Some(e.to_string()),
+                });
                 fail += 1;
             }
         }
@@ -613,7 +720,10 @@ pub async fn add_openvpn_profile_entries(
         state.log_err("add_profile_entry", Some(e.to_string()));
         e.to_string()
     })?;
-    state.log_ok("add_profile_entry", Some(format!("Added {ok} profile entr(y/ies), {fail} failed")));
+    state.log_ok(
+        "add_profile_entry",
+        Some(format!("Added {ok} profile entr(y/ies), {fail} failed")),
+    );
     Ok(results)
 }
 
@@ -645,14 +755,17 @@ pub async fn list_openvpn_profiles(
 
     // Refresh the classification sets so status derivation reflects the current
     // state of every cert (same as `list_vpn_certs`).
-    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
+    db.process_ca_database(None, false)
+        .map_err(|e| e.to_string())?;
 
     let profiles = db.query_all_openvpn_profiles().map_err(|e| e.to_string())?;
 
     // Index cert types once (by serial and by CN) so profile rows resolve their
     // type with map lookups instead of a SQL query each. Deleted certs stay in,
     // since a profile can still pin one.
-    let certs = db.query_all_certs_including_deleted().map_err(|e| e.to_string())?;
+    let certs = db
+        .query_all_certs_including_deleted()
+        .map_err(|e| e.to_string())?;
     let mut type_by_serial: HashMap<&str, &str> = HashMap::new();
     let mut type_by_cn: HashMap<&str, &str> = HashMap::new();
     for c in &certs {
@@ -700,13 +813,18 @@ pub async fn delete_openvpn_profile(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
-    let removed = db.delete_openvpn_profile(&title).map_err(|e| e.to_string())?;
+    let removed = db
+        .delete_openvpn_profile(&title)
+        .map_err(|e| e.to_string())?;
     ca.store_ca_database().map_err(|e| {
         state.log_err("delete_profile", Some(e.to_string()));
         e.to_string()
     })?;
 
-    state.log_ok("delete_profile", Some(format!("Deleted VPN profile {title}")));
+    state.log_ok(
+        "delete_profile",
+        Some(format!("Deleted VPN profile {title}")),
+    );
     Ok(removed)
 }
 
@@ -718,7 +836,10 @@ pub async fn bulk_delete_openvpn_profiles(
     state: State<'_, AppState>,
     titles: Vec<String>,
 ) -> Result<Vec<BulkProfileResult>, String> {
-    info!("[tauri] bulk_delete_openvpn_profiles: {} profile(s)", titles.len());
+    info!(
+        "[tauri] bulk_delete_openvpn_profiles: {} profile(s)",
+        titles.len()
+    );
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
@@ -728,12 +849,22 @@ pub async fn bulk_delete_openvpn_profiles(
     for title in &titles {
         match db.delete_openvpn_profile(title) {
             Ok(_) => {
-                results.push(BulkProfileResult { cn: String::new(), title: Some(title.clone()), ok: true, error: None });
+                results.push(BulkProfileResult {
+                    cn: String::new(),
+                    title: Some(title.clone()),
+                    ok: true,
+                    error: None,
+                });
                 ok += 1;
             }
             Err(e) => {
                 warn!("[tauri] bulk_delete_openvpn_profiles: {title} failed: {e}");
-                results.push(BulkProfileResult { cn: String::new(), title: Some(title.clone()), ok: false, error: Some(e.to_string()) });
+                results.push(BulkProfileResult {
+                    cn: String::new(),
+                    title: Some(title.clone()),
+                    ok: false,
+                    error: Some(e.to_string()),
+                });
                 fail += 1;
             }
         }
@@ -744,7 +875,10 @@ pub async fn bulk_delete_openvpn_profiles(
         e.to_string()
     })?;
 
-    state.log_ok("bulk_delete_profile", Some(format!("Bulk delete profiles: {ok} ok, {fail} failed")));
+    state.log_ok(
+        "bulk_delete_profile",
+        Some(format!("Bulk delete profiles: {ok} ok, {fail} failed")),
+    );
     Ok(results)
 }
 
@@ -767,7 +901,9 @@ pub async fn send_profile_to_vault(
             .map_err(|e| format!("Failed to read profile '{title}': {}", OpcaError::from(e)))?;
 
         dest_or_own(vault, Some(&dest_vault))
-            .and_then(|dest| Ok(dest.create_document(&title, &format!("{cn}.ovpn"), content.expose())?))
+            .and_then(|dest| {
+                Ok(dest.create_document(&title, &format!("{cn}.ovpn"), content.expose())?)
+            })
             .map_err(|e| format!("Failed to send profile to vault '{dest_vault}': {e}"))?;
 
         Ok(true)

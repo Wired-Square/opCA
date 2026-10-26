@@ -1,5 +1,7 @@
 use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
-use opca_core::crypto::utils::{generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key};
+use opca_core::crypto::utils::{
+    generate_dh_params, generate_ta_key, verify_dh_params, verify_ta_key,
+};
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Assignment, Runner, ShellRunner};
 use opca_core::services::ca::CertificateAuthority;
@@ -21,7 +23,9 @@ pub fn dispatch(args: OpenvpnArgs, app: &mut AppContext<ShellRunner>) -> Result<
             cn,
             file,
             template,
-        } => handle_generate(app, dh, ta_key, profile, server, setup, dest, cn, file, template),
+        } => handle_generate(
+            app, dh, ta_key, profile, server, setup, dest, cn, file, template,
+        ),
         OpenvpnAction::Get {
             dh,
             ta_key,
@@ -39,7 +43,12 @@ pub fn dispatch(args: OpenvpnArgs, app: &mut AppContext<ShellRunner>) -> Result<
 
 /// Sets fields of the `OpenVPN` item, creating it when there is none.
 fn store_openvpn<R: Runner>(app: &AppContext<R>, fields: &[Assignment]) -> Result<(), OpcaError> {
-    op::put_item(app.vault()?, DEFAULT_OP_CONF.openvpn_title, DEFAULT_OP_CONF.category, fields)
+    op::put_item(
+        app.vault()?,
+        DEFAULT_OP_CONF.openvpn_title,
+        DEFAULT_OP_CONF.category,
+        fields,
+    )
 }
 
 fn server_defaults() -> Result<Vec<Assignment>, OpcaError> {
@@ -94,9 +103,9 @@ fn handle_generate<R: Runner + Clone>(
     }
 
     if setup {
-        let template_name = template.as_deref().ok_or_else(|| {
-            OpcaError::Other("--setup requires --template".into())
-        })?;
+        let template_name = template
+            .as_deref()
+            .ok_or_else(|| OpcaError::Other("--setup requires --template".into()))?;
         return handle_setup(app, template_name);
     }
 
@@ -107,9 +116,9 @@ fn handle_generate<R: Runner + Clone>(
         handle_generate_ta(app)?;
     }
     if profile {
-        let template_name = template.as_deref().ok_or_else(|| {
-            OpcaError::Other("--profile requires --template".into())
-        })?;
+        let template_name = template
+            .as_deref()
+            .ok_or_else(|| OpcaError::Other("--profile requires --template".into()))?;
         handle_generate_profiles(app, cn, file, template_name, dest.as_deref())?;
     }
     if _server {
@@ -124,12 +133,18 @@ fn handle_generate_dh<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaErro
 
     let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)?;
     let dh_keysize = verify_dh_params(dh_pem.as_bytes())?;
-    output::print_result(&format!("DH parameters generated ({dh_keysize} bits)"), true);
+    output::print_result(
+        &format!("DH parameters generated ({dh_keysize} bits)"),
+        true,
+    );
 
-    store_openvpn(app, &[
-        op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)?,
-        op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?,
-    ])?;
+    store_openvpn(
+        app,
+        &[
+            op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)?,
+            op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?,
+        ],
+    )?;
 
     output::print_result("Stored in 1Password", true);
     println!();
@@ -152,10 +167,13 @@ fn handle_generate_ta<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaErro
 
     output::print_result(&format!("TA key generated ({ta_keysize} bits)"), true);
 
-    store_openvpn(app, &[
-        op::assign(DEFAULT_OP_CONF.ta_item, &ta_pem)?,
-        op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?,
-    ])?;
+    store_openvpn(
+        app,
+        &[
+            op::assign(DEFAULT_OP_CONF.ta_item, &ta_pem)?,
+            op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?,
+        ],
+    )?;
 
     output::print_result("Stored in 1Password", true);
     println!();
@@ -183,9 +201,7 @@ fn handle_generate_profiles<R: Runner + Clone>(
     } else if let Some(cn) = cn {
         vec![cn]
     } else {
-        return Err(OpcaError::Other(
-            "--profile requires --cn or --file".into(),
-        ));
+        return Err(OpcaError::Other("--profile requires --cn or --file".into()));
     };
 
     let template_content = openvpn::get_template(ca_with_templates(app)?, template_name)?.content;
@@ -195,7 +211,9 @@ fn handle_generate_profiles<R: Runner + Clone>(
         None => vault.clone(),
     };
     for profile_cn in &cn_list {
-        let profile = vault.op().inject(&template_content, &[("OPCA_USER", profile_cn)])?;
+        let profile = vault
+            .op()
+            .inject(&template_content, &[("OPCA_USER", profile_cn)])?;
 
         let item_title = format!("VPN_{profile_cn}");
         let filename = format!("{profile_cn}-{template_name}.ovpn");
@@ -216,10 +234,7 @@ fn handle_generate_server<R: Runner>(app: &mut AppContext<R>) -> Result<(), Opca
     Ok(())
 }
 
-fn handle_setup<R: Runner>(
-    app: &mut AppContext<R>,
-    template_name: &str,
-) -> Result<(), OpcaError> {
+fn handle_setup<R: Runner>(app: &mut AppContext<R>, template_name: &str) -> Result<(), OpcaError> {
     output::title("OpenVPN Server Setup");
 
     let mut fields = server_defaults()?;
@@ -227,7 +242,10 @@ fn handle_setup<R: Runner>(
     // DH parameters
     let dh_pem = generate_dh_params(DEFAULT_KEY_SIZE.dh)?;
     let dh_keysize = verify_dh_params(dh_pem.as_bytes())?;
-    output::print_result(&format!("DH parameters generated ({dh_keysize} bits)"), true);
+    output::print_result(
+        &format!("DH parameters generated ({dh_keysize} bits)"),
+        true,
+    );
     fields.push(op::assign(DEFAULT_OP_CONF.dh_item, &dh_pem)?);
     fields.push(op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?);
 
@@ -261,7 +279,10 @@ fn handle_get<R: Runner>(
 
     let vault = app.vault()?;
     let read = |field: &str| {
-        let reference = vault.reference(DEFAULT_OP_CONF.openvpn_title, Some(&field.replace('.', "/")));
+        let reference = vault.reference(
+            DEFAULT_OP_CONF.openvpn_title,
+            Some(&field.replace('.', "/")),
+        );
         op::read_text(vault, &reference)
     };
 
@@ -306,9 +327,10 @@ fn handle_import<R: Runner>(
     }
 
     if dh {
-        let path = dh_file.as_ref().or(file.as_ref()).ok_or_else(|| {
-            OpcaError::Other("--dh requires --dh-file or --file".into())
-        })?;
+        let path = dh_file
+            .as_ref()
+            .or(file.as_ref())
+            .ok_or_else(|| OpcaError::Other("--dh requires --dh-file or --file".into()))?;
         output::title("Importing DH Parameters");
 
         let dh_pem = std::fs::read_to_string(path)?;
@@ -323,18 +345,22 @@ fn handle_import<R: Runner>(
 
         output::print_result(&format!("DH parameters verified ({dh_keysize} bits)"), true);
 
-        store_openvpn(app, &[
-            op::assign(DEFAULT_OP_CONF.dh_item, dh_pem.trim())?,
-            op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?,
-        ])?;
+        store_openvpn(
+            app,
+            &[
+                op::assign(DEFAULT_OP_CONF.dh_item, dh_pem.trim())?,
+                op::assign(DEFAULT_OP_CONF.dh_key_size_item, dh_keysize)?,
+            ],
+        )?;
 
         output::print_result("Stored in 1Password", true);
     }
 
     if ta_key {
-        let path = ta_key_file.as_ref().or(file.as_ref()).ok_or_else(|| {
-            OpcaError::Other("--ta-key requires --ta-key-file or --file".into())
-        })?;
+        let path = ta_key_file
+            .as_ref()
+            .or(file.as_ref())
+            .ok_or_else(|| OpcaError::Other("--ta-key requires --ta-key-file or --file".into()))?;
         output::title("Importing TLS Authentication Key");
 
         let ta_pem = std::fs::read_to_string(path)?;
@@ -349,10 +375,13 @@ fn handle_import<R: Runner>(
 
         output::print_result(&format!("TA key verified ({ta_keysize} bits)"), true);
 
-        store_openvpn(app, &[
-            op::assign(DEFAULT_OP_CONF.ta_item, ta_pem.trim())?,
-            op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?,
-        ])?;
+        store_openvpn(
+            app,
+            &[
+                op::assign(DEFAULT_OP_CONF.ta_item, ta_pem.trim())?,
+                op::assign(DEFAULT_OP_CONF.ta_key_size_item, ta_keysize)?,
+            ],
+        )?;
 
         output::print_result("Stored in 1Password", true);
     }

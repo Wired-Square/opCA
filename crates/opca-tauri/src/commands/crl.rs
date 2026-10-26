@@ -7,7 +7,7 @@ use wslib_crypto_ca::CrlView;
 use opca_core::constants::CRL_BATCH_LOW_COVER;
 use opca_core::services::ca::{crl_metadata, crl_to_text, parse_crl_metadata};
 use opca_core::services::database::{CertificateAuthorityDB, CrlMetadata};
-use opca_core::utils::datetime::{format_datetime, DateTimeFormat};
+use opca_core::utils::datetime::{DateTimeFormat, format_datetime};
 
 use crate::commands::dto::{CrlBatchDto, CrlInfo, InspectCrlResult};
 use crate::state::AppState;
@@ -47,7 +47,10 @@ fn make_crl_info(
 }
 
 /// The Lambda ignores a batch while batches are off, so a leftover record covers nothing.
-pub(crate) fn crl_batch_dto(db: &CertificateAuthorityDB, enabled: bool) -> Result<Option<CrlBatchDto>, String> {
+pub(crate) fn crl_batch_dto(
+    db: &CertificateAuthorityDB,
+    enabled: bool,
+) -> Result<Option<CrlBatchDto>, String> {
     if !enabled {
         return Ok(None);
     }
@@ -89,16 +92,20 @@ pub async fn backfill_crl(state: State<'_, AppState>) -> Result<CrlInfo, String>
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    let crl_pem = ca.get_crl().map_err(|e| e.to_string())?.map(|s| s.to_string());
+    let crl_pem = ca
+        .get_crl()
+        .map_err(|e| e.to_string())?
+        .map(|s| s.to_string());
 
     let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     let mut metadata = db.get_crl_metadata().map_err(|e| e.to_string())?;
     let has_crl = Some(crl_pem.is_some());
 
     if metadata.is_none()
-        && let Some(ref pem) = crl_pem {
-            metadata = parse_crl_metadata(pem).ok();
-        }
+        && let Some(ref pem) = crl_pem
+    {
+        metadata = parse_crl_metadata(pem).ok();
+    }
 
     make_crl_info(db, metadata, crl_pem, has_crl)
 }
@@ -109,7 +116,10 @@ pub async fn inspect_crl(crl_pem: String) -> Result<InspectCrlResult, String> {
         .map_err(|e| format!("Failed to parse CRL PEM: {e}"))?;
 
     let text_dump = crl_to_text(&crl).map_err(|e| format!("Failed to render CRL text: {e}"))?;
-    let view = crl.to_der().ok().and_then(|der| CrlView::from_der(&der).ok());
+    let view = crl
+        .to_der()
+        .ok()
+        .and_then(|der| CrlView::from_der(&der).ok());
     let metadata = view.as_ref().map(crl_metadata).unwrap_or_default();
     let signature_algorithm = view
         .as_ref()
@@ -158,7 +168,10 @@ pub async fn upload_crl(state: State<'_, AppState>) -> Result<(), String> {
         e.to_string()
     })?;
 
-    state.log_ok("upload_crl", Some("CRL uploaded to public store".to_string()));
+    state.log_ok(
+        "upload_crl",
+        Some("CRL uploaded to public store".to_string()),
+    );
     Ok(())
 }
 

@@ -1,16 +1,16 @@
 use std::time::Duration;
 
-use wslib_mcp::rmcp;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::{ErrorData, tool, tool_router};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::{AppHandle, LogicalSize, Manager, Wry};
-use wslib_mcp::dom::{self, DomBridge, BRIDGE_TIMEOUT};
+use wslib_mcp::dom::{self, BRIDGE_TIMEOUT, DomBridge};
 use wslib_mcp::result::{ok_json, tool_error};
+use wslib_mcp::rmcp;
 use wslib_mcp::router::mark_read_only;
 use wslib_mcp::server::ServerIdentity;
 use wslib_mcp::tauri_bridge::TauriBridge;
@@ -89,7 +89,9 @@ struct SizeParams {
 
 #[tool_router(router = read_router)]
 impl OpcaTools {
-    #[tool(description = "Connection state: the 1Password account and vault, and whether the CA is loaded.")]
+    #[tool(
+        description = "Connection state: the 1Password account and vault, and whether the CA is loaded."
+    )]
     async fn app_status(&self) -> Result<CallToolResult, ErrorData> {
         let state = self.state();
         let conn = state.conn.lock().expect("mutex poisoned");
@@ -102,7 +104,9 @@ impl OpcaTools {
         }))
     }
 
-    #[tool(description = "Certificates in the loaded CA's local database, as the Certs page lists them. Fails if the CA is not loaded yet.")]
+    #[tool(
+        description = "Certificates in the loaded CA's local database, as the Certs page lists them. Fails if the CA is not loaded yet."
+    )]
     async fn list_certs(&self) -> Result<CallToolResult, ErrorData> {
         let state = self.state();
         let mut conn = state.conn.lock().expect("mutex poisoned");
@@ -119,17 +123,26 @@ impl OpcaTools {
 #[tool_router(router = ui_router)]
 impl OpcaTools {
     #[tool(description = "Navigate the app to a route.")]
-    async fn navigate(&self, Parameters(p): Parameters<NavigateParams>) -> Result<CallToolResult, ErrorData> {
+    async fn navigate(
+        &self,
+        Parameters(p): Parameters<NavigateParams>,
+    ) -> Result<CallToolResult, ErrorData> {
         self.relay("navigate", p).await
     }
 
     #[tool(description = "Switch the app theme.")]
-    async fn set_theme(&self, Parameters(p): Parameters<ThemeParams>) -> Result<CallToolResult, ErrorData> {
+    async fn set_theme(
+        &self,
+        Parameters(p): Parameters<ThemeParams>,
+    ) -> Result<CallToolResult, ErrorData> {
         self.relay("set_theme", p).await
     }
 
     #[tool(description = "Resize the main window's content area.")]
-    async fn resize_window(&self, Parameters(p): Parameters<SizeParams>) -> Result<CallToolResult, ErrorData> {
+    async fn resize_window(
+        &self,
+        Parameters(p): Parameters<SizeParams>,
+    ) -> Result<CallToolResult, ErrorData> {
         let Some(window) = self.app.get_webview_window("main") else {
             return Ok(tool_error("main window not open"));
         };
@@ -149,7 +162,12 @@ mod tests {
         let read_only: Vec<_> = OpcaTools::router()
             .list_all()
             .into_iter()
-            .map(|t| (t.name.to_string(), t.annotations.and_then(|a| a.read_only_hint) == Some(true)))
+            .map(|t| {
+                (
+                    t.name.to_string(),
+                    t.annotations.and_then(|a| a.read_only_hint) == Some(true),
+                )
+            })
             .collect();
         assert_eq!(
             read_only,

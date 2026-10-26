@@ -5,7 +5,7 @@ use openssl::rsa::Rsa;
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Error, Item, ItemRef, Runner, ShellRunner};
-use opca_core::services::route53::{check_dkim_record, DkimDnsCheck, Route53Client};
+use opca_core::services::route53::{DkimDnsCheck, Route53Client, check_dkim_record};
 use opca_core::services::storage::AwsCredentials;
 
 use crate::app::AppContext;
@@ -33,7 +33,10 @@ fn dkim_item<R: Runner>(app: &AppContext<R>, item_title: &str) -> Result<Item, O
 
 /// The AWS credentials for this CA, with its configured region applied.
 fn aws_credentials<R: Runner>(app: &AppContext<R>) -> Result<AwsCredentials, OpcaError> {
-    app.ca.as_ref().ok_or(OpcaError::CaNotFound)?.aws_credentials()
+    app.ca
+        .as_ref()
+        .ok_or(OpcaError::CaNotFound)?
+        .aws_credentials()
 }
 
 fn format_dkim_dns_record(public_key_pem: &str) -> String {
@@ -115,7 +118,8 @@ fn handle_create<R: Runner>(
         op::assign("dns_name[text]", &dns_name)?,
         op::assign("created_at[text]", &created_at)?,
     ];
-    app.vault()?.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?;
+    app.vault()?
+        .create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?;
 
     output::print_result(&format!("DKIM key '{item_title}' created"), true);
 
@@ -126,7 +130,10 @@ fn handle_create<R: Runner>(
             .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?;
         let result = rt.block_on(client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL))?;
         output::print_result(
-            &format!("Deployed to Route53 zone {} (change: {})", result.zone_name, result.change_id),
+            &format!(
+                "Deployed to Route53 zone {} (change: {})",
+                result.zone_name, result.change_id
+            ),
             true,
         );
     }
@@ -156,10 +163,19 @@ fn handle_info<R: Runner>(
     output::subtitle(&format!("DKIM Key: {domain} / {selector}"));
     output::info("Domain", &domain);
     output::info("Selector", &selector);
-    output::info("Key Size", &read_field("key_size").unwrap_or_else(|| "N/A".to_string()));
-    output::info("Created", &read_field("created_at").unwrap_or_else(|| "N/A".to_string()));
+    output::info(
+        "Key Size",
+        &read_field("key_size").unwrap_or_else(|| "N/A".to_string()),
+    );
+    output::info(
+        "Created",
+        &read_field("created_at").unwrap_or_else(|| "N/A".to_string()),
+    );
     output::info("DNS Name", &dns_name);
-    output::info("DNS Record", &read_field("dns_record").unwrap_or_else(|| "N/A".to_string()));
+    output::info(
+        "DNS Record",
+        &read_field("dns_record").unwrap_or_else(|| "N/A".to_string()),
+    );
 
     Ok(())
 }
@@ -176,7 +192,10 @@ fn handle_deploy<R: Runner>(
     let dns_name = make_dns_name(&domain, &selector);
 
     let item = dkim_item(app, &item_title)?;
-    let dns_record = op::field_text(&item, "dns_record").unwrap_or_default().trim().to_string();
+    let dns_record = op::field_text(&item, "dns_record")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
 
     let client = Route53Client::new(aws_credentials(app)?);
     let rt = tokio::runtime::Runtime::new()
@@ -184,7 +203,10 @@ fn handle_deploy<R: Runner>(
     let result = rt.block_on(client.deploy_txt_record(&dns_name, &dns_record, DKIM_DNS_TTL))?;
 
     output::print_result(
-        &format!("Deployed to zone {} (change: {})", result.zone_name, result.change_id),
+        &format!(
+            "Deployed to zone {} (change: {})",
+            result.zone_name, result.change_id
+        ),
         true,
     );
     output::warning("Run 'opca dkim verify' to confirm DNS propagation");
@@ -201,18 +223,20 @@ fn handle_list<R: Runner>(
     let mut dkim_items: Vec<(String, String, String)> = Vec::new();
     for item in &items {
         if let Some(rest) = item.title.strip_prefix(&format!("{DKIM_ITEM_PREFIX}_"))
-            && let Some(pos) = rest.rfind('_') {
-                let domain = &rest[..pos];
-                let selector = &rest[pos + 1..];
-                if !domain.is_empty() && !selector.is_empty() {
-                    if let Some(ref filter) = domain_filter
-                        && domain != filter.as_str() {
-                            continue;
-                        }
-                    let created = item.created_at.get(..10).unwrap_or_default().to_string();
-                    dkim_items.push((domain.to_string(), selector.to_string(), created));
+            && let Some(pos) = rest.rfind('_')
+        {
+            let domain = &rest[..pos];
+            let selector = &rest[pos + 1..];
+            if !domain.is_empty() && !selector.is_empty() {
+                if let Some(ref filter) = domain_filter
+                    && domain != filter.as_str()
+                {
+                    continue;
                 }
+                let created = item.created_at.get(..10).unwrap_or_default().to_string();
+                dkim_items.push((domain.to_string(), selector.to_string(), created));
             }
+        }
     }
 
     dkim_items.sort();
@@ -241,17 +265,23 @@ fn handle_verify<R: Runner>(
     let dns_name = make_dns_name(&domain, &selector);
 
     let item = dkim_item(app, &item_title)?;
-    let expected_record = op::field_text(&item, "dns_record").unwrap_or_default().trim().to_string();
+    let expected_record = op::field_text(&item, "dns_record")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
 
     let check = tokio::runtime::Runtime::new()
         .map_err(|e| OpcaError::Other(format!("Failed to create runtime: {e}")))?
         .block_on(check_dkim_record(&dns_name, &expected_record))?;
 
     match check {
-        DkimDnsCheck::Matches => output::print_result("DNS record verified — published and matching", true),
-        DkimDnsCheck::NotPublished => {
-            output::print_result("No TXT record found. DNS may not have propagated yet", false)
+        DkimDnsCheck::Matches => {
+            output::print_result("DNS record verified — published and matching", true)
         }
+        DkimDnsCheck::NotPublished => output::print_result(
+            "No TXT record found. DNS may not have propagated yet",
+            false,
+        ),
         DkimDnsCheck::Mismatch { .. } => {
             output::print_result("TXT record found but does not match expected value", false)
         }

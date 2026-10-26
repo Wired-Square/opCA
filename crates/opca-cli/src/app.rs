@@ -1,7 +1,7 @@
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Runner, ShellRunner, Vault};
 use opca_core::services::ca::CertificateAuthority;
-use opca_core::services::local_backup::{age_phrase, BackupSource, LocalBackup};
+use opca_core::services::local_backup::{BackupSource, LocalBackup, age_phrase};
 use opca_core::vault_lock::VaultLock;
 
 /// CLI application context.
@@ -57,9 +57,10 @@ impl<R: Runner> AppContext<R> {
                 self.ca = Some(ca);
                 Ok(())
             }
-            Err(OpcaError::DatabaseUnreadable(msg)) => {
-                Err(OpcaError::DatabaseUnreadable(format!("{msg}. {}", backup_hint(account.as_deref(), &source))))
-            }
+            Err(OpcaError::DatabaseUnreadable(msg)) => Err(OpcaError::DatabaseUnreadable(format!(
+                "{msg}. {}",
+                backup_hint(account.as_deref(), &source)
+            ))),
             Err(e) => Err(e),
         }
     }
@@ -76,9 +77,13 @@ impl<R: Runner> AppContext<R> {
     pub fn lock(&mut self, operation: &str) -> Result<(), OpcaError> {
         let vault = match &self.ca {
             Some(ca) => &ca.vault,
-            None => self.standalone_vault.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
+            None => self
+                .standalone_vault
+                .as_ref()
+                .ok_or_else(|| OpcaError::Other("Not connected".into()))?,
         };
-        self.vault_lock.acquire(vault, operation, VaultLock::default_ttl())
+        self.vault_lock
+            .acquire(vault, operation, VaultLock::default_ttl())
     }
 
     /// Release the vault lock.
@@ -88,7 +93,10 @@ impl<R: Runner> AppContext<R> {
         }
         let vault = match &self.ca {
             Some(ca) => &ca.vault,
-            None => self.standalone_vault.as_ref().ok_or_else(|| OpcaError::Other("Not connected".into()))?,
+            None => self
+                .standalone_vault
+                .as_ref()
+                .ok_or_else(|| OpcaError::Other("Not connected".into()))?,
         };
         self.vault_lock.release(vault)
     }

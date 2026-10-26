@@ -1,4 +1,4 @@
-use log::{info, warn, debug};
+use log::{debug, info, warn};
 use serde::Serialize;
 use tauri::State;
 
@@ -75,10 +75,22 @@ pub async fn connect(
     // Clear any stale CA and vault before installing the new connection.
     // This single lock acquisition prevents the race where a stale CA
     // from a previous vault survives into the new session.
-    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    state.replace_connection(&mut conn, Connection { vault: Some(vault), ..Connection::default() });
+    let mut conn = state
+        .conn
+        .lock()
+        .expect("mutex poisoned — a prior operation panicked");
+    state.replace_connection(
+        &mut conn,
+        Connection {
+            vault: Some(vault),
+            ..Connection::default()
+        },
+    );
 
-    state.log_ok("connect", Some(format!("Connected to vault '{}'", info.vault)));
+    state.log_ok(
+        "connect",
+        Some(format!("Connected to vault '{}'", info.vault)),
+    );
     Ok(info)
 }
 
@@ -86,12 +98,18 @@ pub async fn connect(
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     info!("[tauri] disconnect");
     // Acquire the single connection lock — no other command can race us.
-    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
+    let mut conn = state
+        .conn
+        .lock()
+        .expect("mutex poisoned — a prior operation panicked");
 
     // Release the vault lock (best-effort) using whichever vault is available.
     let vault_ref = conn.ca.as_ref().map(|ca| &ca.vault).or(conn.vault.as_ref());
     if let Some(vault) = vault_ref {
-        let mut lock = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
+        let mut lock = state
+            .vault_lock
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked");
         let _ = lock.release(vault);
     }
 
@@ -102,7 +120,9 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn list_vaults(account: Option<String>) -> Result<Vec<VaultInfo>, String> {
-    op::client(ShellRunner::new(), account.as_deref()).vaults().map_err(|e| e.to_string())
+    op::client(ShellRunner::new(), account.as_deref())
+        .vaults()
+        .map_err(|e| e.to_string())
 }
 
 /// The accounts configured in the local `op` CLI, for the connect screen's
@@ -122,7 +142,10 @@ pub async fn create_vault(
     info!("[tauri] create_vault: name='{name}' account={account:?}");
     let result = op::create_vault(&op::client(ShellRunner::new(), account.as_deref()), &name)
         .map_err(|e| e.to_string())?;
-    state.log_ok("create_vault", Some(format!("Created vault '{}'", result.name)));
+    state.log_ok(
+        "create_vault",
+        Some(format!("Created vault '{}'", result.name)),
+    );
     Ok(result)
 }
 

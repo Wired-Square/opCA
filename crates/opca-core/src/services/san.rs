@@ -35,8 +35,12 @@ impl SubjectAltName {
         }
         if let Some(bytes) = name.ipaddress() {
             return match bytes.len() {
-                4 => <[u8; 4]>::try_from(bytes).ok().map(|b| Self::Ip(Ipv4Addr::from(b).into())),
-                16 => <[u8; 16]>::try_from(bytes).ok().map(|b| Self::Ip(Ipv6Addr::from(b).into())),
+                4 => <[u8; 4]>::try_from(bytes)
+                    .ok()
+                    .map(|b| Self::Ip(Ipv4Addr::from(b).into())),
+                16 => <[u8; 16]>::try_from(bytes)
+                    .ok()
+                    .map(|b| Self::Ip(Ipv6Addr::from(b).into())),
                 _ => None,
             };
         }
@@ -85,7 +89,8 @@ impl FromStr for SubjectAltName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let v = s.trim();
-        let invalid = |why: &str| OpcaError::InvalidCertificate(format!("Invalid SAN '{v}': {why}"));
+        let invalid =
+            |why: &str| OpcaError::InvalidCertificate(format!("Invalid SAN '{v}': {why}"));
         if v.is_empty() {
             return Err(invalid("empty"));
         }
@@ -137,10 +142,15 @@ fn is_dns_name(v: &str, allow_wildcard: bool) -> bool {
         _ => v,
     };
     name.len() <= 253
-        && !name.rsplit('.').next().is_some_and(|tld| tld.bytes().all(|b| b.is_ascii_digit()))
+        && !name
+            .rsplit('.')
+            .next()
+            .is_some_and(|tld| tld.bytes().all(|b| b.is_ascii_digit()))
         && name.split('.').all(|label| {
             (1..=63).contains(&label.len())
-                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
                 && !label.starts_with('-')
                 && !label.ends_with('-')
         })
@@ -148,7 +158,12 @@ fn is_dns_name(v: &str, allow_wildcard: bool) -> bool {
 
 pub fn of_certificate(cert: &X509Ref) -> Vec<SubjectAltName> {
     cert.subject_alt_names()
-        .map(|names| names.iter().filter_map(SubjectAltName::from_general_name).collect())
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(SubjectAltName::from_general_name)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -167,29 +182,69 @@ mod tests {
     #[test]
     fn classifies_valid_input() {
         for (input, expected) in [
-            ("www.example.com", SubjectAltName::Dns("www.example.com".into())),
+            (
+                "www.example.com",
+                SubjectAltName::Dns("www.example.com".into()),
+            ),
             ("*.example.com", SubjectAltName::Dns("*.example.com".into())),
             ("localhost", SubjectAltName::Dns("localhost".into())),
             ("10.0.0.5", SubjectAltName::Ip("10.0.0.5".parse().unwrap())),
-            ("2001:db8::1", SubjectAltName::Ip("2001:db8::1".parse().unwrap())),
-            ("ops@example.com", SubjectAltName::Email("ops@example.com".into())),
-            ("spiffe://prod/web", SubjectAltName::Uri("spiffe://prod/web".into())),
-            ("https://example.com/id", SubjectAltName::Uri("https://example.com/id".into())),
-            ("urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66", SubjectAltName::Uri("urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66".into())),
+            (
+                "2001:db8::1",
+                SubjectAltName::Ip("2001:db8::1".parse().unwrap()),
+            ),
+            (
+                "ops@example.com",
+                SubjectAltName::Email("ops@example.com".into()),
+            ),
+            (
+                "spiffe://prod/web",
+                SubjectAltName::Uri("spiffe://prod/web".into()),
+            ),
+            (
+                "https://example.com/id",
+                SubjectAltName::Uri("https://example.com/id".into()),
+            ),
+            (
+                "urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66",
+                SubjectAltName::Uri("urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66".into()),
+            ),
         ] {
-            assert_eq!(input.parse::<SubjectAltName>().unwrap(), expected, "{input}");
+            assert_eq!(
+                input.parse::<SubjectAltName>().unwrap(),
+                expected,
+                "{input}"
+            );
         }
     }
 
     #[test]
     fn rejects_invalid_input() {
         for input in [
-            "", "   ", "10.0.0.300", "1.2.3", "a@b@c", "@example.com", "user@bad_domain",
-            "user@*.example.com", "-bad.example.com", "bad-.example.com", "foo..com",
-            "no-scheme/path", "example.com:443", "https://", "has space.com", "*.*.example.com",
-            "www.*.example.com", "010.0.0.1", "::1]/x[",
+            "",
+            "   ",
+            "10.0.0.300",
+            "1.2.3",
+            "a@b@c",
+            "@example.com",
+            "user@bad_domain",
+            "user@*.example.com",
+            "-bad.example.com",
+            "bad-.example.com",
+            "foo..com",
+            "no-scheme/path",
+            "example.com:443",
+            "https://",
+            "has space.com",
+            "*.*.example.com",
+            "www.*.example.com",
+            "010.0.0.1",
+            "::1]/x[",
         ] {
-            assert!(input.parse::<SubjectAltName>().is_err(), "{input:?} should be rejected");
+            assert!(
+                input.parse::<SubjectAltName>().is_err(),
+                "{input:?} should be rejected"
+            );
         }
     }
 

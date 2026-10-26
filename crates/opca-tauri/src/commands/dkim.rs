@@ -9,14 +9,14 @@ use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Error, Item, ItemRef, Runner, Vault};
 use opca_core::services::database::{DkimRecord, DkimSync};
-use opca_core::services::route53::{check_dkim_record, DkimDnsCheck, Route53Client};
+use opca_core::services::route53::{DkimDnsCheck, Route53Client, check_dkim_record};
 use wslib_dns::txt;
 
+use crate::commands::cert::{encrypt_if_asked, encrypted_note};
 use crate::commands::dto::{
     CreateDkimRequest, CreateDkimResult, DkimKeyDetail, DkimKeyItem, DkimRoute53Result,
     DkimVerifyResult,
 };
-use crate::commands::cert::{encrypt_if_asked, encrypted_note};
 use crate::state::AppState;
 
 /// 1Password item title prefix for DKIM keys.
@@ -39,7 +39,10 @@ fn dkim_item<R: Runner>(vault: &Vault<R>, item_title: &str) -> Result<Item, Stri
 
 fn dns_record<R: Runner>(vault: &Vault<R>, item_title: &str) -> Result<String, String> {
     let item = dkim_item(vault, item_title)?;
-    Ok(op::field_text(&item, "dns_record").unwrap_or_default().trim().to_string())
+    Ok(op::field_text(&item, "dns_record")
+        .unwrap_or_default()
+        .trim()
+        .to_string())
 }
 
 /// Format a PEM-encoded public key as a DKIM DNS TXT record value.
@@ -156,7 +159,9 @@ fn do_sync_dkim_keys(state: &State<'_, AppState>) -> Result<usize, String> {
     let prefix = format!("{DKIM_ITEM_PREFIX}_");
     let mut found = Vec::new();
     for item in &items {
-        let Some(rest) = item.title.strip_prefix(&prefix) else { continue };
+        let Some(rest) = item.title.strip_prefix(&prefix) else {
+            continue;
+        };
         // Title format: DKIM_<domain>_<selector> — split on the LAST underscore
         // because domains never contain '_' but selectors might (rare).
         let Some(pos) = rest.rfind('_') else { continue };
@@ -396,7 +401,11 @@ pub async fn create_dkim_key(
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    if ca.vault.item_exists(&ItemRef::title(&item_title)).map_err(|e| OpcaError::from(e).to_string())? {
+    if ca
+        .vault
+        .item_exists(&ItemRef::title(&item_title))
+        .map_err(|e| OpcaError::from(e).to_string())?
+    {
         return Err(format!(
             "DKIM key '{}' already exists. Delete it first or use a different selector.",
             item_title
@@ -435,7 +444,11 @@ pub async fn create_dkim_key(
     .collect::<Result<Vec<_>, _>>();
 
     fields
-        .and_then(|fields| Ok(ca.vault.create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?))
+        .and_then(|fields| {
+            Ok(ca
+                .vault
+                .create_item(&item_title, DEFAULT_OP_CONF.category, &fields)?)
+        })
         .map_err(|e| format!("Failed to store DKIM key in 1Password: {e}"))?;
 
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
@@ -457,7 +470,9 @@ pub async fn create_dkim_key(
 
     state.log_ok(
         "create_dkim",
-        Some(format!("Created DKIM key for {selector}._domainkey.{domain}")),
+        Some(format!(
+            "Created DKIM key for {selector}._domainkey.{domain}"
+        )),
     );
 
     let dns_record_chunked = chunk_for_route53(&dns_record);
@@ -489,7 +504,9 @@ pub async fn delete_dkim_key(
 
     match ca.vault.delete_item(&ItemRef::title(&item_title)) {
         Err(Error::ItemNotFound(_)) => return Err(format!("DKIM key '{}' not found.", item_title)),
-        deleted => deleted.map_err(|e| format!("Failed to delete DKIM key: {}", OpcaError::from(e)))?,
+        deleted => {
+            deleted.map_err(|e| format!("Failed to delete DKIM key: {}", OpcaError::from(e)))?
+        }
     }
 
     let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
@@ -502,7 +519,9 @@ pub async fn delete_dkim_key(
 
     state.log_ok(
         "delete_dkim",
-        Some(format!("Deleted DKIM key for {selector}._domainkey.{domain}")),
+        Some(format!(
+            "Deleted DKIM key for {selector}._domainkey.{domain}"
+        )),
     );
 
     Ok(true)
@@ -526,9 +545,11 @@ pub async fn verify_dkim_dns(
 
     let (verified, message, found) = match check {
         DkimDnsCheck::Matches => (true, "DNS record verified — published and matching.", None),
-        DkimDnsCheck::NotPublished => {
-            (false, "No TXT record found. DNS may not have propagated yet.", None)
-        }
+        DkimDnsCheck::NotPublished => (
+            false,
+            "No TXT record found. DNS may not have propagated yet.",
+            None,
+        ),
         DkimDnsCheck::Mismatch { found } => (
             false,
             "TXT record found but does not match the expected value.",

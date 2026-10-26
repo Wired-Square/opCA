@@ -1,5 +1,5 @@
 use opca_core::services::database::CaConfig;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::ca::*;
 use super::crl::*;
@@ -20,23 +20,34 @@ fn set_config(h: &Harness, config: CaConfig) {
 fn batch_mode(h: &Harness) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("pending-crl")).unwrap();
-    set_config(h, CaConfig {
-        crl_batch_enabled: Some(true),
-        ca_private_store: Some(format!("rsync://{}", dir.path().display())),
-        ..CaConfig::default()
-    });
+    set_config(
+        h,
+        CaConfig {
+            crl_batch_enabled: Some(true),
+            ca_private_store: Some(format!("rsync://{}", dir.path().display())),
+            ..CaConfig::default()
+        },
+    );
     dir
 }
 
 fn crl_regenerate_items(dashboard: &Value) -> Vec<&Value> {
-    dashboard["action_items"].as_array().unwrap().iter().filter(|i| i["id"] == "crl_regenerate").collect()
+    dashboard["action_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["id"] == "crl_regenerate")
+        .collect()
 }
 
 #[test]
 fn crl_info_reports_the_signed_batch_and_its_cover() {
     let h = Harness::with_ca(vec![], handler());
     let info = h.invoke("get_crl_info", json!({})).unwrap();
-    assert_eq!((&info["crl_batch_enabled"], &info["crl_batch"]), (&json!(false), &Value::Null));
+    assert_eq!(
+        (&info["crl_batch_enabled"], &info["crl_batch"]),
+        (&json!(false), &Value::Null)
+    );
 
     let _store = batch_mode(&h);
     h.answer_writes(2);
@@ -47,7 +58,13 @@ fn crl_info_reports_the_signed_batch_and_its_cover() {
     let batch = &info["crl_batch"];
     assert_eq!(info["crl_batch_enabled"], json!(true));
     assert_eq!(
-        (&batch["first_number"], &batch["last_number"], &batch["due_number"], &batch["remaining"], &batch["count"]),
+        (
+            &batch["first_number"],
+            &batch["last_number"],
+            &batch["due_number"],
+            &batch["remaining"],
+            &batch["count"]
+        ),
         (&json!(1), &json!(5), &json!(1), &json!(4), &json!(5))
     );
     assert_eq!(batch["low_cover"], json!(false));
@@ -57,11 +74,20 @@ fn crl_info_reports_the_signed_batch_and_its_cover() {
 #[test]
 fn the_dashboard_judges_crl_expiry_by_the_batch_only_while_batches_are_on() {
     let h = Harness::with_ca(vec![], handler());
-    set_config(&h, CaConfig { crl_days: Some(10), ..CaConfig::default() });
+    set_config(
+        &h,
+        CaConfig {
+            crl_days: Some(10),
+            ..CaConfig::default()
+        },
+    );
     h.answer_writes(4);
     h.invoke("generate_crl", json!({})).unwrap();
     let single = h.invoke("get_dashboard", json!({})).unwrap();
-    assert_eq!(crl_regenerate_items(&single)[0]["message"], json!("CRL expires in 9 days"));
+    assert_eq!(
+        crl_regenerate_items(&single)[0]["message"],
+        json!("CRL expires in 9 days")
+    );
 
     let _store = batch_mode(&h);
     h.invoke("generate_crl", json!({})).unwrap();
@@ -71,29 +97,58 @@ fn the_dashboard_judges_crl_expiry_by_the_batch_only_while_batches_are_on() {
     assert_eq!(batched["crl_expiry_warning"], Value::Null);
     assert_eq!(batched["crl_batch"]["remaining"], json!(4));
 
-    set_config(&h, CaConfig { crl_batch_enabled: Some(false), ..CaConfig::default() });
+    set_config(
+        &h,
+        CaConfig {
+            crl_batch_enabled: Some(false),
+            ..CaConfig::default()
+        },
+    );
     let switched_off = h.invoke("get_dashboard", json!({})).unwrap();
 
     assert_eq!(switched_off["crl_batch"], Value::Null);
-    assert_eq!(crl_regenerate_items(&switched_off)[0]["message"], json!("CRL expires in 9 days"));
-    assert_eq!(h.invoke("get_crl_info", json!({})).unwrap()["crl_batch"], Value::Null);
+    assert_eq!(
+        crl_regenerate_items(&switched_off)[0]["message"],
+        json!("CRL expires in 9 days")
+    );
+    assert_eq!(
+        h.invoke("get_crl_info", json!({})).unwrap()["crl_batch"],
+        Value::Null
+    );
 }
 
 #[test]
 fn crl_batches_cannot_be_turned_on_without_a_private_store() {
     let h = Harness::with_ca(vec![], handler());
 
-    let err = h.invoke("update_ca_config", json!({ "config": { "crl_batch_enabled": true } })).unwrap_err();
-    assert!(err.as_str().unwrap().contains("CRL batches need a private store"), "{err}");
     let err = h
-        .invoke("update_ca_config", json!({ "config": { "crl_batch_enabled": true, "ca_private_store": " " } }))
+        .invoke(
+            "update_ca_config",
+            json!({ "config": { "crl_batch_enabled": true } }),
+        )
+        .unwrap_err();
+    assert!(
+        err.as_str()
+            .unwrap()
+            .contains("CRL batches need a private store"),
+        "{err}"
+    );
+    let err = h
+        .invoke(
+            "update_ca_config",
+            json!({ "config": { "crl_batch_enabled": true, "ca_private_store": " " } }),
+        )
         .unwrap_err();
     assert!(err.as_str().unwrap().contains("private store"), "{err}");
 
     h.answer_writes(2);
     h.invoke("update_ca_config", json!({ "config": { "crl_batch_enabled": true, "ca_private_store": "rsync:///nonexistent-opca-store" } }))
         .unwrap();
-    h.invoke("update_ca_config", json!({ "config": { "crl_batch_enabled": false } })).unwrap();
+    h.invoke(
+        "update_ca_config",
+        json!({ "config": { "crl_batch_enabled": false } }),
+    )
+    .unwrap();
     let info = h.invoke("get_crl_info", json!({})).unwrap();
     assert_eq!(info["crl_batch_enabled"], json!(false));
 }
@@ -102,7 +157,10 @@ fn crl_batches_cannot_be_turned_on_without_a_private_store() {
 fn inspecting_a_crl_reports_its_signature_algorithm() {
     let h = Harness::with_ca(vec![], handler());
     h.answer_writes(2);
-    let crl_pem = h.invoke("generate_crl", json!({})).unwrap()["crl_pem"].as_str().unwrap().to_string();
+    let crl_pem = h.invoke("generate_crl", json!({})).unwrap()["crl_pem"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let result = tauri::async_runtime::block_on(inspect_crl(crl_pem)).unwrap();
     assert_eq!(result.signature_algorithm, "ecdsa-with-SHA256");
     assert_eq!((result.crl_number, result.revoked_count), (Some(1), 0));
