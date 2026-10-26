@@ -76,7 +76,8 @@ Organised by concern under [src/](../crates/opca-core/src):
     (`profile_for`) and calls `Authority::issue`; `build_crl` calls
     `Authority::revocation_list`, which writes the Authority Key Identifier
     before the CRL Number. CRL metadata is read from PEM with `CrlView`
-    (`parse_crl_metadata`, also behind the CRL inspector), its issuer
+    (`parse_crl_metadata`; the CRL inspector calls `crl_metadata` on its own
+    view), its issuer
     kept in OpenSSL's one-line form (`CN=…, C=…, emailAddress=…`) through
     `name_attributes`. A SHA-1-signed CSR can be read but not signed: the
     provider has no SHA-1. `crl_to_text` stays on `openssl-sys`
@@ -132,7 +133,8 @@ Organised by concern under [src/](../crates/opca-core/src):
     credentials are read straight from a 1Password item with `op item get`
     (see [AWS credentials](#aws-credentials)).
   - [route53.rs](../crates/opca-core/src/services/route53.rs) — AWS SDK
-    calls for DKIM TXT record deployment, and the DKIM DNS check
+    calls for DKIM TXT record deployment, the value split into 255-octet
+    quoted strings by `wslib_dns::txt::{split, quote}`, and the DKIM DNS check
     (`check_dkim_record`), which looks the record up through `wslib-dns` so
     NXDOMAIN/NODATA (not published) stay apart from SERVFAIL, REFUSED or a
     timeout (`OpcaError::Dns`).
@@ -472,6 +474,12 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
   module exposes `#[tauri::command]` async functions that deserialise DTOs,
   call into `opca-core`, and return serialisable results. DTO shapes are
   defined in [commands/dto.rs](../crates/opca-tauri/src/commands/dto.rs).
+  The certificate, CSR and CRL Inspect commands read their fields from
+  `wslib_crypto_x509::inspect`, `CsrView` and `CrlView`: subject and issuer
+  in RFC 4514 form (`EMAIL=…,O=…,CN=…`), the decimal serial, the key as
+  opCA's `RSA` / `EC` / `Ed25519` with `KeyDescription::bits` (none for
+  Ed25519) and OpenSSL's signature algorithm names. The raw dump beside them
+  stays OpenSSL's `to_text()`.
 
 The shell is intentionally thin: no PKI logic lives here, only glue between
 the webview and `opca-core`.

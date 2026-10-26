@@ -305,7 +305,7 @@ export interface InspectCertificateResult {
   not_after: string | null;
   alt_names: string[];
   key_type: string;
-  key_size: number;
+  key_size: number | null;
   signature_algorithm: string;
   public_key_fingerprint_sha256: string;
   is_ca: boolean;
@@ -376,10 +376,14 @@ export interface InspectCsrResult {
   subject: string;
   alt_names: string[];
   key_type: string;
-  key_size: number;
+  key_size: number | null;
   signature_algorithm: string;
   public_key_fingerprint_sha256: string;
   text_dump: string;
+}
+
+export function keyText(key: { key_type: string; key_size: number | null }): string {
+  return key.key_size == null ? key.key_type : `${key.key_type} ${key.key_size} bits`;
 }
 
 // ---------------------------------------------------------------------------

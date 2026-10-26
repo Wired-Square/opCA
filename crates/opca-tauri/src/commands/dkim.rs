@@ -9,9 +9,8 @@ use opca_core::constants::{DEFAULT_KEY_SIZE, DEFAULT_OP_CONF};
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Error, Item, ItemRef, Runner, Vault};
 use opca_core::services::database::{DkimRecord, DkimSync};
-use opca_core::services::route53::{
-    check_dkim_record, format_txt_value, split_txt_value, DkimDnsCheck, Route53Client,
-};
+use opca_core::services::route53::{check_dkim_record, DkimDnsCheck, Route53Client};
+use wslib_dns::txt;
 
 use crate::commands::dto::{
     CreateDkimRequest, CreateDkimResult, DkimKeyDetail, DkimKeyItem, DkimRoute53Result,
@@ -56,7 +55,7 @@ fn format_dkim_dns_record(public_key_pem: &str) -> String {
 /// Re-format a TXT value as Route53 expects long records: 255-byte chunks,
 /// each wrapped in double quotes and space-separated.
 fn chunk_for_route53(record: &str) -> String {
-    format_txt_value(&split_txt_value(record, 255))
+    txt::quote(txt::split(record))
 }
 
 fn item_to_dkim_record(domain: &str, selector: &str, created_at: Option<String>) -> DkimRecord {

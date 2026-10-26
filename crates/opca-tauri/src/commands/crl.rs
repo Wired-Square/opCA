@@ -2,14 +2,14 @@ use chrono::Utc;
 use log::{debug, info, warn};
 use openssl::x509::X509Crl;
 use tauri::State;
+use wslib_crypto_ca::CrlView;
 
 use opca_core::constants::CRL_BATCH_LOW_COVER;
-use opca_core::services::ca::{crl_to_text, parse_crl_metadata};
+use opca_core::services::ca::{crl_metadata, crl_to_text, parse_crl_metadata};
 use opca_core::services::database::{CertificateAuthorityDB, CrlMetadata};
 use opca_core::utils::datetime::{format_datetime, DateTimeFormat};
 
 use crate::commands::dto::{CrlBatchDto, CrlInfo, InspectCrlResult};
-use crate::commands::inspect_helpers::signature_algorithm_from_text;
 use crate::state::AppState;
 
 /// Project the database CRL metadata (and optionally the just-fetched PEM)
@@ -110,8 +110,12 @@ pub async fn inspect_crl(crl_pem: String) -> Result<InspectCrlResult, String> {
         .map_err(|e| format!("Failed to parse CRL PEM: {e}"))?;
 
     let text_dump = crl_to_text(&crl).map_err(|e| format!("Failed to render CRL text: {e}"))?;
-    let metadata = parse_crl_metadata(&crl_pem).unwrap_or_default();
-    let signature_algorithm = signature_algorithm_from_text(&text_dump);
+    let view = crl.to_der().ok().and_then(|der| CrlView::from_der(&der).ok());
+    let metadata = view.as_ref().map(crl_metadata).unwrap_or_default();
+    let signature_algorithm = view
+        .as_ref()
+        .map_or("Unknown", CrlView::signature_algorithm)
+        .to_string();
 
     Ok(InspectCrlResult {
         issuer: metadata.issuer.unwrap_or_default(),

@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Holding a quit until 1Password work finishes now comes from `wslib-tauri`
   0.1.0's quit guard; the app menu reads "Quit opCA" as before.
+- Inspect reads a certificate's, CSR's or CRL's signature algorithm, key and
+  CA flag from the parsed structure rather than OpenSSL's text. Ed25519 keys
+  now say "Ed25519" with no bit count, and subjects and issuers are written in
+  RFC 4514 form (`EMAIL=` in place of `emailAddress=`, special characters
+  escaped). The text dump is unchanged.
+- DKIM records are split into 255-octet TXT strings by `wslib-dns`, which
+  splits only between characters and escapes quotes and backslashes.
 - The frontend's colour tokens now use the kit's `--app-*` names and reach the
   page through the kit's adopted-stylesheet theme and `data-app-scheme`; the
   saved dark or light choice carries over.

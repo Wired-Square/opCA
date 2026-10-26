@@ -26,8 +26,8 @@ rustls-openssl = "0.4"
 rustls = { version = "0.23", default-features = false }
 rustls-pki-types = "1.12"
 wslib-crypto = { version = "0.1", registry = "wired-square" }
-wslib-crypto-x509 = { version = "0.1.1", registry = "wired-square" }
-wslib-crypto-ca = { version = "0.1", registry = "wired-square" }
+wslib-crypto-x509 = { version = "0.1.2", registry = "wired-square" }
+wslib-crypto-ca = { version = "0.1.1", registry = "wired-square" }
 wslib-dns-mail = { version = "0.5.1", registry = "wired-square" }
 wslib-1password = { version = "0.1.1", registry = "wired-square" }
 # wslib-1password traces each `op` call; this forwards them to `log`.
@@ -36,14 +36,14 @@ aws-sdk-s3 = "1"
 aws-sdk-route53 = "1"
 aws-credential-types = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
-wslib-dns = { version = "0.2", registry = "wired-square", features = ["hickory"] }
+wslib-dns = { version = "0.2.1", registry = "wired-square", features = ["hickory"] }
 ssh2 = "0.9"
 dirs = "6"
 whoami = "1"
 
 [dev-dependencies]
 wslib-1password = { version = "0.1.1", registry = "wired-square", features = ["testing"] }
-wslib-dns = { version = "0.2", registry = "wired-square", features = ["testing"] }
+wslib-dns = { version = "0.2.1", registry = "wired-square", features = ["testing"] }
 
 [features]
 default = []

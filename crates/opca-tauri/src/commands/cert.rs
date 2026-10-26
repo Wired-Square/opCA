@@ -1,4 +1,5 @@
 use log::{info, warn, debug};
+use openssl::bn::BigNum;
 use openssl::nid::Nid;
 use openssl::x509::X509;
 use serde::Deserialize;
@@ -12,9 +13,7 @@ use opca_core::crypto::utils::encrypt_private_key_pem;
 use opca_core::services::san;
 use zeroize::Zeroizing;
 
-use crate::commands::inspect_helpers::{
-    public_key_summary, signature_algorithm_from_text, x509_name_to_rdn_string,
-};
+use crate::commands::inspect_helpers::{key_type, spki_fingerprint};
 
 /// 1Password title for an external cert is always `EXT_<cn>` ([ca.rs] convention),
 /// even though the DB row stores the un-prefixed CN in `title`. Compute the
@@ -1029,12 +1028,11 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
         .map_err(|e| format!("Failed to render certificate text: {e}"))?;
     let text_dump = String::from_utf8_lossy(&text_bytes).to_string();
 
-    let public_key = cert
-        .public_key()
-        .map_err(|e| format!("Failed to read public key: {e}"))?;
-    let (key_type, key_size, public_key_fingerprint_sha256) = public_key_summary(&public_key)?;
-
-    let signature_algorithm = signature_algorithm_from_text(&text_dump);
+    let der = cert
+        .to_der()
+        .map_err(|e| format!("Failed to encode certificate: {e}"))?;
+    let view = wslib_crypto_x509::inspect(&der)
+        .map_err(|e| format!("Failed to read certificate: {e}"))?;
 
     let cn = cert
         .subject_name()
@@ -1042,14 +1040,9 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
         .next()
         .and_then(|e| e.data().to_string().ok());
 
-    let subject = x509_name_to_rdn_string(cert.subject_name());
-    let issuer = x509_name_to_rdn_string(cert.issuer_name());
-
-    let serial = cert
-        .serial_number()
-        .to_bn()
+    let serial = BigNum::from_hex_str(&view.serial)
+        .and_then(|bn| bn.to_dec_str())
         .ok()
-        .and_then(|bn| bn.to_dec_str().ok())
         .map(|s| s.to_string());
 
     let not_before = asn1_time_to_string(cert.not_before());
@@ -1057,21 +1050,19 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
 
     let alt_names = san::of_certificate(&cert).iter().map(ToString::to_string).collect();
 
-    let is_ca = text_dump.contains("CA:TRUE");
-
     Ok(InspectCertificateResult {
         cn,
-        subject,
-        issuer,
+        subject: view.subject,
+        issuer: view.issuer,
         serial,
         not_before,
         not_after,
         alt_names,
-        key_type,
-        key_size,
-        signature_algorithm,
-        public_key_fingerprint_sha256,
-        is_ca,
+        key_type: key_type(&view.key),
+        key_size: view.key.bits(),
+        signature_algorithm: view.signature_algorithm,
+        public_key_fingerprint_sha256: spki_fingerprint(&view.spki),
+        is_ca: view.ca,
         text_dump,
     })
 }

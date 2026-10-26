@@ -1845,7 +1845,7 @@ pub fn parse_crl_metadata(pem: &str) -> Result<CrlMetadata, OpcaError> {
     Ok(crl_metadata(&view))
 }
 
-fn crl_metadata(view: &CrlView) -> CrlMetadata {
+pub fn crl_metadata(view: &CrlView) -> CrlMetadata {
     let openssl_time =
         |at: std::time::SystemTime| datetime::format_datetime(at.into(), DateTimeFormat::Openssl);
     CrlMetadata {

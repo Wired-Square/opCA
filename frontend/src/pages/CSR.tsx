@@ -14,7 +14,7 @@ import {
 import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import PemInput from "../components/PemInput";
-import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
+import { CERT_TYPES, defaultKeyAlgorithm, keyText, type KeyAlgorithm } from "../api/types";
 import CertDaysField, { createCertDays } from "../components/CertDaysField";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import DeleteCsrDialog from "../components/DeleteCsrDialog";
@@ -730,7 +730,7 @@ export default function CSR() {
                 <div class="detail-grid">
                   <Row label="Common Name" value={r().cn} />
                   <Row label="Subject" value={r().subject} mono />
-                  <Row label="Key" value={`${r().key_type} ${r().key_size} bits`} />
+                  <Row label="Key" value={keyText(r())} />
                   <Row label="Signature Algorithm" value={r().signature_algorithm} mono />
                   <Row
                     label="Public Key SHA-256"
