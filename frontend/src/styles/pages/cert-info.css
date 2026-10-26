@@ -17,23 +17,6 @@
   color: var(--app-text);
 }
 
-.san-copy-all {
-  margin-left: 8px;
-  padding: 1px 6px;
-  font: inherit;
-  font-size: 0.6875rem;
-  color: var(--app-text-muted);
-  background: transparent;
-  border: 1px solid var(--app-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.san-copy-all:hover {
-  color: var(--app-text);
-  background: var(--bg-elevated);
-}
-
 .cert-actions {
   display: flex;
   align-items: center;

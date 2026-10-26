@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { Notice } from "@wired-square/kit";
+import { CopyButton, Notice } from "@wired-square/kit";
 import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import {
@@ -11,7 +11,7 @@ import {
   importCsrCert,
   inspectCsr,
 } from "../api/csr";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
@@ -46,7 +46,6 @@ export default function CSR() {
   const [detail, setDetail] = createSignal<CreateCsrResult | null>(null);
   const [loadingDetail, setLoadingDetail] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [copied, markCopied] = createCopiedSignal();
 
   // Create form
   const [cn, setCn] = createSignal("");
@@ -84,7 +83,6 @@ export default function CSR() {
   const [inspecting, setInspecting] = createSignal(false);
   const [inspectError, setInspectError] = createSignal<string | null>(null);
   const [inspectResult, setInspectResult] = createSignal<InspectCsrResult | null>(null);
-  const [inspectCopied, markInspectCopied] = createCopiedSignal();
 
   function selectRow(csr: CsrListItem) {
     setSelected(csr);
@@ -152,14 +150,6 @@ export default function CSR() {
     }
   }
 
-  function copyInspectDump() {
-    const dump = inspectResult()?.text_dump;
-    if (dump) {
-      void writeClipboard(dump);
-      markInspectCopied();
-    }
-  }
-
   async function handleInfo() {
     const sel = selected();
     if (!sel?.cn) return;
@@ -173,14 +163,6 @@ export default function CSR() {
       setError(errorMessage(e));
     } finally {
       setLoadingDetail(false);
-    }
-  }
-
-  function copyPem() {
-    const pem = detail()?.csr_pem ?? createResult()?.csr_pem;
-    if (pem) {
-      void writeClipboard(pem);
-      markCopied();
     }
   }
 
@@ -478,10 +460,9 @@ export default function CSR() {
                 <Show when={d().csr_pem}>
                   <div class="pem-section">
                     <div class="pem-header">
-                      <span class="detail-label">CSR PEM</span>
-                      <button class="btn-ghost btn-sm" onClick={copyPem}>
-                        {copied() ? "Copied" : "Copy"}
-                      </button>
+                      <span class="detail-label">
+                        <CopyButton value={d().csr_pem} write={writeClipboard}>CSR PEM</CopyButton>
+                      </span>
                     </div>
                     <pre class="pem-block mono">{d().csr_pem}</pre>
                   </div>
@@ -551,10 +532,9 @@ export default function CSR() {
                   <p class="page-success">CSR created successfully.</p>
                   <div class="pem-section">
                     <div class="pem-header">
-                      <span class="detail-label">CSR PEM</span>
-                      <button type="button" class="btn-ghost btn-sm" onClick={copyPem}>
-                        {copied() ? "Copied" : "Copy"}
-                      </button>
+                      <span class="detail-label">
+                        <CopyButton value={r().csr_pem} write={writeClipboard}>CSR PEM</CopyButton>
+                      </span>
                     </div>
                     <pre class="pem-block mono">{r().csr_pem}</pre>
                   </div>
@@ -696,17 +676,11 @@ export default function CSR() {
                   </p>
                   <div class="pem-section">
                     <div class="pem-header">
-                      <span class="detail-label">Certificate PEM</span>
-                      <button
-                        type="button"
-                        class="btn-ghost btn-sm"
-                        onClick={() => {
-                          void writeClipboard(r().cert_pem);
-                          markCopied();
-                        }}
-                      >
-                        {copied() ? "Copied" : "Copy"}
-                      </button>
+                      <span class="detail-label">
+                        <CopyButton value={r().cert_pem} write={writeClipboard}>
+                          Certificate PEM
+                        </CopyButton>
+                      </span>
                     </div>
                     <pre class="pem-block mono">{r().cert_pem}</pre>
                   </div>
@@ -779,14 +753,9 @@ export default function CSR() {
                 </div>
                 <div class="pem-section">
                   <div class="pem-header">
-                    <span class="detail-label">Text Dump</span>
-                    <button
-                      type="button"
-                      class="btn-ghost btn-sm"
-                      onClick={copyInspectDump}
-                    >
-                      {inspectCopied() ? "Copied" : "Copy"}
-                    </button>
+                    <span class="detail-label">
+                      <CopyButton value={r().text_dump} write={writeClipboard}>Text Dump</CopyButton>
+                    </span>
                   </div>
                   <pre class="text-dump mono">{r().text_dump}</pre>
                 </div>

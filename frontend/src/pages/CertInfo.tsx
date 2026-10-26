@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
-import { DateModeToggle, Notice, createAction } from "@wired-square/kit";
+import { CopyButton, DateModeToggle, Notice, createAction } from "@wired-square/kit";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
 import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy, forgetPreloadedKey } from "../api/certs";
 import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
@@ -47,7 +47,6 @@ export default function CertInfo() {
   const [copied, markCopied] = createCopiedSignal();
   const [copiedKey, markKeyCopied] = createCopiedSignal();
   const [copiedChain, markChainCopied] = createCopiedSignal();
-  const [copiedSan, markSanCopied] = createCopiedSignal();
   const [backfilling, setBackfilling] = createSignal(false);
   const [showIgnore, setShowIgnore] = createSignal(false);
 
@@ -339,16 +338,8 @@ export default function CertInfo() {
                 <Row label="Key Size" value={d().key_size != null ? String(d().key_size) : null} />
                 <div class="detail-row">
                   <span class="detail-label">
-                    SAN
-                    <Show when={sanList(d()).length > 1}>
-                      <button
-                        type="button"
-                        class="san-copy-all"
-                        title="Copy all SANs"
-                        onClick={() => { void writeClipboard(d().san!); markSanCopied(); }}
-                      >
-                        {copiedSan() ? "Copied" : "Copy all"}
-                      </button>
+                    <Show when={sanList(d()).length > 1} fallback="SAN">
+                      <CopyButton value={d().san!} write={writeClipboard}>SAN</CopyButton>
                     </Show>
                   </span>
                   <Show when={sanList(d()).length > 0} fallback={<span class="detail-value">{"\u2014"}</span>}>
