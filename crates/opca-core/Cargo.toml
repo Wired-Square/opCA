@@ -1,7 +1,7 @@
 [package]
 name = "opca-core"
 version.workspace = true
-edition = "2021"
+edition.workspace = true
 rust-version.workspace = true
 description = "OPCA core library — PKI management backed by 1Password"
 

@@ -1892,7 +1892,7 @@ fn short_name(oid: &str) -> &str {
 pub fn crl_to_text(crl: &openssl::x509::X509Crl) -> Result<String, OpcaError> {
     use std::os::raw::{c_char, c_int};
 
-    extern "C" {
+    unsafe extern "C" {
         fn X509_CRL_print(bp: *mut openssl_sys::BIO, x: *mut openssl_sys::X509_CRL) -> c_int;
     }
 

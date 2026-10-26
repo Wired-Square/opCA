@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Building needs Rust 1.99, pinned by `rust-toolchain.toml` and declared as the
   crates' `rust-version`; CI installs the same toolchain.
+- The crates are on the Rust 2024 edition, with Cargo's resolver 3, which
+  picks dependency versions that build on the declared `rust-version`.
 - The Connect page asks for the account first, then the vault. Each has a
   Browse button, and vaults are listed only when you press it, for the account
   in the field; recent logins sit below the form and fill both fields.

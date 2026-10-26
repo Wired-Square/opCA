@@ -1,7 +1,7 @@
 [package]
 name = "opca-tauri"
 version.workspace = true
-edition = "2021"
+edition.workspace = true
 rust-version.workspace = true
 description = "OPCA desktop application — Tauri 2 GUI"
 
