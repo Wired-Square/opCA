@@ -184,10 +184,10 @@
   cursor: not-allowed;
 }
 
-.theme-toggle-connect {
-  display: block;
-  margin: 24px auto 0;
-  font-size: 0.8125rem;
+.connect-scheme {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
 }
 
 .op-cli-status {

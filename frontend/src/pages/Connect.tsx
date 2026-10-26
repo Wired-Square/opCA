@@ -7,11 +7,10 @@ import { listAccounts, accountValue, accountLabel } from "../api/accounts";
 import { createVault, listVaults } from "../api/vaults";
 import type { AccountInfo, VaultInfo } from "../api/types";
 import { setAppState, type VaultState } from "../stores/app";
-import { themeMode, toggleTheme } from "../stores/theme";
 import { availableUpdate, fetchUpdate } from "../stores/update";
 import Icon from "../components/Icon";
 import Spinner from "../components/Spinner";
-import { Popover, PopoverOption } from "@wired-square/kit";
+import { Popover, PopoverOption, SchemePicker } from "@wired-square/kit";
 import "../styles/pages/connect.css";
 
 interface ConnectionInfo {
@@ -363,9 +362,9 @@ export default function Connect() {
           {creating() ? "Connect to an existing vault" : "New CA in a new vault…"}
         </button>
 
-        <button class="btn-ghost theme-toggle-connect" onClick={toggleTheme} title="Toggle theme">
-          {themeMode() === "dark" ? "☀ Light mode" : "☾ Dark mode"}
-        </button>
+        <div class="connect-scheme">
+          <SchemePicker />
+        </div>
 
         <Show when={opCli()}>
           {(status) => (

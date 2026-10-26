@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   escaped). The text dump is unchanged.
 - DKIM records are split into 255-octet TXT strings by `wslib-dns`, which
   splits only between characters and escapes quotes and backslashes.
+- The colour scheme follows macOS unless you pick light or dark: the header
+  and Connect page offer system, light and dark.
+
 - Copyable detail values use the row's width again, instead of wrapping short
   values such as "CA" mid-word.
 

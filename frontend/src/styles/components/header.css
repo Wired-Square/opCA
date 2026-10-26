@@ -55,12 +55,6 @@
   gap: 4px;
 }
 
-.theme-toggle {
-  font-size: 1.25rem;
-  padding: 4px 8px;
-  border-radius: var(--radius-md);
-}
-
 .disconnect-btn {
   padding: 4px 8px;
   border-radius: var(--radius-md);

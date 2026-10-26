@@ -653,9 +653,10 @@ keep theirs (`--bg-elevated`, `--text-tertiary`, `--info`, `--caution`,
 `--link`, …). The `theme` store hands both sets to the kit's `applyTheme` once,
 as an adopted stylesheet, and switches between them with the kit's
 `data-app-scheme` attribute, which also sets `color-scheme` so native controls
-follow the app's theme rather than the OS appearance. The choice is kept under
-the kit's storage key; a value under the old `opca-theme` key is carried over
-once. Everything that does not vary by theme is a static `:root` variable in
+follow the app's theme. The kit's `SchemePicker` (header and Connect page)
+offers system, light and dark; with no choice kept, the app follows the OS
+appearance. The choice is kept under the kit's storage key; a value under the
+old `opca-theme` key is carried over once. Everything that does not vary by theme is a static `:root` variable in
 [styles/global.css](../frontend/src/styles/global.css): status tints and
 edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
 the kit tokens opca derives from its own (`--app-surface-sunken`,

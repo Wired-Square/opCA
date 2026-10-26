@@ -1,7 +1,7 @@
 import { Show, Switch, Match } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { appState, disconnect } from "../../stores/app";
-import { themeMode, toggleTheme } from "../../stores/theme";
+import { SchemePicker } from "@wired-square/kit";
 import Icon from "../Icon";
 import "../../styles/components/header.css";
 
@@ -44,9 +44,7 @@ export default function Header() {
         </Show>
       </div>
       <div class="header-actions">
-        <button class="btn-ghost theme-toggle" onClick={toggleTheme} aria-label="Toggle theme" title="Toggle theme">
-          {themeMode() === "dark" ? "\u2600" : "\u263E"}
-        </button>
+        <SchemePicker />
         <button class="btn-ghost disconnect-btn" onClick={handleLogout} aria-label="Disconnect" title="Disconnect">
           <Icon name="logout" />
         </button>
