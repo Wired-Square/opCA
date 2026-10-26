@@ -1,5 +1,5 @@
 import { describe as group, it, expect } from "vitest";
-import { clippingAncestor, describe, rectInViewport } from "../harness/dom-ops";
+import { clippingAncestor, describe, rectInViewport } from "@wired-square/mcp-bridge/dom-ops";
 
 function box(left: number, top: number, right: number, bottom: number) {
   return { left, top, right, bottom, x: left, y: top, width: right - left, height: bottom - top } as DOMRect;

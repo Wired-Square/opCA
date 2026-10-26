@@ -1,6 +1,7 @@
+import "@wired-square/mcp-bridge/dom-ops";
 import type { Navigator } from "@solidjs/router";
 import { chooseScheme, type Scheme } from "@wired-square/kit/core";
-import { startHarnessBridge } from "./tauri-bridge";
+import { startHarnessBridge } from "@wired-square/mcp-bridge/tauri-bridge";
 
 let navigate: Navigator;
 let stop: Promise<() => void> | undefined;

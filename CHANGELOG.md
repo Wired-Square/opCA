@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Tauri is updated to 2.12.
+- The MCP dev harness's page code now comes from `@wired-square/mcp-bridge`
+  0.1.0, beside `wslib-mcp` 0.2.0, instead of copies kept in step by tests.
 - Holding a quit until 1Password work finishes now comes from `wslib-tauri`
   0.1.0's quit guard; the app menu reads "Quit opCA" as before.
 - Inspect reads a certificate's, CSR's or CRL's signature algorithm, key and

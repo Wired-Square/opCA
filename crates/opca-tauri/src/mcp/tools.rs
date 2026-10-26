@@ -169,14 +169,4 @@ mod tests {
             .map(|(n, r)| (n.to_string(), r))
         );
     }
-
-    #[test]
-    fn the_vendored_dom_ops_match_the_library() {
-        assert_eq!(include_str!("../../../../frontend/src/harness/dom-ops.ts"), dom::OPS_TS);
-    }
-
-    #[test]
-    fn the_vendored_tauri_bridge_matches_the_library() {
-        assert_eq!(include_str!("../../../../frontend/src/harness/tauri-bridge.ts"), wslib_mcp::tauri_bridge::BRIDGE_TS);
-    }
 }

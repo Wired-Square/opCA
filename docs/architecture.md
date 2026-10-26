@@ -533,10 +533,8 @@ through the registry mirror (`.cargo/mirror.toml`).
 Everything except `resize_window` crosses `wslib-mcp`'s `tauri-bridge`: its
 `TauriBridge` emits `harness:request {id, op, args}` to the main window and
 awaits the matching `harness:reply`, timing out after 10 s. The webview side is
-[harness/tauri-bridge.ts](../frontend/src/harness/tauri-bridge.ts) and
-[harness/dom-ops.ts](../frontend/src/harness/dom-ops.ts), both vendored
-byte-for-byte from the library (Rust tests compare them with
-`wslib_mcp::tauri_bridge::BRIDGE_TS` and `wslib_mcp::dom::OPS_TS`);
+`@wired-square/mcp-bridge` (`/dom-ops`, imported first because it installs the
+console capture, and `/tauri-bridge`);
 [harness/start.ts](../frontend/src/harness/start.ts) starts it with the
 `navigate` and `set_theme` app ops. All are imported only under
 `import.meta.env.DEV`, so they are absent from `frontend/dist`. `click`
