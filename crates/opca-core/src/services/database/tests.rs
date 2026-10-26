@@ -1219,7 +1219,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 11); // v5→v6 … v14→v15, v15→v16
+    assert_eq!(info.steps.len(), 12); // v5→v6 … v15→v16, v16→v17
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1255,6 +1255,7 @@ fn a_v14_dump_imports_with_crl_batches_off() {
     db.conn
         .execute_batch(
             "DROP TABLE crl_batch;
+             DROP TABLE brokers;
              ALTER TABLE config DROP COLUMN crl_batch_enabled;
              ALTER TABLE config DROP COLUMN openvpn_template_import;
              UPDATE config SET schema_version = 14 WHERE id = 1;",
@@ -1264,11 +1265,11 @@ fn a_v14_dump_imports_with_crl_batches_off() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v14_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (14, 2));
+    assert_eq!((info.from_version, info.steps.len()), (14, 3));
     let config = db.get_config().unwrap();
     assert_eq!(
         (config.schema_version, config.crl_batch_enabled),
-        (Some(16), None)
+        (Some(DEFAULT_SCHEMA_VERSION), None)
     );
     assert!(db.get_crl_batch().unwrap().is_none());
     assert_eq!(config.org.as_deref(), Some("Test Org"));
@@ -1279,7 +1280,8 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
     let db = test_db();
     db.conn
         .execute_batch(
-            "ALTER TABLE config DROP COLUMN openvpn_template_import;
+            "DROP TABLE brokers;
+             ALTER TABLE config DROP COLUMN openvpn_template_import;
              UPDATE config SET schema_version = 15 WHERE id = 1;",
         )
         .unwrap();
@@ -1287,7 +1289,7 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v15_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (15, 1));
+    assert_eq!((info.from_version, info.steps.len()), (15, 2));
     assert_eq!(
         db.openvpn_template_import().unwrap(),
         TemplateImport::NotImported
@@ -1360,6 +1362,100 @@ fn a_batch_reports_the_due_crl_its_cover_and_what_is_left_to_release() {
             .iter()
             .all(|&d| at(d).signed_until == signed_until && at(d).count == 5)
     );
+}
+
+#[test]
+fn a_v16_dump_gains_an_empty_brokers_table() {
+    let db = test_db();
+    db.conn
+        .execute_batch(
+            "DROP TABLE brokers;
+             UPDATE config SET schema_version = 16 WHERE id = 1;",
+        )
+        .unwrap();
+    let v16_sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+    assert!(!v16_sql.contains("brokers"));
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(&v16_sql).unwrap();
+
+    assert_eq!((info.from_version, info.steps.len()), (16, 1));
+    assert_eq!(
+        db.get_config().unwrap().schema_version,
+        Some(DEFAULT_SCHEMA_VERSION)
+    );
+    assert!(db.query_all_brokers().unwrap().is_empty());
+}
+
+fn broker_db() -> CertificateAuthorityDB {
+    let mut db = test_db();
+    let mut sub = make_cert("100", "Broker CA", "20301231235959Z");
+    sub.cert_type = Some("subordinateca".into());
+    db.add_cert(&sub).unwrap();
+    db
+}
+
+fn domains(names: &[&str]) -> Vec<String> {
+    names.iter().map(|n| n.to_string()).collect()
+}
+
+#[test]
+fn a_broker_reads_its_expiry_and_cn_from_the_certificate_row() {
+    let db = broker_db();
+    let id = db.add_broker("100", &domains(&["home.arpa"])).unwrap();
+
+    let broker = db.query_broker(id).unwrap().unwrap();
+
+    assert_eq!(broker.subordinate_serial, "100");
+    assert_eq!(broker.permitted_domains, ["home.arpa"]);
+    assert_eq!(broker.state, BrokerState::Active);
+    assert_eq!(
+        (broker.url, broker.pinned_key, broker.last_contact),
+        (None, None, None)
+    );
+    assert_eq!(broker.cn.as_deref(), Some("Broker CA"));
+    assert_eq!(broker.expiry_date.as_deref(), Some("20301231235959Z"));
+    assert!(db.query_broker(id + 1).unwrap().is_none());
+}
+
+#[test]
+fn a_broker_moves_to_a_new_serial_and_can_be_revoked() {
+    let mut db = broker_db();
+    db.add_cert(&make_cert("101", "Broker CA", "20311231235959Z"))
+        .unwrap();
+    let id = db.add_broker("100", &domains(&["home.arpa"])).unwrap();
+
+    db.move_broker_to(id, "101", &domains(&["home.arpa", "lab.example"]))
+        .unwrap();
+    db.revoke_brokers_of("100").unwrap();
+    assert_eq!(
+        db.query_broker(id).unwrap().unwrap().state,
+        BrokerState::Active,
+        "the superseded serial no longer names the broker"
+    );
+    db.revoke_brokers_of("101").unwrap();
+
+    let broker = db.query_broker(id).unwrap().unwrap();
+    assert_eq!(broker.subordinate_serial, "101");
+    assert_eq!(broker.expiry_date.as_deref(), Some("20311231235959Z"));
+    assert_eq!(broker.permitted_domains, ["home.arpa", "lab.example"]);
+    assert_eq!(broker.state, BrokerState::Revoked);
+    assert_eq!(db.query_all_brokers().unwrap(), [broker]);
+}
+
+#[test]
+fn brokers_survive_export_and_import() {
+    let db = broker_db();
+    db.add_broker("100", &domains(&["home.arpa", "o'brien.example"]))
+        .unwrap();
+    let before = db.query_all_brokers().unwrap();
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(
+        &String::from_utf8(db.export_database().unwrap()).unwrap(),
+    )
+    .unwrap();
+
+    assert!(!info.migrated);
+    assert_eq!(db.query_all_brokers().unwrap(), before);
 }
 
 #[test]
