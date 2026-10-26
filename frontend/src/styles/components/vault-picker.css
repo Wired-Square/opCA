@@ -14,7 +14,7 @@
 }
 
 .vault-picker-new {
-  color: var(--accent);
+  color: var(--app-accent);
   font-weight: 500;
 }
 

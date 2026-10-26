@@ -52,21 +52,21 @@
 }
 
 .log-ok {
-  color: var(--success);
+  color: var(--app-good);
 }
 
 .log-fail {
-  color: var(--error);
+  color: var(--app-bad);
 }
 
 .log-action {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--app-text);
   flex-shrink: 0;
 }
 
 .log-detail {
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

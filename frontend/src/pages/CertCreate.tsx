@@ -1,11 +1,12 @@
 import { createSignal, For } from "solid-js";
+import { Notice } from "@wired-square/kit";
+import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { createCert } from "../api/certs";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
 import CertDaysField, { createCertDays } from "../components/CertDaysField";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import SanInput from "../components/SanInput";
-import PageError from "../components/PageError";
 import "../styles/pages/cert-create.css";
 
 export default function CertCreate() {
@@ -36,7 +37,7 @@ export default function CertCreate() {
       // just return to the list.
       navigate("/certs");
     } catch (err) {
-      setError(String(err));
+      setError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -82,7 +83,7 @@ export default function CertCreate() {
 
         <SanInput values={sans()} onChange={setSans} />
 
-        <PageError placement="form" message={error()} />
+        <Notice tone="bad" class="form-notice">{error()}</Notice>
 
         <div class="form-actions">
           <button class="btn-primary" type="submit" disabled={saving() || !cn().trim()}>

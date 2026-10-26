@@ -88,6 +88,12 @@ jobs:
             package-lock.json
             frontend/package-lock.json
 
+      - name: Authenticate to the npm registry mirror
+        shell: bash
+        env:
+          NPM_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
+        run: echo "//mirror.wiredsquare.com/npm/:_authToken=${NPM_MIRROR_TOKEN}" >> ~/.npmrc
+
       - name: Install npm dependencies
         run: |
           npm ci

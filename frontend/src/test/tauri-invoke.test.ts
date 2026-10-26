@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { Refusal, refusalMessage } from "@wired-square/kit";
 import { errorMessage, tauriInvoke } from "../api/tauri";
 
 const mockInvoke = vi.mocked(invoke);
@@ -27,10 +28,12 @@ describe("tauriInvoke", () => {
     });
   });
 
-  it("normalises a string rejection into an Error", async () => {
+  it("normalises a string rejection into a Refusal the kit shows verbatim", async () => {
     mockInvoke.mockRejectedValueOnce("Vault not found");
 
-    await expect(tauriInvoke("get_ca_info")).rejects.toThrow("Vault not found");
+    const err = await tauriInvoke("get_ca_info").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Refusal);
+    expect(refusalMessage(err)).toBe("Vault not found");
   });
 
   it("normalises a non-string rejection too", async () => {

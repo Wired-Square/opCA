@@ -1,4 +1,5 @@
 import { Show, createEffect, createResource, createSignal } from "solid-js";
+import { DateModeToggle, Notice, createAction } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import {
   getCrlInfo,
@@ -8,16 +9,13 @@ import {
   inspectCrl,
   recordCrlCopy,
 } from "../api/crl";
-import { formatDate } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
-import { ActionResultBanner } from "../components/ResultBanner";
+import { ActionOutcome } from "../components/ResultBanner";
 import UploadPrompt from "../components/UploadPrompt";
-import PageError from "../components/PageError";
-import { createActionResult } from "../utils/actionResult";
-import { createAction } from "../utils/action";
+import { failureOf, headed } from "../utils/acting";
 import { createPublishFlow } from "../utils/publishFlow";
 import type { CrlInfo, InspectCrlResult } from "../api/types";
 import "../styles/pages/crl.css";
@@ -34,13 +32,8 @@ function generatedMessage(crl: CrlInfo): string {
 export default function CRL() {
   const [info, { refetch, mutate }] = createResource<CrlInfo>(getCrlInfo);
   const [tab, setTab] = createSignal<Tab>("detail");
-  const outcome = createActionResult();
-  const generate = createAction(outcome);
-  const publish = createPublishFlow({
-    upload: uploadCrl,
-    success: "CRL uploaded to public store",
-    outcome,
-  });
+  const generate = createAction();
+  const publish = createPublishFlow({ upload: uploadCrl, success: "CRL uploaded to public store" });
   const [copied, markCopied] = createCopiedSignal();
   const [backfilling, setBackfilling] = createSignal(false);
 
@@ -72,17 +65,13 @@ export default function CRL() {
 
   function handleGenerate() {
     publish.dismiss();
-    return generate.run(
-      { success: generatedMessage, failure: "Generate failed" },
-      async () => {
-        const generated = await generateCrl();
-        mutate(generated);
-        if (generated.crl_pem) setInspectPem(generated.crl_pem);
-        setInspectResult(null);
-        if (generated.has_public_store) publish.offer();
-        return generated;
-      },
-    );
+    return generate.run(headed("Generate failed", generateCrl), (generated) => {
+      mutate(generated);
+      if (generated.crl_pem) setInspectPem(generated.crl_pem);
+      setInspectResult(null);
+      if (generated.has_public_store) publish.offer();
+      generate.succeed(generatedMessage(generated));
+    });
   }
 
   function copyPem() {
@@ -130,12 +119,12 @@ export default function CRL() {
             {info.loading ? "Loading…" : "Refresh"}
           </button>
           <Show when={info()?.has_public_store}>
-            <button class="btn-ghost" onClick={publish.handleUpload} disabled={publish.uploading()}>
-              {publish.uploading() ? "Uploading…" : "Upload CRL"}
+            <button class="btn-ghost" onClick={publish.handleUpload} disabled={publish.pending()}>
+              {publish.pending() ? "Uploading…" : "Upload CRL"}
             </button>
           </Show>
-          <button class="btn-primary" onClick={handleGenerate} disabled={generate.busy()}>
-            {generate.busy() ? "Generating…" : "Generate CRL"}
+          <button class="btn-primary" onClick={handleGenerate} disabled={generate.pending()}>
+            {generate.pending() ? "Generating…" : "Generate CRL"}
           </button>
         </div>
       </div>
@@ -158,9 +147,10 @@ export default function CRL() {
       <div class="crl-scroll">
         <UploadPrompt flow={publish} message="Upload CRL to public store?" />
 
-        <ActionResultBanner outcome={outcome} />
+        <ActionOutcome action={generate} />
+        <ActionOutcome action={publish} />
 
-        <PageError message={info.error} />
+        <Notice tone="bad">{failureOf(info.error)}</Notice>
 
         <Show when={info.loading}>
           <Spinner message="Loading…" />
@@ -179,12 +169,12 @@ export default function CRL() {
                   <span class="detail-value mono">{d().issuer ?? "—"}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Last Update <TzToggle /></span>
-                  <span class="detail-value mono">{formatDate(d().last_update)}</span>
+                  <span class="detail-label">Last Update <DateModeToggle /></span>
+                  <span class="detail-value mono"><StoredDate value={d().last_update} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Next Update</span>
-                  <span class="detail-value mono">{formatDate(d().next_update)}</span>
+                  <span class="detail-value mono"><StoredDate value={d().next_update} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">CRL Number</span>
@@ -230,7 +220,7 @@ export default function CRL() {
                       </div>
                       <div class="detail-row">
                         <span class="detail-label">Signed Until</span>
-                        <span class="detail-value mono">{formatDate(b().signed_until)}</span>
+                        <span class="detail-value mono"><StoredDate value={b().signed_until} /></span>
                       </div>
                       <div class="detail-row">
                         <span class="detail-label">Unreleased</span>
@@ -285,7 +275,7 @@ export default function CRL() {
             </button>
           </div>
 
-          <PageError message={inspectError()} />
+          <Notice tone="bad">{inspectError()}</Notice>
 
           <Show when={inspectResult()}>
             {(r) => (
@@ -296,12 +286,12 @@ export default function CRL() {
                     <span class="detail-value mono">{r().issuer || "—"}</span>
                   </div>
                   <div class="detail-row">
-                    <span class="detail-label">Last Update <TzToggle /></span>
-                    <span class="detail-value mono">{formatDate(r().last_update)}</span>
+                    <span class="detail-label">Last Update <DateModeToggle /></span>
+                    <span class="detail-value mono"><StoredDate value={r().last_update} /></span>
                   </div>
                   <div class="detail-row">
                     <span class="detail-label">Next Update</span>
-                    <span class="detail-value mono">{formatDate(r().next_update)}</span>
+                    <span class="detail-value mono"><StoredDate value={r().next_update} /></span>
                   </div>
                   <div class="detail-row">
                     <span class="detail-label">CRL Number</span>

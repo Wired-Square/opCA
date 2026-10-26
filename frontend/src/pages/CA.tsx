@@ -1,26 +1,24 @@
 import { Show, For, createSignal, createResource, createUniqueId, onMount, onCleanup } from "solid-js";
+import { DateModeToggle, Notice, createAction } from "@wired-square/kit";
+import { failureOf, headed } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { appState, setAppState, hasCA, type VaultState } from "../stores/app";
 import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCert, recordCaCertCopy } from "../api/ca";
 import { listAwsCredentials, getAwsCredential, setAwsCredential } from "../api/aws";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
-import PageError from "../components/PageError";
 import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { caDaysOverAppleLimit, defaultKeyAlgorithm, type CaInfo, type CaConfig, type RestoreResult, type BackupInfoResult, type StoreTestResults, type AwsItemRef } from "../api/types";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
-import { ActionResultBanner, ActionResultLine } from "../components/ResultBanner";
+import { ActionOutcome } from "../components/ResultBanner";
 import ResignCaDialog from "../components/ResignCaDialog";
 import UploadPrompt from "../components/UploadPrompt";
-import { createActionResult } from "../utils/actionResult";
-import { createAction } from "../utils/action";
 import { createPublishFlow } from "../utils/publishFlow";
 import "../styles/pages/ca.css";
 
@@ -34,28 +32,20 @@ export default function CA() {
   // Certificate-tab actions live up here so they can sit in the page header
   // beside the title, the way the CRL page does it.
   const [showResignDialog, setShowResignDialog] = createSignal(false);
-  const outcome = createActionResult();
-  const publish = createPublishFlow({
-    upload: uploadCaCert,
-    success: "Certificate uploaded to public store",
-    outcome,
-  });
+  const publish = createPublishFlow({ upload: uploadCaCert, success: "Certificate uploaded to public store" });
 
   // Reading `.error` first: a resource getter rethrows, and the header reads
   // this before the tab body has gated on a loaded resource.
   const hasPublicStore = () => !caConfig.error && !!caConfig()?.ca_public_store;
 
-  /** Certificate-tab feedback is owned by the shell now, so it would otherwise
-   * outlive the tab it belongs to. */
   function selectTab(next: Tab) {
     setTab(next);
     publish.dismiss();
-    outcome.clear();
   }
 
   function handleResigned(days: number) {
     refetchCaInfo();
-    outcome.report(`CA certificate re-signed for ${days} days`);
+    publish.succeed(`CA certificate re-signed for ${days} days`);
     // Re-signing does not publish, so the store still holds the old
     // certificate — same gap the CRL page closes after Generate.
     if (hasPublicStore()) publish.offer();
@@ -71,8 +61,8 @@ export default function CA() {
               Re-sign Certificate
             </button>
             <Show when={hasPublicStore()}>
-              <button class="btn-ghost" onClick={publish.handleUpload} disabled={publish.uploading()}>
-                {publish.uploading() ? "Uploading…" : "Upload Certificate"}
+              <button class="btn-ghost" onClick={publish.handleUpload} disabled={publish.pending()}>
+                {publish.pending() ? "Uploading…" : "Upload Certificate"}
               </button>
             </Show>
           </div>
@@ -116,7 +106,7 @@ export default function CA() {
           message="Upload the re-signed certificate to the public store?"
         />
 
-        <ActionResultBanner outcome={outcome} />
+        <ActionOutcome action={publish} />
 
         <CertificateTab info={caInfo} />
       </Show>
@@ -149,6 +139,7 @@ export default function CA() {
 }
 
 function CertificateTab(props: { info: () => CaInfo | undefined }) {
+  const dateText = useDateText();
   const [copied, markCopied] = createCopiedSignal();
 
   function copyPem() {
@@ -170,8 +161,8 @@ function CertificateTab(props: { info: () => CaInfo | undefined }) {
               <DetailRow label="Subject" value={info().subject} mono />
               <DetailRow label="Issuer" value={info().issuer} mono />
               <DetailRow label="Serial" value={info().serial} mono />
-              <DetailRow label={<>Valid From <TzToggle /></>} value={formatDate(info().not_before)} />
-              <DetailRow label="Valid Until" value={formatDate(info().not_after)} />
+              <DetailRow label={<>Valid From <DateModeToggle /></>} value={dateText(info().not_before)} />
+              <DetailRow label="Valid Until" value={dateText(info().not_after)} />
               <DetailRow label="Key Type" value={info().key_type} />
               <DetailRow label="Key Size" value={info().key_size} />
               <div class="detail-row">
@@ -214,8 +205,7 @@ function CertificateTab(props: { info: () => CaInfo | undefined }) {
 }
 
 function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => void }) {
-  const outcome = createActionResult();
-  const save = createAction(outcome);
+  const save = createAction();
   const [form, setForm] = createSignal<Partial<CaConfig>>({});
 
   const merged = () => ({ ...props.config(), ...form() } as CaConfig);
@@ -223,10 +213,10 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
     setForm((f) => ({ ...f, [key]: value || null }));
 
   const handleSave = () =>
-    save.run({ success: "Configuration saved.", failure: "Save failed" }, async () => {
-      await updateCaConfig(merged());
+    save.run(headed("Save failed", () => updateCaConfig(merged())), () => {
       setForm({});
       props.onSave();
+      save.succeed("Configuration saved.");
     });
 
   return (
@@ -251,11 +241,11 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <FormField label="CRL URL" value={merged().crl_url} onChange={(v) => set("crl_url", v)} />
             </div>
 
-            <ActionResultLine outcome={outcome} />
+            <ActionOutcome action={save} />
 
             <div class="form-actions">
-              <button class="btn-primary" onClick={handleSave} disabled={save.busy()}>
-                {save.busy() ? "Saving…" : "Save Configuration"}
+              <button class="btn-primary" onClick={handleSave} disabled={save.pending()}>
+                {save.pending() ? "Saving…" : "Save Configuration"}
               </button>
             </div>
           </div>
@@ -267,8 +257,7 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
 
 function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => void }) {
   const [testing, setTesting] = createSignal(false);
-  const outcome = createActionResult();
-  const save = createAction(outcome);
+  const save = createAction();
   const [testResults, setTestResults] = createSignal<StoreTestResults | null>(null);
   const [testError, setTestError] = createSignal<string | null>(null);
   const [form, setForm] = createSignal<Partial<CaConfig>>({});
@@ -282,10 +271,10 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
     );
 
   const handleSave = () =>
-    save.run({ success: "Store settings saved.", failure: "Save failed" }, async () => {
-      await updateCaConfig(merged());
+    save.run(headed("Save failed", () => updateCaConfig(merged())), () => {
       setForm({});
       props.onSave();
+      save.succeed("Store settings saved.");
     });
 
   async function handleTest() {
@@ -336,11 +325,11 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <p class="form-hint is-warning">CRL batches need a private store.</p>
             </Show>
 
-            <ActionResultLine outcome={outcome} />
+            <ActionOutcome action={save} />
 
             <div class="form-actions">
-              <button class="btn-primary" onClick={handleSave} disabled={save.busy()}>
-                {save.busy() ? "Saving…" : "Save Stores"}
+              <button class="btn-primary" onClick={handleSave} disabled={save.pending()}>
+                {save.pending() ? "Saving…" : "Save Stores"}
               </button>
               <button class="btn-ghost" onClick={handleTest} disabled={testing()}>
                 {testing() ? "Testing…" : "Test Stores"}
@@ -357,7 +346,7 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <Spinner message="Testing store connections…" />
             </Show>
 
-            <PageError placement="form" message={testError()} />
+            <Notice tone="bad" class="form-notice">{testError()}</Notice>
 
             <Show when={testResults()}>
               {(results) => (
@@ -478,8 +467,8 @@ function AwsCredentialSection() {
         </div>
       </Show>
 
-      <PageError placement="form" message={items.error} />
-      <PageError placement="form" message={result() === "ok" ? null : result()} />
+      <Notice tone="bad" class="form-notice">{failureOf(items.error)}</Notice>
+      <Notice tone="bad" class="form-notice">{result() === "ok" ? null : result()}</Notice>
       <Show when={result() === "ok"}>
         <p class="form-success">AWS credential saved.</p>
       </Show>
@@ -544,7 +533,7 @@ function InitTab(props: { onInitialised: () => void }) {
           />
         </div>
 
-        <PageError placement="form" message={error()} />
+        <Notice tone="bad" class="form-notice">{error()}</Notice>
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleInit} disabled={saving() || !form().cn?.trim()}>
@@ -660,7 +649,7 @@ function RestoreTab() {
           />
         </div>
 
-        <PageError placement="form" message={restoreError()} />
+        <Notice tone="bad" class="form-notice">{restoreError()}</Notice>
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleRestore} disabled={restoring()}>
@@ -775,7 +764,7 @@ function InfoTab() {
           />
         </div>
 
-        <PageError placement="form" message={infoError()} />
+        <Notice tone="bad" class="form-notice">{infoError()}</Notice>
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleInfo} disabled={loadingInfo()}>

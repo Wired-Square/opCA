@@ -5,8 +5,8 @@ import DeleteCertDialog from "../components/DeleteCertDialog";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 
-/** These are thin wrappers over ConfirmDialog, so only their own wiring is
- * tested here — the acting/error/reset behaviour lives in confirm-dialog.test. */
+/** These are thin wrappers over the kit Confirm, so only their own wiring is
+ * tested here — the acting/error/reset behaviour lives in confirm.test. */
 
 const revokeCert = vi.hoisted(() => vi.fn());
 const ignoreCert = vi.hoisted(() => vi.fn());

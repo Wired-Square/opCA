@@ -52,7 +52,7 @@
 
 .md5-hash {
   font-size: 0.8125rem;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   padding: 6px 12px;
   background: var(--bg-elevated);
   border-radius: var(--radius-md);
@@ -61,5 +61,5 @@
 
 .md5-label {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--app-text);
 }

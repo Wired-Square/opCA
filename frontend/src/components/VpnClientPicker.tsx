@@ -1,8 +1,8 @@
 import { Show, For, createSignal, createMemo } from "solid-js";
-import Popover, { PopoverOption } from "./Popover";
+import { Popover, PopoverOption } from "@wired-square/kit";
 import CertStatusBadge from "./CertStatusBadge";
 import Spinner from "./Spinner";
-import { formatDate } from "../utils/dates";
+import StoredDate from "./StoredDate";
 import type { CertListItem } from "../api/types";
 import "../styles/components/vpn-client-picker.css";
 
@@ -27,7 +27,7 @@ function ClientRow(props: { cert: CertListItem }) {
         label={`#${props.cert.serial ?? "?"}`}
       />
       <span class="vpn-picker-cn">{props.cert.cn ?? "—"}</span>
-      <span class="vpn-picker-expiry">{formatDate(props.cert.expiry_date)}</span>
+      <span class="vpn-picker-expiry"><StoredDate value={props.cert.expiry_date} /></span>
     </>
   );
 }
@@ -115,18 +115,16 @@ export default function VpnClientPicker(props: VpnClientPickerProps) {
           <div class="vpn-picker-list" role="listbox" aria-multiselectable="true">
             <For each={matches()}>
               {(cert) => (
-                <PopoverOption
-                  class="vpn-picker-item"
-                  selected={isSelected(cert)}
-                  onSelect={() => props.onToggle(cert)}
-                >
-                  <input
-                    type="checkbox"
-                    class="table-checkbox table-checkbox-passive"
-                    checked={isSelected(cert)}
-                    tabindex={-1}
-                  />
-                  <ClientRow cert={cert} />
+                <PopoverOption selected={isSelected(cert)} onSelect={() => props.onToggle(cert)}>
+                  <div class="vpn-picker-item">
+                    <input
+                      type="checkbox"
+                      class="table-checkbox table-checkbox-passive"
+                      checked={isSelected(cert)}
+                      tabindex={-1}
+                    />
+                    <ClientRow cert={cert} />
+                  </div>
                 </PopoverOption>
               )}
             </For>

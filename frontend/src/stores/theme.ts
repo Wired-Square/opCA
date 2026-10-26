@@ -1,26 +1,29 @@
 import { createSignal, createEffect } from "solid-js";
-import { darkTheme, lightTheme, applyTheme } from "../styles/theme";
+import { SCHEME_KEY, applyTheme, chooseScheme, storedScheme } from "@wired-square/kit/core";
+import { darkTheme, lightTheme } from "../styles/theme";
 
 export type ThemeMode = "dark" | "light";
 
-const STORAGE_KEY = "opca-theme";
+const LEGACY_KEY = "opca-theme";
 
-function getInitialTheme(): ThemeMode {
-  if (typeof window !== "undefined") {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "dark" || stored === "light") return stored;
+export function initialThemeMode(): ThemeMode {
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy !== null) {
+      if (localStorage.getItem(SCHEME_KEY) === null) localStorage.setItem(SCHEME_KEY, legacy);
+      localStorage.removeItem(LEGACY_KEY);
+    }
+  } catch {
+    // Storage blocked: nothing to carry over.
   }
-  return "dark"; // default to dark
+  return storedScheme("dark") === "light" ? "light" : "dark";
 }
 
-const [themeMode, setThemeMode] = createSignal<ThemeMode>(getInitialTheme());
+applyTheme(lightTheme, darkTheme);
 
-createEffect(() => {
-  const mode = themeMode();
-  applyTheme(mode === "dark" ? darkTheme : lightTheme);
-  document.documentElement.setAttribute("data-theme", mode);
-  localStorage.setItem(STORAGE_KEY, mode);
-});
+const [themeMode, setThemeMode] = createSignal<ThemeMode>(initialThemeMode());
+
+createEffect(() => chooseScheme(themeMode()));
 
 export function toggleTheme() {
   setThemeMode((prev) => (prev === "dark" ? "light" : "dark"));

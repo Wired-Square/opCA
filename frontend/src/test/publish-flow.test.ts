@@ -1,46 +1,41 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook } from "@solidjs/testing-library";
-import { createActionResult } from "../utils/actionResult";
+import { Refusal } from "@wired-square/kit";
 import { createPublishFlow } from "../utils/publishFlow";
 
-function mount(upload: () => Promise<void>) {
-  return renderHook(() => {
-    const outcome = createActionResult();
-    const flow = createPublishFlow({ upload, success: "Uploaded to store", outcome });
-    return { outcome, flow };
-  }).result;
-}
+const mount = (upload: () => Promise<void>) =>
+  renderHook(() => createPublishFlow({ upload, success: "Uploaded to store" })).result;
 
 describe("createPublishFlow", () => {
   it("starts idle with no prompt", () => {
-    const { flow } = mount(() => Promise.resolve());
+    const flow = mount(() => Promise.resolve());
     expect(flow.showPrompt()).toBe(false);
-    expect(flow.uploading()).toBe(false);
+    expect(flow.pending()).toBe(false);
   });
 
   it("offer() raises the prompt and dismiss() clears it", () => {
-    const { flow } = mount(() => Promise.resolve());
+    const flow = mount(() => Promise.resolve());
     flow.offer();
     expect(flow.showPrompt()).toBe(true);
     flow.dismiss();
     expect(flow.showPrompt()).toBe(false);
   });
 
-  it("hides the prompt and reports the success summary", async () => {
+  it("hides the prompt and reports the success sentence", async () => {
     const upload = vi.fn(() => Promise.resolve());
-    const { flow, outcome } = mount(upload);
+    const flow = mount(upload);
     flow.offer();
 
     await flow.handleUpload();
 
     expect(upload).toHaveBeenCalledOnce();
     expect(flow.showPrompt()).toBe(false);
-    expect(flow.uploading()).toBe(false);
-    expect(outcome.result()).toEqual({ summary: "Uploaded to store", error: null });
+    expect(flow.pending()).toBe(false);
+    expect(flow.succeeded()).toBe("Uploaded to store");
   });
 
   it("leaves the prompt up and reports the failure", async () => {
-    const { flow, outcome } = mount(() => Promise.reject("vault locked"));
+    const flow = mount(() => Promise.reject(new Refusal("vault locked")));
     flow.offer();
 
     // Resolving rather than throwing is the contract Database relies on when
@@ -49,25 +44,19 @@ describe("createPublishFlow", () => {
 
     // The user should still be able to retry from the prompt.
     expect(flow.showPrompt()).toBe(true);
-    expect(flow.uploading()).toBe(false);
-    expect(outcome.result()).toEqual({ summary: "Upload failed", error: "vault locked" });
+    expect(flow.pending()).toBe(false);
+    expect(flow.failed()).toBe("Upload failed: vault locked");
   });
 
-  it("coerces a thrown Error for display", async () => {
-    const { flow, outcome } = mount(() => Promise.reject(new Error("boom")));
-    await flow.handleUpload();
-    expect(outcome.result()?.error).toBe("Error: boom");
-  });
-
-  it("reports uploading while in flight", async () => {
+  it("is pending while the upload is in flight", async () => {
     let release!: () => void;
-    const { flow } = mount(() => new Promise<void>((resolve) => { release = resolve; }));
+    const flow = mount(() => new Promise<void>((resolve) => { release = resolve; }));
 
     const done = flow.handleUpload();
-    expect(flow.uploading()).toBe(true);
+    expect(flow.pending()).toBe(true);
 
     release();
     await done;
-    expect(flow.uploading()).toBe(false);
+    expect(flow.pending()).toBe(false);
   });
 });

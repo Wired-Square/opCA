@@ -7,9 +7,9 @@
 .search-input {
   padding: 6px 28px 6px 10px;
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  border: 1px solid var(--app-border);
   border-radius: var(--radius-md);
-  color: var(--text-primary);
+  color: var(--app-text);
   font-size: 0.8125rem;
   min-width: 160px;
 }
@@ -31,5 +31,5 @@
 }
 
 .search-clear:hover {
-  color: var(--text-primary);
+  color: var(--app-text);
 }

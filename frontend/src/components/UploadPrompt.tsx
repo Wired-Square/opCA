@@ -17,9 +17,9 @@ export default function UploadPrompt(props: UploadPromptProps) {
           <button
             class="btn-primary btn-sm"
             onClick={props.flow.handleUpload}
-            disabled={props.flow.uploading()}
+            disabled={props.flow.pending()}
           >
-            {props.flow.uploading() ? "Uploading…" : "Upload"}
+            {props.flow.pending() ? "Uploading…" : "Upload"}
           </button>
           <button class="btn-ghost btn-sm" onClick={props.flow.dismiss}>
             Dismiss

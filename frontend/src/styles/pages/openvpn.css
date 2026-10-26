@@ -6,7 +6,7 @@
   box-sizing: border-box;
 }
 
-.page-openvpn .page-error,
+.page-openvpn .app-notice,
 .page-openvpn .page-success {
   margin-top: 12px;
   margin-bottom: 0;
@@ -46,7 +46,7 @@
 }
 
 .template-section {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--app-border);
   padding-top: 16px;
 }
 
@@ -80,10 +80,10 @@
   width: 100%;
   min-height: 250px;
   padding: 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   border-radius: var(--radius-lg);
-  color: var(--text-primary);
+  color: var(--app-text);
   font-family: var(--font-mono);
   font-size: 0.8125rem;
   line-height: 1.5;
@@ -111,18 +111,18 @@
 
 .filter-chips .chip {
   padding: 5px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--app-border);
   border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   font-size: 0.8125rem;
   cursor: pointer;
 }
 
 .filter-chips .chip-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: var(--app-accent-contrast);
 }
 
 .page-openvpn .detail-label {

@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createMemo, createResource, onMount } from "solid-js";
+import { Confirm, createSelection, Notice } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useSearchParams } from "@solidjs/router";
 import {
@@ -20,17 +21,16 @@ import {
   deleteOpenVpnProfile,
   bulkDeleteOpenVpnProfiles,
 } from "../api/openvpn";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import AddProfileModal from "../components/AddProfileModal";
-import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import SendToVaultDialog from "../components/SendToVaultDialog";
-import ConfirmDialog from "../components/ConfirmDialog";
 import ResultBanner from "../components/ResultBanner";
-import SelectAllCheckbox from "../components/SelectAllCheckbox";
-import PageError from "../components/PageError";
-import { createSelection } from "../utils/selection";
+import TableTick from "../components/TableTick";
+import { createActing } from "../utils/acting";
 import type {
   BulkProfileResult,
   CertListItem,
@@ -62,6 +62,7 @@ type Tab = "profiles" | "templates" | "config";
 type ProfileFilter = "all" | "client" | "server";
 
 export default function OpenVPN() {
+  const dateText = useDateText();
   const [tab, setTab] = createSignal<Tab>("profiles");
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
@@ -171,7 +172,7 @@ export default function OpenVPN() {
       .filter((p) => {
         if (f !== "all" && (p.profile_type ?? "").toLowerCase() !== f) return false;
         if (!q) return true;
-        return [p.cn, p.created_date ? formatDate(p.created_date) : null].some((v) =>
+        return [p.cn, p.created_date ? dateText(p.created_date) : null].some((v) =>
           v?.toLowerCase().includes(q),
         );
       })
@@ -213,6 +214,8 @@ export default function OpenVPN() {
       setBulkActing(false);
     }
   }
+
+  const deleteActing = createActing();
 
   async function runConfirmDelete() {
     const target = confirmDelete();
@@ -328,6 +331,8 @@ export default function OpenVPN() {
     }
   }
 
+  const deleteTemplateActing = createActing();
+
   async function runDeleteTemplate() {
     const name = confirmDeleteTemplate();
     if (!name) return;
@@ -418,7 +423,7 @@ export default function OpenVPN() {
     }
   }
 
-  function profileMenuItems(profile: OpenVpnProfileItem): KebabItem[] {
+  function profileMenuItems(profile: OpenVpnProfileItem): MenuAction[] {
     return [
       { label: "Send to Vault", onSelect: () => setSendProfiles([{ title: profile.title, cn: profile.cn }]) },
       { label: "Regenerate", disabled: !profile.template, onSelect: () => void handleRegenerate(profile) },
@@ -525,7 +530,7 @@ export default function OpenVPN() {
                 <thead>
                   <tr>
                     <th class="checkbox-col">
-                      <SelectAllCheckbox all={sel.allSelected()} some={sel.someSelected()} onToggle={sel.toggleAll} />
+                      <TableTick label="Select all" checked={sel.allSelected()} mixed={sel.someSelected() && !sel.allSelected()} onChange={sel.toggleAll} />
                     </th>
                     <For each={sortColumns}>
                       {(col) => (
@@ -547,12 +552,10 @@ export default function OpenVPN() {
                         classList={{ "data-table-row-selected": sel.isSelected(profile.title) }}
                       >
                         <td class="checkbox-col">
-                          <input
-                            type="checkbox"
-                            class="table-checkbox"
+                          <TableTick
+                            label={`Select ${profile.cn}`}
                             checked={sel.isSelected(profile.title)}
                             onChange={() => sel.toggle(profile.title)}
-                            aria-label={`Select ${profile.cn}`}
                           />
                         </td>
                         <td>{profile.profile_type ?? "—"}</td>
@@ -562,9 +565,9 @@ export default function OpenVPN() {
                         <td>
                           <span class={`status-badge ${badge.cls}`}>{badge.label}</span>
                         </td>
-                        <td class="mono">{formatDate(profile.created_date)}</td>
+                        <td class="mono"><StoredDate value={profile.created_date} /></td>
                         <td class="kebab-col">
-                          <KebabMenu items={profileMenuItems(profile)} />
+                          <ActionMenu items={profileMenuItems(profile)} />
                         </td>
                       </tr>
                       );
@@ -698,7 +701,7 @@ export default function OpenVPN() {
                       >
                         <td>{t.name}</td>
                         <td>{profilesUsingTemplate(t.name)}</td>
-                        <td class="mono">{formatDate(t.updated_date)}</td>
+                        <td class="mono"><StoredDate value={t.updated_date} /></td>
                       </tr>
                     )}
                   </For>
@@ -766,34 +769,36 @@ export default function OpenVPN() {
         }}
       />
 
-      <ConfirmDialog
-        open={!!confirmDelete()}
-        title="Delete VPN Profile"
-        message={
-          confirmDelete() === "bulk"
-            ? `Remove ${sel.selectedItems().length} profile(s) from the list? The stored .ovpn document(s) stay in the vault.`
-            : `Remove the profile for ${(confirmDelete() as OpenVpnProfileItem | null)?.cn ?? "this CN"} from the list? The stored .ovpn document stays in the vault.`
-        }
-        confirmLabel="Delete"
-        actingLabel="Deleting…"
-        danger
-        onClose={() => setConfirmDelete(null)}
-        onConfirm={runConfirmDelete}
-      />
+      <Show when={confirmDelete()}>
+        {(target) => (
+          <Confirm
+            title="Delete VPN Profile"
+            verb={deleteActing.verb("Delete", "Deleting…")}
+            onClose={() => setConfirmDelete(null)}
+            act={deleteActing.act(runConfirmDelete)}
+          >
+            {target() === "bulk"
+              ? `Remove ${sel.selectedItems().length} profile(s) from the list? The stored .ovpn document(s) stay in the vault.`
+              : `Remove the profile for ${(target() as OpenVpnProfileItem).cn ?? "this CN"} from the list? The stored .ovpn document stays in the vault.`}
+          </Confirm>
+        )}
+      </Show>
 
-      <ConfirmDialog
-        open={!!confirmDeleteTemplate()}
-        title="Delete Template"
-        message={deleteTemplateMessage(confirmDeleteTemplate() ?? "")}
-        confirmLabel="Delete"
-        actingLabel="Deleting…"
-        danger
-        onClose={() => setConfirmDeleteTemplate(null)}
-        onConfirm={runDeleteTemplate}
-      />
+      <Show when={confirmDeleteTemplate()}>
+        {(name) => (
+          <Confirm
+            title="Delete Template"
+            verb={deleteTemplateActing.verb("Delete", "Deleting…")}
+            onClose={() => setConfirmDeleteTemplate(null)}
+            act={deleteTemplateActing.act(runDeleteTemplate)}
+          >
+            {deleteTemplateMessage(name())}
+          </Confirm>
+        )}
+      </Show>
 
       {/* ── Feedback ───────────────────────────────────────────── */}
-      <PageError message={error()} />
+      <Notice tone="bad">{error()}</Notice>
       <Show when={success()}>
         <p class="page-success">{success()}</p>
       </Show>
@@ -825,11 +830,9 @@ function VaultTemplatesNotice(props: {
 }) {
   const count = () => props.names.length;
   return (
-    <div class="result-banner result-banner-success" role="status">
-      <div class="result-banner-head">
-        <span>OpenVPN templates imported into the CA database</span>
-      </div>
-      <p class="result-banner-detail">
+    <Notice tone="good">
+      <div class="notice-head">OpenVPN templates imported into the CA database</div>
+      <p class="notice-detail">
         All {count()} template(s) on the 1Password <code>OpenVPN</code> item are now
         in the CA database: {props.names.join(", ")}. Archive moves the {count()} old
         template field(s) into an archived Secure Note that can be restored from
@@ -843,6 +846,6 @@ function VaultTemplatesNotice(props: {
           Keep in 1Password
         </button>
       </div>
-    </div>
+    </Notice>
   );
 }

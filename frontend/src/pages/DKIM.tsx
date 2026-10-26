@@ -1,4 +1,6 @@
 import { Show, For, createSignal, createResource, onMount } from "solid-js";
+import { Notice, createAction } from "@wired-square/kit";
+import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import { useLocation, useNavigate } from "@solidjs/router";
 import {
@@ -7,13 +9,11 @@ import {
   createDkimKey,
   deployDkimRoute53,
 } from "../api/dkim";
-import { formatDate } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
-import { ActionResultBanner } from "../components/ResultBanner";
-import PageError from "../components/PageError";
-import { createActionResult } from "../utils/actionResult";
+import { ActionOutcome } from "../components/ResultBanner";
 import type { DkimKeyItem } from "../api/types";
 import "../styles/pages/dkim.css";
 
@@ -22,13 +22,13 @@ type Tab = "keys" | "create";
 export default function DKIM() {
   const navigate = useNavigate();
   const location = useLocation<{ deleted?: string }>();
-  const outcome = createActionResult();
+  const outcome = createAction();
   const [tab, setTab] = createSignal<Tab>("keys");
 
   // A delete happens on the detail page and navigates here with the result.
   onMount(() => {
     const deleted = location.state?.deleted;
-    if (deleted) outcome.report(`Deleted DKIM key ${deleted}`);
+    if (deleted) outcome.succeed(`Deleted DKIM key ${deleted}`);
   });
   // listDkimKeys self-syncs from 1Password the first time after migration
   // (when the dkim_key table is empty), so a separate onMount sync would
@@ -102,7 +102,7 @@ export default function DKIM() {
       setSelector("");
       refetch();
     } catch (err) {
-      setCreateError(String(err));
+      setCreateError(errorMessage(err));
     } finally {
       setCreating(false);
     }
@@ -116,7 +116,7 @@ export default function DKIM() {
     try {
       const result = await deployDkimRoute53(r.domain, r.selector);
       setCreateResult(null);
-      outcome.report(result.message);
+      outcome.succeed(result.message);
       setTab("keys");
     } catch (e) {
       setCreateError(errorMessage(e));
@@ -169,11 +169,11 @@ export default function DKIM() {
             <Spinner message={syncing() ? "Syncing DKIM keys from vault…" : "Loading DKIM keys…"} />
           </Show>
 
-          <ActionResultBanner outcome={outcome} />
+          <ActionOutcome action={outcome} />
 
-          <PageError message={syncError()} />
+          <Notice tone="bad">{syncError()}</Notice>
 
-          <PageError message={keys.error} />
+          <Notice tone="bad">{failureOf(keys.error)}</Notice>
 
           <Show when={!keys.loading && !syncing() && filteredKeys().length === 0}>
             <p class="text-muted">No DKIM keys found.</p>
@@ -200,7 +200,7 @@ export default function DKIM() {
                         <td>{key.domain}</td>
                         <td class="mono">{key.selector}</td>
                         <td class="mono">{key.key_size != null ? `${key.key_size}` : "—"}</td>
-                        <td class="mono">{formatDate(key.created_at)}</td>
+                        <td class="mono"><StoredDate value={key.created_at} /></td>
                       </tr>
                     )}
                   </For>
@@ -243,7 +243,7 @@ export default function DKIM() {
               />
             </div>
 
-            <PageError message={createError()} />
+            <Notice tone="bad">{createError()}</Notice>
 
             <Show when={createResult()}>
               {(r) => (

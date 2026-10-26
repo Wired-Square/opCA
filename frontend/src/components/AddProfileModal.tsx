@@ -1,7 +1,6 @@
 import { Show, For, createSignal, createMemo, createEffect } from "solid-js";
+import { Dialog, Notice } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
-import Modal from "./Modal";
-import PageError from "./PageError";
 import VpnClientPicker from "./VpnClientPicker";
 import SendToVault from "./SendToVault";
 import {
@@ -47,7 +46,17 @@ function typeLabel(certType: string | null | undefined): string | null {
  * several runs the bulk generate and reports a per-cert summary.
  */
 export default function AddProfileModal(props: AddProfileModalProps) {
-  const [selected, setSelected] = createSignal<Set<string>>(new Set());
+  return (
+    <Show when={props.open}>
+      <AddProfileDialog {...props} />
+    </Show>
+  );
+}
+
+function AddProfileDialog(props: Omit<AddProfileModalProps, "open">) {
+  const [selected, setSelected] = createSignal<Set<string>>(
+    props.prefillSerial ? new Set([props.prefillSerial]) : new Set<string>(),
+  );
   const [template, setTemplate] = createSignal("");
   const [genNow, setGenNow] = createSignal(true);
   const [generated, setGenerated] = createSignal<OpenVpnProfileItem | null>(null);
@@ -85,27 +94,12 @@ export default function AddProfileModal(props: AddProfileModalProps) {
     }
   }
 
-  // Reset / apply prefill on each open transition. Kept free of any
-  // props.templates read so it only re-runs when `open` flips.
-  let lastOpen = false;
-  createEffect(() => {
-    const open = props.open;
-    if (open && !lastOpen) {
-      setError(null);
-      setGenerated(null);
-      setBulkResults(null);
-      setGenNow(true);
-      setTemplate("");
-      setSelected(props.prefillSerial ? new Set([props.prefillSerial]) : new Set<string>());
-      if (props.prefillCn) void preselectTemplate(props.prefillCn);
-    }
-    lastOpen = open;
-  });
+  if (props.prefillCn) void preselectTemplate(props.prefillCn);
 
   // Default the template to the first available once templates load, if nothing
   // is selected yet (handles a deep-link open where templates were still loading).
   createEffect(() => {
-    if (props.open && !template() && props.templates.length > 0) {
+    if (!template() && props.templates.length > 0) {
       setTemplate(props.templates[0].name);
     }
   });
@@ -151,7 +145,7 @@ export default function AddProfileModal(props: AddProfileModalProps) {
   const isForm = () => !generated() && !bulkResults();
 
   return (
-    <Modal open={props.open} onClose={props.onClose} title="Add VPN Profile">
+    <Dialog title="Add VPN Profile" wide pending={acting()} onClose={props.onClose}>
       {/* Single result — offer the optional send-to-vault follow-up. */}
       <Show when={generated()}>
         {(profile) => (
@@ -241,7 +235,7 @@ export default function AddProfileModal(props: AddProfileModalProps) {
           <span>Generate Profile</span>
         </label>
 
-        <PageError message={error()} />
+        <Notice tone="bad">{error()}</Notice>
 
         <div class="form-actions">
           <button class="btn-primary" onClick={handleAdd} disabled={acting()}>
@@ -250,6 +244,6 @@ export default function AddProfileModal(props: AddProfileModalProps) {
           <button class="btn-ghost" onClick={props.onClose}>Cancel</button>
         </div>
       </Show>
-    </Modal>
+    </Dialog>
   );
 }

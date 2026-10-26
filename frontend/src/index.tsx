@@ -1,7 +1,10 @@
 /* @refresh reload */
+import "./styles/layers.css";
 import { render } from "solid-js/web";
 import { Router, Route } from "@solidjs/router";
+import { IconSet } from "@wired-square/kit";
 import App from "./App";
+import CopyIcon from "./components/CopyIcon";
 import { routes } from "./router";
 // Fonts (self-hosted via @fontsource)
 import "@fontsource/dm-sans/400.css";
@@ -16,7 +19,10 @@ import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/ubuntu/400.css";
 import "@fontsource/ubuntu/500.css";
 import "@fontsource/ubuntu/700.css";
+import "@wired-square/kit/theme.css";
+import "@wired-square/kit/kit.css";
 import "./styles/global.css";
+import "./styles/components/popover.css";
 // Initialise theme on load
 import "./stores/theme";
 
@@ -24,11 +30,13 @@ const root = document.getElementById("root");
 
 render(
   () => (
-    <Router root={App}>
-      {routes.map((r) => (
-        <Route path={r.path} component={r.component} />
-      ))}
-    </Router>
+    <IconSet icons={{ copy: CopyIcon }}>
+      <Router root={App}>
+        {routes.map((r) => (
+          <Route path={r.path} component={r.component} />
+        ))}
+      </Router>
+    </IconSet>
   ),
   root!,
 );

@@ -1,41 +1,86 @@
-.popover {
-  position: fixed;
-  z-index: var(--z-popover);
-  overflow-y: auto;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+/* opca's look over the kit's popovers and menus, which sit in the top layer. */
+.app-popover,
+.app-menu {
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-popover);
 }
 
-.popover-option {
+.app-popover__option {
   padding: 8px 12px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  color: var(--text-primary);
   transition: background 0.1s;
 }
 
-.popover-option:hover,
-.popover-option:focus-visible {
+.app-popover__option:hover,
+.app-popover__option:focus-visible {
   background: var(--bg-elevated);
-  outline: none;
+  box-shadow: none;
 }
 
-.popover-option[aria-selected="true"] {
+.app-popover__option[aria-selected="true"] {
   background: var(--accent-glow);
-}
-
-.popover-option + .popover-option {
-  border-top: 1px solid var(--border);
+  font-weight: inherit;
 }
 
 .popover-note {
   padding: 12px;
   font-size: 0.8125rem;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
 }
 
 .popover-error {
-  color: var(--error);
+  color: var(--app-bad);
+}
+
+.app-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--app-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.app-menu__trigger:hover,
+.app-menu__trigger[aria-expanded="true"] {
+  color: var(--app-text);
+  background: var(--bg-elevated);
+  border-color: var(--app-border);
+}
+
+.app-menu {
+  min-width: 160px;
+  padding: 4px;
+}
+
+.app-menu:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-menu__item {
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.8125rem;
+  border-radius: var(--radius-sm);
+}
+
+.app-menu__item:hover:not([aria-disabled="true"]),
+.app-menu__item:focus-visible {
+  background: var(--bg-hover);
+  box-shadow: none;
+}
+
+.app-menu__item[aria-disabled="true"] {
+  color: var(--text-tertiary);
+  opacity: 0.5;
+}
+
+.app-menu__item--danger:hover:not([aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--app-bad) 14%, var(--app-surface));
 }

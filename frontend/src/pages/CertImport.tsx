@@ -1,8 +1,9 @@
 import { createSignal, Show } from "solid-js";
+import { Notice } from "@wired-square/kit";
+import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { importCert } from "../api/certs";
 import PemInput from "../components/PemInput";
-import PageError from "../components/PageError";
 import "../styles/pages/cert-import.css";
 
 export default function CertImport() {
@@ -56,7 +57,7 @@ export default function CertImport() {
       // just return to the list.
       navigate("/certs");
     } catch (err) {
-      setError(String(err));
+      setError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -108,7 +109,7 @@ export default function CertImport() {
           rows={4}
         />
 
-        <PageError placement="form" message={error()} />
+        <Notice tone="bad" class="form-notice">{error()}</Notice>
 
         <div class="form-actions">
           <button class="btn-primary" type="submit" disabled={saving() || !certPem().trim()}>

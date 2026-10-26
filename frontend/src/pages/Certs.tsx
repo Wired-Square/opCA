@@ -1,4 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
+import { Confirm, createAction, createSelection, DateModeToggle, Notice } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
@@ -7,24 +8,20 @@ import {
 } from "../api/certs";
 import { canDeleteCert, certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { generateCsrFromCert } from "../api/csr";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import CertStatusBadge from "../components/CertStatusBadge";
-import KebabMenu, { type KebabItem } from "../components/KebabMenu";
+import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
 import RevokeCertDialog from "../components/RevokeCertDialog";
 import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
-import ConfirmDialog from "../components/ConfirmDialog";
-import ResultBanner, { ActionResultBanner } from "../components/ResultBanner";
-import SelectAllCheckbox from "../components/SelectAllCheckbox";
-import PageError from "../components/PageError";
-import { createSelection } from "../utils/selection";
-import { createActionResult } from "../utils/actionResult";
-import { createAction, type ActionMessages } from "../utils/action";
+import ResultBanner, { ActionOutcome } from "../components/ResultBanner";
+import TableTick from "../components/TableTick";
+import { createActing, failureOf, headed } from "../utils/acting";
 import type { BulkCertResult, CertListItem, ExternalCertListItem, InspectCertificateResult, KeyAlgorithm } from "../api/types";
 import "../styles/pages/certs.css";
 
@@ -48,6 +45,7 @@ const VALID_FILTERS = new Set([
 let sessionFilter = "valid";
 
 export default function Certs() {
+  const dateText = useDateText();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialFilter = typeof searchParams.filter === "string" && VALID_FILTERS.has(searchParams.filter)
@@ -95,7 +93,7 @@ export default function Certs() {
     }
     const q = search().toLowerCase();
     if (q) items = items.filter((c) =>
-      [c.serial, c.cn, c.cert_type, c.status, c.expiry_date ? formatDate(c.expiry_date) : null]
+      [c.serial, c.cn, c.cert_type, c.status, c.expiry_date ? dateText(c.expiry_date) : null]
         .some((v) => v?.toLowerCase().includes(q))
     );
     return items;
@@ -107,7 +105,7 @@ export default function Certs() {
     if (f !== "all") items = items.filter((c) => c.status?.toLowerCase() === f);
     const q = search().toLowerCase();
     if (q) items = items.filter((c) =>
-      [c.serial, c.cn, c.issuer, c.status, c.expiry_date ? formatDate(c.expiry_date) : null, c.import_date ? formatDate(c.import_date) : null]
+      [c.serial, c.cn, c.issuer, c.status, c.expiry_date ? dateText(c.expiry_date) : null, c.import_date ? dateText(c.import_date) : null]
         .some((v) => v?.toLowerCase().includes(q))
     );
     return items;
@@ -126,8 +124,7 @@ export default function Certs() {
 
   // Per-row certificate actions (kebab menu). Rekey/Renew navigate away to the
   // new cert; Rekey/Revoke/Delete/Ignore use shared dialogs; Unignore acts immediately.
-  const outcome = createActionResult();
-  const action = createAction(outcome);
+  const action = createAction();
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
   const [deleteTarget, setDeleteTarget] = createSignal<CertListItem | null>(null);
@@ -175,6 +172,8 @@ export default function Certs() {
     refetchLocal();
   }
 
+  const bulkActing = createActing();
+
   // Per-action copy for the shared confirm dialog.
   const bulkDialogConfig = () => {
     const n = selectedSerials().length;
@@ -202,25 +201,29 @@ export default function Certs() {
     if (await backfillTypeIfMissing(cert)) refetchLocal();
   }
 
-  function certMenuItems(cert: CertListItem): KebabItem[] {
+  function certMenuItems(cert: CertListItem): MenuAction[] {
     const serial = cert.serial;
     const label = certLabel(cert);
     // Wrap a row action: no-op without a serial, otherwise run it through the
     // list-level banner. Renew reports no success — it navigates away
     // to a page that says so via its fresh-banner.
-    const act = (messages: ActionMessages<void>, fn: () => Promise<void>) => () => {
-      if (serial) void action.run(messages, fn);
+    const act = (failure: string, fn: () => Promise<void>, success?: string) => () => {
+      if (serial) void action.run(headed(failure, fn), () => success && action.succeed(success));
     };
     return certKebabItems(cert, {
       onRekey: () => setRekeyTarget(cert),
-      onRenew: act({ failure: "Renew failed" }, async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
+      onRenew: act("Renew failed", async () => { await backfillTypeIfMissing(cert); await renewAndGo(navigate, serial!); }),
       onRevoke: () => setRevokeTarget(cert),
       onDelete: () => setDeleteTarget(cert),
       onIgnore: () => setIgnoreTarget(cert),
-      onUnignore: act({ failure: "Unignore failed", success: `Unignored ${label}` }, async () => {
-        await unignoreCert(serial!);
-        await finishListAction(cert);
-      }),
+      onUnignore: act(
+        "Unignore failed",
+        async () => {
+          await unignoreCert(serial!);
+          await finishListAction(cert);
+        },
+        `Unignored ${label}`,
+      ),
     });
   }
 
@@ -271,7 +274,7 @@ export default function Certs() {
       await generateCsrFromCert({ serial: cert.serial });
       navigate("/csrs");
     } catch (err) {
-      setGenerateError(String(err));
+      setGenerateError(errorMessage(err));
     } finally {
       setGeneratingSerial(null);
     }
@@ -336,7 +339,7 @@ export default function Certs() {
         </button>
       </div>
 
-      <PageError message={certs().error} />
+      <Notice tone="bad">{failureOf(certs().error)}</Notice>
 
       <Show when={loading()}>
         <Spinner message="Loading…" />
@@ -344,7 +347,7 @@ export default function Certs() {
 
       {/* Local certificates tab */}
       <Show when={tab() === "local"}>
-        <ActionResultBanner outcome={outcome} />
+        <ActionOutcome action={action} />
 
         <Show when={bulkResults()}>
           {(results) => (
@@ -399,13 +402,13 @@ export default function Certs() {
               <thead>
                 <tr>
                   <th class="checkbox-col">
-                    <SelectAllCheckbox all={sel.allSelected()} some={sel.someSelected()} onToggle={sel.toggleAll} />
+                    <TableTick label="Select all" checked={sel.allSelected()} mixed={sel.someSelected() && !sel.allSelected()} onChange={sel.toggleAll} />
                   </th>
                   <th>Serial</th>
                   <th>Common Name</th>
                   <th>Type</th>
                   <th>Status</th>
-                  <th>Expiry <TzToggle /></th>
+                  <th>Expiry <DateModeToggle /></th>
                   <th class="kebab-col"></th>
                 </tr>
               </thead>
@@ -423,13 +426,11 @@ export default function Certs() {
                       onClick={() => cert.serial && navigate(`/certs/${cert.serial}`)}
                     >
                       <td class="checkbox-col" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          class="table-checkbox"
+                        <TableTick
+                          label={`Select ${cert.cn ?? cert.serial ?? "certificate"}`}
                           checked={!!cert.serial && sel.isSelected(cert.serial)}
                           disabled={!cert.serial}
                           onChange={() => cert.serial && sel.toggle(cert.serial)}
-                          aria-label={`Select ${cert.cn ?? cert.serial ?? "certificate"}`}
                         />
                       </td>
                       <td class="mono">{cert.serial ?? "\u2014"}</td>
@@ -444,9 +445,9 @@ export default function Certs() {
                           <span class="status-badge status-superseded">superseded</span>
                         </Show>
                       </td>
-                      <td class="mono">{formatDate(cert.expiry_date)}</td>
+                      <td class="mono"><StoredDate value={cert.expiry_date} /></td>
                       <td class="kebab-col" onClick={(e) => e.stopPropagation()}>
-                        <KebabMenu items={certMenuItems(cert)} />
+                        <ActionMenu items={certMenuItems(cert)} />
                       </td>
                     </tr>
                   )}
@@ -465,7 +466,7 @@ export default function Certs() {
           </p>
         </Show>
 
-        <PageError message={generateError()} />
+        <Notice tone="bad">{generateError()}</Notice>
 
         <Show when={filteredExternal().length > 0}>
           <div class="data-table-wrap">
@@ -476,7 +477,7 @@ export default function Certs() {
                   <th>Common Name</th>
                   <th>Issuer</th>
                   <th>Status</th>
-                  <th>Expiry <TzToggle /></th>
+                  <th>Expiry <DateModeToggle /></th>
                   <th>Imported</th>
                   <th>Actions</th>
                 </tr>
@@ -492,8 +493,8 @@ export default function Certs() {
                       <td>{cert.cn ?? "\u2014"}</td>
                       <td>{cert.issuer ?? "\u2014"}</td>
                       <td><span class={statusBadgeClass(cert.status)}>{cert.status ?? "\u2014"}</span></td>
-                      <td class="mono">{formatDate(cert.expiry_date)}</td>
-                      <td class="mono">{formatDate(cert.import_date)}</td>
+                      <td class="mono"><StoredDate value={cert.expiry_date} /></td>
+                      <td class="mono"><StoredDate value={cert.import_date} /></td>
                       <td>
                         <button
                           class="btn-ghost btn-sm"
@@ -543,7 +544,7 @@ export default function Certs() {
           </button>
         </div>
 
-        <PageError message={inspectError()} />
+        <Notice tone="bad">{inspectError()}</Notice>
 
         <Show when={inspectResult()}>
           {(r) => (
@@ -566,12 +567,12 @@ export default function Certs() {
                   <span class="detail-value mono">{r().serial ?? "\u2014"}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="detail-label">Valid From <TzToggle /></span>
-                  <span class="detail-value mono">{formatDate(r().not_before)}</span>
+                  <span class="detail-label">Valid From <DateModeToggle /></span>
+                  <span class="detail-value mono"><StoredDate value={r().not_before} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Valid Until</span>
-                  <span class="detail-value mono">{formatDate(r().not_after)}</span>
+                  <span class="detail-value mono"><StoredDate value={r().not_after} /></span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Key</span>
@@ -627,7 +628,7 @@ export default function Certs() {
         serial={ignoreTarget()?.serial ?? null}
         cn={ignoreTarget()?.cn ?? null}
         onClose={() => setIgnoreTarget(null)}
-        onDone={() => { const c = ignoreTarget(); if (c) { outcome.report(`Ignored ${certLabel(c)}`); void finishListAction(c); } }}
+        onDone={() => { const c = ignoreTarget(); if (c) { action.succeed(`Ignored ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
       <RevokeCertDialog
@@ -635,7 +636,7 @@ export default function Certs() {
         serial={revokeTarget()?.serial ?? null}
         cn={revokeTarget()?.cn ?? null}
         onClose={() => setRevokeTarget(null)}
-        onDone={() => { const c = revokeTarget(); if (c) { outcome.report(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
+        onDone={() => { const c = revokeTarget(); if (c) { action.succeed(`Revoked ${certLabel(c)}`); void finishListAction(c); } }}
       />
 
       <DeleteCertDialog
@@ -643,7 +644,7 @@ export default function Certs() {
         serial={deleteTarget()?.serial ?? null}
         cn={deleteTarget()?.cn ?? null}
         onClose={() => setDeleteTarget(null)}
-        onDone={() => { const c = deleteTarget(); if (c) { outcome.report(`Deleted ${certLabel(c)}`); refetchLocal(); } }}
+        onDone={() => { const c = deleteTarget(); if (c) { action.succeed(`Deleted ${certLabel(c)}`); refetchLocal(); } }}
       />
 
       <RekeyDialog
@@ -667,17 +668,18 @@ export default function Certs() {
         onConfirm={(keyAlgorithm) => runBulk("", keyAlgorithm)}
       />
 
-      <ConfirmDialog
-        open={!!bulkAction() && bulkAction() !== "rekey"}
-        title={bulkDialogConfig().title}
-        message={bulkDialogConfig().message}
-        confirmLabel={bulkDialogConfig().confirmLabel}
-        actingLabel={bulkDialogConfig().actingLabel}
-        danger={bulkDialogConfig().danger}
-        requireReason={bulkDialogConfig().requireReason}
-        onClose={() => setBulkAction(null)}
-        onConfirm={(reason) => runBulk(reason, null)}
-      />
+      <Show when={bulkAction() && bulkAction() !== "rekey"}>
+        <Confirm
+          title={bulkDialogConfig().title}
+          verb={bulkActing.verb(bulkDialogConfig().confirmLabel, bulkDialogConfig().actingLabel)}
+          tone={bulkDialogConfig().danger ? "danger" : "primary"}
+          reason={bulkDialogConfig().requireReason ? { label: "Reason", placeholder: "Reason for the audit trail" } : undefined}
+          onClose={() => setBulkAction(null)}
+          act={bulkActing.act((reason: string) => runBulk(reason, null))}
+        >
+          {bulkDialogConfig().message}
+        </Confirm>
+      </Show>
 
     </div>
   );

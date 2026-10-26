@@ -1,7 +1,7 @@
 import type { useNavigate } from "@solidjs/router";
 import { rekeyCert, renewCert } from "./certs";
 import type { CertListItem, KeyAlgorithm } from "./types";
-import type { KebabItem } from "../components/KebabMenu";
+import type { MenuAction } from "../components/ActionMenu";
 
 /** How a certificate is named in confirmations and result messages. Shared so
  * the list, the detail page and the confirm dialogs cannot drift apart. */
@@ -27,16 +27,16 @@ export interface CertActionHandlers {
   onUnignore: () => void;
 }
 
-/** Build a certificate's kebab menu items, gated on its state. Shared by the
+/** Build a certificate's action menu items, gated on its state. Shared by the
  * certificates list and the detail page so the two can't drift apart; each
  * caller supplies its own action handlers. */
 export function certKebabItems(
   cert: CertListItem,
   h: CertActionHandlers,
   disabled?: boolean,
-): KebabItem[] {
+): MenuAction[] {
   const status = cert.status?.toLowerCase();
-  const items: KebabItem[] = [{ label: "Rekey", disabled, onSelect: h.onRekey }];
+  const items: MenuAction[] = [{ label: "Rekey", disabled, onSelect: h.onRekey }];
   if (status === "valid") {
     items.push({ label: "Renew", disabled, onSelect: h.onRenew });
     items.push({ label: "Revoke", danger: true, disabled, onSelect: h.onRevoke });

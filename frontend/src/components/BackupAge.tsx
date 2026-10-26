@@ -1,5 +1,5 @@
 import { Show } from "solid-js";
-import { formatLocalDateTime, formatTimeAgo } from "../utils/dates";
+import { formatLocalDateTime, formatRelativeTime } from "../utils/dates";
 
 const STALE_BACKUP_DAYS = 7;
 
@@ -10,7 +10,7 @@ function backupAgeDays(takenAt: string): number {
 }
 
 export function backupAgePhrase(takenAt: string): string {
-  return formatTimeAgo(new Date(takenAt), Date.now());
+  return formatRelativeTime(new Date(takenAt), Date.now());
 }
 
 /** Age first ("3 days ago"), then the exact local time, flagging stale copies. */

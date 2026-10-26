@@ -1,8 +1,8 @@
 import { For, Show, createEffect, createResource, createSignal } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import Modal from "./Modal";
+import { Dialog, Notice } from "@wired-square/kit";
+import { failureOf } from "../utils/acting";
 import Spinner from "./Spinner";
-import PageError from "./PageError";
 import BackupAge, { backupAgePhrase } from "./BackupAge";
 import { getLocalBackups, restoreLocalBackup } from "../api/localBackups";
 import { errorMessage } from "../api/tauri";
@@ -23,7 +23,7 @@ function formatSize(bytes: number): string {
  */
 export default function DatabaseRecoveryDialog() {
   const navigate = useNavigate();
-  const [info] = createResource(recoveryOpen, getLocalBackups);
+  const [info] = createResource(getLocalBackups);
   const [selected, setSelected] = createSignal<LocalBackupEntry | null>(null);
   const [confirming, setConfirming] = createSignal(false);
   const [restoring, setRestoring] = createSignal(false);
@@ -61,14 +61,14 @@ export default function DatabaseRecoveryDialog() {
   }
 
   return (
-    <Modal open={recoveryOpen()} onClose={() => !restoring() && setRecoveryOpen(false)} title="CA Database Unreadable">
+    <Dialog title="CA Database Unreadable" wide pending={restoring()} onClose={() => setRecoveryOpen(false)}>
       <p class="confirm-message">
         The CA database in <span class="mono">{appState.vault}</span> can't be read, so the CA can't be loaded.
       </p>
-      <PageError message={info()?.database_error} placement="form" class="mono mb-3" />
+      <Notice tone="bad" class="form-notice mono mb-3">{info()?.database_error}</Notice>
 
       <Show when={!info.loading} fallback={<Spinner message="Looking for local backups…" />}>
-        <PageError message={info.error} />
+        <Notice tone="bad">{failureOf(info.error)}</Notice>
 
         <Show
           when={(info()?.backups.length ?? 0) > 0}
@@ -149,7 +149,7 @@ export default function DatabaseRecoveryDialog() {
         </Show>
       </Show>
 
-      <PageError message={error()} placement="form" />
+      <Notice tone="bad" class="form-notice">{error()}</Notice>
 
       <div class="form-actions">
         <Show
@@ -170,7 +170,10 @@ export default function DatabaseRecoveryDialog() {
         <button class="btn-ghost" onClick={handleDisconnect} disabled={restoring()}>
           Disconnect
         </button>
+        <button class="btn-ghost" onClick={() => setRecoveryOpen(false)} disabled={restoring()}>
+          Close
+        </button>
       </div>
-    </Modal>
+    </Dialog>
   );
 }

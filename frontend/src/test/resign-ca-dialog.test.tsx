@@ -3,8 +3,8 @@ import { createSignal } from "solid-js";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import ResignCaDialog from "../components/ResignCaDialog";
 
-/** A thin wrapper over ConfirmDialog — the acting/error/reset behaviour is
- * covered in confirm-dialog.test. What is specific here is the days field. */
+/** A thin wrapper over the kit Confirm — the acting/error/reset behaviour is
+ * covered in confirm.test. What is specific here is the days field. */
 
 const resignCa = vi.hoisted(() => vi.fn());
 vi.mock("../api/ca", async (actual) => ({

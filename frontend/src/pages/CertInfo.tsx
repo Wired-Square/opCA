@@ -1,12 +1,13 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
+import { DateModeToggle, Notice, createAction } from "@wired-square/kit";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
 import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy, forgetPreloadedKey } from "../api/certs";
 import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { getVpnProfileForCn, generateOpenVpnProfile } from "../api/openvpn";
 import type { CertDetail } from "../api/types";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
+import StoredDate from "../components/StoredDate";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import CopyableValue from "../components/CopyableValue";
@@ -16,14 +17,13 @@ import RevokeCertDialog from "../components/RevokeCertDialog";
 import DeleteCertDialog from "../components/DeleteCertDialog";
 import RekeyDialog from "../components/RekeyDialog";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
-import KebabMenu, { type KebabItem } from "../components/KebabMenu";
-import { ActionResultBanner } from "../components/ResultBanner";
-import PageError from "../components/PageError";
-import { createActionResult } from "../utils/actionResult";
-import { createAction } from "../utils/action";
+import ActionMenu, { type MenuAction } from "../components/ActionMenu";
+import { ActionOutcome } from "../components/ResultBanner";
+import { failureOf, headed } from "../utils/acting";
 import "../styles/pages/cert-info.css";
 
 export default function CertInfo() {
+  const dateText = useDateText();
   const params = useParams();
   const navigate = useNavigate();
   // `freshFrom`/`op` are set when we land here right after a renew/rekey, to
@@ -37,13 +37,12 @@ export default function CertInfo() {
   const [showRevoke, setShowRevoke] = createSignal(false);
   const [showDelete, setShowDelete] = createSignal(false);
   const [showRekey, setShowRekey] = createSignal(false);
-  const outcome = createActionResult();
   /** Renew and unignore share one action: the kebab disables all of its
    *  items together, so there is nothing to tell their busy states apart. */
-  const headerAction = createAction(outcome);
+  const headerAction = createAction();
   const [showKeyCopy, setShowKeyCopy] = createSignal(false);
   onCleanup(() => void forgetPreloadedKey());
-  const regenerateVpn = createAction(outcome);
+  const regenerateVpn = createAction();
   const label = () => certLabel({ cn: detail()?.cn, serial: params.serial as string });
   const [copied, markCopied] = createCopiedSignal();
   const [copiedKey, markKeyCopied] = createCopiedSignal();
@@ -82,11 +81,10 @@ export default function CertInfo() {
 
   function handleRegenerateVpn(cn: string, template: string) {
     return regenerateVpn.run(
-      {
-        success: (profile) => `Regenerated VPN profile for ${cn} (stored as ${profile.title})`,
-        failure: "VPN profile regeneration failed",
-      },
-      () => generateOpenVpnProfile({ cn, serial: params.serial as string, template_name: template }),
+      headed("VPN profile regeneration failed", () =>
+        generateOpenVpnProfile({ cn, serial: params.serial as string, template_name: template }),
+      ),
+      (profile) => regenerateVpn.succeed(`Regenerated VPN profile for ${cn} (stored as ${profile.title})`),
     );
   }
 
@@ -95,23 +93,20 @@ export default function CertInfo() {
   function handleRenew() {
     const serial = params.serial as string;
     if (!serial) return;
-    void headerAction.run({ failure: "Renew failed" }, () => renewAndGo(navigate, serial));
+    void headerAction.run(headed("Renew failed", () => renewAndGo(navigate, serial)));
   }
 
   function handleUnignore() {
     const serial = params.serial as string;
     if (!serial) return;
-    void headerAction.run(
-      { success: `Unignored ${label()}`, failure: "Unignore failed" },
-      async () => {
-        await unignoreCert(serial);
-        refetch();
-      },
-    );
+    void headerAction.run(headed("Unignore failed", () => unignoreCert(serial)), () => {
+      refetch();
+      headerAction.succeed(`Unignored ${label()}`);
+    });
   }
 
   // Header actions menu — gating shared with the certificates list kebab.
-  function certActions(d: CertDetail): KebabItem[] {
+  function certActions(d: CertDetail): MenuAction[] {
     return certKebabItems(d, {
       onRekey: () => setShowRekey(true),
       onRenew: handleRenew,
@@ -119,7 +114,7 @@ export default function CertInfo() {
       onDelete: () => setShowDelete(true),
       onIgnore: () => setShowIgnore(true),
       onUnignore: handleUnignore,
-    }, headerAction.busy());
+    }, headerAction.pending());
   }
 
   function copyPem() {
@@ -174,15 +169,16 @@ export default function CertInfo() {
             Back to list
           </button>
           <Show when={detail()}>
-            {(d) => <KebabMenu items={certActions(d())} ariaLabel="Certificate actions" />}
+            {(d) => <ActionMenu items={certActions(d())} aria-label="Certificate actions" />}
           </Show>
         </div>
       </div>
 
       <div class="cert-info-scroll">
-        <PageError message={detail.error} />
+        <Notice tone="bad">{failureOf(detail.error)}</Notice>
 
-        <ActionResultBanner outcome={outcome} />
+        <ActionOutcome action={headerAction} />
+        <ActionOutcome action={regenerateVpn} />
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />
@@ -204,7 +200,7 @@ export default function CertInfo() {
                       {" "}by <span class="mono">{d().ignored_by}</span>
                     </Show>
                     <Show when={d().ignored_at}>
-                      {" "}on <span class="mono">{formatDate(d().ignored_at)}</span> <TzToggle />
+                      {" "}on <span class="mono"><StoredDate value={d().ignored_at} /></span> <DateModeToggle />
                     </Show>
                     <Show when={d().ignored_note}>
                       {" "}&mdash; <span>{d().ignored_note}</span>
@@ -279,10 +275,10 @@ export default function CertInfo() {
                         <div class="vpn-regen-actions">
                           <button
                             class="btn-primary btn-sm"
-                            disabled={regenerateVpn.busy() || !profile().template}
+                            disabled={regenerateVpn.pending() || !profile().template}
                             onClick={() => handleRegenerateVpn(profile().cn, profile().template!)}
                           >
-                            {regenerateVpn.busy() ? "Regenerating…" : "Regenerate VPN profile"}
+                            {regenerateVpn.pending() ? "Regenerating…" : "Regenerate VPN profile"}
                           </button>
                         </div>
                         <div class="vpn-regen-caveat">
@@ -336,9 +332,9 @@ export default function CertInfo() {
                 </div>
                 <Row label="Subject" value={d().subject} mono copy />
                 <Row label="Issuer" value={d().issuer} mono copy />
-                <Row label={<>Valid From <TzToggle /></>} value={formatDate(d().not_before)} />
-                <Row label="Expiry" value={formatDate(d().expiry_date)} />
-                <Row label="Revocation Date" value={formatDate(d().revocation_date)} />
+                <Row label={<>Valid From <DateModeToggle /></>} value={dateText(d().not_before)} />
+                <Row label="Expiry" value={dateText(d().expiry_date)} />
+                <Row label="Revocation Date" value={dateText(d().revocation_date)} />
                 <Row label="Key Type" value={d().key_type} />
                 <Row label="Key Size" value={d().key_size != null ? String(d().key_size) : null} />
                 <div class="detail-row">
@@ -388,7 +384,7 @@ export default function CertInfo() {
                 serial={d().serial}
                 cn={d().cn}
                 onClose={() => setShowIgnore(false)}
-                onDone={() => { outcome.report(`Ignored ${label()}`); refetch(); }}
+                onDone={() => { headerAction.succeed(`Ignored ${label()}`); refetch(); }}
               />
 
               <RekeyDialog
@@ -404,7 +400,7 @@ export default function CertInfo() {
                 serial={d().serial}
                 cn={d().cn}
                 onClose={() => setShowRevoke(false)}
-                onDone={() => { outcome.report(`Revoked ${label()}`); refetch(); }}
+                onDone={() => { headerAction.succeed(`Revoked ${label()}`); refetch(); }}
               />
 
               <DeleteCertDialog

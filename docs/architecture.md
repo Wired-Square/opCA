@@ -573,12 +573,24 @@ accepted for now; batching the flushes is future work.
 
 ## Frontend (`frontend`)
 
-A single-page SolidJS app. Key conventions:
+A single-page SolidJS app. Shared primitives come from `@wired-square/kit`,
+read from the `mirror.wiredsquare.com/npm/` registry mirror:
+`frontend/.npmrc` names the registry for the scope, and the token lives in the
+user's `~/.npmrc` (CI writes it there from the same secret as the cargo
+mirror). Its `theme.css` and `kit.css` load before opca's
+stylesheets, and `kit.css` sits in a cascade layer, so opca's unlayered rules
+win. Key conventions:
 
 - [App.tsx](../frontend/src/App.tsx) routes based on `vaultState`
   (`valid_ca` / `empty_vault` / `invalid_ca`) returned by `connect`. Empty
   vaults are steered to CA initialisation; broken vaults to the dashboard
   with an error banner.
+  It also wraps every page in the kit's `DateModes` (UTC first, `en-AU`,
+  opca's countdown / time-ago wording for relative), which the
+  `DateModeToggle` beside a date cycles. Stored ASN.1 dates are read by
+  `asn1Date` in [utils/dates.ts](../frontend/src/utils/dates.ts) and shown by
+  `StoredDate` (the kit's `When`); `useDateText` gives the same text for row
+  search filters and string-valued detail rows.
 - [pages/Connect.tsx](../frontend/src/pages/Connect.tsx) picks the vault
   from previously-used logins (localStorage) or the account's vaults, and the
   account from `list_accounts` — `op account list`, which reads local CLI
@@ -601,7 +613,8 @@ A single-page SolidJS app. Key conventions:
 - [api/](../frontend/src/api) — one file per feature, each a typed
   wrapper around `tauriInvoke` from
   [api/tauri.ts](../frontend/src/api/tauri.ts). `tauriInvoke` normalises
-  the rejection to an `Error` and tracks the in-flight operation — kept
+  the rejection to the kit's `Refusal`, carrying the backend's message so kit
+  components show it as written, and tracks the in-flight operation — kept
   as a stack in [stores/operation.ts](../frontend/src/stores/operation.ts)
   (the side-nav shows the most recent op and never blanks mid-flight, and a
   finishing background task can't clear a running foreground one). `withLock()`
@@ -613,8 +626,11 @@ A single-page SolidJS app. Key conventions:
   roughly 1-to-1.
 - [components/](../frontend/src/components) — reusable UI. Mutating
   actions on the certificate list/detail and the OpenVPN Profiles list share a
-  per-row `KebabMenu`; Ignore / Revoke / Send-to-Vault are self-contained
-  `Modal` dialogs reused across those pages.
+  per-row `ActionMenu`; Ignore / Revoke / Send-to-Vault are self-contained
+  dialogs on the kit's `Dialog` or `Confirm`, reused across those pages.
+  Multi-select tables keep their selection in the kit's `createSelection`,
+  cleared on a refetch, and tick rows with `TableTick`, the kit's `Tick`
+  named for screen readers only.
 
 ### Styling tokens
 
@@ -622,32 +638,57 @@ The CSP forbids static inline styles, so all styling lives in
 [styles/](../frontend/src/styles) and refers to tokens rather than
 literals. Colours that differ by theme are defined in
 [styles/theme.ts](../frontend/src/styles/theme.ts) (`darkTheme` /
-`lightTheme`), which the `theme` store writes onto `:root`, along with a
-`data-theme` attribute that sets `color-scheme` so native controls follow the
-app's theme rather than the OS appearance. Everything that
-does not vary by theme is a static `:root` variable in
+`lightTheme`). Those the kit shares carry its names (`--app-bg`,
+`--app-surface`, `--app-text`, `--app-text-muted`, `--app-accent`,
+`--app-good` / `-warn` / `-bad` / `-neutral`, `--app-border`, …); opca's own
+keep theirs (`--bg-elevated`, `--text-tertiary`, `--info`, `--caution`,
+`--link`, …). The `theme` store hands both sets to the kit's `applyTheme` once,
+as an adopted stylesheet, and switches between them with the kit's
+`data-app-scheme` attribute, which also sets `color-scheme` so native controls
+follow the app's theme rather than the OS appearance. The choice is kept under
+the kit's storage key; a value under the old `opca-theme` key is carried over
+once. Everything that does not vary by theme is a static `:root` variable in
 [styles/global.css](../frontend/src/styles/global.css): status tints and
 edges derived with `color-mix` (`--{success,error,warning,caution,neutral,link}-{tint,edge}`),
-`--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and the stacking order
-`--z-sticky` < `--z-modal` < `--z-popover`. New styles use these; a raw hex or
-pixel radius in a component stylesheet is a regression.
+the kit tokens opca derives from its own (`--app-surface-sunken`,
+`--app-*-bg`, `--app-alert`, `--app-radius`, `--app-shadow`, `--app-focus`, …),
+`--radius-*`, `--shadow-*`, `--overlay`, `--font-mono` and `--z-sticky`.
+Dialogs, popovers and menus need no z-index: they sit in the platform's top
+layer, each above the one opened before it. opca's CSS reset is in a `reset`
+cascade layer ordered below the kit's, so the kit's components keep their
+spacing. New styles use these tokens; a raw hex or pixel radius in a component
+stylesheet is a regression.
 
 ### Popovers
 
-Anything that floats over the page — the row `KebabMenu`, `VaultPicker`,
-`VpnClientPicker` and Connect's saved-login and account pickers — renders
-through [components/Popover.tsx](../frontend/src/components/Popover.tsx).
-It portals to `body` at `--z-popover`, so it escapes the `overflow` of a
-`.modal-dialog` or the page, and positions itself with the pure
-[utils/placePopover.ts](../frontend/src/utils/placePopover.ts): below the
-anchor, else above, else on the larger side with a capped height, clamped
-8px inside the window horizontally. It closes on outside mousedown, Escape,
-outside scroll or resize, hands focus back to the anchor if it held it, and
-handles arrow / Home / End between items. Clicks stop at its root and Escape
-is captured on `window`, so a popover in a table row or a `Modal` triggers
-neither the row nor the dialog. List rows use `PopoverOption`
-(`role="option"`, Enter / Space to activate) and the shared `.popover-option`
-styles in `styles/components/popover.css`.
+Anything that floats over the page — the row and header action menus,
+`VaultPicker`, `VpnClientPicker` and Connect's saved-login and account pickers —
+is the kit's. [components/ActionMenu.tsx](../frontend/src/components/ActionMenu.tsx)
+renders a `MenuAction[]` (built by `certKebabItems` for certificates) as the
+kit's `Menu` / `MenuItem`: a ⋮ trigger, a `popover="auto"` panel the platform
+light-dismisses, arrow keys over every item including disabled ones, Escape
+and a chosen item handing focus back to the trigger. Pickers use the kit's
+`Popover` and `PopoverOption`: mounted while open, on `popover="manual"`
+pinned to an anchor (a press on the anchor counts as inside), focus left where
+it was so a field keeps typing, and closed on an outside press, Escape, an
+outside scroll or a resize. Both are top-layer, so one opened in a dialog is
+drawn above it with no portal, and both prevent Escape's default so a
+surrounding dialog stays open. [styles/components/popover.css](../frontend/src/styles/components/popover.css)
+restyles the kit's `app-popover` / `app-menu` classes in opca's look; the
+kit's `PopoverOption` takes no class, so a row's own layout class goes on an
+element inside it.
+
+### Copying
+
+Every copy writes through `writeClipboard` in
+[utils/clipboard.ts](../frontend/src/utils/clipboard.ts), the Tauri
+clipboard plugin, because WKWebView refuses `navigator.clipboard` once an
+`await` separates the write from the click. `CopyableValue` is the kit's
+`CopyButton` with that writer, flashing "Copied" in place of opca's glyph
+(given to the kit through `IconSet` at the root) once the write lands.
+Availability tags and the labelled Copy buttons keep `createCopiedSignal`:
+their value is fetched on click, or they are disabled, busy or labelled in
+ways `CopyButton` does not draw.
 
 ### Publishing to a store
 
@@ -655,33 +696,38 @@ Generating a CRL, re-signing the CA and mutating the database all leave the
 copy in the store stale — the backend does not upload as a side effect. That
 follow-up is one mechanism, not three:
 [utils/publishFlow.ts](../frontend/src/utils/publishFlow.ts)'s
-`createPublishFlow({ upload, success, outcome })` owns the in-flight flag and
-the offer-to-upload state, and reports through the page's existing banner
-controller rather than a second one — the CRL page narrates generate *and*
-upload in one place. [components/UploadPrompt.tsx](../frontend/src/components/UploadPrompt.tsx)
-renders the amber prompt from it. Same state-here / rendering-there split as
-`createActionResult` and `ResultBanner`.
+`createPublishFlow({ upload, success })` is the upload's own kit action plus
+the offer-to-upload state; the page renders its outcome with `ActionOutcome`
+beside its other actions', and the CA page reports a re-sign through it.
+[components/UploadPrompt.tsx](../frontend/src/components/UploadPrompt.tsx)
+renders the amber prompt from it.
 
 ### When a page throws
 
 Resource getters rethrow on read, so a failed load would otherwise blank the
-window. [components/RouteErrorBoundary.tsx](../frontend/src/components/RouteErrorBoundary.tsx)
-wraps the route outlet *inside* the layout, so the sidebar and header stay
-usable and the user can navigate away — which recovers on its own, because the
-router rebuilds the outlet. "Try again" is for retrying in place. This catches
+window. The kit's `ScreenBoundary` wraps the route outlet *inside* the layout
+(`App.tsx`), so the sidebar and header stay usable and the user can navigate
+away — which recovers on its own, because the router rebuilds the outlet, so
+it takes no `pathname`. It shows the `Refusal`'s sentence, or the kit's generic
+one for anything else, with "Try again" for retrying in place. This catches
 render-time throws only; failures inside async event handlers, which is where
-nearly every command lives, are reported by the page through its result banner.
+nearly every command lives, are reported by the page through its action.
 
 ### Confirming destructive actions
 
-Anything irreversible goes through a `Modal`, never a bare button. `ConfirmDialog`
-is the generic gate: it owns the acting/error state, renders a `danger` confirm,
-closes only on success, and takes a `children` slot plus a `canConfirm` predicate
-for callers that need their own field. Bulk cert and OpenVPN actions use it with
-a reason field; `ResignCaDialog` uses it with a validity-days field;
+Anything irreversible goes through the kit's `Confirm`, never a bare button. It
+sits on the kit's `Dialog`, a native modal `<dialog>` in the top layer that is
+open while mounted, so each wrapper renders it inside a `<Show>` and every open
+starts fresh. `Confirm` owns the pending and error state, holds Escape and
+Cancel while the act runs, closes only on success, shows the act's `Refusal` in
+the dialog, and takes a `children` slot plus a reactive `disabled` for callers
+that need their own field. [utils/acting.ts](../frontend/src/utils/acting.ts)'s
+`createActing()` adds opca's "Revoking…" verb while the act runs and keeps any
+other failure's message as written. Bulk cert actions use `Confirm` with a
+`reason` field when ignoring; `ResignCaDialog` adds a validity-days field;
 `RevokeCertDialog`, `DeleteCertDialog` and `IgnoreCertDialog` wrap it with a `certLabel` message.
-Every wrapper is prop-passing only, so `ConfirmDialog`'s own test owns the
-shared behaviour and each wrapper's test asserts just its wiring.
+The wrappers only pass props, so `confirm.test` owns the shared behaviour and
+each wrapper's test asserts just its wiring.
 
 Re-signing the CA earns a confirmation despite keeping the key, subject and
 serial (so issued certificates still chain): `re_sign_ca` overwrites the vault
@@ -694,41 +740,36 @@ does after Generate.
 
 The operation indicator above is strictly *in-flight* — it clears the moment a
 command returns and carries no terminal state. Actions that change the vault
-therefore report their own outcome through
-[utils/actionResult.ts](../frontend/src/utils/actionResult.ts):
-`createActionResult()` holds one `{summary, error}` result, auto-clears a
-success after a few seconds, and keeps a failure until dismissed so the error
-stays readable. It owns state only; three renderers in
+therefore report their own outcome through the kit's `createAction()`: one per
+button so `pending()` gates just that button, or one shared across a group that
+is enabled and disabled together (the certificate detail page's kebab). `run()`
+never throws; its `then` calls `succeed(sentence)`, which clears itself after
+four seconds, and a failure stays as `failed()` until the action next
+succeeds. [utils/acting.ts](../frontend/src/utils/acting.ts)'s
+`headed(headline, act)` turns the act's failure into a `Refusal` reading
+`headline: reason`, so the sentence names the action that failed. The headline
+is read after the act fails, so it can say how far a partial failure got —
+"generated, but the upload failed".
+
 [components/ResultBanner.tsx](../frontend/src/components/ResultBanner.tsx)
-share one `BannerShell`:
+renders through the kit's `Notice`:
 
 | Renderer | Used for |
 | --- | --- |
-| `ActionResultBanner` | one action — green, or red with the error beneath |
-| `ActionResultLine` | the CA tabs, whose established idiom is a line under the form |
-| `ResultBanner` | bulk runs — a neutral `n succeeded` count plus per-item failures |
+| `ActionOutcome` | one action — a good notice for its success, a bad one for its failure |
+| `ResultBanner` | bulk runs — a neutral `n succeeded` count plus per-item failures, dismissable |
 
-A bulk count is reported neutrally rather than green: a partially-failed run
-should not read as simply "good".
+A bulk count is reported neutrally rather than good: a partially-failed run
+should not read as simply "good". A page whose actions each have their own
+button (CRL's Generate and Upload, the certificate detail's kebab and VPN
+regenerate) renders one `ActionOutcome` per action.
 
-Reporting is one half; running is the other.
-[utils/action.ts](../frontend/src/utils/action.ts)'s
-`createAction(outcome)` owns an action's in-flight flag and the
-clear/try/report dance around its body. Take one per button so `busy()` gates
-just that button, or share one across a group that is enabled and disabled
-together (the certificate detail page's kebab). The success headline is built
-from whatever the body returned, and the failure headline is resolved after the
-body too, so it can say how far a partial failure got — "generated, but the
-upload failed". `run()` never throws, so whatever used to sit in `finally` is
-simply the code after the await. `createPublishFlow` is built on it.
-
-An error that belongs to the page rather than to one action is rendered by
-[components/PageError.tsx](../frontend/src/components/PageError.tsx). It
-coerces whatever it is given and renders nothing for null, undefined or an
-empty string, so a resource error goes straight in with no `<Show>` and no
-`String()` around it. An error under a form (the CA tabs, the create/import
-pages) is the same component with `placement="form"`, which swaps the page
-spacing for the form's.
+An error that belongs to the page rather than to one action is
+`<Notice tone="bad">`, which renders nothing when empty; a resource's error
+goes through `failureOf` (in `utils/acting.ts`), which is nothing until the
+load fails and the refusal's sentence after. An error under a form (the CA
+tabs, the create/import pages) adds the `form-notice` class for the form's
+spacing.
 
 Two cases deliberately do **not** use this. Rekey and renew navigate to the new
 serial, where `CertInfo`'s `.fresh-banner` reports the outcome from

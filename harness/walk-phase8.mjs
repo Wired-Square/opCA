@@ -3,8 +3,8 @@
 import { connect } from "./mcp.mjs";
 
 const SHORT = { width: 900, height: 600 };
-const PANEL = ".popover";
-const DIALOG = '[role="dialog"]';
+const PANEL = ":is(.app-popover, .app-menu):popover-open";
+const DIALOG = "dialog[open]";
 const EPSILON = 0.5;
 
 class Skip extends Error {}
@@ -71,7 +71,7 @@ async function escapeCloses(stillOpen) {
 }
 
 async function lastVisibleKebab() {
-  const kebabs = await app.query(".data-table-row .kebab-btn");
+  const kebabs = await app.query(".data-table-row .app-menu__trigger");
   const index = kebabs.findLastIndex((k) => k.inViewport && !k.clippedBy);
   if (index < 0) skip("no rows");
   return index;
@@ -80,7 +80,7 @@ async function lastVisibleKebab() {
 async function bottomRowKebab(page, ready) {
   await visit(page, ready);
   const index = await lastVisibleKebab();
-  const { panel, anchor, side } = await openPanel({ trigger: ".data-table-row .kebab-btn", index });
+  const { panel, anchor, side } = await openPanel({ trigger: ".data-table-row .app-menu__trigger", index });
   const items = await app.query(`${PANEL} [role="menuitem"]`);
   assert(items.every((i) => i.inViewport && !i.clippedBy), "a menu item is off-screen or clipped");
   await escapeCloses();
@@ -98,7 +98,7 @@ async function walk(theme) {
 
   await check(t("Certs: kebab closes on outside mousedown"), async () => {
     await visit("/certs", ".data-table");
-    await openPanel({ trigger: ".data-table-row .kebab-btn" });
+    await openPanel({ trigger: ".data-table-row .app-menu__trigger" });
     await app.click(".page-header h2");
     await app.waitFor(PANEL, "gone", 2000);
   });
@@ -107,7 +107,7 @@ async function walk(theme) {
     const { certs } = await app.call("list_certs");
     const serial = certs.find((c) => c.serial)?.serial;
     if (!serial) skip("no certificate with a serial");
-    const trigger = '.kebab-btn[aria-label="Certificate actions"]';
+    const trigger = '.app-menu__trigger[aria-label="Certificate actions"]';
     await visit(`/certs/${serial}`, trigger);
     const { side } = await openPanel({ trigger });
     await escapeCloses();
@@ -119,7 +119,7 @@ async function walk(theme) {
   await check(t("OpenVPN: VaultPicker in Send to Vault"), async () => {
     await visit("/openvpn", ".profiles-header");
     await lastVisibleKebab();
-    await openPanel({ trigger: ".data-table-row .kebab-btn" });
+    await openPanel({ trigger: ".data-table-row .app-menu__trigger" });
     await app.click(`${PANEL} [role="menuitem"]`, await indexOfText(`${PANEL} [role="menuitem"]`, "Send to Vault"));
     await app.waitFor(DIALOG);
     const { side } = await openPanel({ trigger: `${DIALOG} .vault-picker-row button`, anchor: `${DIALOG} .vault-picker-row` });

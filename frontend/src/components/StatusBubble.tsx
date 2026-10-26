@@ -1,6 +1,6 @@
 import { Show, type JSX } from "solid-js";
-import TzToggle from "./TzToggle";
-import { formatDate } from "../utils/dates";
+import { DateModeToggle } from "@wired-square/kit";
+import StoredDate from "./StoredDate";
 
 export type StatusTone = "success" | "warning" | "error" | "muted";
 export type WarningLevel =
@@ -21,7 +21,7 @@ export interface StatusBubbleProps {
   tone?: StatusTone;
   /** Short prefix for the detail line, e.g. "expires" or "next update". */
   detailPrefix?: string;
-  /** Raw date string, passed through `formatDate`. Hides the detail row when null. */
+  /** Raw date string, shown as a `StoredDate`. Hides the detail row when null. */
   detailDate?: string | null;
   warning?: StatusBubbleWarning | null;
   onClick?: () => void;
@@ -75,7 +75,7 @@ export default function StatusBubble(props: StatusBubbleProps) {
       <div class="stat-card-header">
         <span class="stat-label">{props.label}</span>
         <Show when={props.detailDate}>
-          <TzToggle />
+          <DateModeToggle />
         </Show>
       </div>
       <span class="stat-value">
@@ -84,7 +84,7 @@ export default function StatusBubble(props: StatusBubbleProps) {
       <Show when={props.detailDate}>
         <span class="stat-card-detail">
           {props.detailPrefix ? `${props.detailPrefix} ` : ""}
-          <span class="mono">{formatDate(props.detailDate ?? null)}</span>
+          <span class="mono"><StoredDate value={props.detailDate} /></span>
         </span>
       </Show>
       <Show when={props.warning}>

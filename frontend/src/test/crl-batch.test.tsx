@@ -203,6 +203,7 @@ describe("CA settings CRL batch toggle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Stores" }));
     await waitFor(() => expect(updateCaConfig).toHaveBeenCalled());
     expect(updateCaConfig.mock.calls[0][0].crl_batch_enabled).toBe(true);
+    await screen.findByText("Store settings saved.");
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Pre-signed CRL batches", checked: true }));
     fireEvent.click(await screen.findByRole("button", { name: "Save Stores" }));

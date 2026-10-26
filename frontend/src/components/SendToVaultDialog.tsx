@@ -1,6 +1,6 @@
 import { Show } from "solid-js";
 import type { ProfileRef } from "../api/types";
-import Modal from "./Modal";
+import { Dialog } from "@wired-square/kit";
 import SendToVault from "./SendToVault";
 
 interface SendToVaultDialogProps {
@@ -16,31 +16,29 @@ interface SendToVaultDialogProps {
 export default function SendToVaultDialog(props: SendToVaultDialogProps) {
   const multi = () => props.profiles.length > 1;
   return (
-    <Modal
-      open={props.open}
-      onClose={props.onClose}
-      title={multi() ? "Send Profiles to Vault" : "Send Profile to Vault"}
-    >
-      <p class="confirm-message">
-        Copy{" "}
-        <Show when={multi()} fallback={<span class="mono">{props.profiles[0]?.title ?? props.profiles[0]?.cn}</span>}>
-          {props.profiles.length} profiles
-        </Show>{" "}
-        to another 1Password vault.
-      </p>
-      <SendToVault
-        profiles={props.profiles}
-        label="Destination vault"
-        onDone={(vault, { sent, failed }) => {
-          // Keep the dialog open on partial failure so the per-profile list shows.
-          if (failed.length === 0) {
-            props.onDone(vault, sent);
-            props.onClose();
-          }
-        }}
-      >
-        <button class="btn-ghost" onClick={props.onClose}>Cancel</button>
-      </SendToVault>
-    </Modal>
+    <Show when={props.open}>
+      <Dialog title={multi() ? "Send Profiles to Vault" : "Send Profile to Vault"} onClose={props.onClose}>
+        <p class="confirm-message">
+          Copy{" "}
+          <Show when={multi()} fallback={<span class="mono">{props.profiles[0]?.title ?? props.profiles[0]?.cn}</span>}>
+            {props.profiles.length} profiles
+          </Show>{" "}
+          to another 1Password vault.
+        </p>
+        <SendToVault
+          profiles={props.profiles}
+          label="Destination vault"
+          onDone={(vault, { sent, failed }) => {
+            // Keep the dialog open on partial failure so the per-profile list shows.
+            if (failed.length === 0) {
+              props.onDone(vault, sent);
+              props.onClose();
+            }
+          }}
+        >
+          <button class="btn-ghost" onClick={props.onClose}>Cancel</button>
+        </SendToVault>
+      </Dialog>
+    </Show>
   );
 }

@@ -19,7 +19,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
+  border: 1px solid var(--app-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--bg-elevated);
@@ -33,7 +33,7 @@
   font-size: 0.7rem;
   line-height: 1.6;
   white-space: pre;
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   user-select: text;
   cursor: text;
   tab-size: 4;
@@ -41,8 +41,8 @@
 
 .log-content::selection,
 .log-content *::selection {
-  background: var(--accent);
-  color: var(--bg-primary);
+  background: var(--app-accent);
+  color: var(--app-bg);
 }
 
 .log-line {
@@ -54,17 +54,17 @@
 }
 
 .log-level-debug { color: var(--text-tertiary); }
-.log-level-info  { color: var(--text-secondary); }
-.log-level-warn  { color: var(--warning); }
-.log-level-error { color: var(--error); }
+.log-level-info  { color: var(--app-text-muted); }
+.log-level-warn  { color: var(--app-warn); }
+.log-level-error { color: var(--app-bad); }
 
 .log-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-primary);
+  border-top: 1px solid var(--app-border);
+  background: var(--app-bg);
   flex-shrink: 0;
 }
 

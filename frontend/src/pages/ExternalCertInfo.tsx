@@ -1,4 +1,6 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
+import { DateModeToggle, Notice } from "@wired-square/kit";
+import { failureOf } from "../utils/acting";
 import { useParams, useNavigate } from "@solidjs/router";
 import {
   getExternalCertInfo,
@@ -7,17 +9,16 @@ import {
   recordCertCopy,
   forgetPreloadedKey,
 } from "../api/certs";
-import { formatDate } from "../utils/dates";
+import { useDateText } from "../utils/dates";
 import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import type { ExternalCertDetail } from "../api/types";
-import TzToggle from "../components/TzToggle";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
-import PageError from "../components/PageError";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
 import "../styles/pages/cert-info.css";
 
 export default function ExternalCertInfo() {
+  const dateText = useDateText();
   const params = useParams();
   const navigate = useNavigate();
   const [detail, { mutate }] = createResource(
@@ -93,7 +94,7 @@ export default function ExternalCertInfo() {
       </div>
 
       <div class="cert-info-scroll">
-        <PageError message={detail.error} />
+        <Notice tone="bad">{failureOf(detail.error)}</Notice>
 
         <Show when={detail.loading}>
           <Spinner message="Loading…" />
@@ -120,9 +121,9 @@ export default function ExternalCertInfo() {
                 <Row label="Subject" value={d().subject} mono />
                 <Row label="Issuer" value={d().issuer} mono />
                 <Row label="Issuer Subject" value={d().issuer_subject} mono />
-                <Row label={<>Valid From <TzToggle /></>} value={formatDate(d().not_before)} />
-                <Row label="Expiry" value={formatDate(d().expiry_date)} />
-                <Row label="Imported" value={formatDate(d().import_date)} />
+                <Row label={<>Valid From <DateModeToggle /></>} value={dateText(d().not_before)} />
+                <Row label="Expiry" value={dateText(d().expiry_date)} />
+                <Row label="Imported" value={dateText(d().import_date)} />
                 <Row label="Key Type" value={d().key_type} />
                 <Row label="Key Size" value={d().key_size != null ? String(d().key_size) : null} />
                 <div class="detail-row">

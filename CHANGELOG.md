@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The frontend's colour tokens now use the kit's `--app-*` names and reach the
+  page through the kit's adopted-stylesheet theme and `data-app-scheme`; the
+  saved dark or light choice carries over.
+- Dialogs are now the kit's native modal dialogs, closed with Escape or their
+  own buttons; the corner × and closing on a click outside are gone.
+- A copyable detail value is now the kit's copy button, and says "Copied" only
+  once the clipboard has taken the value.
 - 1Password access now goes through `wslib-1password`. Item fields reach `op`
   on stdin when an item is created, every call names the vault by id, a title
   two items share fails naming both ids, and a signed-out `op` is reported
@@ -18,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The MCP dev harness now comes from `wslib-mcp` 0.1.0 on the private
   `wired-square` cargo registry, replacing the `wslib-ai-mcp` git dependency.
   It adds a read-only `console` tool for the page's errors and warnings.
+- Action menus and pickers are now the kit's, drawn in the platform's top
+  layer; a disabled menu item can now be reached with the arrow keys.
+- Table selection and its tickboxes are now the kit's.
 - The harness's Tauri event bridge now comes from `wslib-mcp`'s `tauri-bridge`
   feature, replacing opCA's own.
 - Builds fetch `wslib-mcp` from the registry instead of over SSH; CI reads it
@@ -25,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CSRs are now built by `wslib-crypto-ca` 0.1 from the `wired-square`
   registry, signed through the `rustls-openssl` provider, and a CSR's SANs are
   read without OpenSSL FFI.
+- Dates and the UTC / Local / Relative toggle are now the kit's; the strings
+  shown are unchanged.
+- Action outcomes, page errors and a page that fails to render are now the
+  kit's notices and screen boundary. A failure reads as one sentence, such as
+  "Save failed: vault locked", and stays until that action next succeeds; the
+  Dismiss button on single-action outcomes is gone.
 - Certificates are now issued by `wslib-crypto-ca`, with one profile per
   certificate type; the extensions issued are unchanged. A SHA-1-signed CSR can
   still be read, but signing it is refused, as the provider has no SHA-1.
@@ -42,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   on OpenSSL.
 - Local CA database backups are written through `wslib-file-atomic`, still
   replaced whole and readable by their owner alone.
+- The frontend now depends on `@wired-square/kit` 0.2.0, fetched from the
+  `mirror.wiredsquare.com` npm mirror, and loads its stylesheets ahead of
+  opca's own.
 
 ### Fixed
 

@@ -6,7 +6,7 @@
   box-sizing: border-box;
 }
 
-.page-csr .page-error,
+.page-csr .app-notice,
 .page-csr .page-success {
   margin-top: 12px;
   margin-bottom: 0;
@@ -29,7 +29,7 @@
 
 .page-csr .pem-block {
   padding: 12px;
-  background: var(--bg-surface);
+  background: var(--app-surface);
   font-size: 0.6875rem;
   max-height: 200px;
   overflow: auto;
@@ -58,7 +58,7 @@
 .import-cert-form {
   margin-top: 16px;
   padding: 16px;
-  background: var(--bg-surface);
+  background: var(--app-surface);
   border-radius: var(--radius-md);
 }
 

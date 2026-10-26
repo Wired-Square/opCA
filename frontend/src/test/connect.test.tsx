@@ -96,6 +96,16 @@ describe("Connect vault list", () => {
     expect(listVaults).toHaveBeenCalledWith("acme.1password.com");
   });
 
+  it("closes the list on Escape, leaving focus in the field", async () => {
+    const field = screen.getByLabelText("1Password Vault");
+    field.focus();
+    toggleVaults();
+    await screen.findByRole("option", { name: "Clients" });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(field).toHaveFocus();
+  });
+
   it("lists each account once, and not while typing", async () => {
     toggleVaults();
     await screen.findByRole("option", { name: "Clients" });

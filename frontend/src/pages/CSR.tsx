@@ -1,4 +1,6 @@
 import { Show, For, createSignal, createResource } from "solid-js";
+import { Notice } from "@wired-square/kit";
+import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import {
   listCsrs,
@@ -13,7 +15,6 @@ import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
-import PageError from "../components/PageError";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
 import CertDaysField, { createCertDays } from "../components/CertDaysField";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
@@ -124,7 +125,7 @@ export default function CSR() {
       setSelected(null);
       refetch();
     } catch (err) {
-      setImportError(String(err));
+      setImportError(errorMessage(err));
     } finally {
       setImporting(false);
     }
@@ -145,7 +146,7 @@ export default function CSR() {
       const result = await inspectCsr(pem);
       setInspectResult(result);
     } catch (err) {
-      setInspectError(String(err));
+      setInspectError(errorMessage(err));
     } finally {
       setInspecting(false);
     }
@@ -209,7 +210,7 @@ export default function CSR() {
       setSans([]);
       refetch();
     } catch (err) {
-      setCreateError(String(err));
+      setCreateError(errorMessage(err));
     } finally {
       setCreating(false);
     }
@@ -232,7 +233,7 @@ export default function CSR() {
       setSignCn(result.cn ?? "");
       setSignSans([...result.alt_names]);
     } catch (err) {
-      setSignError(String(err));
+      setSignError(errorMessage(err));
     } finally {
       setDecoding(false);
     }
@@ -274,7 +275,7 @@ export default function CSR() {
       setSignCn("");
       signLifetime.setEntered(null);
     } catch (err) {
-      setSignError(String(err));
+      setSignError(errorMessage(err));
     } finally {
       setSigning(false);
     }
@@ -345,7 +346,7 @@ export default function CSR() {
             <Spinner message="Loading CSRs..." />
           </Show>
 
-          <PageError message={csrs.error} />
+          <Notice tone="bad">{failureOf(csrs.error)}</Notice>
 
           <Show when={!csrs.loading && filteredCsrs().length === 0}>
             <p class="text-muted">No CSRs found.</p>
@@ -433,7 +434,7 @@ export default function CSR() {
                 rows={6}
               />
 
-              <PageError message={importError()} />
+              <Notice tone="bad">{importError()}</Notice>
 
               <div class="form-actions">
                 <button
@@ -457,7 +458,7 @@ export default function CSR() {
             )}
           </Show>
 
-          <PageError message={error()} />
+          <Notice tone="bad">{error()}</Notice>
 
           <Show when={loadingDetail()}>
             <Spinner message="Fetching CSR details..." />
@@ -542,7 +543,7 @@ export default function CSR() {
 
             <SanInput values={sans()} onChange={setSans} />
 
-            <PageError message={createError()} />
+            <Notice tone="bad">{createError()}</Notice>
 
             <Show when={createResult()}>
               {(r) => (
@@ -608,7 +609,7 @@ export default function CSR() {
               </div>
             </Show>
 
-            <PageError message={signError()} />
+            <Notice tone="bad">{signError()}</Notice>
 
             <Show when={!signResult() ? decoded() : null}>
               {(d) => (
@@ -748,7 +749,7 @@ export default function CSR() {
             </button>
           </div>
 
-          <PageError message={inspectError()} />
+          <Notice tone="bad">{inspectError()}</Notice>
 
           <Show when={inspectResult()}>
             {(r) => (

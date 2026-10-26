@@ -2,8 +2,8 @@
   width: 240px;
   min-width: 240px;
   height: 100vh;
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border);
+  background: var(--app-surface);
+  border-right: 1px solid var(--app-border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -11,7 +11,7 @@
 
 .sidebar-brand {
   padding: 20px 24px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .sidebar-brand-row {
@@ -34,11 +34,11 @@
 }
 
 .brand-op {
-  color: var(--text-primary);
+  color: var(--app-text);
 }
 
 .brand-ca {
-  color: var(--accent);
+  color: var(--app-accent);
 }
 
 .brand-version {
@@ -74,7 +74,7 @@
   gap: 12px;
   padding: 10px 12px;
   border-radius: var(--radius-lg);
-  color: var(--text-secondary);
+  color: var(--app-text-muted);
   font-size: 0.9375rem;
   font-weight: 500;
   transition: all 0.15s ease;
@@ -93,12 +93,12 @@
 }
 
 .sidebar-link:hover {
-  color: var(--text-primary);
+  color: var(--app-text);
   background: var(--accent-glow);
 }
 
 .sidebar-link.active {
-  color: var(--accent);
+  color: var(--app-accent);
   background: var(--accent-glow);
   font-weight: 600;
 }
@@ -128,7 +128,7 @@
 
 .sidebar-footer {
   padding: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--app-border);
 }
 
 .sidebar-status {
@@ -151,8 +151,8 @@
 .sidebar-status-spinner {
   width: 12px;
   height: 12px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
+  border: 2px solid var(--app-border);
+  border-top-color: var(--app-accent);
   border-radius: 50%;
   animation: sidebar-spin 0.8s linear infinite;
   flex-shrink: 0;
@@ -167,7 +167,7 @@
 }
 
 .logout-btn:hover {
-  color: var(--error);
+  color: var(--app-bad);
   background: var(--error-tint);
 }
 
