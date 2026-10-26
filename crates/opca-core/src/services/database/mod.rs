@@ -404,11 +404,10 @@ impl CertificateAuthorityDB {
             .unwrap_or(1);
 
         // Bump forward if caller supplies an explicit serial
-        if let Some(sn) = serial_number {
-            if sn > current_value {
+        if let Some(sn) = serial_number
+            && sn > current_value {
                 current_value = sn;
             }
-        }
 
         let next_serial = current_value + 1;
         self.conn.execute(
@@ -1446,11 +1445,10 @@ impl CertificateAuthorityDB {
             if cert.ignored_at.is_some() {
                 continue;
             }
-            if let Some(rev_serial) = revoke_serial {
-                if rev_serial == cert.serial {
+            if let Some(rev_serial) = revoke_serial
+                && rev_serial == cert.serial {
                     continue; // about to be revoked — not a replacement
                 }
-            }
             let Some(expiry_str) = cert.expiry_date.as_deref() else {
                 continue;
             };
@@ -1511,15 +1509,14 @@ impl CertificateAuthorityDB {
             let mut revoked = cert.revocation_date.as_ref().is_some_and(|rd| !rd.is_empty())
                 || cert.status.as_deref() == Some("Revoked");
 
-            if let Some(rev_serial) = revoke_serial {
-                if !expired && !revoked && rev_serial == cert.serial {
+            if let Some(rev_serial) = revoke_serial
+                && !expired && !revoked && rev_serial == cert.serial {
                     revoked = true;
                     cert_changed = true;
                     db_changed = true;
                     cert.revocation_date =
                         Some(datetime::now_utc_str(DateTimeFormat::Openssl));
                 }
-            }
 
             let expires_warning = caution_boundary > expiry_date;
 
@@ -1683,11 +1680,10 @@ impl CertificateAuthorityDB {
         // Superseded by a newer valid cert for the CN (rekey/renew) → regenerate
         // against it. `valid_cn_to_serial` omits ignored certs, so this only
         // fires when a genuine replacement exists.
-        if let Some(cur) = current_valid {
-            if cur != serial {
+        if let Some(cur) = current_valid
+            && cur != serial {
                 return (VpnProfileStatus::NeedsRegen, Some(cur.to_string()));
             }
-        }
 
         // Expired-but-replaced → regen against the replacement; expired with no
         // replacement → expired.

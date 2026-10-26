@@ -190,12 +190,11 @@ fn handle_export<R: Runner>(
         write_file(path, cert_pem.as_bytes(), 0o644)?;
         output::print_result(&format!("Certificate written to {path}"), true);
     }
-    if let Some(ref path) = key_out {
-        if let Some(ref kp) = key_pem {
+    if let Some(ref path) = key_out
+        && let Some(ref kp) = key_pem {
             write_file(path, kp.as_bytes(), 0o600)?;
             output::print_result(&format!("Private key written to {path}"), true);
         }
-    }
 
     // Stdout output
     if to_stdout || (cert_out.is_none() && key_out.is_none()) {
@@ -262,16 +261,14 @@ fn handle_list<R: Runner>(
         };
 
         // Apply filters
-        if let Some(ref filter_cn) = cn {
-            if cert.cn.as_deref() != Some(filter_cn.as_str()) {
+        if let Some(ref filter_cn) = cn
+            && cert.cn.as_deref() != Some(filter_cn.as_str()) {
                 continue;
             }
-        }
-        if let Some(ref filter_serial) = serial {
-            if cert.serial != *filter_serial {
+        if let Some(ref filter_serial) = serial
+            && cert.serial != *filter_serial {
                 continue;
             }
-        }
 
         let include = match mode {
             "expired" => status == "Expired",

@@ -99,11 +99,10 @@ impl LocalBackup {
     /// Write a backup unless it matches the newest one; returns the new file.
     pub fn write(&self, source: &BackupSource, sql: &str) -> Result<Option<PathBuf>, OpcaError> {
         let newest = self.backup_files(source)?.into_iter().last();
-        if let Some(newest) = newest {
-            if fs::read_to_string(&newest).is_ok_and(|prev| strip_header(&prev) == sql) {
+        if let Some(newest) = newest
+            && fs::read_to_string(&newest).is_ok_and(|prev| strip_header(&prev) == sql) {
                 return Ok(None);
             }
-        }
         let path = self.write_file(source, sql, "")?;
         self.prune(source)?;
         Ok(Some(path))

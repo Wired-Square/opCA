@@ -193,11 +193,10 @@ pub async fn backfill_cert(
                 backfill_record(&mut record, b);
                 record != before
             });
-        if did_backfill {
-            if let Some(db) = ca.ca_database.as_mut() {
+        if did_backfill
+            && let Some(db) = ca.ca_database.as_mut() {
                 let _ = db.update_cert(&record);
             }
-        }
 
         let superseded_by = ca
             .ca_database
@@ -216,11 +215,10 @@ pub async fn backfill_cert(
             let state: State<'_, AppState> = app.state();
             let _ = app.emit("op-status", Some("store_database"));
             let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-            if let Some(ca) = conn.ca.as_mut() {
-                if let Err(e) = ca.store_ca_database() {
+            if let Some(ca) = conn.ca.as_mut()
+                && let Err(e) = ca.store_ca_database() {
                     state.log_err("store_database", Some(e.to_string()));
                 }
-            }
             drop(conn);
             let _ = app.emit("op-status", None::<String>);
         });

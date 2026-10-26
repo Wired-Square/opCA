@@ -200,21 +200,19 @@ fn handle_list<R: Runner>(
 
     let mut dkim_items: Vec<(String, String, String)> = Vec::new();
     for item in &items {
-        if let Some(rest) = item.title.strip_prefix(&format!("{DKIM_ITEM_PREFIX}_")) {
-            if let Some(pos) = rest.rfind('_') {
+        if let Some(rest) = item.title.strip_prefix(&format!("{DKIM_ITEM_PREFIX}_"))
+            && let Some(pos) = rest.rfind('_') {
                 let domain = &rest[..pos];
                 let selector = &rest[pos + 1..];
                 if !domain.is_empty() && !selector.is_empty() {
-                    if let Some(ref filter) = domain_filter {
-                        if domain != filter.as_str() {
+                    if let Some(ref filter) = domain_filter
+                        && domain != filter.as_str() {
                             continue;
                         }
-                    }
                     let created = item.created_at.get(..10).unwrap_or_default().to_string();
                     dkim_items.push((domain.to_string(), selector.to_string(), created));
                 }
             }
-        }
     }
 
     dkim_items.sort();

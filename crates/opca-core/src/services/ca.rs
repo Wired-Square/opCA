@@ -354,14 +354,13 @@ impl<R: Runner> CertificateAuthority<R> {
     ) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
-        if let Some(source) = local_backup::read_source(backup_contents) {
-            if source.vault_id.as_ref().is_some_and(|id| *id != vault.info().id) {
+        if let Some(source) = local_backup::read_source(backup_contents)
+            && source.vault_id.as_ref().is_some_and(|id| *id != vault.info().id) {
                 return Err(OpcaError::Other(format!(
                     "Backup is from vault {:?}, not the connected vault {:?}",
                     source.vault, vault.info().name
                 )));
             }
-        }
 
         let sql = local_backup::strip_header(backup_contents);
         let (mut db, _migration) = CertificateAuthorityDB::from_sql_dump(sql)?;
@@ -1307,11 +1306,10 @@ impl<R: Runner> CertificateAuthority<R> {
 
         // Before the 1Password write, so a failed or damaged store still
         // leaves a good local copy.
-        if let Some(backup) = &self.local_backup {
-            if let Err(e) = backup.write(&BackupSource::of(&self.vault), &sql_text) {
+        if let Some(backup) = &self.local_backup
+            && let Err(e) = backup.write(&BackupSource::of(&self.vault), &sql_text) {
                 warn!("[ca] local database backup failed: {e}");
             }
-        }
 
         op::put_document(
             &self.vault,
@@ -1404,11 +1402,10 @@ impl<R: Runner> CertificateAuthority<R> {
             let cert_type = bundle.cert_type.clone();
             result_map.insert(serial_str.clone(), (cert, title.to_string(), cert_type));
 
-            if let Ok(s) = serial_str.parse::<i64>() {
-                if s > max_serial {
+            if let Ok(s) = serial_str.parse::<i64>()
+                && s > max_serial {
                     max_serial = s;
                 }
-            }
         }
 
         {

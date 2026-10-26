@@ -794,13 +794,13 @@ impl CertificateBundle {
                 Some(reversed.join(","))
             }
             "serial" => {
-                let serial = cert
+                
+                cert
                     .serial_number()
                     .to_bn()
                     .ok()
                     .and_then(|bn| bn.to_dec_str().ok())
-                    .map(|s| s.to_string());
-                serial
+                    .map(|s| s.to_string())
             }
             "not_before" => {
                 asn1_time_to_openssl_str(cert.not_before())
@@ -879,15 +879,14 @@ impl CertificateBundle {
             self.config.cn = self.certificate.as_ref().and_then(extract_cn);
         }
         // Backfill SANs from certificate if not in config
-        if self.config.alt_names.is_none() {
-            if let Some(cert) = self.certificate.as_ref() {
+        if self.config.alt_names.is_none()
+            && let Some(cert) = self.certificate.as_ref() {
                 let names: Vec<String> =
                     san::of_certificate(cert).iter().map(ToString::to_string).collect();
                 if !names.is_empty() {
                     self.config.alt_names = Some(names);
                 }
             }
-        }
 
         let algorithm = algorithm
             .or_else(|| {

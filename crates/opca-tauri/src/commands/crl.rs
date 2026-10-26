@@ -95,11 +95,10 @@ pub async fn backfill_crl(state: State<'_, AppState>) -> Result<CrlInfo, String>
     let mut metadata = db.get_crl_metadata().map_err(|e| e.to_string())?;
     let has_crl = Some(crl_pem.is_some());
 
-    if metadata.is_none() {
-        if let Some(ref pem) = crl_pem {
+    if metadata.is_none()
+        && let Some(ref pem) = crl_pem {
             metadata = parse_crl_metadata(pem).ok();
         }
-    }
 
     make_crl_info(db, metadata, crl_pem, has_crl)
 }

@@ -85,11 +85,10 @@ pub fn parse_bulk_file(path: impl AsRef<Path>) -> Result<Vec<BulkEntry>, OpcaErr
 /// Expand `~` and environment variables in a path.
 fn expand_path(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
-    if s.starts_with('~') {
-        if let Some(home) = std::env::var_os("HOME") {
+    if s.starts_with('~')
+        && let Some(home) = std::env::var_os("HOME") {
             return PathBuf::from(home).join(s.strip_prefix("~/").unwrap_or(&s[1..]));
         }
-    }
     PathBuf::from(shellexpand::tilde(&s).into_owned())
 }
 

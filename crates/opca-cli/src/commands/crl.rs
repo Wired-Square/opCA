@@ -102,9 +102,9 @@ fn handle_info<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     }
 
     // Parse revoked entries from JSON if available
-    if let Some(ref json) = metadata.revoked_json {
-        if let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(json) {
-            if !entries.is_empty() {
+    if let Some(ref json) = metadata.revoked_json
+        && let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(json)
+            && !entries.is_empty() {
                 println!();
                 let headers = &["Serial", "Revocation Date"];
                 let rows: Vec<Vec<String>> = entries
@@ -118,8 +118,6 @@ fn handle_info<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
                     .collect();
                 output::print_table(headers, &rows);
             }
-        }
-    }
 
     Ok(())
 }

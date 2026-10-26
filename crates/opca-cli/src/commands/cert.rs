@@ -122,12 +122,11 @@ fn handle_export<R: Runner>(
             super::ca::write_file(path, cert_pem.as_bytes(), 0o644)?;
             output::print_result(&format!("Certificate written to {path}"), true);
         }
-        if let Some(ref path) = args.key_out {
-            if let Some(ref kp) = key_pem {
+        if let Some(ref path) = args.key_out
+            && let Some(ref kp) = key_pem {
                 super::ca::write_file(path, kp.as_bytes(), 0o600)?;
                 output::print_result(&format!("Private key written to {path}"), true);
             }
-        }
 
         if args.to_stdout || (args.cert_out.is_none() && args.key_out.is_none()) {
             print!("{cert_pem}");

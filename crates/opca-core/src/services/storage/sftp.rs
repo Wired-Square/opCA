@@ -178,8 +178,8 @@ impl StorageBackend for StorageSftp {
 
         // Ensure the parent directory exists
         let remote_path = std::path::Path::new(&parsed.path);
-        if let Some(parent) = remote_path.parent() {
-            if parent != std::path::Path::new("/") {
+        if let Some(parent) = remote_path.parent()
+            && parent != std::path::Path::new("/") {
                 // Attempt to create parent directories; ignore errors (they may
                 // already exist).
                 let mut cumulative = PathBuf::from("/");
@@ -188,7 +188,6 @@ impl StorageBackend for StorageSftp {
                     let _ = sftp.mkdir(&cumulative, 0o755);
                 }
             }
-        }
 
         let mut remote_file = sftp
             .create(remote_path)
