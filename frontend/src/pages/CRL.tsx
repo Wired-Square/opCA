@@ -1,5 +1,5 @@
 import { Show, createEffect, createResource, createSignal } from "solid-js";
-import { CopyButton, DateModeToggle, Notice, createAction } from "@wired-square/kit";
+import { CopyButton, DateModeToggle, Notice, createAction, createFlash } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import {
   getCrlInfo,
@@ -10,7 +10,7 @@ import {
   recordCrlCopy,
 } from "../api/crl";
 import StoredDate from "../components/StoredDate";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { copyThenRecord, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import { ActionOutcome } from "../components/ResultBanner";
@@ -34,7 +34,7 @@ export default function CRL() {
   const [tab, setTab] = createSignal<Tab>("detail");
   const generate = createAction();
   const publish = createPublishFlow({ upload: uploadCrl, success: "CRL uploaded to public store" });
-  const [copied, markCopied] = createCopiedSignal();
+  const [copied, flashAfter] = createFlash();
   const [backfilling, setBackfilling] = createSignal(false);
 
   const [inspectPem, setInspectPem] = createSignal("");
@@ -75,11 +75,7 @@ export default function CRL() {
 
   function copyPem() {
     const pem = info()?.crl_pem;
-    if (pem) {
-      void writeClipboard(pem);
-      markCopied();
-      void recordCrlCopy();
-    }
+    if (pem) copyThenRecord(flashAfter, pem, recordCrlCopy);
   }
 
   async function handleInspect() {

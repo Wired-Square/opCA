@@ -683,12 +683,14 @@ element inside it.
 Every copy writes through `writeClipboard` in
 [utils/clipboard.ts](../frontend/src/utils/clipboard.ts), the Tauri
 clipboard plugin, because WKWebView refuses `navigator.clipboard` once an
-`await` separates the write from the click. `CopyableValue` is the kit's
-`CopyButton` with that writer, flashing "Copied" in place of opca's glyph
-(given to the kit through `IconSet` at the root) once the write lands.
-Availability tags and the labelled Copy buttons keep `createCopiedSignal`:
-their value is fetched on click, or they are disabled, busy or labelled in
-ways `CopyButton` does not draw.
+`await` separates the write from the click. `CopyableValue` and the section
+labels over text dumps, PEMs and DNS records are the kit's `CopyButton` with
+that writer, flashing "Copied" in place of opca's glyph (given to the kit
+through `IconSet` at the root) once the write lands. Availability tags and the
+private-key copies, whose value is fetched on click or which are disabled,
+busy or blocked in ways `CopyButton` does not draw, flash through the kit's
+`createFlash`; `copyThenRecord` records the audit entry only after the write
+succeeds and drops a refused write, as `CopyButton` does.
 
 ### Publishing to a store
 

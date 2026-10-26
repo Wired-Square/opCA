@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { CopyButton, Notice } from "@wired-square/kit";
+import { CopyButton, Notice, SearchInput } from "@wired-square/kit";
 import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import {
@@ -13,7 +13,6 @@ import {
 } from "../api/csr";
 import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import PemInput from "../components/PemInput";
 import { CERT_TYPES, defaultKeyAlgorithm, type KeyAlgorithm } from "../api/types";
 import CertDaysField, { createCertDays } from "../components/CertDaysField";
@@ -286,7 +285,7 @@ export default function CSR() {
         <h2>Certificate Signing Requests</h2>
         <Show when={tab() === "list"}>
           <div class="header-actions">
-            <SearchInput value={search()} onInput={setSearch} />
+            <SearchInput label="Search CSRs" value={search()} onValue={setSearch} placeholder="Search…" />
             <button class="btn-ghost" onClick={() => refetch()} disabled={csrs.loading}>
               Refresh
             </button>

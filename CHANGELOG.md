@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The text dump, PEM, DNS record, SAN and log copy buttons are now their
   section's label, and likewise say "Copied" only once the clipboard has the
   value.
+- The stored-item tags (certificate, chain, private key, CRL, DKIM fields) say
+  "Copied", and record the copy in the audit log, only once the clipboard has
+  the value; a refused write records nothing.
+- Search fields are the kit's search input, with a labelled clear button.
 - 1Password access now goes through `wslib-1password`. Item fields reach `op`
   on stdin when an item is created, every call names the vault by id, a title
   two items share fails naming both ids, and a signed-out `op` is reported

@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource, onMount } from "solid-js";
-import { CopyButton, Notice, createAction } from "@wired-square/kit";
+import { CopyButton, Notice, SearchInput, createAction } from "@wired-square/kit";
 import { failureOf } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import { useLocation, useNavigate } from "@solidjs/router";
@@ -12,7 +12,6 @@ import {
 import StoredDate from "../components/StoredDate";
 import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import { ActionOutcome } from "../components/ResultBanner";
 import type { DkimKeyItem } from "../api/types";
 import "../styles/pages/dkim.css";
@@ -132,7 +131,7 @@ export default function DKIM() {
         <h2>DKIM Key Management</h2>
         <Show when={tab() === "keys"}>
           <div class="header-actions">
-            <SearchInput value={search()} onInput={setSearch} />
+            <SearchInput label="Search DKIM keys" value={search()} onValue={setSearch} placeholder="Search…" />
             <button class="btn-ghost" onClick={handleRefresh} disabled={keys.loading || syncing()}>
               {syncing() ? "Syncing…" : "Refresh"}
             </button>

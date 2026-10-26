@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
-import { CopyButton, DateModeToggle, Notice, createAction } from "@wired-square/kit";
+import { CopyButton, DateModeToggle, Notice, createAction, createFlash } from "@wired-square/kit";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
 import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy, forgetPreloadedKey } from "../api/certs";
 import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
@@ -7,7 +7,7 @@ import { getVpnProfileForCn, generateOpenVpnProfile } from "../api/openvpn";
 import type { CertDetail } from "../api/types";
 import { useDateText } from "../utils/dates";
 import StoredDate from "../components/StoredDate";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { copyThenRecord, writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import CopyableValue from "../components/CopyableValue";
@@ -44,9 +44,9 @@ export default function CertInfo() {
   onCleanup(() => void forgetPreloadedKey());
   const regenerateVpn = createAction();
   const label = () => certLabel({ cn: detail()?.cn, serial: params.serial as string });
-  const [copied, markCopied] = createCopiedSignal();
-  const [copiedKey, markKeyCopied] = createCopiedSignal();
-  const [copiedChain, markChainCopied] = createCopiedSignal();
+  const [copied, flashAfter] = createFlash();
+  const [copiedKey, flashKeyAfter] = createFlash();
+  const [copiedChain, flashChainAfter] = createFlash();
   const [backfilling, setBackfilling] = createSignal(false);
   const [showIgnore, setShowIgnore] = createSignal(false);
 
@@ -119,28 +119,19 @@ export default function CertInfo() {
   function copyPem() {
     const pem = detail()?.cert_pem;
     const serial = params.serial as string;
-    if (pem && serial) {
-      void writeClipboard(pem);
-      markCopied();
-      void recordCertCopy("local", serial, "certificate");
-    }
+    if (pem && serial) copyThenRecord(flashAfter, pem, () => recordCertCopy("local", serial, "certificate"));
   }
 
   function copyChain() {
     const pem = detail()?.chain_pem;
     const serial = params.serial as string;
-    if (pem && serial) {
-      void writeClipboard(pem);
-      markChainCopied();
-      void recordCertCopy("local", serial, "chain");
-    }
+    if (pem && serial) copyThenRecord(flashChainAfter, pem, () => recordCertCopy("local", serial, "chain"));
   }
 
   async function copyPrivateKey(passphrase?: string) {
     // No recordCertCopy() here: get_cert_private_key audits server-side and
     // refuses CA keys outright.
-    await writeClipboard(await getCertPrivateKey(params.serial as string, passphrase));
-    markKeyCopied();
+    await flashKeyAfter(writeClipboard(await getCertPrivateKey(params.serial as string, passphrase)));
   }
 
   // Until backfill finishes, we know whether a chain exists (has_chain) but

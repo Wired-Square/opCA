@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
-import { DateModeToggle, Notice } from "@wired-square/kit";
+import { DateModeToggle, Notice, createFlash } from "@wired-square/kit";
 import { failureOf } from "../utils/acting";
 import { useParams, useNavigate } from "@solidjs/router";
 import {
@@ -10,7 +10,7 @@ import {
   forgetPreloadedKey,
 } from "../api/certs";
 import { useDateText } from "../utils/dates";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { copyThenRecord, writeClipboard } from "../utils/clipboard";
 import type { ExternalCertDetail } from "../api/types";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
@@ -25,9 +25,9 @@ export default function ExternalCertInfo() {
     () => params.serial as string | undefined,
     (serial: string) => getExternalCertInfo(serial),
   );
-  const [copiedPem, markPemCopied] = createCopiedSignal();
-  const [copiedChain, markChainCopied] = createCopiedSignal();
-  const [copiedKey, markKeyCopied] = createCopiedSignal();
+  const [copiedPem, flashPemAfter] = createFlash();
+  const [copiedChain, flashChainAfter] = createFlash();
+  const [copiedKey, flashKeyAfter] = createFlash();
   const [showKeyCopy, setShowKeyCopy] = createSignal(false);
   onCleanup(() => void forgetPreloadedKey());
   const [backfilling, setBackfilling] = createSignal(false);
@@ -48,28 +48,19 @@ export default function ExternalCertInfo() {
   function copyPem() {
     const pem = detail()?.cert_pem;
     const serial = params.serial as string;
-    if (pem && serial) {
-      void writeClipboard(pem);
-      markPemCopied();
-      void recordCertCopy("external", serial, "certificate");
-    }
+    if (pem && serial) copyThenRecord(flashPemAfter, pem, () => recordCertCopy("external", serial, "certificate"));
   }
 
   function copyChain() {
     const pem = detail()?.chain_pem;
     const serial = params.serial as string;
-    if (pem && serial) {
-      void writeClipboard(pem);
-      markChainCopied();
-      void recordCertCopy("external", serial, "chain");
-    }
+    if (pem && serial) copyThenRecord(flashChainAfter, pem, () => recordCertCopy("external", serial, "chain"));
   }
 
   async function copyPrivateKey(passphrase?: string) {
     // No recordCertCopy() here: get_external_cert_private_key audits
     // server-side and refuses CA keys outright.
-    await writeClipboard(await getExternalCertPrivateKey(params.serial as string, passphrase));
-    markKeyCopied();
+    await flashKeyAfter(writeClipboard(await getExternalCertPrivateKey(params.serial as string, passphrase)));
   }
 
   // Until backfill finishes, we know whether a chain exists (has_chain) but

@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource } from "solid-js";
-import { Confirm, CopyButton, createAction, createSelection, DateModeToggle, Notice } from "@wired-square/kit";
+import { Confirm, CopyButton, createAction, createSelection, DateModeToggle, Notice, SearchInput } from "@wired-square/kit";
 import { errorMessage } from "../api/tauri";
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import {
@@ -12,7 +12,6 @@ import { useDateText } from "../utils/dates";
 import StoredDate from "../components/StoredDate";
 import { writeClipboard } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import CertStatusBadge from "../components/CertStatusBadge";
 import ActionMenu, { type MenuAction } from "../components/ActionMenu";
 import IgnoreCertDialog from "../components/IgnoreCertDialog";
@@ -280,7 +279,7 @@ export default function Certs() {
               visible on every tab so the header keeps a constant height and the
               tabs/table below don't shift when switching to Inspect. */}
           <Show when={tab() !== "inspect"}>
-            <SearchInput value={search()} onInput={setSearch} />
+            <SearchInput label="Search certificates" value={search()} onValue={setSearch} placeholder="Search…" />
             <select
               class="status-filter"
               value={filter()}

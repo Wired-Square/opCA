@@ -274,6 +274,18 @@ input[aria-invalid="true"]:focus {
   align-items: center;
 }
 
+/* The unlayered `input` and `button` rules outrank the kit's, so its search box is sized here. */
+.app-search__input {
+  min-width: 160px;
+  padding: 6px 2rem 6px 10px;
+  font-size: 0.8125rem;
+  border-radius: var(--radius-md);
+}
+
+.app-search__clear {
+  padding: 2px;
+}
+
 .page-success,
 .page-warning,
 .form-success {

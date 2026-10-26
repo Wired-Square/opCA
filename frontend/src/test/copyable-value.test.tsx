@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
 import CopyableValue from "../components/CopyableValue";
 
 const writeText = vi.hoisted(() => vi.fn(async (_text: string) => {}));
@@ -14,8 +14,8 @@ describe("CopyableValue", () => {
     expect(button.querySelector(".app-copy__glyph svg")).not.toBeNull();
     fireEvent.click(button);
     expect(writeText).toHaveBeenCalledWith("example.com");
-    expect(await screen.findByText("Copied")).toBeInTheDocument();
-    expect(screen.getByText("example.com")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Copied"));
+    expect(button).toHaveTextContent("example.comCopied");
     expect(button.querySelector(".app-copy__glyph svg")).toBeNull();
   });
 

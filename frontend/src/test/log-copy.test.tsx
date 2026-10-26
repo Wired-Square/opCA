@@ -20,7 +20,7 @@ describe("Log copy all", () => {
     expect(writeText).toHaveBeenCalledWith("[INFO] one\n[WARN] two");
     expect(screen.queryByText("Copied")).toBeNull();
     land();
-    expect(await screen.findByText("Copied")).toBeInTheDocument();
-    expect(screen.getByText("Copy all")).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent("Copied");
+    expect(screen.getByRole("button", { name: "Copy all" })).toHaveTextContent("Copied");
   });
 });

@@ -1,5 +1,5 @@
 import { Show, For, createSignal, createResource, createUniqueId, onMount, onCleanup } from "solid-js";
-import { DateModeToggle, Notice, createAction } from "@wired-square/kit";
+import { DateModeToggle, Notice, SearchInput, createAction, createFlash } from "@wired-square/kit";
 import { failureOf, headed } from "../utils/acting";
 import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
@@ -8,9 +8,8 @@ import { getCaInfo, getCaConfig, updateCaConfig, initCa, testStores, uploadCaCer
 import { listAwsCredentials, getAwsCredential, setAwsCredential } from "../api/aws";
 import { vaultRestore, vaultInfo } from "../api/vault-backup";
 import { useDateText } from "../utils/dates";
-import { createCopiedSignal, writeClipboard } from "../utils/clipboard";
+import { copyThenRecord } from "../utils/clipboard";
 import Spinner from "../components/Spinner";
-import SearchInput from "../components/SearchInput";
 import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -140,15 +139,11 @@ export default function CA() {
 
 function CertificateTab(props: { info: () => CaInfo | undefined }) {
   const dateText = useDateText();
-  const [copied, markCopied] = createCopiedSignal();
+  const [copied, flashAfter] = createFlash();
 
   function copyPem() {
     const pem = props.info()?.cert_pem;
-    if (pem) {
-      void writeClipboard(pem);
-      markCopied();
-      void recordCaCertCopy();
-    }
+    if (pem) copyThenRecord(flashAfter, pem, recordCaCertCopy);
   }
 
   return (
@@ -442,7 +437,7 @@ function AwsCredentialSection() {
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label">Filter</label>
-            <SearchInput value={filter()} onInput={setFilter} placeholder="Filter items…" />
+            <SearchInput label="Filter 1Password items" value={filter()} onValue={setFilter} placeholder="Filter items…" />
           </div>
           <div class="form-group">
             <label class="form-label">
