@@ -9,31 +9,31 @@ use chrono::{DateTime, SubsecRound, Utc};
 use foreign_types::ForeignType;
 use log::{debug, error, info, warn};
 use openssl::asn1::Asn1Time;
-use openssl::x509::{X509Req, X509};
+use openssl::x509::{X509, X509Req};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::constants::{
-    OpConf, CRL_BATCH_PERIOD_DAYS, CRL_BATCH_SIZE, CRL_BATCH_WINDOW_DAYS, DEFAULT_OP_CONF,
-    DEFAULT_STORAGE_CONF,
+    CRL_BATCH_PERIOD_DAYS, CRL_BATCH_SIZE, CRL_BATCH_WINDOW_DAYS, DEFAULT_OP_CONF,
+    DEFAULT_STORAGE_CONF, OpConf,
 };
 use crate::error::OpcaError;
 use crate::op::{self, Assignment, Error, ItemRef, Runner, Vault};
 use crate::services::cert::{
-    crypto_provider, signer_of, CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm,
-    APPLE_TLS_MAX_DAYS,
+    APPLE_TLS_MAX_DAYS, CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm,
+    crypto_provider, signer_of,
 };
+use crate::services::database::CertificateAuthorityDB;
 use crate::services::database::models::{
     CaConfig, CertLookup, CertRecord, CrlBatch, CrlEntry, CrlMetadata, CsrLookup, CsrRecord,
     ExternalCertRecord, IgnoreReason, SerialType,
 };
-use crate::services::database::CertificateAuthorityDB;
 use crate::services::local_backup::{self, BackupSource, LocalBackup};
 use crate::services::storage;
 use crate::utils::datetime::{self, DateTimeFormat};
 use wslib_crypto_ca::{
-    Authority, CrlView, Csr, KeyIdentifierMethod, Profile, Revocation, SanPolicy, Serial,
-    Validity, X509_CRL,
+    Authority, CrlView, Csr, KeyIdentifierMethod, Profile, Revocation, SanPolicy, Serial, Validity,
+    X509_CRL,
 };
 use wslib_crypto_x509::AttributeValue;
 
@@ -121,9 +121,11 @@ pub fn assess_crl_expiry(next_update: DateTime<Utc>, now: DateTime<Utc>) -> CrlE
 /// Where a CA in batch mode uploads its CRL batch; `None` when batches are off.
 fn crl_batch_uri(config: &CaConfig) -> Result<Option<String>, OpcaError> {
     match (config.crl_batch_enabled, config.ca_private_store.as_deref()) {
-        (Some(true), Some(store)) => {
-            Ok(Some(format!("{}/{}", store.trim_end_matches('/'), DEFAULT_STORAGE_CONF.crl_batch_file)))
-        }
+        (Some(true), Some(store)) => Ok(Some(format!(
+            "{}/{}",
+            store.trim_end_matches('/'),
+            DEFAULT_STORAGE_CONF.crl_batch_file
+        ))),
         (Some(true), None) => Err(OpcaError::Storage(
             "CRL batches need a private store: set one or turn CRL batches off".into(),
         )),
@@ -252,7 +254,8 @@ impl<R: Runner> CertificateAuthority<R> {
         let mut db = CertificateAuthorityDB::new(config)?;
 
         let bundle_config = ca_config_to_bundle(config);
-        let mut bundle = CertificateBundle::generate(CertType::Ca, op_config.ca_title, bundle_config)?;
+        let mut bundle =
+            CertificateBundle::generate(CertType::Ca, op_config.ca_title, bundle_config)?;
         bundle.self_sign_ca()?;
 
         db.increment_serial(SerialType::Cert, None)?;
@@ -317,15 +320,14 @@ impl<R: Runner> CertificateAuthority<R> {
 
         // Download database — also proves the CA exists, so we skip a
         // separate `item_exists` probe (one fewer `op` process spawn).
-        let ca_database_sql = op::document_text(&vault, op_config.ca_database_title)
-            .map_err(|e| match e {
+        let ca_database_sql =
+            op::document_text(&vault, op_config.ca_database_title).map_err(|e| match e {
                 OpcaError::ItemNotFound(_) => OpcaError::CaNotFound,
                 other => other,
             })?;
 
         let fingerprint = sha256_hex(ca_database_sql.as_bytes());
-        let (mut db, _migration) =
-            CertificateAuthorityDB::from_sql_dump(&ca_database_sql)?;
+        let (mut db, _migration) = CertificateAuthorityDB::from_sql_dump(&ca_database_sql)?;
         db.download_fingerprint = Some(fingerprint);
 
         // Retrieve CA bundle
@@ -354,13 +356,17 @@ impl<R: Runner> CertificateAuthority<R> {
     ) -> Result<Self, OpcaError> {
         let op_config = DEFAULT_OP_CONF;
 
-        if let Some(source) = local_backup::read_source(backup_contents) {
-            if source.vault_id.as_ref().is_some_and(|id| *id != vault.info().id) {
-                return Err(OpcaError::Other(format!(
-                    "Backup is from vault {:?}, not the connected vault {:?}",
-                    source.vault, vault.info().name
-                )));
-            }
+        if let Some(source) = local_backup::read_source(backup_contents)
+            && source
+                .vault_id
+                .as_ref()
+                .is_some_and(|id| *id != vault.info().id)
+        {
+            return Err(OpcaError::Other(format!(
+                "Backup is from vault {:?}, not the connected vault {:?}",
+                source.vault,
+                vault.info().name
+            )));
         }
 
         let sql = local_backup::strip_header(backup_contents);
@@ -468,8 +474,11 @@ impl<R: Runner> CertificateAuthority<R> {
             .ok_or_else(|| OpcaError::CaNotFound)?;
 
         let provider = crypto_provider();
-        let csr = Csr::from_der(&csr.to_der()?, provider.signature_verification_algorithms.all)
-            .map_err(|e| OpcaError::InvalidCertificate(format!("CSR: {e}")))?;
+        let csr = Csr::from_der(
+            &csr.to_der()?,
+            provider.signature_verification_algorithms.all,
+        )
+        .map_err(|e| OpcaError::InvalidCertificate(format!("CSR: {e}")))?;
 
         let ca_config = db.get_config()?;
         let serial = Serial::try_from(db.increment_serial(SerialType::Cert, None)?)?;
@@ -501,9 +510,9 @@ impl<R: Runner> CertificateAuthority<R> {
         info!("[ca] generating {cert_type} certificate '{item_title}'");
         let mut bundle = CertificateBundle::generate(cert_type.clone(), item_title, config)?;
 
-        let csr_pem = bundle.csr_pem().ok_or_else(|| {
-            OpcaError::InvalidCertificate("CSR not generated".into())
-        })?;
+        let csr_pem = bundle
+            .csr_pem()
+            .ok_or_else(|| OpcaError::InvalidCertificate("CSR not generated".into()))?;
         let csr = X509Req::from_pem(csr_pem.as_bytes())
             .map_err(|e| OpcaError::Crypto(format!("Parse CSR: {e}")))?;
 
@@ -523,12 +532,14 @@ impl<R: Runner> CertificateAuthority<R> {
 
     /// Check whether a certificate was signed by this CA and is within its validity period.
     pub fn is_cert_valid(&self, cert: &X509) -> Result<bool, OpcaError> {
-        let ca_bundle = self.ca_bundle.as_ref()
-            .ok_or(OpcaError::CaNotFound)?;
-        let ca_cert = ca_bundle.certificate.as_ref()
+        let ca_bundle = self.ca_bundle.as_ref().ok_or(OpcaError::CaNotFound)?;
+        let ca_cert = ca_bundle
+            .certificate
+            .as_ref()
             .ok_or(OpcaError::CaNotFound)?;
 
-        let ca_pubkey = ca_cert.public_key()
+        let ca_pubkey = ca_cert
+            .public_key()
             .map_err(|e| OpcaError::Crypto(format!("Get CA public key: {e}")))?;
 
         // Verify signature
@@ -538,8 +549,8 @@ impl<R: Runner> CertificateAuthority<R> {
         }
 
         // Check time validity
-        let now = Asn1Time::days_from_now(0)
-            .map_err(|e| OpcaError::Crypto(format!("Asn1Time: {e}")))?;
+        let now =
+            Asn1Time::days_from_now(0).map_err(|e| OpcaError::Crypto(format!("Asn1Time: {e}")))?;
         if cert.not_before() > &now || cert.not_after() < &now {
             return Ok(false);
         }
@@ -590,10 +601,11 @@ impl<R: Runner> CertificateAuthority<R> {
 
         // For local imports, advance the serial counter if needed
         if is_local {
-            let cert_serial_str = bundle.get_certificate_attrib("serial")?
-                .unwrap_or_default();
+            let cert_serial_str = bundle.get_certificate_attrib("serial")?.unwrap_or_default();
             if let Ok(cert_serial) = cert_serial_str.parse::<i64>() {
-                let db = self.ca_database.as_mut()
+                let db = self
+                    .ca_database
+                    .as_mut()
                     .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
                 db.increment_serial(SerialType::Cert, Some(cert_serial))?;
             }
@@ -618,12 +630,7 @@ impl<R: Runner> CertificateAuthority<R> {
         };
 
         // Store in 1Password
-        self.store_certbundle_for(
-            &bundle,
-            issuer.as_deref(),
-            issuer_subject.as_deref(),
-            true,
-        )?;
+        self.store_certbundle_for(&bundle, issuer.as_deref(), issuer_subject.as_deref(), true)?;
 
         Ok(bundle)
     }
@@ -658,14 +665,19 @@ impl<R: Runner> CertificateAuthority<R> {
         days: Option<u32>,
     ) -> Result<(String, String, Vec<CertIssuanceWarning>), OpcaError> {
         info!("[ca] renewing certificate {lookup:?}");
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
-        let cert_record = db.query_cert(lookup, true)?
+        let cert_record = db
+            .query_cert(lookup, true)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
         let old_serial = cert_record.serial.clone();
-        let item_title = cert_record.title.clone()
+        let item_title = cert_record
+            .title
+            .clone()
             .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
 
         let status = cert_record.status.as_deref().unwrap_or("");
@@ -675,13 +687,15 @@ impl<R: Runner> CertificateAuthority<R> {
             ));
         }
 
-        let mut cert_bundle = self.retrieve_certbundle(&item_title)?
+        let mut cert_bundle = self
+            .retrieve_certbundle(&item_title)?
             .ok_or_else(|| OpcaError::CertificateNotFound(item_title.clone()))?;
 
-        let csr_pem = cert_bundle.csr_pem()
-            .ok_or_else(|| OpcaError::Other(format!(
+        let csr_pem = cert_bundle.csr_pem().ok_or_else(|| {
+            OpcaError::Other(format!(
                 "CSR not found for certificate '{item_title}'; cannot renew."
-            )))?;
+            ))
+        })?;
 
         let csr = X509Req::from_pem(csr_pem.as_bytes())
             .map_err(|e| OpcaError::Crypto(format!("Parse CSR: {e}")))?;
@@ -691,8 +705,12 @@ impl<R: Runner> CertificateAuthority<R> {
         cert_bundle.update_certificate(signed_cert)?;
 
         // Update title with new serial
-        let new_serial = cert_bundle.get_certificate_attrib("serial")?.unwrap_or_default();
-        let cn = cert_bundle.get_certificate_attrib("cn")?.unwrap_or_default();
+        let new_serial = cert_bundle
+            .get_certificate_attrib("serial")?
+            .unwrap_or_default();
+        let cn = cert_bundle
+            .get_certificate_attrib("cn")?
+            .unwrap_or_default();
         cert_bundle.title = format!("CRT_{new_serial}_{cn}");
 
         // Persist the new bundle, then auto-ignore the predecessor so it stops
@@ -718,26 +736,31 @@ impl<R: Runner> CertificateAuthority<R> {
         days: Option<u32>,
     ) -> Result<(String, String, Vec<CertIssuanceWarning>), OpcaError> {
         info!("[ca] rekeying certificate {lookup:?}");
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
-        let cert_record = db.query_cert(lookup, false)?
+        let cert_record = db
+            .query_cert(lookup, false)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
         let old_serial = cert_record.serial.clone();
-        let item_title = cert_record.title.clone()
+        let item_title = cert_record
+            .title
+            .clone()
             .ok_or_else(|| OpcaError::CertificateNotFound("No title".into()))?;
 
-        let mut cert_bundle = self.retrieve_certbundle(&item_title)?
+        let mut cert_bundle = self
+            .retrieve_certbundle(&item_title)?
             .ok_or_else(|| OpcaError::CertificateNotFound(item_title.clone()))?;
 
         // Generate a new private key and CSR, preserving subject attributes
         cert_bundle.regenerate_key_and_csr(key_algorithm)?;
 
-        let csr_pem = cert_bundle.csr_pem()
-            .ok_or_else(|| OpcaError::Other(
-                "CSR not available after rekeying".into(),
-            ))?;
+        let csr_pem = cert_bundle
+            .csr_pem()
+            .ok_or_else(|| OpcaError::Other("CSR not available after rekeying".into()))?;
 
         let csr = X509Req::from_pem(csr_pem.as_bytes())
             .map_err(|e| OpcaError::Crypto(format!("Parse CSR: {e}")))?;
@@ -747,8 +770,12 @@ impl<R: Runner> CertificateAuthority<R> {
         cert_bundle.update_certificate(signed_cert)?;
 
         // Update title with new serial
-        let new_serial = cert_bundle.get_certificate_attrib("serial")?.unwrap_or_default();
-        let cn = cert_bundle.get_certificate_attrib("cn")?.unwrap_or_default();
+        let new_serial = cert_bundle
+            .get_certificate_attrib("serial")?
+            .unwrap_or_default();
+        let cn = cert_bundle
+            .get_certificate_attrib("cn")?
+            .unwrap_or_default();
         cert_bundle.title = format!("CRT_{new_serial}_{cn}");
 
         // Persist the updated bundle (new key, CSR, and cert), then auto-ignore
@@ -769,10 +796,13 @@ impl<R: Runner> CertificateAuthority<R> {
     /// Revoke a valid certificate and update the CA database.
     pub fn revoke_certificate(&mut self, lookup: &CertLookup) -> Result<bool, OpcaError> {
         info!("[ca] revoking certificate {lookup:?}");
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
-        let cert = db.query_cert(lookup, true)?
+        let cert = db
+            .query_cert(lookup, true)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("{lookup:?}")))?;
 
         let item_serial = cert.serial.clone();
@@ -796,7 +826,9 @@ impl<R: Runner> CertificateAuthority<R> {
         info!("[ca] ignoring certificate {serial}");
         let by = local_user();
 
-        let db = self.ca_database.as_mut()
+        let db = self
+            .ca_database
+            .as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         db.ignore_cert(serial, IgnoreReason::Manual, &by, note)?;
 
@@ -807,7 +839,9 @@ impl<R: Runner> CertificateAuthority<R> {
     /// Clear the ignored state on a certificate (undo). Persists to 1Password.
     pub fn unignore_certificate(&mut self, serial: &str) -> Result<(), OpcaError> {
         info!("[ca] un-ignoring certificate {serial}");
-        let db = self.ca_database.as_mut()
+        let db = self
+            .ca_database
+            .as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         db.unignore_cert(serial)?;
 
@@ -819,18 +853,26 @@ impl<R: Runner> CertificateAuthority<R> {
     /// A batch is uploaded before returning, or the old batch would hide a revocation.
     pub fn generate_crl(&mut self) -> Result<String, OpcaError> {
         info!("[ca] generating CRL");
-        let db = self.ca_database.as_mut()
+        let db = self
+            .ca_database
+            .as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         db.process_ca_database(None, false)?;
 
         let ca_config = db.get_config()?;
         let batch_uri = crl_batch_uri(&ca_config)?;
 
-        let ca_bundle = self.ca_bundle.as_ref()
+        let ca_bundle = self
+            .ca_bundle
+            .as_ref()
             .ok_or_else(|| OpcaError::CaNotFound)?;
-        let ca_cert = ca_bundle.certificate.as_ref()
+        let ca_cert = ca_bundle
+            .certificate
+            .as_ref()
             .ok_or_else(|| OpcaError::CaNotFound)?;
-        let ca_key = ca_bundle.private_key.as_ref()
+        let ca_key = ca_bundle
+            .private_key
+            .as_ref()
             .ok_or_else(|| OpcaError::Crypto("CA private key not available".into()))?;
 
         let entries = db.crl_entries()?;
@@ -847,7 +889,16 @@ impl<R: Runner> CertificateAuthority<R> {
             first_number,
         };
         let crls = (0..batch.count)
-            .map(|i| build_crl(ca_cert, ca_key, first_number + i, batch.this_update(i), batch.next_update(i), &entries))
+            .map(|i| {
+                build_crl(
+                    ca_cert,
+                    ca_key,
+                    first_number + i,
+                    batch.this_update(i),
+                    batch.next_update(i),
+                    &entries,
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         if batch_uri.is_some() {
@@ -861,7 +912,12 @@ impl<R: Runner> CertificateAuthority<R> {
         }
         db.upsert_crl_metadata(&parse_crl_metadata(&crls[0])?)?;
 
-        op::put_document(&self.vault, self.op_config.crl_title, self.op_config.crl_filename, &crls[0])?;
+        op::put_document(
+            &self.vault,
+            self.op_config.crl_title,
+            self.op_config.crl_filename,
+            &crls[0],
+        )?;
         self.crl = Some(crls[0].clone());
         self.store_ca_database()?;
 
@@ -963,10 +1019,14 @@ impl<R: Runner> CertificateAuthority<R> {
 
     fn cert_days(&self, cert_type: &CertType, requested: Option<u32>) -> Result<u32, OpcaError> {
         match requested {
-            Some(0) => Err(OpcaError::Other("Certificate lifetime must be at least 1 day".into())),
+            Some(0) => Err(OpcaError::Other(
+                "Certificate lifetime must be at least 1 day".into(),
+            )),
             Some(days) => Ok(days),
             None => {
-                let db = self.ca_database.as_ref()
+                let db = self
+                    .ca_database
+                    .as_ref()
                     .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
                 let ca_days = db.get_config()?.days.unwrap_or(365) as u32;
                 Ok(cert_type.default_days(ca_days))
@@ -975,9 +1035,14 @@ impl<R: Runner> CertificateAuthority<R> {
     }
 
     fn issuance_warnings(&self, cert_type: &CertType, days: u32) -> Vec<CertIssuanceWarning> {
-        let outlives_ca = self.ca_not_after().ok()
+        let outlives_ca = self
+            .ca_not_after()
+            .ok()
             .and_then(|ca_not_after| assess_cert_issuance(ca_not_after, days.into(), Utc::now()));
-        outlives_ca.into_iter().chain(assess_apple_tls_limit(cert_type, days)).collect()
+        outlives_ca
+            .into_iter()
+            .chain(assess_apple_tls_limit(cert_type, days))
+            .collect()
     }
 
     // -----------------------------------------------------------------------
@@ -995,8 +1060,12 @@ impl<R: Runner> CertificateAuthority<R> {
 
         // Extract updated attributes
         let cert_pem = bundle.certificate_pem()?;
-        let not_before = bundle.get_certificate_attrib("not_before")?.unwrap_or_default();
-        let not_after = bundle.get_certificate_attrib("not_after")?.unwrap_or_default();
+        let not_before = bundle
+            .get_certificate_attrib("not_before")?
+            .unwrap_or_default();
+        let not_after = bundle
+            .get_certificate_attrib("not_after")?
+            .unwrap_or_default();
 
         let not_before_text = openssl_to_text(&not_before);
         let not_after_text = openssl_to_text(&not_after);
@@ -1007,7 +1076,8 @@ impl<R: Runner> CertificateAuthority<R> {
             op::assign(self.op_config.start_date_item, not_before_text)?,
             op::assign(self.op_config.expiry_date_item, not_after_text)?,
         ];
-        self.vault.edit_item(&ItemRef::title(self.op_config.ca_title), &fields)?;
+        self.vault
+            .edit_item(&ItemRef::title(self.op_config.ca_title), &fields)?;
 
         self.store_ca_database()?;
         Ok(())
@@ -1037,9 +1107,15 @@ impl<R: Runner> CertificateAuthority<R> {
         // Build attributes
         let cert_pem = bundle.certificate_pem()?;
         let cn = bundle.get_certificate_attrib("cn")?.unwrap_or_default();
-        let subject = bundle.get_certificate_attrib("subject")?.unwrap_or_default();
-        let not_before = bundle.get_certificate_attrib("not_before")?.unwrap_or_default();
-        let not_after = bundle.get_certificate_attrib("not_after")?.unwrap_or_default();
+        let subject = bundle
+            .get_certificate_attrib("subject")?
+            .unwrap_or_default();
+        let not_before = bundle
+            .get_certificate_attrib("not_before")?
+            .unwrap_or_default();
+        let not_after = bundle
+            .get_certificate_attrib("not_after")?
+            .unwrap_or_default();
         let serial = bundle.get_certificate_attrib("serial")?.unwrap_or_default();
         let csr_pem = bundle.csr_pem().unwrap_or_default();
 
@@ -1073,7 +1149,9 @@ impl<R: Runner> CertificateAuthority<R> {
         // Add to database
         let db_item = format_db_item(bundle, item_title, issuer, issuer_subject)?;
 
-        let db = self.ca_database.as_mut()
+        let db = self
+            .ca_database
+            .as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
         if is_external {
@@ -1098,20 +1176,32 @@ impl<R: Runner> CertificateAuthority<R> {
         persist: bool,
     ) -> Result<(), OpcaError> {
         // Clone the bundle data we need — we can't borrow self mutably twice
-        let bundle = self.ca_bundle.as_ref()
+        let bundle = self
+            .ca_bundle
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("No CA bundle".into()))?;
 
         let item_title = bundle.title.clone();
         let cert_type_str = bundle.cert_type.to_string();
         let cert_pem = bundle.certificate_pem()?;
         let cn = bundle.get_certificate_attrib("cn")?.unwrap_or_default();
-        let subject = bundle.get_certificate_attrib("subject")?.unwrap_or_default();
-        let not_before = bundle.get_certificate_attrib("not_before")?.unwrap_or_default();
-        let not_after = bundle.get_certificate_attrib("not_after")?.unwrap_or_default();
+        let subject = bundle
+            .get_certificate_attrib("subject")?
+            .unwrap_or_default();
+        let not_before = bundle
+            .get_certificate_attrib("not_before")?
+            .unwrap_or_default();
+        let not_after = bundle
+            .get_certificate_attrib("not_after")?
+            .unwrap_or_default();
         let serial = bundle.get_certificate_attrib("serial")?.unwrap_or_default();
         let csr_pem_str = bundle.csr_pem().unwrap_or_default();
         let has_key = bundle.private_key.is_some();
-        let key_pem = if has_key { Some(bundle.private_key_pem()?) } else { None };
+        let key_pem = if has_key {
+            Some(bundle.private_key_pem()?)
+        } else {
+            None
+        };
         let chain_pem = bundle.chain_pem();
 
         let db_item = format_db_item(bundle, &item_title, issuer, issuer_subject)?;
@@ -1148,7 +1238,9 @@ impl<R: Runner> CertificateAuthority<R> {
 
         self.vault.create_item(&op_title, c.category, &fields)?;
 
-        let db = self.ca_database.as_mut()
+        let db = self
+            .ca_database
+            .as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
         if is_external {
@@ -1170,7 +1262,10 @@ impl<R: Runner> CertificateAuthority<R> {
     }
 
     /// Retrieve a certificate bundle from 1Password.
-    pub fn retrieve_certbundle(&self, item_title: &str) -> Result<Option<CertificateBundle>, OpcaError> {
+    pub fn retrieve_certbundle(
+        &self,
+        item_title: &str,
+    ) -> Result<Option<CertificateBundle>, OpcaError> {
         Self::retrieve_certbundle_static(&self.vault, &self.op_config, item_title)
     }
 
@@ -1217,13 +1312,17 @@ impl<R: Runner> CertificateAuthority<R> {
         dst_title: &str,
         persist: bool,
     ) -> Result<(), OpcaError> {
-        let db = self.ca_database.as_mut()
+        let db = self
+            .ca_database
+            .as_mut()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
-        let mut record = db.query_cert(&CertLookup::Title(src_title.to_string()), false)?
+        let mut record = db
+            .query_cert(&CertLookup::Title(src_title.to_string()), false)?
             .ok_or_else(|| OpcaError::CertificateNotFound(src_title.to_string()))?;
 
-        self.vault.rename_item(&ItemRef::title(src_title), dst_title)?;
+        self.vault
+            .rename_item(&ItemRef::title(src_title), dst_title)?;
 
         record.title = Some(dst_title.to_string());
         db.update_cert(&record)?;
@@ -1246,7 +1345,9 @@ impl<R: Runner> CertificateAuthority<R> {
             .filter(|c| c.deleted_at.is_none())
             .ok_or_else(|| OpcaError::CertificateNotFound(serial.to_string()))?;
         if cert.cert_type.as_deref() == Some("ca") {
-            return Err(OpcaError::Other("The CA certificate cannot be deleted".into()));
+            return Err(OpcaError::Other(
+                "The CA certificate cannot be deleted".into(),
+            ));
         }
         if !matches!(cert.status.as_deref(), Some("Revoked" | "Expired")) {
             return Err(OpcaError::Other(format!(
@@ -1299,7 +1400,9 @@ impl<R: Runner> CertificateAuthority<R> {
     pub fn store_ca_database(&mut self) -> Result<(), OpcaError> {
         self.update_db_fingerprint()?;
 
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
 
         let sql_bytes = db.export_database()?;
@@ -1307,10 +1410,10 @@ impl<R: Runner> CertificateAuthority<R> {
 
         // Before the 1Password write, so a failed or damaged store still
         // leaves a good local copy.
-        if let Some(backup) = &self.local_backup {
-            if let Err(e) = backup.write(&BackupSource::of(&self.vault), &sql_text) {
-                warn!("[ca] local database backup failed: {e}");
-            }
+        if let Some(backup) = &self.local_backup
+            && let Err(e) = backup.write(&BackupSource::of(&self.vault), &sql_text)
+        {
+            warn!("[ca] local database backup failed: {e}");
         }
 
         op::put_document(
@@ -1333,8 +1436,12 @@ impl<R: Runner> CertificateAuthority<R> {
     /// so the caller can perform the (slow) upload off the connection lock; the
     /// `fingerprint` lets the caller skip an upload when nothing has changed.
     pub fn private_store_upload_job(&self) -> Result<Option<PrivateStoreJob>, OpcaError> {
-        let Some(uri) = self.private_store_uri()? else { return Ok(None) };
-        let db = self.ca_database.as_ref()
+        let Some(uri) = self.private_store_uri()? else {
+            return Ok(None);
+        };
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         let bytes = db.export_database_binary()?;
         let fingerprint = sha256_hex(&bytes);
@@ -1350,7 +1457,9 @@ impl<R: Runner> CertificateAuthority<R> {
     /// The configured private-store URI for this CA's database, or `None` when
     /// no private store is set.
     fn private_store_uri(&self) -> Result<Option<String>, OpcaError> {
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         Ok(db.get_config()?.ca_private_store.map(|store| {
             let vault_name = self.vault.info().name.trim().to_lowercase();
@@ -1390,9 +1499,7 @@ impl<R: Runner> CertificateAuthority<R> {
                 None => continue,
             };
 
-            let serial_str = bundle
-                .get_certificate_attrib("serial")?
-                .unwrap_or_default();
+            let serial_str = bundle.get_certificate_attrib("serial")?.unwrap_or_default();
 
             if result_map.contains_key(&serial_str) {
                 return Err(OpcaError::DuplicateCertificate(format!(
@@ -1404,10 +1511,10 @@ impl<R: Runner> CertificateAuthority<R> {
             let cert_type = bundle.cert_type.clone();
             result_map.insert(serial_str.clone(), (cert, title.to_string(), cert_type));
 
-            if let Ok(s) = serial_str.parse::<i64>() {
-                if s > max_serial {
-                    max_serial = s;
-                }
+            if let Ok(s) = serial_str.parse::<i64>()
+                && s > max_serial
+            {
+                max_serial = s;
             }
         }
 
@@ -1422,7 +1529,9 @@ impl<R: Runner> CertificateAuthority<R> {
                 let bundle_tmp = CertificateBundle::import(
                     cert_type.clone(),
                     title,
-                    &cert.to_pem().map_err(|e| OpcaError::Crypto(format!("{e}")))?,
+                    &cert
+                        .to_pem()
+                        .map_err(|e| OpcaError::Crypto(format!("{e}")))?,
                     None,
                     None,
                     None,
@@ -1471,7 +1580,9 @@ impl<R: Runner> CertificateAuthority<R> {
 
     /// The AWS region configured for this CA, if any.
     pub fn aws_region(&self) -> Result<Option<String>, OpcaError> {
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         Ok(db.get_config()?.ca_aws_region)
     }
@@ -1491,7 +1602,9 @@ impl<R: Runner> CertificateAuthority<R> {
             store_uri.to_string()
         };
 
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         let binary_db = db.export_database_binary()?;
         self.upload_content(&binary_db, &uri)
@@ -1500,12 +1613,19 @@ impl<R: Runner> CertificateAuthority<R> {
     /// Upload the CA certificate to the public store.
     pub fn upload_ca_cert(&self, store_uri: &str) -> Result<(), OpcaError> {
         let uri = if store_uri.is_empty() {
-            let db = self.ca_database.as_ref()
+            let db = self
+                .ca_database
+                .as_ref()
                 .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
             let config = db.get_config()?;
-            let cfg_store = config.ca_public_store
+            let cfg_store = config
+                .ca_public_store
                 .ok_or_else(|| OpcaError::Storage("No public store configured".into()))?;
-            format!("{}/{}", cfg_store.trim_end_matches('/'), DEFAULT_STORAGE_CONF.ca_cert_file)
+            format!(
+                "{}/{}",
+                cfg_store.trim_end_matches('/'),
+                DEFAULT_STORAGE_CONF.ca_cert_file
+            )
         } else {
             store_uri.to_string()
         };
@@ -1517,17 +1637,26 @@ impl<R: Runner> CertificateAuthority<R> {
     /// Upload the CRL to the public store.
     pub fn upload_crl(&self, store_uri: &str) -> Result<(), OpcaError> {
         let uri = if store_uri.is_empty() {
-            let db = self.ca_database.as_ref()
+            let db = self
+                .ca_database
+                .as_ref()
                 .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
             let config = db.get_config()?;
-            let cfg_store = config.ca_public_store
+            let cfg_store = config
+                .ca_public_store
                 .ok_or_else(|| OpcaError::Storage("No public store configured".into()))?;
-            format!("{}/{}", cfg_store.trim_end_matches('/'), DEFAULT_STORAGE_CONF.crl_file)
+            format!(
+                "{}/{}",
+                cfg_store.trim_end_matches('/'),
+                DEFAULT_STORAGE_CONF.crl_file
+            )
         } else {
             store_uri.to_string()
         };
 
-        let crl = self.crl.as_ref()
+        let crl = self
+            .crl
+            .as_ref()
             .ok_or_else(|| OpcaError::CertificateNotFound("CRL not found".into()))?;
         self.upload_content(crl.as_bytes(), &uri)
     }
@@ -1543,7 +1672,9 @@ impl<R: Runner> CertificateAuthority<R> {
     /// error message.
     pub fn test_stores(&self) -> Result<HashMap<String, String>, OpcaError> {
         info!("[ca] testing store connections");
-        let db = self.ca_database.as_ref()
+        let db = self
+            .ca_database
+            .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         let config = db.get_config()?;
 
@@ -1554,9 +1685,9 @@ impl<R: Runner> CertificateAuthority<R> {
         ];
 
         // Check if any store needs S3 credentials so we only fetch once
-        let needs_s3 = stores.iter().any(|(_, uri)| {
-            uri.as_deref().is_some_and(|u| u.starts_with("s3://"))
-        });
+        let needs_s3 = stores
+            .iter()
+            .any(|(_, uri)| uri.as_deref().is_some_and(|u| u.starts_with("s3://")));
 
         let aws_creds = if needs_s3 {
             match storage::get_aws_credentials(self.vault.op(), config.ca_aws_region.as_deref()) {
@@ -1617,7 +1748,11 @@ fn authority_of(
     ca_cert: &X509,
     ca_key: &openssl::pkey::PKey<openssl::pkey::Private>,
 ) -> Result<Authority, OpcaError> {
-    Ok(Authority::new(ca_cert.to_der()?.into(), signer_of(ca_key)?, KeyIdentifierMethod::Sha1)?)
+    Ok(Authority::new(
+        ca_cert.to_der()?.into(),
+        signer_of(ca_key)?,
+        KeyIdentifierMethod::Sha1,
+    )?)
 }
 
 /// VPN client CNs are people, not hosts, so only their requested names become SANs.
@@ -1669,7 +1804,10 @@ fn profile_for(cert_type: &CertType, rsa_subject: bool, ca_config: &CaConfig) ->
         },
         CertType::WebServer => Profile {
             key_usage: key_usage(rsa_subject),
-            extended_key_usage: Some(Extension::non_critical(vec![Eku::ServerAuth, Eku::ClientAuth])),
+            extended_key_usage: Some(Extension::non_critical(vec![
+                Eku::ServerAuth,
+                Eku::ClientAuth,
+            ])),
             names: SanPolicy::CommonNameAndRequested,
             crl_distribution_points: ca_config.crl_url.iter().cloned().collect(),
             ca_issuers: ca_config.ca_url.iter().cloned().collect(),
@@ -1712,23 +1850,27 @@ fn format_db_item(
     _issuer: Option<&str>,
     _issuer_subject: Option<&str>,
 ) -> Result<CertRecord, OpcaError> {
-    let cert = bundle.certificate.as_ref()
+    let cert = bundle
+        .certificate
+        .as_ref()
         .ok_or_else(|| OpcaError::InvalidCertificate("No certificate".into()))?;
 
     let cn = bundle.get_certificate_attrib("cn")?.unwrap_or_default();
     let serial = bundle.get_certificate_attrib("serial")?.unwrap_or_default();
-    let subject = bundle.get_certificate_attrib("subject")?.unwrap_or_default();
+    let subject = bundle
+        .get_certificate_attrib("subject")?
+        .unwrap_or_default();
     let not_before = bundle.get_certificate_attrib("not_before")?;
     let not_after = bundle.get_certificate_attrib("not_after")?;
     let key_type = bundle.get_certificate_attrib("key_type")?;
-    let key_size = bundle.get_certificate_attrib("key_size")?
+    let key_size = bundle
+        .get_certificate_attrib("key_size")?
         .and_then(|s| s.parse::<i64>().ok());
     let san = bundle.get_certificate_attrib("san")?;
     let issuer_str = bundle.get_certificate_attrib("issuer")?;
 
     // Check if expired
-    let now = Asn1Time::days_from_now(0)
-        .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
+    let now = Asn1Time::days_from_now(0).map_err(|e| OpcaError::Crypto(format!("{e}")))?;
     let expired = cert.not_after() < &now;
     let status = if expired { "Expired" } else { "Valid" };
 
@@ -1758,11 +1900,19 @@ fn format_db_item(
 
 /// Extension trait to convert a CertRecord to an ExternalCertRecord.
 trait IntoExternal {
-    fn into_external(self, issuer: Option<&str>, issuer_subject: Option<&str>) -> ExternalCertRecord;
+    fn into_external(
+        self,
+        issuer: Option<&str>,
+        issuer_subject: Option<&str>,
+    ) -> ExternalCertRecord;
 }
 
 impl IntoExternal for CertRecord {
-    fn into_external(self, issuer: Option<&str>, issuer_subject: Option<&str>) -> ExternalCertRecord {
+    fn into_external(
+        self,
+        issuer: Option<&str>,
+        issuer_subject: Option<&str>,
+    ) -> ExternalCertRecord {
         ExternalCertRecord {
             serial: self.serial,
             cn: self.cn,
@@ -1795,7 +1945,8 @@ fn build_crl(
     let revoked = entries
         .iter()
         .map(|entry| {
-            let revoked_at = datetime::parse_datetime(&entry.revocation_date, DateTimeFormat::Openssl)?;
+            let revoked_at =
+                datetime::parse_datetime(&entry.revocation_date, DateTimeFormat::Openssl)?;
             Ok(Revocation::new(entry.serial.parse()?, revoked_at.into()))
         })
         .collect::<Result<Vec<_>, OpcaError>>()?;
@@ -1834,7 +1985,9 @@ pub fn csr_item_fields(
 }
 
 /// Convenience: prepare a CA by retrieving it from 1Password.
-pub fn prepare_cert_authority<R: Runner>(vault: Vault<R>) -> Result<CertificateAuthority<R>, OpcaError> {
+pub fn prepare_cert_authority<R: Runner>(
+    vault: Vault<R>,
+) -> Result<CertificateAuthority<R>, OpcaError> {
     CertificateAuthority::retrieve(vault)
 }
 
@@ -1892,7 +2045,7 @@ fn short_name(oid: &str) -> &str {
 pub fn crl_to_text(crl: &openssl::x509::X509Crl) -> Result<String, OpcaError> {
     use std::os::raw::{c_char, c_int};
 
-    extern "C" {
+    unsafe extern "C" {
         fn X509_CRL_print(bp: *mut openssl_sys::BIO, x: *mut openssl_sys::X509_CRL) -> c_int;
     }
 
@@ -1925,10 +2078,10 @@ pub fn crl_to_text(crl: &openssl::x509::X509Crl) -> Result<String, OpcaError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::san;
-    use openssl::nid::Nid;
     use crate::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
-    use crate::testutil::{fake_vault, item_json, not_found, FakeRunner, Output, VAULT_ID};
+    use crate::services::san;
+    use crate::testutil::{FakeRunner, Output, VAULT_ID, fake_vault, item_json, not_found};
+    use openssl::nid::Nid;
 
     fn make_ca_bundle() -> CertificateBundle {
         let config = CertBundleConfig {
@@ -1957,19 +2110,31 @@ mod tests {
     }
 
     fn calls(ca: &CertificateAuthority<FakeRunner>) -> Vec<Vec<String>> {
-        ca.vault.op().runner().calls().iter().map(|c| c.args().to_vec()).collect()
+        ca.vault
+            .op()
+            .runner()
+            .calls()
+            .iter()
+            .map(|c| c.args().to_vec())
+            .collect()
     }
 
     fn ca_item(bundle: &CertificateBundle) -> Output {
-        Output::ok(item_json("CA", &[
-            ("certificate", &bundle.certificate_pem().unwrap()),
-            ("private_key", &bundle.private_key_pem().unwrap()),
-            ("type", "ca"),
-        ]))
+        Output::ok(item_json(
+            "CA",
+            &[
+                ("certificate", &bundle.certificate_pem().unwrap()),
+                ("private_key", &bundle.private_key_pem().unwrap()),
+                ("type", "ca"),
+            ],
+        ))
     }
 
     /// A backup file, as `LocalBackup` writes it, whose `CA` row has `ca_serial`.
-    fn backup_contents(ca_serial: &str, vault_id: &str) -> (tempfile::TempDir, LocalBackup, String) {
+    fn backup_contents(
+        ca_serial: &str,
+        vault_id: &str,
+    ) -> (tempfile::TempDir, LocalBackup, String) {
         let mut db = CertificateAuthorityDB::new(&CaConfig::default()).unwrap();
         let ca_row: CertRecord = serde_json::from_value(serde_json::json!({
             "serial": ca_serial, "cn": "Test CA", "title": "CA", "status": "Valid",
@@ -1980,7 +2145,10 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let store = LocalBackup::new(dir.path(), "user-uuid", 5);
-        let source = BackupSource { vault: "TestVault".into(), vault_id: Some(vault_id.into()) };
+        let source = BackupSource {
+            vault: "TestVault".into(),
+            vault_id: Some(vault_id.into()),
+        };
         let path = store.write(&source, &sql).unwrap().unwrap();
         let contents = std::fs::read_to_string(path).unwrap();
         (dir, store, contents)
@@ -1996,16 +2164,24 @@ mod tests {
             .respond(Output::ok("BEGIN TRANSACTION;\nCREATE TABLE csr ("))
             .respond(Output::ok(""));
 
-        let ca = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store).unwrap();
+        let ca = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store)
+            .unwrap();
 
         let source = BackupSource::of(&ca.vault);
-        let kept: Vec<_> = std::fs::read_dir(store.dir_for(&source)).unwrap()
+        let kept: Vec<_> = std::fs::read_dir(store.dir_for(&source))
+            .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .filter(|n| n.ends_with("-unreadable.sql"))
             .collect();
         assert_eq!(kept.len(), 1);
-        assert_eq!(fake.files().last().unwrap(), local_backup::strip_header(&contents).as_bytes());
-        assert_eq!(fake.calls()[2].args()[..3], ["document", "edit", "CA_Database"]);
+        assert_eq!(
+            fake.files().last().unwrap(),
+            local_backup::strip_header(&contents).as_bytes()
+        );
+        assert_eq!(
+            fake.calls()[2].args()[..3],
+            ["document", "edit", "CA_Database"]
+        );
     }
 
     #[test]
@@ -2013,7 +2189,8 @@ mod tests {
         let (_dir, store, contents) = backup_contents("1", "vault-a");
         let fake = FakeRunner::new();
 
-        let result = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store);
+        let result =
+            CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store);
 
         assert!(result.is_err_and(|e| e.to_string().contains("not the connected vault")));
     }
@@ -2025,12 +2202,19 @@ mod tests {
         let fake = FakeRunner::new();
         fake.respond(ca_item(&bundle));
 
-        let result = CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store);
+        let result =
+            CertificateAuthority::restore_from_backup(fake_vault(&fake), &contents, &store);
 
         assert!(result.is_err_and(|e| e.to_string().contains("different CA")));
-        assert_eq!(std::fs::read_dir(store.dir_for(&BackupSource {
-            vault: "TestVault".into(), vault_id: Some(VAULT_ID.into()),
-        })).unwrap().count(), 1);
+        assert_eq!(
+            std::fs::read_dir(store.dir_for(&BackupSource {
+                vault: "TestVault".into(),
+                vault_id: Some(VAULT_ID.into()),
+            }))
+            .unwrap()
+            .count(),
+            1
+        );
     }
 
     #[test]
@@ -2103,11 +2287,9 @@ mod tests {
             org: Some("Test Org".to_string()),
             ..CertBundleConfig::default()
         };
-        let device_bundle = CertificateBundle::generate(
-            CertType::Device,
-            "device.example.com",
-            device_config,
-        ).unwrap();
+        let device_bundle =
+            CertificateBundle::generate(CertType::Device, "device.example.com", device_config)
+                .unwrap();
 
         let csr_pem = device_bundle.csr_pem().unwrap();
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
@@ -2128,8 +2310,14 @@ mod tests {
         let text = signed.to_text().unwrap();
         let text = String::from_utf8_lossy(&text);
         assert!(text.contains("CA:FALSE"), "Should have CA:FALSE");
-        assert!(text.contains("Digital Signature"), "Should have Digital Signature");
-        assert!(text.contains("TLS Web Client Authentication"), "Should have Client Auth");
+        assert!(
+            text.contains("Digital Signature"),
+            "Should have Digital Signature"
+        );
+        assert!(
+            text.contains("TLS Web Client Authentication"),
+            "Should have Client Auth"
+        );
     }
 
     #[test]
@@ -2154,11 +2342,8 @@ mod tests {
             alt_names: Some(vec!["example.com".to_string()]),
             ..CertBundleConfig::default()
         };
-        let ws_bundle = CertificateBundle::generate(
-            CertType::WebServer,
-            "www.example.com",
-            ws_config,
-        ).unwrap();
+        let ws_bundle =
+            CertificateBundle::generate(CertType::WebServer, "www.example.com", ws_config).unwrap();
 
         let csr_pem = ws_bundle.csr_pem().unwrap();
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
@@ -2172,7 +2357,9 @@ mod tests {
             local_backup: None,
         };
 
-        let signed = ca.sign_certificate(&csr, &CertType::WebServer, 365).unwrap();
+        let signed = ca
+            .sign_certificate(&csr, &CertType::WebServer, 365)
+            .unwrap();
 
         let text = signed.to_text().unwrap();
         let text = String::from_utf8_lossy(&text);
@@ -2199,11 +2386,8 @@ mod tests {
             key_algorithm: Some(KeyAlgorithm::Rsa2048),
             ..CertBundleConfig::default()
         };
-        let vpn_bundle = CertificateBundle::generate(
-            CertType::VpnClient,
-            "vpn-client-1",
-            vpn_config,
-        ).unwrap();
+        let vpn_bundle =
+            CertificateBundle::generate(CertType::VpnClient, "vpn-client-1", vpn_config).unwrap();
 
         let csr_pem = vpn_bundle.csr_pem().unwrap();
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
@@ -2217,7 +2401,9 @@ mod tests {
             local_backup: None,
         };
 
-        let signed = ca.sign_certificate(&csr, &CertType::VpnClient, 365).unwrap();
+        let signed = ca
+            .sign_certificate(&csr, &CertType::VpnClient, 365)
+            .unwrap();
 
         let text = signed.to_text().unwrap();
         let text = String::from_utf8_lossy(&text);
@@ -2244,11 +2430,8 @@ mod tests {
             key_algorithm: Some(KeyAlgorithm::Rsa2048),
             ..CertBundleConfig::default()
         };
-        let vpn_bundle = CertificateBundle::generate(
-            CertType::VpnServer,
-            "vpn-server",
-            vpn_config,
-        ).unwrap();
+        let vpn_bundle =
+            CertificateBundle::generate(CertType::VpnServer, "vpn-server", vpn_config).unwrap();
 
         let csr_pem = vpn_bundle.csr_pem().unwrap();
         let csr = X509Req::from_pem(csr_pem.as_bytes()).unwrap();
@@ -2262,7 +2445,9 @@ mod tests {
             local_backup: None,
         };
 
-        let signed = ca.sign_certificate(&csr, &CertType::VpnServer, 365).unwrap();
+        let signed = ca
+            .sign_certificate(&csr, &CertType::VpnServer, 365)
+            .unwrap();
 
         let text = signed.to_text().unwrap();
         let text = String::from_utf8_lossy(&text);
@@ -2286,7 +2471,8 @@ mod tests {
         let mut db = CertificateAuthorityDB::new(&ca_config).unwrap();
         let ca_bundle = make_ca_bundle();
         let ca_cert = ca_bundle.certificate.clone().unwrap();
-        db.add_cert(&format_db_item(&ca_bundle, "CA", None, None).unwrap()).unwrap();
+        db.add_cert(&format_db_item(&ca_bundle, "CA", None, None).unwrap())
+            .unwrap();
         let mut ca = CertificateAuthority {
             vault: fake_vault(&FakeRunner::new()),
             op_config: DEFAULT_OP_CONF,
@@ -2296,11 +2482,23 @@ mod tests {
             local_backup: None,
         };
 
-        let signed = sign(&mut ca, CertType::CodeSigning, "ApplianceOS Update Signing", &[], KeyAlgorithm::EcP256);
+        let signed = sign(
+            &mut ca,
+            CertType::CodeSigning,
+            "ApplianceOS Update Signing",
+            &[],
+            KeyAlgorithm::EcP256,
+        );
 
         let text = text_of(&signed);
-        assert!(text.contains("X509v3 Extended Key Usage: critical\n                Code Signing\n"), "{text}");
-        assert!(text.contains("X509v3 Key Usage: critical\n                Digital Signature\n"), "{text}");
+        assert!(
+            text.contains("X509v3 Extended Key Usage: critical\n                Code Signing\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("X509v3 Key Usage: critical\n                Digital Signature\n"),
+            "{text}"
+        );
         assert!(text.contains("CA:FALSE"));
         assert!(signed.subject_alt_names().is_none());
         assert!(!text.contains("CRL Distribution Points"));
@@ -2327,11 +2525,16 @@ mod tests {
             let d = epoch.diff(t).unwrap();
             at(i64::from(d.days) * 86_400 + i64::from(d.secs))
         };
-        (seconds(crl.last_update()), seconds(crl.next_update().unwrap()))
+        (
+            seconds(crl.last_update()),
+            seconds(crl.next_update().unwrap()),
+        )
     }
 
     fn crl_number(crl: &openssl::x509::X509Crl) -> Option<i64> {
-        parse_crl_metadata(std::str::from_utf8(&crl.to_pem().unwrap()).unwrap()).unwrap().crl_number
+        parse_crl_metadata(std::str::from_utf8(&crl.to_pem().unwrap()).unwrap())
+            .unwrap()
+            .crl_number
     }
 
     #[test]
@@ -2387,7 +2590,8 @@ mod tests {
             ..CertBundleConfig::default()
         };
         let leaf = CertificateBundle::generate(cert_type.clone(), cn, config).unwrap();
-        ca.sign_certificate(leaf.csr.as_ref().unwrap(), &cert_type, 365).unwrap()
+        ca.sign_certificate(leaf.csr.as_ref().unwrap(), &cert_type, 365)
+            .unwrap()
     }
 
     fn sign_leaf(ca: &mut CertificateAuthority<FakeRunner>, algorithm: KeyAlgorithm) -> X509 {
@@ -2395,7 +2599,10 @@ mod tests {
     }
 
     fn san_strings(cert: &X509) -> Vec<String> {
-        san::of_certificate(cert).iter().map(|n| n.tagged()).collect()
+        san::of_certificate(cert)
+            .iter()
+            .map(|n| n.tagged())
+            .collect()
     }
 
     fn text_of(cert: &X509) -> String {
@@ -2411,7 +2618,10 @@ mod tests {
             let mut ca = ca_with_key(ca_alg);
             let signed = sign_leaf(&mut ca, leaf_alg);
             let ca_key = ca.ca_bundle.as_ref().unwrap().private_key.as_ref().unwrap();
-            assert!(signed.verify(ca_key).unwrap(), "{ca_alg} CA → {leaf_alg} leaf");
+            assert!(
+                signed.verify(ca_key).unwrap(),
+                "{ca_alg} CA → {leaf_alg} leaf"
+            );
         }
     }
 
@@ -2433,7 +2643,15 @@ mod tests {
         let ca = ca_with_key(KeyAlgorithm::EcP384);
         let bundle = ca.ca_bundle.as_ref().unwrap();
         let key = bundle.private_key.as_ref().unwrap();
-        let pem = build_crl(bundle.certificate.as_ref().unwrap(), key, 1, Utc::now(), Utc::now(), &[]).unwrap();
+        let pem = build_crl(
+            bundle.certificate.as_ref().unwrap(),
+            key,
+            1,
+            Utc::now(),
+            Utc::now(),
+            &[],
+        )
+        .unwrap();
         let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
         assert!(crl.verify(key).unwrap());
     }
@@ -2445,19 +2663,35 @@ mod tests {
             &mut ca,
             CertType::WebServer,
             "www.example.com",
-            &["10.0.0.5", "2001:db8::1", "ops@example.com", "spiffe://prod/web", "example.com"],
+            &[
+                "10.0.0.5",
+                "2001:db8::1",
+                "ops@example.com",
+                "spiffe://prod/web",
+                "example.com",
+            ],
             KeyAlgorithm::EcP256,
         );
         assert_eq!(
             san_strings(&signed),
             [
-                "DNS:www.example.com", "IP:10.0.0.5", "IP:2001:db8::1", "email:ops@example.com",
-                "URI:spiffe://prod/web", "DNS:example.com",
+                "DNS:www.example.com",
+                "IP:10.0.0.5",
+                "IP:2001:db8::1",
+                "email:ops@example.com",
+                "URI:spiffe://prod/web",
+                "DNS:example.com",
             ]
         );
         let pem = signed.to_pem().unwrap();
         let bundle = CertificateBundle::import(
-            CertType::WebServer, "www", &pem, None, None, None, CertBundleConfig::default(),
+            CertType::WebServer,
+            "www",
+            &pem,
+            None,
+            None,
+            None,
+            CertBundleConfig::default(),
         )
         .unwrap();
         let stored = bundle.get_certificate_attrib("san").unwrap().unwrap();
@@ -2467,16 +2701,34 @@ mod tests {
     #[test]
     fn an_ip_common_name_becomes_an_ip_san() {
         let mut ca = ca_with_key(KeyAlgorithm::EcP256);
-        let signed = sign(&mut ca, CertType::Device, "192.168.1.20", &[], KeyAlgorithm::EcP256);
+        let signed = sign(
+            &mut ca,
+            CertType::Device,
+            "192.168.1.20",
+            &[],
+            KeyAlgorithm::EcP256,
+        );
         assert_eq!(san_strings(&signed), ["IP:192.168.1.20"]);
     }
 
     #[test]
     fn vpn_clients_carry_their_csr_sans_but_not_their_cn() {
         let mut ca = ca_with_key(KeyAlgorithm::EcP256);
-        let signed = sign(&mut ca, CertType::VpnClient, "Alex", &["alex@example.com"], KeyAlgorithm::EcP256);
+        let signed = sign(
+            &mut ca,
+            CertType::VpnClient,
+            "Alex",
+            &["alex@example.com"],
+            KeyAlgorithm::EcP256,
+        );
         assert_eq!(san_strings(&signed), ["email:alex@example.com"]);
-        let bare = sign(&mut ca, CertType::VpnClient, "Sam", &[], KeyAlgorithm::EcP256);
+        let bare = sign(
+            &mut ca,
+            CertType::VpnClient,
+            "Sam",
+            &[],
+            KeyAlgorithm::EcP256,
+        );
         assert!(bare.subject_alt_names().is_none());
     }
 
@@ -2494,7 +2746,10 @@ mod tests {
     fn deleting_a_pending_csr_archives_its_key_item() {
         let mut ca = ca_with_key(KeyAlgorithm::EcP256);
         let db = ca.ca_database.as_ref().unwrap();
-        for (cn, status) in [("pending.example.com", "Pending"), ("done.example.com", "Complete")] {
+        for (cn, status) in [
+            ("pending.example.com", "Pending"),
+            ("done.example.com", "Complete"),
+        ] {
             db.add_csr(&CsrRecord {
                 cn: Some(cn.to_string()),
                 title: Some(format!("CSR_{cn}")),
@@ -2508,11 +2763,25 @@ mod tests {
         ca.delete_csr(1).unwrap();
         ca.delete_csr(2).unwrap();
 
-        let deletes: Vec<_> = calls(&ca).into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
-        assert_eq!(deletes.len(), 1, "only the pending CSR's item is archived: {deletes:?}");
+        let deletes: Vec<_> = calls(&ca)
+            .into_iter()
+            .filter(|c| c[..2] == ["item", "delete"])
+            .collect();
+        assert_eq!(
+            deletes.len(),
+            1,
+            "only the pending CSR's item is archived: {deletes:?}"
+        );
         assert_eq!(deletes[0][2], "CSR_pending.example.com");
         assert!(deletes[0].contains(&"--archive".to_string()));
-        assert!(ca.ca_database.as_ref().unwrap().query_all_csrs(None).unwrap().is_empty());
+        assert!(
+            ca.ca_database
+                .as_ref()
+                .unwrap()
+                .query_all_csrs(None)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     fn ca_with_cert_rows() -> CertificateAuthority<FakeRunner> {
@@ -2554,15 +2823,26 @@ mod tests {
         answer_writes(&ca, 4);
         ca.delete_certificate("3").unwrap();
 
-        let deletes: Vec<_> = calls(&ca).into_iter().filter(|c| c[..2] == ["item", "delete"]).collect();
+        let deletes: Vec<_> = calls(&ca)
+            .into_iter()
+            .filter(|c| c[..2] == ["item", "delete"])
+            .collect();
         assert_eq!(deletes.len(), 1);
         assert_eq!(deletes[0][2], "CRT_3_host3.example.com");
         assert!(deletes[0].contains(&"--archive".to_string()));
 
         let db = ca.ca_database.as_mut().unwrap();
-        let listed: Vec<_> = db.query_all_certs().unwrap().into_iter().map(|c| c.serial).collect();
+        let listed: Vec<_> = db
+            .query_all_certs()
+            .unwrap()
+            .into_iter()
+            .map(|c| c.serial)
+            .collect();
         assert_eq!(listed, ["1", "2", "4"]);
-        let row = db.query_cert(&CertLookup::Serial("3".into()), false).unwrap().unwrap();
+        let row = db
+            .query_cert(&CertLookup::Serial("3".into()), false)
+            .unwrap()
+            .unwrap();
         assert!(row.deleted_at.is_some());
         assert_eq!(row.ignored_reason.as_deref(), Some("deleted"));
 
@@ -2570,14 +2850,27 @@ mod tests {
         assert!(db.certs_revoked.contains("3"));
         assert_eq!(crl_serials(&ca.generate_crl().unwrap()), ["3"]);
 
-        assert!(matches!(ca.delete_certificate("3"), Err(OpcaError::CertificateNotFound(_))));
+        assert!(matches!(
+            ca.delete_certificate("3"),
+            Err(OpcaError::CertificateNotFound(_))
+        ));
     }
 
     fn crl_serials(pem: &str) -> Vec<String> {
         let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
         crl.get_revoked()
             .map(|stack| {
-                stack.iter().map(|r| r.serial_number().to_bn().unwrap().to_dec_str().unwrap().to_string()).collect()
+                stack
+                    .iter()
+                    .map(|r| {
+                        r.serial_number()
+                            .to_bn()
+                            .unwrap()
+                            .to_dec_str()
+                            .unwrap()
+                            .to_string()
+                    })
+                    .collect()
             })
             .unwrap_or_default()
     }
@@ -2604,8 +2897,18 @@ mod tests {
 
         let listed = crl_serials(&ca.generate_crl().unwrap());
 
-        assert_eq!(listed, ["3"], "deleted stays listed; expired or undated revoked certs don't");
-        let metadata = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().unwrap();
+        assert_eq!(
+            listed,
+            ["3"],
+            "deleted stays listed; expired or undated revoked certs don't"
+        );
+        let metadata = ca
+            .ca_database
+            .as_ref()
+            .unwrap()
+            .get_crl_metadata()
+            .unwrap()
+            .unwrap();
         assert_eq!(metadata.revoked_count, Some(listed.len() as i64));
     }
 
@@ -2617,7 +2920,10 @@ mod tests {
             let data = <openssl::asn1::Asn1StringRef as foreign_types::ForeignTypeRef>::from_ptr(
                 openssl_sys::X509_EXTENSION_get_data(ext).cast(),
             );
-            (openssl_sys::X509_EXTENSION_get_critical(ext) == 1, data.as_slice().to_vec())
+            (
+                openssl_sys::X509_EXTENSION_get_critical(ext) == 1,
+                data.as_slice().to_vec(),
+            )
         }
     }
 
@@ -2628,12 +2934,29 @@ mod tests {
         for expected in [1, 2] {
             let pem = ca.generate_crl().unwrap();
             let crl = openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap();
-            assert_eq!(crl_extension(&crl, Nid::CRL_NUMBER), (false, vec![0x02, 0x01, expected as u8]));
+            assert_eq!(
+                crl_extension(&crl, Nid::CRL_NUMBER),
+                (false, vec![0x02, 0x01, expected as u8])
+            );
             assert_eq!(parse_crl_metadata(&pem).unwrap().crl_number, Some(expected));
-            let metadata = ca.ca_database.as_ref().unwrap().get_crl_metadata().unwrap().unwrap();
+            let metadata = ca
+                .ca_database
+                .as_ref()
+                .unwrap()
+                .get_crl_metadata()
+                .unwrap()
+                .unwrap();
             assert_eq!(metadata.crl_number, Some(expected));
         }
-        assert_eq!(ca.ca_database.as_ref().unwrap().get_config().unwrap().next_crl_serial, Some(3));
+        assert_eq!(
+            ca.ca_database
+                .as_ref()
+                .unwrap()
+                .get_config()
+                .unwrap()
+                .next_crl_serial,
+            Some(3)
+        );
     }
 
     #[test]
@@ -2641,14 +2964,31 @@ mod tests {
         let mut ca = ca_with_key(KeyAlgorithm::EcP384);
         answer_writes(&ca, 2);
         let crl = openssl::x509::X509Crl::from_pem(ca.generate_crl().unwrap().as_bytes()).unwrap();
-        let ski = ca.ca_bundle.as_ref().unwrap().certificate.as_ref().unwrap().subject_key_id().unwrap().as_slice().to_vec();
+        let ski = ca
+            .ca_bundle
+            .as_ref()
+            .unwrap()
+            .certificate
+            .as_ref()
+            .unwrap()
+            .subject_key_id()
+            .unwrap()
+            .as_slice()
+            .to_vec();
 
         let (critical, der) = crl_extension(&crl, Nid::AUTHORITY_KEY_IDENTIFIER);
         assert!(!critical);
         assert_eq!(der, [&[0x30, 22, 0x80, 20][..], &ski].concat());
-        let hex = ski.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":");
+        let hex = ski
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(":");
         let text = crl_to_text(&crl).unwrap();
-        assert!(text.contains("X509v3 Authority Key Identifier") && text.contains(&hex), "{text}");
+        assert!(
+            text.contains("X509v3 Authority Key Identifier") && text.contains(&hex),
+            "{text}"
+        );
     }
 
     #[test]
@@ -2673,12 +3013,15 @@ mod tests {
 
     fn batch_ca(store: Option<&str>) -> CertificateAuthority<FakeRunner> {
         let ca = ca_with_cert_rows();
-        ca.ca_database.as_ref().unwrap().update_config(&CaConfig {
-            crl_batch_enabled: Some(true),
-            ca_private_store: store.map(str::to_string),
-            ..CaConfig::default()
-        })
-        .unwrap();
+        ca.ca_database
+            .as_ref()
+            .unwrap()
+            .update_config(&CaConfig {
+                crl_batch_enabled: Some(true),
+                ca_private_store: store.map(str::to_string),
+                ..CaConfig::default()
+            })
+            .unwrap();
         ca
     }
 
@@ -2691,7 +3034,8 @@ mod tests {
     }
 
     fn uploaded_batch(dir: &tempfile::TempDir) -> Vec<openssl::x509::X509Crl> {
-        let pem = std::fs::read_to_string(dir.path().join(DEFAULT_STORAGE_CONF.crl_batch_file)).unwrap();
+        let pem =
+            std::fs::read_to_string(dir.path().join(DEFAULT_STORAGE_CONF.crl_batch_file)).unwrap();
         pem.split_inclusive("-----END X509 CRL-----\n")
             .map(|one| openssl::x509::X509Crl::from_pem(one.as_bytes()).unwrap())
             .collect()
@@ -2709,13 +3053,30 @@ mod tests {
         let key = ca.ca_bundle.as_ref().unwrap().private_key.clone().unwrap();
         let db = ca.ca_database.as_ref().unwrap();
         let batch = db.get_crl_batch().unwrap().unwrap();
-        assert_eq!((batch.count, batch.period_days, batch.window_days, batch.first_number), (5, 7, 10, 1));
+        assert_eq!(
+            (
+                batch.count,
+                batch.period_days,
+                batch.window_days,
+                batch.first_number
+            ),
+            (5, 7, 10, 1)
+        );
         assert_eq!(crls.len(), 5);
         for (i, crl) in crls.iter().enumerate() {
             let i = i as i64;
             assert_eq!(crl_number(crl), Some(1 + i));
-            assert_eq!(validity(crl), (batch.t0 + chrono::Duration::days(7 * i), batch.t0 + chrono::Duration::days(7 * i + 10)));
-            assert_eq!(crl_serials(&String::from_utf8(crl.to_pem().unwrap()).unwrap()), ["3"]);
+            assert_eq!(
+                validity(crl),
+                (
+                    batch.t0 + chrono::Duration::days(7 * i),
+                    batch.t0 + chrono::Duration::days(7 * i + 10)
+                )
+            );
+            assert_eq!(
+                crl_serials(&String::from_utf8(crl.to_pem().unwrap()).unwrap()),
+                ["3"]
+            );
             assert!(crl.verify(&key).unwrap());
         }
         assert_eq!(stored.as_bytes(), crls[0].to_pem().unwrap());
@@ -2734,19 +3095,61 @@ mod tests {
 
         let numbers: Vec<_> = uploaded_batch(&dir).iter().map(crl_number).collect();
         assert_eq!(numbers, [6, 7, 8, 9, 10].map(Some));
-        assert_eq!(ca.ca_database.as_ref().unwrap().get_crl_batch().unwrap().unwrap().first_number, 6);
+        assert_eq!(
+            ca.ca_database
+                .as_ref()
+                .unwrap()
+                .get_crl_batch()
+                .unwrap()
+                .unwrap()
+                .first_number,
+            6
+        );
     }
 
     #[test]
     fn a_config_update_cannot_leave_batches_on_without_a_private_store() {
-        let on = CaConfig { crl_batch_enabled: Some(true), ..CaConfig::default() };
-        let store = |s: &str| CaConfig { ca_private_store: Some(s.into()), ..CaConfig::default() };
+        let on = CaConfig {
+            crl_batch_enabled: Some(true),
+            ..CaConfig::default()
+        };
+        let store = |s: &str| CaConfig {
+            ca_private_store: Some(s.into()),
+            ..CaConfig::default()
+        };
 
         assert!(check_crl_batch_update(&CaConfig::default(), &on).is_err());
-        assert!(check_crl_batch_update(&CaConfig { ca_private_store: Some(" ".into()), ..on.clone() }, &store(" ")).is_err());
+        assert!(
+            check_crl_batch_update(
+                &CaConfig {
+                    ca_private_store: Some(" ".into()),
+                    ..on.clone()
+                },
+                &store(" ")
+            )
+            .is_err()
+        );
         assert!(check_crl_batch_update(&store("rsync:///ca"), &on).is_ok());
-        assert!(check_crl_batch_update(&CaConfig { ca_private_store: Some("rsync:///ca".into()), ..on.clone() }, &store("")).is_err());
-        assert!(check_crl_batch_update(&on, &CaConfig { crl_batch_enabled: Some(false), ..CaConfig::default() }).is_ok());
+        assert!(
+            check_crl_batch_update(
+                &CaConfig {
+                    ca_private_store: Some("rsync:///ca".into()),
+                    ..on.clone()
+                },
+                &store("")
+            )
+            .is_err()
+        );
+        assert!(
+            check_crl_batch_update(
+                &on,
+                &CaConfig {
+                    crl_batch_enabled: Some(false),
+                    ..CaConfig::default()
+                }
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -2755,7 +3158,10 @@ mod tests {
 
         let err = ca.generate_crl().unwrap_err();
 
-        assert!(matches!(err, OpcaError::Storage(ref m) if m.contains("private store")), "{err}");
+        assert!(
+            matches!(err, OpcaError::Storage(ref m) if m.contains("private store")),
+            "{err}"
+        );
         let db = ca.ca_database.as_ref().unwrap();
         assert_eq!(db.get_config().unwrap().next_crl_serial, None);
         assert!(db.get_crl_metadata().unwrap().is_none());
@@ -2772,7 +3178,15 @@ mod tests {
 
         assert!(matches!(err, OpcaError::CrlBatchUpload(_)), "{err}");
         assert!(ca.crl.is_some());
-        assert_eq!(ca.ca_database.as_ref().unwrap().get_config().unwrap().next_crl_serial, Some(6));
+        assert_eq!(
+            ca.ca_database
+                .as_ref()
+                .unwrap()
+                .get_config()
+                .unwrap()
+                .next_crl_serial,
+            Some(6)
+        );
     }
 
     #[test]
@@ -2782,11 +3196,17 @@ mod tests {
         answer_writes(&ca, 4);
         ca.generate_crl().unwrap();
         let db = ca.ca_database.as_ref().unwrap();
-        db.update_config(&CaConfig { crl_batch_enabled: Some(false), crl_days: Some(30), ..CaConfig::default() }).unwrap();
+        db.update_config(&CaConfig {
+            crl_batch_enabled: Some(false),
+            crl_days: Some(30),
+            ..CaConfig::default()
+        })
+        .unwrap();
 
         let pem = ca.generate_crl().unwrap();
 
-        let (this_update, next_update) = validity(&openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap());
+        let (this_update, next_update) =
+            validity(&openssl::x509::X509Crl::from_pem(pem.as_bytes()).unwrap());
         assert_eq!(next_update - this_update, chrono::Duration::days(30));
         let db = ca.ca_database.as_ref().unwrap();
         assert!(db.get_crl_batch().unwrap().is_none());
@@ -2807,9 +3227,13 @@ mod tests {
             country: config.country,
             ..CertBundleConfig::default()
         };
-        ca.vault.op().runner().respond(crate::testutil::created("CRT_2_www.example.com"));
+        ca.vault
+            .op()
+            .runner()
+            .respond(crate::testutil::created("CRT_2_www.example.com"));
         answer_writes(&ca, 1);
-        ca.generate_certificate_bundle(CertType::WebServer, "www.example.com", leaf, None).unwrap();
+        ca.generate_certificate_bundle(CertType::WebServer, "www.example.com", leaf, None)
+            .unwrap();
         assert!(ca.vault.op().runner().is_done());
     }
 
@@ -2817,17 +3241,29 @@ mod tests {
     fn deleting_an_expired_certificate_tolerates_a_missing_item() {
         let mut ca = ca_with_cert_rows();
         let fake = FakeRunner::new();
-        fake.respond(not_found("CRT_4_host4.example.com")).respond(Output::ok(""));
+        fake.respond(not_found("CRT_4_host4.example.com"))
+            .respond(Output::ok(""));
         ca.vault = fake_vault(&fake);
         ca.delete_certificate("4").unwrap();
         let db = ca.ca_database.as_ref().unwrap();
-        assert!(db.query_all_certs().unwrap().iter().all(|c| c.serial != "4"));
+        assert!(
+            db.query_all_certs()
+                .unwrap()
+                .iter()
+                .all(|c| c.serial != "4")
+        );
     }
 
     #[test]
     fn ca_init_config_carries_its_key_algorithm() {
-        let config = CaConfig { key_algorithm: Some(KeyAlgorithm::Rsa4096), ..CaConfig::default() };
-        assert_eq!(ca_config_to_bundle(&config).key_algorithm, Some(KeyAlgorithm::Rsa4096));
+        let config = CaConfig {
+            key_algorithm: Some(KeyAlgorithm::Rsa4096),
+            ..CaConfig::default()
+        };
+        assert_eq!(
+            ca_config_to_bundle(&config).key_algorithm,
+            Some(KeyAlgorithm::Rsa4096)
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -2839,7 +3275,10 @@ mod tests {
         let now = chrono::Utc::now();
         let ca_not_after = now + chrono::Duration::days(15);
         let result = assess_ca_expiry(ca_not_after, 365, now);
-        assert!(matches!(result, CaExpiryWarning::Critical { days_remaining: 15 }));
+        assert!(matches!(
+            result,
+            CaExpiryWarning::Critical { days_remaining: 15 }
+        ));
     }
 
     #[test]
@@ -2847,7 +3286,10 @@ mod tests {
         let now = chrono::Utc::now();
         let ca_not_after = now + chrono::Duration::days(90);
         let result = assess_ca_expiry(ca_not_after, 365, now);
-        assert!(matches!(result, CaExpiryWarning::Prominent { days_remaining: 90 }));
+        assert!(matches!(
+            result,
+            CaExpiryWarning::Prominent { days_remaining: 90 }
+        ));
     }
 
     #[test]
@@ -2895,7 +3337,8 @@ mod tests {
     #[test]
     fn issuance_warnings_leave_the_warning_label_to_the_caller() {
         let now = chrono::Utc::now();
-        let outlives_ca = assess_cert_issuance(now + chrono::Duration::days(200), 365, now).unwrap();
+        let outlives_ca =
+            assess_cert_issuance(now + chrono::Duration::days(200), 365, now).unwrap();
         let over_apple_limit = assess_apple_tls_limit(&CertType::WebServer, 826).unwrap();
         for w in [outlives_ca, over_apple_limit] {
             assert!(!w.message.starts_with("Warning"), "{}", w.message);
@@ -2909,16 +3352,27 @@ mod tests {
     ) -> (i32, Vec<CertIssuanceWarning>) {
         let mut ca = ca_with_key(KeyAlgorithm::EcP256);
         let db = ca.ca_database.as_ref().unwrap();
-        db.update_config(&CaConfig { days: Some(ca_days), ..CaConfig::default() }).unwrap();
+        db.update_config(&CaConfig {
+            days: Some(ca_days),
+            ..CaConfig::default()
+        })
+        .unwrap();
         let leaf = CertificateBundle::generate(
             cert_type.clone(),
             "leaf.example.com",
-            CertBundleConfig { cn: Some("leaf.example.com".into()), ..CertBundleConfig::default() },
+            CertBundleConfig {
+                cn: Some("leaf.example.com".into()),
+                ..CertBundleConfig::default()
+            },
         )
         .unwrap();
-        let (cert, warnings) =
-            ca.issue_certificate(leaf.csr.as_ref().unwrap(), &cert_type, requested).unwrap();
-        (cert.not_before().diff(cert.not_after()).unwrap().days, warnings)
+        let (cert, warnings) = ca
+            .issue_certificate(leaf.csr.as_ref().unwrap(), &cert_type, requested)
+            .unwrap();
+        (
+            cert.not_before().diff(cert.not_after()).unwrap().days,
+            warnings,
+        )
     }
 
     #[test]
@@ -2926,7 +3380,10 @@ mod tests {
         assert_eq!(issued_days(3000, CertType::WebServer, None), (825, vec![]));
         assert_eq!(issued_days(3000, CertType::VpnServer, None), (825, vec![]));
         assert_eq!(issued_days(3000, CertType::Device, None), (3000, vec![]));
-        assert_eq!(issued_days(3000, CertType::CodeSigning, None), (3000, vec![]));
+        assert_eq!(
+            issued_days(3000, CertType::CodeSigning, None),
+            (3000, vec![])
+        );
         assert_eq!(issued_days(365, CertType::WebServer, None), (365, vec![]));
     }
 
@@ -2940,7 +3397,11 @@ mod tests {
         let (days, warnings) = issued_days(365, CertType::WebServer, Some(826));
         assert_eq!(days, 826);
         assert!(warnings[0].message.contains("825-day limit"));
-        assert!(issued_days(365, CertType::WebServer, Some(825)).1.is_empty());
+        assert!(
+            issued_days(365, CertType::WebServer, Some(825))
+                .1
+                .is_empty()
+        );
         assert!(issued_days(365, CertType::Device, Some(3000)).1.is_empty());
     }
 
@@ -2950,10 +3411,16 @@ mod tests {
         let leaf = CertificateBundle::generate(
             CertType::Device,
             "d",
-            CertBundleConfig { cn: Some("d".into()), ..CertBundleConfig::default() },
+            CertBundleConfig {
+                cn: Some("d".into()),
+                ..CertBundleConfig::default()
+            },
         )
         .unwrap();
-        assert!(ca.issue_certificate(leaf.csr.as_ref().unwrap(), &CertType::Device, Some(0)).is_err());
+        assert!(
+            ca.issue_certificate(leaf.csr.as_ref().unwrap(), &CertType::Device, Some(0))
+                .is_err()
+        );
     }
 
     // -----------------------------------------------------------------------

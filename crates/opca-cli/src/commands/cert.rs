@@ -3,11 +3,11 @@ use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle};
 use opca_core::services::database::CertLookup;
 
-use crate::app::{with_lock, AppContext};
+use crate::app::{AppContext, with_lock};
 use crate::output;
 use crate::{
-    CertAction, CertArgs, CertCreateArgs, CertExportArgs, CertIdentifier, CertRekeyArgs, CertRenewArgs,
-    CertRevokeArgs,
+    CertAction, CertArgs, CertCreateArgs, CertExportArgs, CertIdentifier, CertRekeyArgs,
+    CertRenewArgs, CertRevokeArgs,
 };
 
 pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(), OpcaError> {
@@ -48,7 +48,9 @@ fn handle_create<R: Runner>(
     with_lock(app, "cert_create", |app| {
         for (cn, alt_names) in &cn_list {
             let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-            let db = ca.ca_database.as_ref()
+            let db = ca
+                .ca_database
+                .as_ref()
                 .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
             let ca_config = db.get_config()?;
 
@@ -70,7 +72,8 @@ fn handle_create<R: Runner>(
                 ca_days: ca_config.days,
             };
 
-            let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), cn, config, args.days)?;
+            let (bundle, issuance_warnings) =
+                ca.generate_certificate_bundle(cert_type.clone(), cn, config, args.days)?;
             let valid = bundle.is_valid().unwrap_or(false);
             output::print_result(&format!("Certificate '{cn}'"), valid);
             for w in &issuance_warnings {
@@ -122,11 +125,11 @@ fn handle_export<R: Runner>(
             super::ca::write_file(path, cert_pem.as_bytes(), 0o644)?;
             output::print_result(&format!("Certificate written to {path}"), true);
         }
-        if let Some(ref path) = args.key_out {
-            if let Some(ref kp) = key_pem {
-                super::ca::write_file(path, kp.as_bytes(), 0o600)?;
-                output::print_result(&format!("Private key written to {path}"), true);
-            }
+        if let Some(ref path) = args.key_out
+            && let Some(ref kp) = key_pem
+        {
+            super::ca::write_file(path, kp.as_bytes(), 0o600)?;
+            output::print_result(&format!("Private key written to {path}"), true);
         }
 
         if args.to_stdout || (args.cert_out.is_none() && args.key_out.is_none()) {
@@ -140,10 +143,7 @@ fn handle_export<R: Runner>(
     Ok(())
 }
 
-fn handle_info<R: Runner>(
-    app: &mut AppContext<R>,
-    id: CertIdentifier,
-) -> Result<(), OpcaError> {
+fn handle_info<R: Runner>(app: &mut AppContext<R>, id: CertIdentifier) -> Result<(), OpcaError> {
     let (bundle, cn) = retrieve_bundle(app, id.cn.as_deref(), id.serial.as_deref())?;
 
     output::subtitle(&format!("Certificate: {cn}"));
@@ -191,20 +191,12 @@ fn handle_import<R: Runner>(
     output::title("Importing Certificate");
 
     let cert_pem = std::fs::read(&cert_file)?;
-    let key_pem = key_file
-        .as_ref()
-        .map(|f| std::fs::read(f))
-        .transpose()?;
+    let key_pem = key_file.as_ref().map(|f| std::fs::read(f)).transpose()?;
 
     with_lock(app, "cert_import", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let bundle = ca.import_certificate_bundle(
-            &cert_pem,
-            key_pem.as_deref(),
-            None,
-            None,
-            cn.as_deref(),
-        )?;
+        let bundle =
+            ca.import_certificate_bundle(&cert_pem, key_pem.as_deref(), None, None, cn.as_deref())?;
 
         let imported_cn = bundle
             .get_certificate_attrib("cn")
@@ -216,18 +208,19 @@ fn handle_import<R: Runner>(
     })
 }
 
-fn handle_rekey<R: Runner>(
-    app: &mut AppContext<R>,
-    args: CertRekeyArgs,
-) -> Result<(), OpcaError> {
+fn handle_rekey<R: Runner>(app: &mut AppContext<R>, args: CertRekeyArgs) -> Result<(), OpcaError> {
     output::title("Rekeying Certificate");
 
     let lookup = make_lookup(args.id.cn.as_deref(), args.id.serial.as_deref())?;
 
     with_lock(app, "cert_rekey", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warnings) = ca.rekey_certificate_bundle(&lookup, args.key, args.days)?;
-        output::print_result(&format!("Certificate rekeyed (new serial {new_serial})"), true);
+        let (new_pem, new_serial, issuance_warnings) =
+            ca.rekey_certificate_bundle(&lookup, args.key, args.days)?;
+        output::print_result(
+            &format!("Certificate rekeyed (new serial {new_serial})"),
+            true,
+        );
         for w in &issuance_warnings {
             output::warning(&w.message);
         }
@@ -236,18 +229,19 @@ fn handle_rekey<R: Runner>(
     })
 }
 
-fn handle_renew<R: Runner>(
-    app: &mut AppContext<R>,
-    args: CertRenewArgs,
-) -> Result<(), OpcaError> {
+fn handle_renew<R: Runner>(app: &mut AppContext<R>, args: CertRenewArgs) -> Result<(), OpcaError> {
     output::title("Renewing Certificate");
 
     let lookup = make_lookup(args.id.cn.as_deref(), args.id.serial.as_deref())?;
 
     with_lock(app, "cert_renew", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warnings) = ca.renew_certificate_bundle(&lookup, args.days)?;
-        output::print_result(&format!("Certificate renewed (new serial {new_serial})"), true);
+        let (new_pem, new_serial, issuance_warnings) =
+            ca.renew_certificate_bundle(&lookup, args.days)?;
+        output::print_result(
+            &format!("Certificate renewed (new serial {new_serial})"),
+            true,
+        );
         for w in &issuance_warnings {
             output::warning(&w.message);
         }
@@ -315,10 +309,7 @@ fn handle_revoke<R: Runner>(
     })
 }
 
-fn handle_delete<R: Runner>(
-    app: &mut AppContext<R>,
-    id: CertIdentifier,
-) -> Result<(), OpcaError> {
+fn handle_delete<R: Runner>(app: &mut AppContext<R>, id: CertIdentifier) -> Result<(), OpcaError> {
     output::title("Deleting Certificate");
 
     with_lock(app, "cert_delete", |app| {
@@ -326,13 +317,18 @@ fn handle_delete<R: Runner>(
             (Some(serial), _) => serial,
             (None, Some(cn)) => deletable_serial_for_cn(app, &cn)?,
             (None, None) => {
-                return Err(OpcaError::Other("Either --cn or --serial is required".into()))
+                return Err(OpcaError::Other(
+                    "Either --cn or --serial is required".into(),
+                ));
             }
         };
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
         let cert = ca.delete_certificate(&serial)?;
         output::print_result(
-            &format!("Deleted certificate {serial} ({})", cert.cn.as_deref().unwrap_or("-")),
+            &format!(
+                "Deleted certificate {serial} ({})",
+                cert.cn.as_deref().unwrap_or("-")
+            ),
             true,
         );
         Ok(())
@@ -345,10 +341,7 @@ fn handle_delete<R: Runner>(
 
 /// A CN is shared by every renewal of a certificate, so it names a delete only
 /// when exactly one of its certificates is revoked or expired.
-fn deletable_serial_for_cn<R: Runner>(
-    app: &AppContext<R>,
-    cn: &str,
-) -> Result<String, OpcaError> {
+fn deletable_serial_for_cn<R: Runner>(app: &AppContext<R>, cn: &str) -> Result<String, OpcaError> {
     let db = app
         .ca
         .as_ref()
@@ -366,7 +359,9 @@ fn deletable_serial_for_cn<R: Runner>(
         .collect();
     match serials.as_slice() {
         [serial] => Ok(serial.clone()),
-        [] => Err(OpcaError::Other(format!("No revoked or expired certificate for CN {cn}"))),
+        [] => Err(OpcaError::Other(format!(
+            "No revoked or expired certificate for CN {cn}"
+        ))),
         _ => Err(OpcaError::Other(format!(
             "CN {cn} has several revoked or expired certificates (serials {}); pass --serial",
             serials.join(", ")
@@ -384,7 +379,8 @@ fn retrieve_bundle<R: Runner>(
     let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
     let db = ca.ca_database.as_ref().ok_or(OpcaError::CaNotFound)?;
     let lookup = make_lookup(cn, serial)?;
-    let not_found = || OpcaError::CertificateNotFound(cn.or(serial).unwrap_or_default().to_string());
+    let not_found =
+        || OpcaError::CertificateNotFound(cn.or(serial).unwrap_or_default().to_string());
     let record = match db.query_cert(&lookup, true)? {
         Some(record) => record,
         None => db.query_cert(&lookup, false)?.ok_or_else(not_found)?,
@@ -401,7 +397,9 @@ fn make_lookup(cn: Option<&str>, serial: Option<&str>) -> Result<CertLookup, Opc
     if let Some(serial) = serial {
         return Ok(CertLookup::Serial(serial.to_string()));
     }
-    Err(OpcaError::Other("Either --cn or --serial is required".into()))
+    Err(OpcaError::Other(
+        "Either --cn or --serial is required".into(),
+    ))
 }
 
 /// Parse a bulk file: one CN per line, # comments, blank lines ignored.
@@ -446,4 +444,3 @@ pub fn get_password_single(prompt: &str) -> Result<String, OpcaError> {
     rpassword::prompt_password_stderr(prompt)
         .map_err(|e| OpcaError::Other(format!("Failed to read password: {e}")))
 }
-

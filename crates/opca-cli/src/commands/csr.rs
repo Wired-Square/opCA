@@ -1,16 +1,16 @@
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::x509::{X509Req, X509};
+use openssl::x509::{X509, X509Req};
 
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{self, ItemRef, Runner, ShellRunner};
 use opca_core::services::ca::csr_item_fields;
-use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType, KeyAlgorithm};
+use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 use opca_core::services::database::{CsrLookup, CsrRecord};
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
-use crate::app::{with_lock, AppContext};
+use crate::app::{AppContext, with_lock};
 use crate::output;
 use crate::{CsrAction, CsrArgs};
 
@@ -84,7 +84,8 @@ fn handle_create<R: Runner>(
 
     // Store in 1Password
     let fields = csr_item_fields(&cert_type, &cn, &key_pem, &csr_pem)?;
-    app.vault()?.create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?;
+    app.vault()?
+        .create_item(&op_title, DEFAULT_OP_CONF.category, &fields)?;
 
     output::print_result(&format!("CSR '{op_title}' stored"), true);
 
@@ -148,9 +149,9 @@ fn handle_import<R: Runner>(
         .or_else(|_| X509::from_der(&cert_pem_bytes))
         .map_err(|e| OpcaError::InvalidCertificate(format!("Failed to parse certificate: {e}")))?;
 
-    let cn = cn_override
-        .or_else(|| cert_cn(&cert))
-        .ok_or_else(|| OpcaError::Other("No CN found in certificate and no --cn provided".into()))?;
+    let cn = cn_override.or_else(|| cert_cn(&cert)).ok_or_else(|| {
+        OpcaError::Other("No CN found in certificate and no --cn provided".into())
+    })?;
 
     let csr_title = format!("CSR_{cn}");
 
@@ -241,7 +242,9 @@ fn handle_sign<R: Runner>(
     } else if let Some(ref pem) = csr_pem_arg {
         pem.as_bytes().to_vec()
     } else {
-        return Err(OpcaError::Other("Either --csr-file or --csr-pem is required".into()));
+        return Err(OpcaError::Other(
+            "Either --csr-file or --csr-pem is required".into(),
+        ));
     };
 
     let csr = X509Req::from_pem(&csr_pem_bytes)

@@ -15,9 +15,8 @@ pub struct BulkEntry {
 /// Read a file as bytes with path expansion (`~` and env vars).
 pub fn read_bytes(path: impl AsRef<Path>) -> Result<Vec<u8>, OpcaError> {
     let file_path = expand_path(path.as_ref());
-    fs::read(&file_path).map_err(|e| {
-        OpcaError::Io(format!("Failed to read '{}': {e}", file_path.display()))
-    })
+    fs::read(&file_path)
+        .map_err(|e| OpcaError::Io(format!("Failed to read '{}': {e}", file_path.display())))
 }
 
 /// Write bytes to a file, whole or not at all, readable by `readers` from creation.
@@ -67,11 +66,7 @@ pub fn parse_bulk_file(path: impl AsRef<Path>) -> Result<Vec<BulkEntry>, OpcaErr
                 .map(|p| p.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-            if names.is_empty() {
-                None
-            } else {
-                Some(names)
-            }
+            if names.is_empty() { None } else { Some(names) }
         } else {
             None
         };
@@ -85,10 +80,10 @@ pub fn parse_bulk_file(path: impl AsRef<Path>) -> Result<Vec<BulkEntry>, OpcaErr
 /// Expand `~` and environment variables in a path.
 fn expand_path(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
-    if s.starts_with('~') {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(s.strip_prefix("~/").unwrap_or(&s[1..]));
-        }
+    if s.starts_with('~')
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(s.strip_prefix("~/").unwrap_or(&s[1..]));
     }
     PathBuf::from(shellexpand::tilde(&s).into_owned())
 }

@@ -26,6 +26,6 @@
     "notary:validate": "xcrun stapler validate"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1"
+    "@tauri-apps/cli": "^2.12.4"
   }
 }

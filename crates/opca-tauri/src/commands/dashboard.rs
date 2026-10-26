@@ -2,14 +2,12 @@ use chrono::Utc;
 use log::warn;
 use tauri::State;
 
-use opca_core::services::ca::{assess_crl_expiry, CaExpiryWarning, CrlExpiryWarning};
+use opca_core::services::ca::{CaExpiryWarning, CrlExpiryWarning, assess_crl_expiry};
 use opca_core::services::cert::APPLE_TLS_MAX_DAYS;
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
-use crate::commands::dto::{
-    ActionItemDto, CaExpiryWarningDto, CrlExpiryWarningDto, DashboardData,
-};
 use crate::commands::crl::crl_batch_dto;
+use crate::commands::dto::{ActionItemDto, CaExpiryWarningDto, CrlExpiryWarningDto, DashboardData};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -19,9 +17,13 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
 
     // Extract CA bundle info first (immutable borrow)
     let ca_valid = ca.is_valid().unwrap_or(false);
-    let ca_cn = ca.ca_bundle.as_ref()
+    let ca_cn = ca
+        .ca_bundle
+        .as_ref()
         .and_then(|b| b.get_certificate_attrib("cn").ok().flatten());
-    let ca_expiry = ca.ca_bundle.as_ref()
+    let ca_expiry = ca
+        .ca_bundle
+        .as_ref()
         .and_then(|b| b.get_certificate_attrib("not_after").ok().flatten());
 
     // Check CA expiry warning
@@ -37,15 +39,16 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
             days_remaining: Some(*days_remaining),
             message: format!("CA certificate expires in {days_remaining} days"),
         }),
-        CaExpiryWarning::CertLifetimeExceedsCa { days_remaining, cert_lifetime_days } => {
-            Some(CaExpiryWarningDto {
-                level: "cert_lifetime".to_string(),
-                days_remaining: Some(*days_remaining),
-                message: format!(
-                    "CA has {days_remaining} days remaining but default cert lifetime is {cert_lifetime_days} days"
-                ),
-            })
-        }
+        CaExpiryWarning::CertLifetimeExceedsCa {
+            days_remaining,
+            cert_lifetime_days,
+        } => Some(CaExpiryWarningDto {
+            level: "cert_lifetime".to_string(),
+            days_remaining: Some(*days_remaining),
+            message: format!(
+                "CA has {days_remaining} days remaining but default cert lifetime is {cert_lifetime_days} days"
+            ),
+        }),
         CaExpiryWarning::None => None,
     };
 
@@ -54,7 +57,9 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
     let crl_metadata = db_ref.get_crl_metadata().map_err(|e| e.to_string())?;
     let config = db_ref.get_config().ok();
     let has_public_store = config.as_ref().is_some_and(|c| c.ca_public_store.is_some());
-    let crl_batch_enabled = config.as_ref().is_some_and(|c| c.crl_batch_enabled == Some(true));
+    let crl_batch_enabled = config
+        .as_ref()
+        .is_some_and(|c| c.crl_batch_enabled == Some(true));
     let cert_days = config.and_then(|c| c.days);
     let crl_batch = crl_batch_dto(db_ref, crl_batch_enabled)?;
 
@@ -92,7 +97,10 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
     // problems". (A still-valid ignored cert remains counted as valid above.)
     let expired_certs = db.certs_expired.difference(&db.certs_ignored).count();
     let expiring_certs = db.certs_expires_soon.difference(&db.certs_ignored).count();
-    let warning_certs = db.certs_expires_warning.difference(&db.certs_ignored).count();
+    let warning_certs = db
+        .certs_expires_warning
+        .difference(&db.certs_ignored)
+        .count();
     let revoked_certs = db.crl_entries().map_err(|e| e.to_string())?.len();
 
     let pending_csrs = db
@@ -143,21 +151,36 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
     })
 }
 
-fn crl_expiry_warning_dto(warning: &CrlExpiryWarning, subject: &str) -> Option<CrlExpiryWarningDto> {
+fn crl_expiry_warning_dto(
+    warning: &CrlExpiryWarning,
+    subject: &str,
+) -> Option<CrlExpiryWarningDto> {
     let (level, days_remaining, message) = match *warning {
-        CrlExpiryWarning::Expired { days_overdue: 0 } => ("expired", 0, format!("{subject} has expired today")),
-        CrlExpiryWarning::Expired { days_overdue } => {
-            ("expired", -days_overdue, format!("{subject} expired {days_overdue} days ago"))
+        CrlExpiryWarning::Expired { days_overdue: 0 } => {
+            ("expired", 0, format!("{subject} has expired today"))
         }
-        CrlExpiryWarning::Critical { days_remaining } => {
-            ("critical", days_remaining, format!("{subject} expires in {days_remaining} days"))
-        }
-        CrlExpiryWarning::Prominent { days_remaining } => {
-            ("prominent", days_remaining, format!("{subject} expires in {days_remaining} days"))
-        }
+        CrlExpiryWarning::Expired { days_overdue } => (
+            "expired",
+            -days_overdue,
+            format!("{subject} expired {days_overdue} days ago"),
+        ),
+        CrlExpiryWarning::Critical { days_remaining } => (
+            "critical",
+            days_remaining,
+            format!("{subject} expires in {days_remaining} days"),
+        ),
+        CrlExpiryWarning::Prominent { days_remaining } => (
+            "prominent",
+            days_remaining,
+            format!("{subject} expires in {days_remaining} days"),
+        ),
         CrlExpiryWarning::None => return None,
     };
-    Some(CrlExpiryWarningDto { level: level.to_string(), days_remaining: Some(days_remaining), message })
+    Some(CrlExpiryWarningDto {
+        level: level.to_string(),
+        days_remaining: Some(days_remaining),
+        message,
+    })
 }
 
 /// Build the dashboard's action-items list. Rules are centralised here so the
@@ -174,7 +197,11 @@ fn build_action_items(
 
     // CRL: expired / critical / prominent all warrant a regenerate action.
     if let Some(warning) = crl_warning {
-        let severity = if warning.level == "prominent" { "warning" } else { "critical" };
+        let severity = if warning.level == "prominent" {
+            "warning"
+        } else {
+            "critical"
+        };
         let (action, button_label) = if has_public_store {
             ("regenerate_and_upload_crl", "Regenerate & Upload CRL")
         } else {
@@ -213,7 +240,11 @@ fn build_action_items(
     }
 
     if expired_certs > 0 {
-        let noun = if expired_certs == 1 { "certificate has" } else { "certificates have" };
+        let noun = if expired_certs == 1 {
+            "certificate has"
+        } else {
+            "certificates have"
+        };
         items.push(ActionItemDto {
             id: "expired_certs".to_string(),
             severity: "info".to_string(),

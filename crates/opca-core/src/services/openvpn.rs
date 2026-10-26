@@ -120,7 +120,10 @@ pub fn import_templates_from_vault<R: Runner>(
     };
     set_import_state(ca, state)?;
 
-    info!("[openvpn] imported {} template(s) from 1Password", found.len());
+    info!(
+        "[openvpn] imported {} template(s) from 1Password",
+        found.len()
+    );
     Ok(Some(found.len()))
 }
 
@@ -183,7 +186,8 @@ pub fn archive_vault_templates<R: Runner>(
         let copies: Vec<Assignment> = found
             .iter()
             .map(|(name, content)| {
-                Assignment::set(name, FieldType::Text, content.as_str()).in_section(TEMPLATE_SECTION)
+                Assignment::set(name, FieldType::Text, content.as_str())
+                    .in_section(TEMPLATE_SECTION)
             })
             .collect();
         let removals: Vec<Assignment> = found
@@ -192,10 +196,16 @@ pub fn archive_vault_templates<R: Runner>(
             .collect();
 
         // Copy and archive before removing, so a failure part-way never loses a template.
-        let archive = ca.vault.create_item(&archive_title, DEFAULT_OP_CONF.category, &copies)?;
+        let archive = ca
+            .vault
+            .create_item(&archive_title, DEFAULT_OP_CONF.category, &copies)?;
         ca.vault.delete_item(&ItemRef::from(&archive))?;
-        ca.vault.edit_item(&ItemRef::title(openvpn_title), &removals)?;
-        info!("[openvpn] archived {} template(s) as '{archive_title}'", found.len());
+        ca.vault
+            .edit_item(&ItemRef::title(openvpn_title), &removals)?;
+        info!(
+            "[openvpn] archived {} template(s) as '{archive_title}'",
+            found.len()
+        );
     }
 
     set_import_state(ca, TemplateImport::Settled)?;
@@ -203,9 +213,7 @@ pub fn archive_vault_templates<R: Runner>(
 }
 
 /// Leave the old template fields on the 1Password `OpenVPN` item and stop asking.
-pub fn keep_vault_templates<R: Runner>(
-    ca: &mut CertificateAuthority<R>,
-) -> Result<(), OpcaError> {
+pub fn keep_vault_templates<R: Runner>(ca: &mut CertificateAuthority<R>) -> Result<(), OpcaError> {
     set_import_state(ca, TemplateImport::Settled)
 }
 
@@ -271,7 +279,7 @@ pub fn delete_template<R: Runner>(
 mod tests {
     use super::*;
     use crate::services::database::models::CaConfig;
-    use crate::testutil::{created, fake_vault, item_with_sections, not_found, FakeRunner, Output};
+    use crate::testutil::{FakeRunner, Output, created, fake_vault, item_with_sections, not_found};
 
     fn item() -> Output {
         Output::ok(item_with_sections(
@@ -325,8 +333,14 @@ mod tests {
         let mut ca = ca(&fake);
 
         assert_eq!(import_templates_from_vault(&mut ca).unwrap(), Some(2));
-        assert_eq!(get_template(&mut ca, "tcp").unwrap().content, "client\nproto tcp");
-        assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::AwaitingCleanup);
+        assert_eq!(
+            get_template(&mut ca, "tcp").unwrap().content,
+            "client\nproto tcp"
+        );
+        assert_eq!(
+            db(&ca).openvpn_template_import().unwrap(),
+            TemplateImport::AwaitingCleanup
+        );
 
         let calls_after_import = fake.calls().len();
         assert_eq!(import_templates_from_vault(&mut ca).unwrap(), None);
@@ -340,7 +354,10 @@ mod tests {
         let mut ca = ca(&fake);
 
         assert_eq!(import_templates_from_vault(&mut ca).unwrap(), Some(0));
-        assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::Settled);
+        assert_eq!(
+            db(&ca).openvpn_template_import().unwrap(),
+            TemplateImport::Settled
+        );
     }
 
     #[test]
@@ -349,8 +366,14 @@ mod tests {
         fake.respond(Output::fail("[ERROR] You are not currently signed in."));
         let mut ca = ca(&fake);
 
-        assert!(matches!(import_templates_from_vault(&mut ca), Err(OpcaError::AuthenticationFailed)));
-        assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::NotImported);
+        assert!(matches!(
+            import_templates_from_vault(&mut ca),
+            Err(OpcaError::AuthenticationFailed)
+        ));
+        assert_eq!(
+            db(&ca).openvpn_template_import().unwrap(),
+            TemplateImport::NotImported
+        );
     }
 
     #[test]
@@ -358,7 +381,9 @@ mod tests {
         let fake = FakeRunner::new();
         fake.respond(item()).respond(stored());
         let mut ca = ca(&fake);
-        db(&ca).upsert_openvpn_template("db-only", "client", None).unwrap();
+        db(&ca)
+            .upsert_openvpn_template("db-only", "client", None)
+            .unwrap();
 
         import_templates_from_vault(&mut ca).unwrap();
 
@@ -381,17 +406,28 @@ mod tests {
         let calls = fake.calls();
         let args = |i: usize| calls[i].args().to_vec();
         assert_eq!(args(2)[..3], ["item", "create", "-"]);
-        assert!(args(2).iter().any(|a| a.starts_with("--title=OpenVPN_Templates_")));
-        let template: serde_json::Value = serde_json::from_slice(calls[2].stdin().unwrap()).unwrap();
+        assert!(
+            args(2)
+                .iter()
+                .any(|a| a.starts_with("--title=OpenVPN_Templates_"))
+        );
+        let template: serde_json::Value =
+            serde_json::from_slice(calls[2].stdin().unwrap()).unwrap();
         assert_eq!(template["fields"][1]["label"], "tcp");
         assert_eq!(template["fields"][1]["value"], "client\nproto tcp");
         assert_eq!(template["fields"][1]["section"]["label"], "template");
-        assert_eq!(args(3)[..3], ["item", "delete", crate::testutil::item_id(1).as_str()]);
+        assert_eq!(
+            args(3)[..3],
+            ["item", "delete", crate::testutil::item_id(1).as_str()]
+        );
         assert!(args(3).contains(&"--archive".to_string()));
         assert_eq!(args(4)[..3], ["item", "edit", "OpenVPN"]);
         assert!(args(4).contains(&"template.default[delete]".to_string()));
         assert!(args(4).contains(&"template.tcp[delete]".to_string()));
-        assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::Settled);
+        assert_eq!(
+            db(&ca).openvpn_template_import().unwrap(),
+            TemplateImport::Settled
+        );
         assert!(fake.is_done());
     }
 
@@ -409,12 +445,25 @@ mod tests {
         let fake = FakeRunner::new();
         fake.respond(item()).respond(stored());
         let mut ca = ca(&fake);
-        db(&ca).upsert_openvpn_template("default", "edited since import", None).unwrap();
-        db(&ca).set_openvpn_template_import(TemplateImport::AwaitingCleanup).unwrap();
+        db(&ca)
+            .upsert_openvpn_template("default", "edited since import", None)
+            .unwrap();
+        db(&ca)
+            .set_openvpn_template_import(TemplateImport::AwaitingCleanup)
+            .unwrap();
 
-        assert_eq!(templates_awaiting_cleanup(&mut ca).unwrap(), vec!["default", "tcp"]);
-        assert_eq!(get_template(&mut ca, "default").unwrap().content, "edited since import");
-        assert_eq!(get_template(&mut ca, "tcp").unwrap().content, "client\nproto tcp");
+        assert_eq!(
+            templates_awaiting_cleanup(&mut ca).unwrap(),
+            vec!["default", "tcp"]
+        );
+        assert_eq!(
+            get_template(&mut ca, "default").unwrap().content,
+            "edited since import"
+        );
+        assert_eq!(
+            get_template(&mut ca, "tcp").unwrap().content,
+            "client\nproto tcp"
+        );
     }
 
     #[test]
@@ -422,10 +471,15 @@ mod tests {
         let fake = FakeRunner::new();
         fake.respond(not_found("OpenVPN")).respond(stored());
         let mut ca = ca(&fake);
-        db(&ca).set_openvpn_template_import(TemplateImport::AwaitingCleanup).unwrap();
+        db(&ca)
+            .set_openvpn_template_import(TemplateImport::AwaitingCleanup)
+            .unwrap();
 
         assert!(templates_awaiting_cleanup(&mut ca).unwrap().is_empty());
-        assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::Settled);
+        assert_eq!(
+            db(&ca).openvpn_template_import().unwrap(),
+            TemplateImport::Settled
+        );
     }
 
     #[test]
@@ -439,7 +493,10 @@ mod tests {
         let calls = fake.calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].args()[..3], ["document", "edit", "CA_Database"]);
-        assert_eq!(db(&ca).openvpn_template_import().unwrap(), TemplateImport::Settled);
+        assert_eq!(
+            db(&ca).openvpn_template_import().unwrap(),
+            TemplateImport::Settled
+        );
     }
 
     #[test]
@@ -450,7 +507,10 @@ mod tests {
 
         save_template(&mut ca, "tcp", "saved after the move").unwrap();
 
-        assert_eq!(get_template(&mut ca, "tcp").unwrap().content, "saved after the move");
+        assert_eq!(
+            get_template(&mut ca, "tcp").unwrap().content,
+            "saved after the move"
+        );
     }
 
     /// A CA whose import has run and found nothing, answering every later store.
@@ -471,7 +531,12 @@ mod tests {
         assert!(!add_starter_template(&mut ca, "default").unwrap());
         assert!(add_starter_template(&mut ca, "udp").unwrap());
         assert_eq!(get_template(&mut ca, "default").unwrap().content, "client");
-        assert!(get_template(&mut ca, "udp").unwrap().content.contains("op://TestVault/OpenVPN/server/hostname"));
+        assert!(
+            get_template(&mut ca, "udp")
+                .unwrap()
+                .content
+                .contains("op://TestVault/OpenVPN/server/hostname")
+        );
     }
 
     #[test]

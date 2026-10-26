@@ -73,13 +73,21 @@ pub struct LocalBackup {
 
 impl LocalBackup {
     pub fn new(root: impl Into<PathBuf>, account_key: impl Into<String>, keep: usize) -> Self {
-        Self { root: root.into(), account: account_key.into(), keep }
+        Self {
+            root: root.into(),
+            account: account_key.into(),
+            keep,
+        }
     }
 
     /// The store for `account` under the settings directory, keyed like the
     /// rest of the settings so any alias of an account finds the same backups.
     pub fn for_account(account: Option<&str>) -> Result<Self, OpcaError> {
-        Ok(Self::new(settings::backups_dir()?, settings::account_key(account), KEEP_LOCAL_BACKUPS))
+        Ok(Self::new(
+            settings::backups_dir()?,
+            settings::account_key(account),
+            KEEP_LOCAL_BACKUPS,
+        ))
     }
 
     /// [`Self::for_account`] when automatic backups are switched on.
@@ -93,16 +101,18 @@ impl LocalBackup {
     }
 
     pub fn dir_for(&self, source: &BackupSource) -> PathBuf {
-        self.root.join(path_safe(&self.account)).join(source.dir_name())
+        self.root
+            .join(path_safe(&self.account))
+            .join(source.dir_name())
     }
 
     /// Write a backup unless it matches the newest one; returns the new file.
     pub fn write(&self, source: &BackupSource, sql: &str) -> Result<Option<PathBuf>, OpcaError> {
         let newest = self.backup_files(source)?.into_iter().last();
-        if let Some(newest) = newest {
-            if fs::read_to_string(&newest).is_ok_and(|prev| strip_header(&prev) == sql) {
-                return Ok(None);
-            }
+        if let Some(newest) = newest
+            && fs::read_to_string(&newest).is_ok_and(|prev| strip_header(&prev) == sql)
+        {
+            return Ok(None);
         }
         let path = self.write_file(source, sql, "")?;
         self.prune(source)?;
@@ -129,19 +139,39 @@ impl LocalBackup {
     pub fn owns(&self, source: &BackupSource, path: &Path) -> bool {
         let dir = self.dir_for(source);
         match (fs::canonicalize(path), fs::canonicalize(&dir)) {
-            (Ok(path), Ok(dir)) => path.parent() == Some(dir.as_path()) && backup_time(&path).is_some(),
+            (Ok(path), Ok(dir)) => {
+                path.parent() == Some(dir.as_path()) && backup_time(&path).is_some()
+            }
             _ => false,
         }
     }
 
-    fn write_file(&self, source: &BackupSource, sql: &str, suffix: &str) -> Result<PathBuf, OpcaError> {
+    fn write_file(
+        &self,
+        source: &BackupSource,
+        sql: &str,
+        suffix: &str,
+    ) -> Result<PathBuf, OpcaError> {
         let taken_at = Utc::now();
-        let header = Header { account: self.account.clone(), source: source.clone(), taken_at };
+        let header = Header {
+            account: self.account.clone(),
+            source: source.clone(),
+            taken_at,
+        };
         let header_json = serde_json::to_string(&header)
             .map_err(|e| OpcaError::Other(format!("backup header: {e}")))?;
-        let name = format!("{FILE_PREFIX}{}{suffix}.sql", taken_at.format(TIMESTAMP_FORMAT));
+        let name = format!(
+            "{FILE_PREFIX}{}{suffix}.sql",
+            taken_at.format(TIMESTAMP_FORMAT)
+        );
         let contents = format!("{HEADER_PREFIX}{header_json}\n{sql}");
-        write_bytes(self.dir_for(source).join(name), contents.as_bytes(), true, true, Readers::Private)
+        write_bytes(
+            self.dir_for(source).join(name),
+            contents.as_bytes(),
+            true,
+            true,
+            Readers::Private,
+        )
     }
 
     /// Regular (non-unreadable) backup files, oldest first.
@@ -224,7 +254,13 @@ fn backup_time(path: &Path) -> Option<DateTime<Utc>> {
 fn path_safe(segment: &str) -> String {
     let cleaned: String = segment
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || "-_.".contains(c) { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     match cleaned.trim_start_matches('.') {
         "" => "_".to_string(),
@@ -237,7 +273,10 @@ mod tests {
     use super::*;
 
     fn source(vault_id: &str) -> BackupSource {
-        BackupSource { vault: "CA Xentro".into(), vault_id: Some(vault_id.into()) }
+        BackupSource {
+            vault: "CA Xentro".into(),
+            vault_id: Some(vault_id.into()),
+        }
     }
 
     fn store(root: &Path, keep: usize) -> LocalBackup {
@@ -245,7 +284,10 @@ mod tests {
     }
 
     fn backup_files(dir: &Path) -> Vec<PathBuf> {
-        let mut files: Vec<_> = fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        let mut files: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
         files.sort();
         files
     }
@@ -254,7 +296,11 @@ mod tests {
         let dir = backup.dir_for(src);
         fs::create_dir_all(&dir).unwrap();
         for stamp in stamps {
-            fs::write(dir.join(format!("{FILE_PREFIX}{stamp}.sql")), format!("-- {stamp}\n")).unwrap();
+            fs::write(
+                dir.join(format!("{FILE_PREFIX}{stamp}.sql")),
+                format!("-- {stamp}\n"),
+            )
+            .unwrap();
         }
     }
 
@@ -264,12 +310,18 @@ mod tests {
         let backup = store(root.path(), 5);
         let src = source("abc123");
 
-        let path = backup.write(&src, "BEGIN TRANSACTION;\nCOMMIT;\n").unwrap().unwrap();
+        let path = backup
+            .write(&src, "BEGIN TRANSACTION;\nCOMMIT;\n")
+            .unwrap()
+            .unwrap();
         let contents = fs::read_to_string(&path).unwrap();
 
         assert_eq!(read_source(&contents), Some(src.clone()));
         assert_eq!(strip_header(&contents), "BEGIN TRANSACTION;\nCOMMIT;\n");
-        assert_eq!(path.parent().unwrap(), root.path().join("user-uuid").join("abc123"));
+        assert_eq!(
+            path.parent().unwrap(),
+            root.path().join("user-uuid").join("abc123")
+        );
     }
 
     #[test]
@@ -288,7 +340,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let backup = store(root.path(), 2);
         let src = source("abc123");
-        seed(&backup, &src, &["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"]);
+        seed(
+            &backup,
+            &src,
+            &["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"],
+        );
 
         backup.write(&src, "new").unwrap();
 
@@ -319,8 +375,14 @@ mod tests {
 
         let entries = backup.list(&src).unwrap();
 
-        assert_eq!(entries[0].taken_at.to_rfc3339(), "2026-09-29T23:57:39+00:00");
-        assert_eq!(entries[1].taken_at.to_rfc3339(), "2026-01-01T00:00:00+00:00");
+        assert_eq!(
+            entries[0].taken_at.to_rfc3339(),
+            "2026-09-29T23:57:39+00:00"
+        );
+        assert_eq!(
+            entries[1].taken_at.to_rfc3339(),
+            "2026-01-01T00:00:00+00:00"
+        );
         assert_eq!(entries[0].cert_count, None);
     }
 
@@ -328,22 +390,40 @@ mod tests {
     fn age_phrase_picks_the_largest_whole_unit() {
         let now = Utc::now();
         assert_eq!(age_phrase(now, now), "just now");
-        assert_eq!(age_phrase(now - chrono::Duration::minutes(1), now), "1 minute ago");
-        assert_eq!(age_phrase(now - chrono::Duration::hours(10), now), "10 hours ago");
-        assert_eq!(age_phrase(now - chrono::Duration::days(3), now), "3 days ago");
+        assert_eq!(
+            age_phrase(now - chrono::Duration::minutes(1), now),
+            "1 minute ago"
+        );
+        assert_eq!(
+            age_phrase(now - chrono::Duration::hours(10), now),
+            "10 hours ago"
+        );
+        assert_eq!(
+            age_phrase(now - chrono::Duration::days(3), now),
+            "3 days ago"
+        );
     }
 
     #[test]
     fn vaults_sharing_a_name_get_separate_directories() {
         let backup = store(Path::new("/backups"), 5);
-        assert_ne!(backup.dir_for(&source("aaa")), backup.dir_for(&source("bbb")));
+        assert_ne!(
+            backup.dir_for(&source("aaa")),
+            backup.dir_for(&source("bbb"))
+        );
     }
 
     #[test]
     fn vault_without_id_falls_back_to_safe_name() {
         let backup = store(Path::new("/backups"), 5);
-        let src = BackupSource { vault: "../CA X".into(), vault_id: None };
-        assert_eq!(backup.dir_for(&src), PathBuf::from("/backups/user-uuid/name-.._ca_x"));
+        let src = BackupSource {
+            vault: "../CA X".into(),
+            vault_id: None,
+        };
+        assert_eq!(
+            backup.dir_for(&src),
+            PathBuf::from("/backups/user-uuid/name-.._ca_x")
+        );
     }
 
     #[test]

@@ -10,7 +10,10 @@
 
 /// The decoded public key (`p=`) of a DKIM record value; `None` when absent, revoked or unreadable.
 pub fn extract_dkim_key(value: &str) -> Option<Vec<u8>> {
-    wslib_dns_mail::dkim::parse(value).record.public_key.filter(|key| !key.is_empty())
+    wslib_dns_mail::dkim::parse(value)
+        .record
+        .public_key
+        .filter(|key| !key.is_empty())
 }
 
 /// What DNS publishes at a DKIM name, against the record opCA holds.
@@ -45,11 +48,17 @@ async fn compare_dkim_record(
         return Ok(DkimDnsCheck::NotPublished);
     }
     let expected_key = extract_dkim_key(expected);
-    let matches = found.iter().any(|record| match (&expected_key, extract_dkim_key(record)) {
-        (Some(expected_key), Some(found_key)) => *expected_key == found_key,
-        _ => record.contains(expected),
-    });
-    Ok(if matches { DkimDnsCheck::Matches } else { DkimDnsCheck::Mismatch { found } })
+    let matches = found
+        .iter()
+        .any(|record| match (&expected_key, extract_dkim_key(record)) {
+            (Some(expected_key), Some(found_key)) => *expected_key == found_key,
+            _ => record.contains(expected),
+        });
+    Ok(if matches {
+        DkimDnsCheck::Matches
+    } else {
+        DkimDnsCheck::Mismatch { found }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +66,7 @@ async fn compare_dkim_record(
 // ---------------------------------------------------------------------------
 
 use log::{debug, error, info};
-use wslib_dns::{txt, HickoryOptions, HickoryResolver, Resolver, Txt};
+use wslib_dns::{HickoryOptions, HickoryResolver, Resolver, Txt, txt};
 
 use crate::error::OpcaError;
 use crate::services::storage::AwsCredentials;
@@ -195,7 +204,11 @@ impl Route53Client {
 
         let chunks = txt::split(value);
         let formatted = txt::quote(&chunks);
-        debug!("[route53] TXT value ({} chunks): {}", chunks.len(), &formatted[..formatted.len().min(120)]);
+        debug!(
+            "[route53] TXT value ({} chunks): {}",
+            chunks.len(),
+            &formatted[..formatted.len().min(120)]
+        );
 
         let record = ResourceRecord::builder()
             .value(formatted)
@@ -249,7 +262,9 @@ impl Route53Client {
         ttl: u64,
     ) -> Result<Route53DeployResult, OpcaError> {
         let zone = self.find_hosted_zone(dns_name).await?;
-        let change_id = self.upsert_txt_record(&zone.id, dns_name, value, ttl).await?;
+        let change_id = self
+            .upsert_txt_record(&zone.id, dns_name, value, ttl)
+            .await?;
 
         Ok(Route53DeployResult {
             zone_id: zone.id,
@@ -287,10 +302,18 @@ mod tests {
     fn a_long_txt_value_splits_into_255_octet_quoted_strings() {
         let value = "a".repeat(600);
         let chunks = txt::split(&value);
-        assert_eq!(chunks.iter().map(|c| c.len()).collect::<Vec<_>>(), [255, 255, 90]);
+        assert_eq!(
+            chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
+            [255, 255, 90]
+        );
         assert_eq!(
             txt::quote(&chunks),
-            format!(r#""{}" "{}" "{}""#, "a".repeat(255), "a".repeat(255), "a".repeat(90))
+            format!(
+                r#""{}" "{}" "{}""#,
+                "a".repeat(255),
+                "a".repeat(255),
+                "a".repeat(90)
+            )
         );
     }
 
@@ -301,12 +324,18 @@ mod tests {
 
     #[test]
     fn test_extract_dkim_key() {
-        assert_eq!(extract_dkim_key("v=DKIM1; k=rsa; p=AQID"), Some(vec![1, 2, 3]));
+        assert_eq!(
+            extract_dkim_key("v=DKIM1; k=rsa; p=AQID"),
+            Some(vec![1, 2, 3])
+        );
     }
 
     #[test]
     fn a_dkim_key_split_by_whitespace_reads_as_one() {
-        assert_eq!(extract_dkim_key("v=DKIM1; k=rsa; p=AQ ID"), extract_dkim_key("v=DKIM1; p=AQID"));
+        assert_eq!(
+            extract_dkim_key("v=DKIM1; k=rsa; p=AQ ID"),
+            extract_dkim_key("v=DKIM1; p=AQID")
+        );
     }
 
     #[test]
@@ -339,7 +368,8 @@ mod tests {
 
     #[test]
     fn a_published_key_split_across_strings_matches() {
-        let resolver = FakeResolver::new().with_txt_strings(DKIM_NAME, ["v=DKIM1; k=rsa; ", "p=AQID"]);
+        let resolver =
+            FakeResolver::new().with_txt_strings(DKIM_NAME, ["v=DKIM1; k=rsa; ", "p=AQID"]);
         assert_eq!(check(resolver).unwrap(), DkimDnsCheck::Matches);
     }
 
@@ -352,14 +382,21 @@ mod tests {
 
     #[test]
     fn nxdomain_and_nodata_are_not_published() {
-        assert_eq!(check(FakeResolver::new()).unwrap(), DkimDnsCheck::NotPublished);
+        assert_eq!(
+            check(FakeResolver::new()).unwrap(),
+            DkimDnsCheck::NotPublished
+        );
         let nodata = FakeResolver::new().with_mx(DKIM_NAME, 10, "mx.example.com");
         assert_eq!(check(nodata).unwrap(), DkimDnsCheck::NotPublished);
     }
 
     #[test]
     fn a_lookup_that_cannot_tell_is_a_dns_error() {
-        for error in [LookupError::ServFail, LookupError::Refused, LookupError::Timeout] {
+        for error in [
+            LookupError::ServFail,
+            LookupError::Refused,
+            LookupError::Timeout,
+        ] {
             let resolver = FakeResolver::new().with_failure(DKIM_NAME, error);
             assert!(matches!(check(resolver), Err(OpcaError::Dns(_))));
         }

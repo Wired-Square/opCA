@@ -121,7 +121,10 @@ fn unset_and_cleared_stores_read_back_as_none() {
         ..Default::default()
     })
     .unwrap();
-    assert_eq!(db.get_config().unwrap().ca_private_store.as_deref(), Some("s3://bucket"));
+    assert_eq!(
+        db.get_config().unwrap().ca_private_store.as_deref(),
+        Some("s3://bucket")
+    );
 
     db.update_config(&CaConfig {
         ca_private_store: Some(" ".to_string()),
@@ -133,14 +136,28 @@ fn unset_and_cleared_stores_read_back_as_none() {
 
 #[test]
 fn unset_and_blank_subject_fields_and_urls_read_back_as_none() {
-    let mut db = CertificateAuthorityDB::new(&CaConfig { country: Some(String::new()), ..Default::default() }).unwrap();
-    db.update_config(&CaConfig { crl_url: Some(" ".to_string()), ..Default::default() }).unwrap();
+    let mut db = CertificateAuthorityDB::new(&CaConfig {
+        country: Some(String::new()),
+        ..Default::default()
+    })
+    .unwrap();
+    db.update_config(&CaConfig {
+        crl_url: Some(" ".to_string()),
+        ..Default::default()
+    })
+    .unwrap();
 
     let c = db.get_config().unwrap();
-    let fields = [c.org, c.ou, c.email, c.city, c.state, c.country, c.ca_url, c.crl_url];
+    let fields = [
+        c.org, c.ou, c.email, c.city, c.state, c.country, c.ca_url, c.crl_url,
+    ];
     assert!(fields.iter().all(Option::is_none), "{fields:?}");
 
-    assert_eq!(db.increment_serial(SerialType::Crl, None).unwrap(), 1, "a blank counter starts at 1");
+    assert_eq!(
+        db.increment_serial(SerialType::Crl, None).unwrap(),
+        1,
+        "a blank counter starts at 1"
+    );
     assert_eq!(db.increment_serial(SerialType::Cert, None).unwrap(), 1);
 }
 
@@ -227,10 +244,7 @@ fn test_query_cert_by_cn() {
         .unwrap();
 
     let found = db
-        .query_cert(
-            &CertLookup::Cn("server.example.com".to_string()),
-            false,
-        )
+        .query_cert(&CertLookup::Cn("server.example.com".to_string()), false)
         .unwrap();
     assert!(found.is_some());
 }
@@ -242,10 +256,7 @@ fn test_query_cert_by_title() {
         .unwrap();
 
     let found = db
-        .query_cert(
-            &CertLookup::Title("server.example.com".to_string()),
-            false,
-        )
+        .query_cert(&CertLookup::Title("server.example.com".to_string()), false)
         .unwrap();
     assert!(found.is_some());
 }
@@ -314,13 +325,18 @@ fn test_count_certs() {
 #[test]
 fn only_the_including_deleted_query_returns_a_deleted_cert() {
     let mut db = test_db();
-    db.add_cert(&make_cert("100", "a.example.com", "20301231235959Z")).unwrap();
-    db.add_cert(&make_cert("101", "b.example.com", "20301231235959Z")).unwrap();
+    db.add_cert(&make_cert("100", "a.example.com", "20301231235959Z"))
+        .unwrap();
+    db.add_cert(&make_cert("101", "b.example.com", "20301231235959Z"))
+        .unwrap();
     db.mark_cert_deleted("100").unwrap();
 
     let serials = |certs: Vec<CertRecord>| certs.into_iter().map(|c| c.serial).collect::<Vec<_>>();
     assert_eq!(serials(db.query_all_certs().unwrap()), ["101"]);
-    assert_eq!(serials(db.query_all_certs_including_deleted().unwrap()), ["100", "101"]);
+    assert_eq!(
+        serials(db.query_all_certs_including_deleted().unwrap()),
+        ["100", "101"]
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -421,7 +437,10 @@ fn test_add_and_query_csr() {
         subject: Some("/CN=server.example.com".to_string()),
         status: Some("Pending".to_string()),
         created_date: Some("20250101000000Z".to_string()),
-        csr_pem: Some("-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----".to_string()),
+        csr_pem: Some(
+            "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----"
+                .to_string(),
+        ),
     };
     db.add_csr(&csr).unwrap();
 
@@ -459,17 +478,26 @@ fn test_query_csr_by_id() {
 fn delete_csr_removes_only_that_row() {
     let db = test_db();
     for cn in ["a.example.com", "b.example.com"] {
-        db.add_csr(&CsrRecord { cn: Some(cn.to_string()), ..Default::default() }).unwrap();
+        db.add_csr(&CsrRecord {
+            cn: Some(cn.to_string()),
+            ..Default::default()
+        })
+        .unwrap();
     }
     assert!(db.delete_csr(1).unwrap());
     assert!(!db.delete_csr(1).unwrap());
-    let left: Vec<_> = db.query_all_csrs(None).unwrap().into_iter().filter_map(|r| r.cn).collect();
+    let left: Vec<_> = db
+        .query_all_csrs(None)
+        .unwrap()
+        .into_iter()
+        .filter_map(|r| r.cn)
+        .collect();
     assert_eq!(left, ["b.example.com"]);
 }
 
 #[test]
 fn only_old_pending_csrs_are_stale() {
-    use crate::utils::datetime::{parse_datetime, DateTimeFormat};
+    use crate::utils::datetime::{DateTimeFormat, parse_datetime};
     let now = parse_datetime("12:00 01 Mar 2026", DateTimeFormat::Compact).unwrap();
     let csr = |status: &str, created: &str| CsrRecord {
         status: Some(status.to_string()),
@@ -593,16 +621,24 @@ fn test_openvpn_template_crud() {
     let db = test_db();
 
     // Insert
-    db.upsert_openvpn_template("default", "client\ndev tun\nproto udp", Some("20250101000000Z"))
-        .unwrap();
+    db.upsert_openvpn_template(
+        "default",
+        "client\ndev tun\nproto udp",
+        Some("20250101000000Z"),
+    )
+    .unwrap();
 
     let tmpl = db.get_openvpn_template("default").unwrap().unwrap();
     assert_eq!(tmpl.name, "default");
     assert!(tmpl.content.contains("client"));
 
     // Update (upsert)
-    db.upsert_openvpn_template("default", "client\ndev tap\nproto tcp", Some("20250201000000Z"))
-        .unwrap();
+    db.upsert_openvpn_template(
+        "default",
+        "client\ndev tap\nproto tcp",
+        Some("20250201000000Z"),
+    )
+    .unwrap();
     let tmpl = db.get_openvpn_template("default").unwrap().unwrap();
     assert!(tmpl.content.contains("tap"));
 
@@ -643,9 +679,10 @@ fn test_openvpn_profile_crud() {
     assert_eq!(profiles[0].serial.as_deref(), Some("42"));
     assert!(profiles[0].generated);
 
-    assert!(db
-        .delete_openvpn_profile("server.example.com_default")
-        .unwrap());
+    assert!(
+        db.delete_openvpn_profile("server.example.com_default")
+            .unwrap()
+    );
     assert!(db.query_all_openvpn_profiles().unwrap().is_empty());
 }
 
@@ -679,10 +716,11 @@ fn test_openvpn_profile_regenerate_is_idempotent() {
 #[test]
 fn test_query_openvpn_profile_for_cn() {
     let db = test_db();
-    assert!(db
-        .query_openvpn_profile_for_cn("vpn.example.com")
-        .unwrap()
-        .is_none());
+    assert!(
+        db.query_openvpn_profile_for_cn("vpn.example.com")
+            .unwrap()
+            .is_none()
+    );
 
     db.add_openvpn_profile(&OpenVpnProfile {
         id: None,
@@ -704,10 +742,11 @@ fn test_query_openvpn_profile_for_cn() {
     assert_eq!(found.template.as_deref(), Some("default"));
 
     // Unrelated CN → None.
-    assert!(db
-        .query_openvpn_profile_for_cn("other.example.com")
-        .unwrap()
-        .is_none());
+    assert!(
+        db.query_openvpn_profile_for_cn("other.example.com")
+            .unwrap()
+            .is_none()
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -845,10 +884,18 @@ fn test_process_ignored_expired_keeps_status_but_drops_from_alert() {
     use crate::services::database::models::IgnoreReason;
 
     let mut db = test_db();
-    db.add_cert(&make_cert("100", "active-expired.example.com", "20200101000000Z"))
-        .unwrap();
-    db.add_cert(&make_cert("200", "ignored-expired.example.com", "20200101000000Z"))
-        .unwrap();
+    db.add_cert(&make_cert(
+        "100",
+        "active-expired.example.com",
+        "20200101000000Z",
+    ))
+    .unwrap();
+    db.add_cert(&make_cert(
+        "200",
+        "ignored-expired.example.com",
+        "20200101000000Z",
+    ))
+    .unwrap();
 
     // Ignore one of the two expired certs.
     db.ignore_cert("200", IgnoreReason::Manual, "alex@example.com", None)
@@ -906,7 +953,10 @@ fn test_is_expiring_soon_window() {
 
     assert!(is_expiring_soon(&soon), "within 30 days → soon");
     assert!(!is_expiring_soon(&far), "200 days out → not soon");
-    assert!(!is_expiring_soon("20200101000000Z"), "already expired → not soon");
+    assert!(
+        !is_expiring_soon("20200101000000Z"),
+        "already expired → not soon"
+    );
     assert!(!is_expiring_soon("not-a-date"), "unparseable → not soon");
 }
 
@@ -922,7 +972,8 @@ fn test_process_expiring_soon_ignored_keeps_expiring_status() {
     let soon = (chrono::Utc::now() + chrono::Duration::days(10))
         .format("%Y%m%d%H%M%SZ")
         .to_string();
-    db.add_cert(&make_cert("100", "soon.example.com", &soon)).unwrap();
+    db.add_cert(&make_cert("100", "soon.example.com", &soon))
+        .unwrap();
     db.ignore_cert("100", IgnoreReason::Manual, "alex@example.com", None)
         .unwrap();
 
@@ -1215,7 +1266,10 @@ fn a_v14_dump_imports_with_crl_batches_off() {
 
     assert_eq!((info.from_version, info.steps.len()), (14, 2));
     let config = db.get_config().unwrap();
-    assert_eq!((config.schema_version, config.crl_batch_enabled), (Some(16), None));
+    assert_eq!(
+        (config.schema_version, config.crl_batch_enabled),
+        (Some(16), None)
+    );
     assert!(db.get_crl_batch().unwrap().is_none());
     assert_eq!(config.org.as_deref(), Some("Test Org"));
 }
@@ -1234,18 +1288,25 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v15_sql).unwrap();
 
     assert_eq!((info.from_version, info.steps.len()), (15, 1));
-    assert_eq!(db.openvpn_template_import().unwrap(), TemplateImport::NotImported);
+    assert_eq!(
+        db.openvpn_template_import().unwrap(),
+        TemplateImport::NotImported
+    );
 }
 
 #[test]
 fn the_openvpn_template_import_state_survives_export_and_import() {
     let db = test_db();
-    db.set_openvpn_template_import(TemplateImport::AwaitingCleanup).unwrap();
+    db.set_openvpn_template_import(TemplateImport::AwaitingCleanup)
+        .unwrap();
     let sql = String::from_utf8(db.export_database().unwrap()).unwrap();
 
     let (db, _) = CertificateAuthorityDB::from_sql_dump(&sql).unwrap();
 
-    assert_eq!(db.openvpn_template_import().unwrap(), TemplateImport::AwaitingCleanup);
+    assert_eq!(
+        db.openvpn_template_import().unwrap(),
+        TemplateImport::AwaitingCleanup
+    );
 }
 
 #[test]
@@ -1258,10 +1319,17 @@ fn the_crl_batch_flag_and_record_survive_export_and_import() {
         count: 5,
         first_number: 11,
     };
-    db.update_config(&CaConfig { crl_batch_enabled: Some(true), ..Default::default() }).unwrap();
+    db.update_config(&CaConfig {
+        crl_batch_enabled: Some(true),
+        ..Default::default()
+    })
+    .unwrap();
     db.upsert_crl_batch(&batch).unwrap();
 
-    let (db, _) = CertificateAuthorityDB::from_sql_dump(&String::from_utf8(db.export_database().unwrap()).unwrap()).unwrap();
+    let (db, _) = CertificateAuthorityDB::from_sql_dump(
+        &String::from_utf8(db.export_database().unwrap()).unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(db.get_config().unwrap().crl_batch_enabled, Some(true));
     assert_eq!(db.get_crl_batch().unwrap(), Some(batch));
@@ -1272,7 +1340,13 @@ fn the_crl_batch_flag_and_record_survive_export_and_import() {
 #[test]
 fn a_batch_reports_the_due_crl_its_cover_and_what_is_left_to_release() {
     let t0 = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-    let batch = CrlBatch { t0, period_days: 7, window_days: 10, count: 5, first_number: 11 };
+    let batch = CrlBatch {
+        t0,
+        period_days: 7,
+        window_days: 10,
+        count: 5,
+        first_number: 11,
+    };
     let signed_until = t0 + chrono::Duration::days(38);
     let at = |days: i64| batch.status(t0 + chrono::Duration::days(days));
 
@@ -1281,7 +1355,11 @@ fn a_batch_reports_the_due_crl_its_cover_and_what_is_left_to_release() {
     assert_eq!((at(13).due_number, at(13).remaining), (12, 3));
     assert_eq!((at(14).due_number, at(14).remaining), (13, 2));
     assert_eq!((at(40).due_number, at(40).remaining), (15, 0));
-    assert!([0, 13, 40].iter().all(|&d| at(d).signed_until == signed_until && at(d).count == 5));
+    assert!(
+        [0, 13, 40]
+            .iter()
+            .all(|&d| at(d).signed_until == signed_until && at(d).count == 5)
+    );
 }
 
 #[test]
@@ -1425,7 +1503,8 @@ fn test_derive_profile_status_expiring_soon() {
     let soon = (chrono::Utc::now() + chrono::Duration::days(10))
         .format("%Y%m%d%H%M%SZ")
         .to_string();
-    db.add_cert(&make_vpn_cert("100", "user.vpn", &soon)).unwrap();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", &soon))
+        .unwrap();
     db.process_ca_database(None, false).unwrap();
     assert!(db.certs_expires_soon.contains("100"));
 
@@ -1454,7 +1533,8 @@ fn test_derive_profile_status_expiring_soon_ignored() {
     let soon = (chrono::Utc::now() + chrono::Duration::days(10))
         .format("%Y%m%d%H%M%SZ")
         .to_string();
-    db.add_cert(&make_vpn_cert("100", "user.vpn", &soon)).unwrap();
+    db.add_cert(&make_vpn_cert("100", "user.vpn", &soon))
+        .unwrap();
     db.ignore_cert("100", IgnoreReason::Manual, "tester", None)
         .unwrap();
     db.process_ca_database(None, false).unwrap();
@@ -1493,8 +1573,13 @@ fn test_derive_profile_status_needs_regen_after_renew() {
     db.add_cert(&make_vpn_cert("101", "user.vpn", "20501231235959Z"))
         .unwrap();
     // Renew auto-ignores the old cert.
-    db.ignore_cert("100", IgnoreReason::Renewed, "tester", Some("replaced by 101"))
-        .unwrap();
+    db.ignore_cert(
+        "100",
+        IgnoreReason::Renewed,
+        "tester",
+        Some("replaced by 101"),
+    )
+    .unwrap();
     db.process_ca_database(None, false).unwrap();
 
     // The current valid cert for the CN is 101.
@@ -1567,19 +1652,44 @@ fn make_dkim(domain: &str, selector: &str) -> DkimRecord {
 fn test_sync_dkim_unchanged_keys_report_no_change() {
     let mut db = test_db();
     let live = [make_dkim("example.com", "mail")];
-    assert_eq!(db.sync_dkim(&live).unwrap(), DkimSync { removed: 0, changed: true });
-    assert_eq!(db.sync_dkim(&live).unwrap(), DkimSync { removed: 0, changed: false });
+    assert_eq!(
+        db.sync_dkim(&live).unwrap(),
+        DkimSync {
+            removed: 0,
+            changed: true
+        }
+    );
+    assert_eq!(
+        db.sync_dkim(&live).unwrap(),
+        DkimSync {
+            removed: 0,
+            changed: false
+        }
+    );
 }
 
 #[test]
 fn test_sync_dkim_removes_keys_gone_from_1password() {
     let mut db = test_db();
-    db.sync_dkim(&[make_dkim("example.com", "mail"), make_dkim("example.org", "s1")]).unwrap();
+    db.sync_dkim(&[
+        make_dkim("example.com", "mail"),
+        make_dkim("example.org", "s1"),
+    ])
+    .unwrap();
 
     let sync = db.sync_dkim(&[make_dkim("example.com", "mail")]).unwrap();
 
-    assert_eq!(sync, DkimSync { removed: 1, changed: true });
-    assert_eq!(db.query_all_dkim().unwrap(), vec![make_dkim("example.com", "mail")]);
+    assert_eq!(
+        sync,
+        DkimSync {
+            removed: 1,
+            changed: true
+        }
+    );
+    assert_eq!(
+        db.query_all_dkim().unwrap(),
+        vec![make_dkim("example.com", "mail")]
+    );
 }
 
 #[test]
@@ -1595,14 +1705,24 @@ fn test_sync_dkim_keeps_stored_detail_the_listing_lacks() {
     let sync = db.sync_dkim(&[make_dkim("example.com", "mail")]).unwrap();
 
     assert!(!sync.changed);
-    assert_eq!(db.query_dkim("example.com", "mail").unwrap().unwrap().key_size, Some(2048));
+    assert_eq!(
+        db.query_dkim("example.com", "mail")
+            .unwrap()
+            .unwrap()
+            .key_size,
+        Some(2048)
+    );
 }
 
 fn dump_with_certs() -> String {
     let mut db = test_db();
     for i in 0..50 {
-        db.add_cert(&make_cert(&format!("{}", 100 + i), &format!("host{i}.example.com"), "20301231235959Z"))
-            .unwrap();
+        db.add_cert(&make_cert(
+            &format!("{}", 100 + i),
+            &format!("host{i}.example.com"),
+            "20301231235959Z",
+        ))
+        .unwrap();
     }
     String::from_utf8(db.export_database().unwrap()).unwrap()
 }

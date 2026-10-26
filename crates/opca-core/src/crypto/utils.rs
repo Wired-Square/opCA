@@ -25,8 +25,7 @@ pub fn generate_dh_params(key_size: u32) -> Result<String, OpcaError> {
         .params_to_pem()
         .map_err(|e| OpcaError::Crypto(format!("DH PEM encoding failed: {e}")))?;
 
-    String::from_utf8(pem)
-        .map_err(|e| OpcaError::Crypto(format!("DH PEM is not valid UTF-8: {e}")))
+    String::from_utf8(pem).map_err(|e| OpcaError::Crypto(format!("DH PEM is not valid UTF-8: {e}")))
 }
 
 /// Verify PEM-formatted DH parameters and return the key size in bits.
@@ -148,7 +147,9 @@ fn generate_test_cert(cn: &str) -> Vec<u8> {
     let key = PKey::from_rsa(rsa).unwrap();
 
     let mut name_builder = X509NameBuilder::new().unwrap();
-    name_builder.append_entry_by_nid(Nid::COMMONNAME, cn).unwrap();
+    name_builder
+        .append_entry_by_nid(Nid::COMMONNAME, cn)
+        .unwrap();
     let name = name_builder.build();
 
     let mut builder = X509Builder::new().unwrap();
@@ -190,7 +191,8 @@ mod tests {
         let encrypted = encrypt_private_key_pem(&plain, "correct horse").unwrap();
 
         assert!(encrypted.starts_with("-----BEGIN ENCRYPTED PRIVATE KEY-----"));
-        let opened = PKey::private_key_from_pem_passphrase(encrypted.as_bytes(), b"correct horse").unwrap();
+        let opened =
+            PKey::private_key_from_pem_passphrase(encrypted.as_bytes(), b"correct horse").unwrap();
         assert!(opened.public_eq(&key));
         assert!(PKey::private_key_from_pem_passphrase(encrypted.as_bytes(), b"wrong").is_err());
     }

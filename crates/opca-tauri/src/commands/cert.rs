@@ -1,15 +1,15 @@
-use log::{info, warn, debug};
+use log::{debug, info, warn};
 use openssl::bn::BigNum;
 use openssl::nid::Nid;
 use openssl::x509::X509;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
+use opca_core::crypto::utils::encrypt_private_key_pem;
 use opca_core::error::OpcaError;
 use opca_core::services::ca::CertificateAuthority;
-use opca_core::services::cert::{CertBundleConfig, CertificateBundle, CertType, KeyAlgorithm};
-use opca_core::services::database::{is_expiring_soon, CertLookup, CertRecord, ExternalCertRecord};
-use opca_core::crypto::utils::encrypt_private_key_pem;
+use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
+use opca_core::services::database::{CertLookup, CertRecord, ExternalCertRecord, is_expiring_soon};
 use opca_core::services::san;
 use zeroize::Zeroizing;
 
@@ -67,10 +67,10 @@ pub async fn list_certs(state: State<'_, AppState>) -> Result<Vec<CertListItem>,
 pub(crate) fn cert_items(conn: &mut Connection) -> Result<Vec<CertListItem>, String> {
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    let db = ca.ca_database.as_mut()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
 
-    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
+    db.process_ca_database(None, false)
+        .map_err(|e| e.to_string())?;
 
     let certs = db.query_all_certs().map_err(|e| e.to_string())?;
     let replacements = db.replacements.clone();
@@ -83,28 +83,35 @@ pub(crate) fn cert_items(conn: &mut Connection) -> Result<Vec<CertListItem>, Str
 }
 
 #[tauri::command]
-pub async fn list_external_certs(state: State<'_, AppState>) -> Result<Vec<ExternalCertListItem>, String> {
+pub async fn list_external_certs(
+    state: State<'_, AppState>,
+) -> Result<Vec<ExternalCertListItem>, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-    let db = ca.ca_database.as_mut()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_mut().ok_or("Database not loaded")?;
 
-    db.process_ca_database(None, false).map_err(|e| e.to_string())?;
+    db.process_ca_database(None, false)
+        .map_err(|e| e.to_string())?;
 
-    let certs = db.query_all_external_certs(None).map_err(|e| e.to_string())?;
+    let certs = db
+        .query_all_external_certs(None)
+        .map_err(|e| e.to_string())?;
 
-    Ok(certs.into_iter().map(|r| ExternalCertListItem {
-        serial: Some(r.serial),
-        cn: r.cn,
-        status: r.status,
-        cert_type: r.cert_type,
-        expiry_date: r.expiry_date,
-        issuer: r.issuer,
-        import_date: r.import_date,
-        key_type: r.key_type,
-        key_size: r.key_size,
-    }).collect())
+    Ok(certs
+        .into_iter()
+        .map(|r| ExternalCertListItem {
+            serial: Some(r.serial),
+            cn: r.cn,
+            status: r.status,
+            cert_type: r.cert_type,
+            expiry_date: r.expiry_date,
+            issuer: r.issuer,
+            import_date: r.import_date,
+            key_type: r.key_type,
+            key_size: r.key_size,
+        })
+        .collect())
 }
 
 /// Fast path: return whatever the local database already knows.
@@ -116,10 +123,10 @@ pub async fn get_cert_info(
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
-    let db = ca.ca_database.as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
 
-    let record = db.query_cert(&CertLookup::Serial(serial), false)
+    let record = db
+        .query_cert(&CertLookup::Serial(serial), false)
         .map_err(|e| e.to_string())?
         .ok_or("Certificate not found")?;
 
@@ -144,10 +151,10 @@ pub async fn backfill_cert(
         let mut conn = state.ensure_ca()?;
         let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
-        let db = ca.ca_database.as_ref()
-            .ok_or("Database not loaded")?;
+        let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
 
-        let mut record = db.query_cert(&CertLookup::Serial(serial), false)
+        let mut record = db
+            .query_cert(&CertLookup::Serial(serial), false)
             .map_err(|e| e.to_string())?
             .ok_or("Certificate not found")?;
 
@@ -167,9 +174,7 @@ pub async fn backfill_cert(
         // 1Password round-trip — but only when the row is already complete and
         // has no chain to fetch (the cache holds the leaf cert only).
         let fresh_pem = state.take_fresh_pem(&record.serial);
-        let skip_fetch = fresh_pem.is_some()
-            && !needs_backfill
-            && record.has_chain == Some(false);
+        let skip_fetch = fresh_pem.is_some() && !needs_backfill && record.has_chain == Some(false);
 
         // Retrieve cert bundle from 1Password (for PEM and/or backfill)
         let title = record.title.as_deref().unwrap_or(&record.serial);
@@ -182,8 +187,7 @@ pub async fn backfill_cert(
             preload_unless_ca(&state, title, record.cert_type.as_deref(), b);
         }
 
-        let cert_pem = fresh_pem
-            .or_else(|| bundle.as_ref().and_then(|b| b.certificate_pem().ok()));
+        let cert_pem = fresh_pem.or_else(|| bundle.as_ref().and_then(|b| b.certificate_pem().ok()));
         let chain_pem = bundle.as_ref().and_then(|b| b.chain_pem());
 
         // A bundle can lack what the row is missing; upload only a row that changed.
@@ -193,10 +197,8 @@ pub async fn backfill_cert(
                 backfill_record(&mut record, b);
                 record != before
             });
-        if did_backfill {
-            if let Some(db) = ca.ca_database.as_mut() {
-                let _ = db.update_cert(&record);
-            }
+        if did_backfill && let Some(db) = ca.ca_database.as_mut() {
+            let _ = db.update_cert(&record);
         }
 
         let superseded_by = ca
@@ -215,11 +217,14 @@ pub async fn backfill_cert(
         tauri::async_runtime::spawn_blocking(move || {
             let state: State<'_, AppState> = app.state();
             let _ = app.emit("op-status", Some("store_database"));
-            let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-            if let Some(ca) = conn.ca.as_mut() {
-                if let Err(e) = ca.store_ca_database() {
-                    state.log_err("store_database", Some(e.to_string()));
-                }
+            let mut conn = state
+                .conn
+                .lock()
+                .expect("mutex poisoned — a prior operation panicked");
+            if let Some(ca) = conn.ca.as_mut()
+                && let Err(e) = ca.store_ca_database()
+            {
+                state.log_err("store_database", Some(e.to_string()));
             }
             drop(conn);
             let _ = app.emit("op-status", None::<String>);
@@ -238,10 +243,12 @@ fn record_to_detail(
     // Expiring-soon is a property of a still-valid cert; revoked/expired ones
     // never show the badge. Computed from the date so it's correct even before
     // a full classification scan has run for this session.
-    let revoked = record.revocation_date.as_deref().is_some_and(|r| !r.is_empty())
+    let revoked = record
+        .revocation_date
+        .as_deref()
+        .is_some_and(|r| !r.is_empty())
         || record.status.as_deref() == Some("Revoked");
-    let expiring_soon = !revoked
-        && record.expiry_date.as_deref().is_some_and(is_expiring_soon);
+    let expiring_soon = !revoked && record.expiry_date.as_deref().is_some_and(is_expiring_soon);
     CertDetail {
         serial: Some(record.serial.clone()),
         cn: record.cn.clone(),
@@ -298,9 +305,8 @@ fn external_record_to_detail(
 
 /// Fill in missing fields on a CertRecord from a CertificateBundle.
 fn backfill_record(record: &mut CertRecord, bundle: &CertificateBundle) {
-    let attr = |name: &str| -> Option<String> {
-        bundle.get_certificate_attrib(name).ok().flatten()
-    };
+    let attr =
+        |name: &str| -> Option<String> { bundle.get_certificate_attrib(name).ok().flatten() };
 
     if record.cert_type.is_none() {
         record.cert_type = Some(bundle.cert_type.to_string());
@@ -342,16 +348,20 @@ pub async fn create_cert(
     state: State<'_, AppState>,
     request: CreateCertRequest,
 ) -> Result<CertListItem, String> {
-    info!("[tauri] create_cert: cn='{}' type='{}'", request.cn, request.cert_type);
-    let cert_type: CertType = request.cert_type.parse()
+    info!(
+        "[tauri] create_cert: cn='{}' type='{}'",
+        request.cn, request.cert_type
+    );
+    let cert_type: CertType = request
+        .cert_type
+        .parse()
         .map_err(|e: opca_core::error::OpcaError| e.to_string())?;
 
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     // Build config from CA's current config + request
-    let db = ca.ca_database.as_ref()
-        .ok_or("Database not loaded")?;
+    let db = ca.ca_database.as_ref().ok_or("Database not loaded")?;
     let ca_config = db.get_config().map_err(|e| e.to_string())?;
 
     let bundle_config = CertBundleConfig {
@@ -368,7 +378,8 @@ pub async fn create_cert(
         ca_days: ca_config.days,
     };
 
-    let (bundle, issuance_warnings) = ca.generate_certificate_bundle(cert_type.clone(), &request.cn, bundle_config, request.days)
+    let (bundle, issuance_warnings) = ca
+        .generate_certificate_bundle(cert_type.clone(), &request.cn, bundle_config, request.days)
         .map_err(|e| {
             warn!("[tauri] create_cert failed: {e}");
             state.log_err("create_cert", Some(e.to_string()));
@@ -377,9 +388,13 @@ pub async fn create_cert(
 
     state.log_warnings("create_cert", issuance_warnings);
 
-    state.log_ok("create_cert", Some(format!("Created {} cert '{}'", cert_type, request.cn)));
+    state.log_ok(
+        "create_cert",
+        Some(format!("Created {} cert '{}'", cert_type, request.cn)),
+    );
 
-    let serial = bundle.get_certificate_attrib("serial")
+    let serial = bundle
+        .get_certificate_attrib("serial")
         .ok()
         .flatten()
         .unwrap_or_default();
@@ -392,7 +407,8 @@ pub async fn create_cert(
         cert_type: Some(cert_type.to_string()),
         expiry_date: bundle.get_certificate_attrib("not_after").ok().flatten(),
         key_type: bundle.get_certificate_attrib("key_type").ok().flatten(),
-        key_size: bundle.get_certificate_attrib("key_size")
+        key_size: bundle
+            .get_certificate_attrib("key_size")
             .ok()
             .flatten()
             .and_then(|s| s.parse().ok()),
@@ -403,10 +419,7 @@ pub async fn create_cert(
 }
 
 #[tauri::command]
-pub async fn revoke_cert(
-    state: State<'_, AppState>,
-    serial: String,
-) -> Result<bool, String> {
+pub async fn revoke_cert(state: State<'_, AppState>, serial: String) -> Result<bool, String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
@@ -419,7 +432,12 @@ pub async fn revoke_cert(
         })?;
     regenerate_crl_after_revoke(&state, "revoke_cert", ca)?;
 
-    state.log_ok("revoke_cert", Some(format!("Revoked certificate {serial} and regenerated the CRL")));
+    state.log_ok(
+        "revoke_cert",
+        Some(format!(
+            "Revoked certificate {serial} and regenerated the CRL"
+        )),
+    );
     Ok(true)
 }
 
@@ -444,10 +462,7 @@ fn regenerate_crl_after_revoke(
 }
 
 #[tauri::command]
-pub async fn delete_cert(
-    state: State<'_, AppState>,
-    serial: String,
-) -> Result<(), String> {
+pub async fn delete_cert(state: State<'_, AppState>, serial: String) -> Result<(), String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
@@ -471,7 +486,8 @@ pub async fn renew_cert(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] renew_cert: serial={serial}");
-    let (new_pem, new_serial, issuance_warnings) = ca.renew_certificate_bundle(&CertLookup::Serial(serial.clone()), None)
+    let (new_pem, new_serial, issuance_warnings) = ca
+        .renew_certificate_bundle(&CertLookup::Serial(serial.clone()), None)
         .map_err(|e| {
             warn!("[tauri] renew_cert failed: {e}");
             state.log_err("renew_cert", Some(e.to_string()));
@@ -480,9 +496,15 @@ pub async fn renew_cert(
 
     state.log_warnings("renew_cert", issuance_warnings);
 
-    state.log_ok("renew_cert", Some(format!("Renewed certificate {serial} → {new_serial}")));
+    state.log_ok(
+        "renew_cert",
+        Some(format!("Renewed certificate {serial} → {new_serial}")),
+    );
     state.cache_fresh_pem(new_serial.clone(), new_pem.clone());
-    Ok(RenewRekeyResult { serial: new_serial, pem: new_pem })
+    Ok(RenewRekeyResult {
+        serial: new_serial,
+        pem: new_pem,
+    })
 }
 
 #[tauri::command]
@@ -495,7 +517,8 @@ pub async fn rekey_cert(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] rekey_cert: serial={serial}");
-    let (new_pem, new_serial, issuance_warnings) = ca.rekey_certificate_bundle(&CertLookup::Serial(serial.clone()), key_algorithm, None)
+    let (new_pem, new_serial, issuance_warnings) = ca
+        .rekey_certificate_bundle(&CertLookup::Serial(serial.clone()), key_algorithm, None)
         .map_err(|e| {
             warn!("[tauri] rekey_cert failed: {e}");
             state.log_err("rekey_cert", Some(e.to_string()));
@@ -504,9 +527,15 @@ pub async fn rekey_cert(
 
     state.log_warnings("rekey_cert", issuance_warnings);
 
-    state.log_ok("rekey_cert", Some(format!("Rekeyed certificate {serial} → {new_serial}")));
+    state.log_ok(
+        "rekey_cert",
+        Some(format!("Rekeyed certificate {serial} → {new_serial}")),
+    );
     state.cache_fresh_pem(new_serial.clone(), new_pem.clone());
-    Ok(RenewRekeyResult { serial: new_serial, pem: new_pem })
+    Ok(RenewRekeyResult {
+        serial: new_serial,
+        pem: new_pem,
+    })
 }
 
 #[tauri::command]
@@ -531,22 +560,21 @@ pub async fn ignore_cert(
 }
 
 #[tauri::command]
-pub async fn unignore_cert(
-    state: State<'_, AppState>,
-    serial: String,
-) -> Result<(), String> {
+pub async fn unignore_cert(state: State<'_, AppState>, serial: String) -> Result<(), String> {
     let mut conn = state.ensure_ca()?;
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] unignore_cert: serial={serial}");
-    ca.unignore_certificate(&serial)
-        .map_err(|e| {
-            warn!("[tauri] unignore_cert failed: {e}");
-            state.log_err("unignore_cert", Some(e.to_string()));
-            e.to_string()
-        })?;
+    ca.unignore_certificate(&serial).map_err(|e| {
+        warn!("[tauri] unignore_cert failed: {e}");
+        state.log_err("unignore_cert", Some(e.to_string()));
+        e.to_string()
+    })?;
 
-    state.log_ok("unignore_cert", Some(format!("Cleared ignore on certificate {serial}")));
+    state.log_ok(
+        "unignore_cert",
+        Some(format!("Cleared ignore on certificate {serial}")),
+    );
     Ok(())
 }
 
@@ -590,12 +618,22 @@ where
         BulkProgress::emit(app, verb, i + 1, total);
         match action(ca, &serial) {
             Ok(new_serial) => {
-                results.push(BulkCertResult { serial, ok: true, error: None, new_serial });
+                results.push(BulkCertResult {
+                    serial,
+                    ok: true,
+                    error: None,
+                    new_serial,
+                });
                 ok += 1;
             }
             Err(e) => {
                 warn!("[tauri] {label}: {serial} failed: {e}");
-                results.push(BulkCertResult { serial, ok: false, error: Some(e.to_string()), new_serial: None });
+                results.push(BulkCertResult {
+                    serial,
+                    ok: false,
+                    error: Some(e.to_string()),
+                    new_serial: None,
+                });
                 fail += 1;
             }
         }
@@ -612,13 +650,23 @@ pub async fn bulk_rekey_certs<R: Runtime>(
     serials: Vec<String>,
     key_algorithm: Option<KeyAlgorithm>,
 ) -> Result<Vec<BulkCertResult>, String> {
-    run_bulk_cert_op(&app, &state, serials, "bulk_rekey", "Rekeying", |ca, serial| {
-        let (new_pem, new_serial, warnings) =
-            ca.rekey_certificate_bundle(&CertLookup::Serial(serial.to_string()), key_algorithm, None)?;
-        state.log_warnings("bulk_rekey", warnings);
-        state.cache_fresh_pem(new_serial.clone(), new_pem);
-        Ok(Some(new_serial))
-    })
+    run_bulk_cert_op(
+        &app,
+        &state,
+        serials,
+        "bulk_rekey",
+        "Rekeying",
+        |ca, serial| {
+            let (new_pem, new_serial, warnings) = ca.rekey_certificate_bundle(
+                &CertLookup::Serial(serial.to_string()),
+                key_algorithm,
+                None,
+            )?;
+            state.log_warnings("bulk_rekey", warnings);
+            state.cache_fresh_pem(new_serial.clone(), new_pem);
+            Ok(Some(new_serial))
+        },
+    )
 }
 
 #[tauri::command]
@@ -627,13 +675,20 @@ pub async fn bulk_renew_certs<R: Runtime>(
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
-    run_bulk_cert_op(&app, &state, serials, "bulk_renew", "Renewing", |ca, serial| {
-        let (new_pem, new_serial, warnings) =
-            ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()), None)?;
-        state.log_warnings("bulk_renew", warnings);
-        state.cache_fresh_pem(new_serial.clone(), new_pem);
-        Ok(Some(new_serial))
-    })
+    run_bulk_cert_op(
+        &app,
+        &state,
+        serials,
+        "bulk_renew",
+        "Renewing",
+        |ca, serial| {
+            let (new_pem, new_serial, warnings) =
+                ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()), None)?;
+            state.log_warnings("bulk_renew", warnings);
+            state.cache_fresh_pem(new_serial.clone(), new_pem);
+            Ok(Some(new_serial))
+        },
+    )
 }
 
 #[tauri::command]
@@ -642,9 +697,17 @@ pub async fn bulk_revoke_certs<R: Runtime>(
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
-    let results = run_bulk_cert_op(&app, &state, serials, "bulk_revoke", "Revoking", |ca, serial| {
-        ca.revoke_certificate(&CertLookup::Serial(serial.to_string())).map(|_| None)
-    })?;
+    let results = run_bulk_cert_op(
+        &app,
+        &state,
+        serials,
+        "bulk_revoke",
+        "Revoking",
+        |ca, serial| {
+            ca.revoke_certificate(&CertLookup::Serial(serial.to_string()))
+                .map(|_| None)
+        },
+    )?;
     if results.iter().any(|r| r.ok) {
         let mut conn = state.ensure_ca()?;
         let ca = conn.ca.as_mut().ok_or("CA not available")?;
@@ -659,9 +722,14 @@ pub async fn bulk_delete_certs<R: Runtime>(
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
-    run_bulk_cert_op(&app, &state, serials, "bulk_delete", "Deleting", |ca, serial| {
-        ca.delete_certificate(serial).map(|_| None)
-    })
+    run_bulk_cert_op(
+        &app,
+        &state,
+        serials,
+        "bulk_delete",
+        "Deleting",
+        |ca, serial| ca.delete_certificate(serial).map(|_| None),
+    )
 }
 
 #[tauri::command]
@@ -671,9 +739,14 @@ pub async fn bulk_ignore_certs<R: Runtime>(
     serials: Vec<String>,
     note: Option<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
-    run_bulk_cert_op(&app, &state, serials, "bulk_ignore", "Ignoring", |ca, serial| {
-        ca.ignore_certificate(serial, note.as_deref()).map(|_| None)
-    })
+    run_bulk_cert_op(
+        &app,
+        &state,
+        serials,
+        "bulk_ignore",
+        "Ignoring",
+        |ca, serial| ca.ignore_certificate(serial, note.as_deref()).map(|_| None),
+    )
 }
 
 #[tauri::command]
@@ -682,9 +755,14 @@ pub async fn bulk_unignore_certs<R: Runtime>(
     state: State<'_, AppState>,
     serials: Vec<String>,
 ) -> Result<Vec<BulkCertResult>, String> {
-    run_bulk_cert_op(&app, &state, serials, "bulk_unignore", "Clearing ignore on", |ca, serial| {
-        ca.unignore_certificate(serial).map(|_| None)
-    })
+    run_bulk_cert_op(
+        &app,
+        &state,
+        serials,
+        "bulk_unignore",
+        "Clearing ignore on",
+        |ca, serial| ca.unignore_certificate(serial).map(|_| None),
+    )
 }
 
 #[tauri::command]
@@ -701,26 +779,36 @@ pub async fn import_cert(
     let chain_pem = request.chain_pem.as_deref().map(|s| s.as_bytes());
     let passphrase = request.passphrase.as_deref().map(|s| s.as_bytes());
 
-    let bundle = ca.import_certificate_bundle(
-        cert_pem,
-        key_pem,
-        chain_pem,
-        passphrase,
-        None, // title derived from certificate CN
-    ).map_err(|e| {
-        state.log_err("import_cert", Some(e.to_string()));
-        e.to_string()
-    })?;
+    let bundle = ca
+        .import_certificate_bundle(
+            cert_pem, key_pem, chain_pem, passphrase,
+            None, // title derived from certificate CN
+        )
+        .map_err(|e| {
+            state.log_err("import_cert", Some(e.to_string()));
+            e.to_string()
+        })?;
 
     let is_external = matches!(bundle.cert_type, CertType::External);
-    let cn = bundle.get_certificate_attrib("cn").ok().flatten().unwrap_or_default();
-    let serial = bundle.get_certificate_attrib("serial").ok().flatten().unwrap_or_default();
+    let cn = bundle
+        .get_certificate_attrib("cn")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let serial = bundle
+        .get_certificate_attrib("serial")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
 
-    state.log_ok("import_cert", Some(format!(
-        "Imported {} cert '{}'",
-        if is_external { "external" } else { "local" },
-        cn,
-    )));
+    state.log_ok(
+        "import_cert",
+        Some(format!(
+            "Imported {} cert '{}'",
+            if is_external { "external" } else { "local" },
+            cn,
+        )),
+    );
 
     Ok(ImportCertResult {
         cert: CertListItem {
@@ -731,7 +819,8 @@ pub async fn import_cert(
             cert_type: Some(bundle.cert_type.to_string()),
             expiry_date: bundle.get_certificate_attrib("not_after").ok().flatten(),
             key_type: bundle.get_certificate_attrib("key_type").ok().flatten(),
-            key_size: bundle.get_certificate_attrib("key_size")
+            key_size: bundle
+                .get_certificate_attrib("key_size")
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse().ok()),
@@ -829,10 +918,19 @@ pub async fn get_cert_private_key(
         .ok_or("Certificate not found")?;
 
     let title = record.title.as_deref().unwrap_or(&record.serial);
-    let key = export_leaf_key(&state, ca, title, record.cert_type.as_deref(), passphrase.as_deref())?;
+    let key = export_leaf_key(
+        &state,
+        ca,
+        title,
+        record.cert_type.as_deref(),
+        passphrase.as_deref(),
+    )?;
     state.log_ok(
         "get_cert_private_key",
-        Some(format!("Exported private key for cert {serial}{}", encrypted_note(passphrase.as_deref()))),
+        Some(format!(
+            "Exported private key for cert {serial}{}",
+            encrypted_note(passphrase.as_deref())
+        )),
     );
     Ok(key)
 }
@@ -880,7 +978,12 @@ pub(crate) fn encrypted_note(passphrase: Option<&str>) -> &'static str {
 }
 
 /// Keep the bundle's key for a quick copy, but never a CA's.
-fn preload_unless_ca(state: &AppState, title: &str, cert_type: Option<&str>, bundle: &CertificateBundle) {
+fn preload_unless_ca(
+    state: &AppState,
+    title: &str,
+    cert_type: Option<&str>,
+    bundle: &CertificateBundle,
+) {
     if bail_if_ca_certificate(cert_type, bundle).is_ok() {
         state.preload_key(title, bundle);
     } else {
@@ -1010,10 +1113,19 @@ pub async fn get_external_cert_private_key(
         .ok_or("External certificate not found")?;
 
     let title = external_item_title(&record)?;
-    let key = export_leaf_key(&state, ca, &title, record.cert_type.as_deref(), passphrase.as_deref())?;
+    let key = export_leaf_key(
+        &state,
+        ca,
+        &title,
+        record.cert_type.as_deref(),
+        passphrase.as_deref(),
+    )?;
     state.log_ok(
         "get_external_cert_private_key",
-        Some(format!("Exported private key for external cert {serial}{}", encrypted_note(passphrase.as_deref()))),
+        Some(format!(
+            "Exported private key for external cert {serial}{}",
+            encrypted_note(passphrase.as_deref())
+        )),
     );
     Ok(key)
 }
@@ -1031,8 +1143,8 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
     let der = cert
         .to_der()
         .map_err(|e| format!("Failed to encode certificate: {e}"))?;
-    let view = wslib_crypto_x509::inspect(&der)
-        .map_err(|e| format!("Failed to read certificate: {e}"))?;
+    let view =
+        wslib_crypto_x509::inspect(&der).map_err(|e| format!("Failed to read certificate: {e}"))?;
 
     let cn = cert
         .subject_name()
@@ -1048,7 +1160,10 @@ pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateR
     let not_before = asn1_time_to_string(cert.not_before());
     let not_after = asn1_time_to_string(cert.not_after());
 
-    let alt_names = san::of_certificate(&cert).iter().map(ToString::to_string).collect();
+    let alt_names = san::of_certificate(&cert)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
 
     Ok(InspectCertificateResult {
         cn,
@@ -1097,7 +1212,10 @@ mod preload_tests {
         let state = AppState::default();
         let leaf = bundle(CertType::WebServer);
         preload_unless_ca(&state, "CRT_1_web", Some("webserver"), &leaf);
-        assert_eq!(*state.preloaded_key("CRT_1_web").unwrap(), leaf.private_key_pem().unwrap());
+        assert_eq!(
+            *state.preloaded_key("CRT_1_web").unwrap(),
+            leaf.private_key_pem().unwrap()
+        );
         assert!(state.preloaded_key("CRT_2_other").is_none());
         state.forget_preloaded_key();
         assert!(state.preloaded_key("CRT_1_web").is_none());
@@ -1106,7 +1224,12 @@ mod preload_tests {
     #[test]
     fn a_ca_key_is_never_preloaded_and_clears_the_slot() {
         let state = AppState::default();
-        preload_unless_ca(&state, "CRT_1_web", Some("webserver"), &bundle(CertType::WebServer));
+        preload_unless_ca(
+            &state,
+            "CRT_1_web",
+            Some("webserver"),
+            &bundle(CertType::WebServer),
+        );
         preload_unless_ca(&state, "CA", Some("ca"), &bundle(CertType::Ca));
         assert!(state.preloaded_key("CA").is_none());
         assert!(state.preloaded_key("CRT_1_web").is_none());
@@ -1116,6 +1239,10 @@ mod preload_tests {
     fn an_empty_passphrase_means_unencrypted() {
         let pem = bundle(CertType::WebServer).private_key_pem().unwrap();
         assert_eq!(encrypt_if_asked(&pem, Some("")).unwrap(), pem);
-        assert!(encrypt_if_asked(&pem, Some("pw")).unwrap().contains("ENCRYPTED PRIVATE KEY"));
+        assert!(
+            encrypt_if_asked(&pem, Some("pw"))
+                .unwrap()
+                .contains("ENCRYPTED PRIVATE KEY")
+        );
     }
 }

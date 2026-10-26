@@ -12,9 +12,15 @@ pub async fn acquire_lock(
     operation: String,
     ttl: Option<u64>,
 ) -> Result<(), String> {
-    info!("[tauri] acquire_lock: operation='{}' ttl={:?}", operation, ttl);
+    info!(
+        "[tauri] acquire_lock: operation='{}' ttl={:?}",
+        operation, ttl
+    );
     state.with_vault(|vault| {
-        let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
+        let mut lock_guard = state
+            .vault_lock
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked");
         lock_guard
             .acquire(vault, &operation, ttl.unwrap_or(VaultLock::default_ttl()))
             .map_err(|e| {
@@ -29,7 +35,10 @@ pub async fn acquire_lock(
 pub async fn release_lock(state: State<'_, AppState>) -> Result<(), String> {
     info!("[tauri] release_lock");
     state.with_vault(|vault| {
-        let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
+        let mut lock_guard = state
+            .vault_lock
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked");
         lock_guard.release(vault).map_err(|e| {
             warn!("[tauri] release_lock failed: {e}");
             e.to_string()

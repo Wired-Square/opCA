@@ -28,8 +28,11 @@ fn try_start(app: AppHandle) -> Result<(), String> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_PORT);
     let token = std::env::var("OPCA_MCP_TOKEN").unwrap_or_else(|_| random_token());
-    let listener = http::bind_with_retry(SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_secs(2))
-        .map_err(|e| e.to_string())?;
+    let listener = http::bind_with_retry(
+        SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_secs(2),
+    )
+    .map_err(|e| e.to_string())?;
 
     let url = format!("http://127.0.0.1:{port}/mcp");
     // Outside app data: reading another app's container from a terminal trips macOS's privacy prompt.
@@ -44,7 +47,16 @@ fn try_start(app: AppHandle) -> Result<(), String> {
         allowed_origins: http::loopback_origins(port),
         ..HttpConfig::default()
     };
-    let factory = move || ToolServer::new(OpcaTools { app: app.clone(), page: page.clone() }, router.clone(), identity.clone());
+    let factory = move || {
+        ToolServer::new(
+            OpcaTools {
+                app: app.clone(),
+                page: page.clone(),
+            },
+            router.clone(),
+            identity.clone(),
+        )
+    };
     tauri::async_runtime::spawn(async move {
         if let Err(e) = http::serve(listener, factory, config, CancellationToken::new()).await {
             warn!("[mcp] server stopped: {e}");
@@ -55,7 +67,10 @@ fn try_start(app: AppHandle) -> Result<(), String> {
 }
 
 fn random_token() -> String {
-    rand::random::<[u8; 24]>().iter().map(|b| format!("{b:02x}")).collect()
+    rand::random::<[u8; 24]>()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn write_handoff(path: &Path, value: &serde_json::Value) -> Result<(), String> {

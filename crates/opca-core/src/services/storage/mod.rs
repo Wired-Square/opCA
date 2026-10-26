@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::DEFAULT_AWS_REGION;
 use crate::error::OpcaError;
-use crate::op::{is_item_id, Item, ItemRef, ItemSummary, Op, Runner};
+use crate::op::{Item, ItemRef, ItemSummary, Op, Runner, is_item_id};
 use crate::settings;
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,10 @@ pub trait StorageBackend {
 /// Callers use this to resolve credentials only when they are actually
 /// required — `rsync://` and `sftp://` uploads must not depend on AWS state.
 pub fn needs_aws_credentials(uri: &str) -> bool {
-    uri.split("://").next().unwrap_or("").eq_ignore_ascii_case("s3")
+    uri.split("://")
+        .next()
+        .unwrap_or("")
+        .eq_ignore_ascii_case("s3")
 }
 
 /// Parse a URI scheme and return the appropriate storage backend.
@@ -53,18 +56,15 @@ pub fn storage_from_uri_with_creds(
     uri: &str,
     aws_creds: Option<&AwsCredentials>,
 ) -> Result<Box<dyn StorageBackend>, OpcaError> {
-    let scheme = uri
-        .split("://")
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let scheme = uri.split("://").next().unwrap_or("").to_lowercase();
 
     match scheme.as_str() {
         "rsync" => Ok(Box::new(rsync::StorageRsync)),
         "sftp" | "scp" => Ok(Box::new(sftp::StorageSftp)),
         "s3" => {
-            let creds = aws_creds
-                .ok_or_else(|| OpcaError::Storage("AWS credentials required for S3 stores".into()))?;
+            let creds = aws_creds.ok_or_else(|| {
+                OpcaError::Storage("AWS credentials required for S3 stores".into())
+            })?;
             Ok(Box::new(s3::StorageS3::new(creds.clone())))
         }
         other => Err(OpcaError::Storage(format!(
@@ -191,7 +191,11 @@ fn aws_item_refs(items: Vec<ItemSummary>) -> Vec<AwsItemRef> {
         .into_iter()
         .map(|item| AwsItemRef {
             id: item.id,
-            title: if item.title.is_empty() { "(untitled)".into() } else { item.title },
+            title: if item.title.is_empty() {
+                "(untitled)".into()
+            } else {
+                item.title
+            },
             vault: item.vault.name,
         })
         .collect();
@@ -213,7 +217,12 @@ fn aws_credentials(item: &Item) -> Result<AwsCredentials, OpcaError> {
 
     for field in &item.fields {
         let label = field.label.to_lowercase();
-        let Some(value) = field.value.as_ref().map(|v| v.expose()).filter(|v| !v.is_empty()) else {
+        let Some(value) = field
+            .value
+            .as_ref()
+            .map(|v| v.expose())
+            .filter(|v| !v.is_empty())
+        else {
             continue;
         };
         match label.as_str() {
@@ -295,7 +304,10 @@ mod tests {
     }
 
     fn item(fields: &str) -> Item {
-        serde_json::from_str(&format!(r#"{{"id":"i1","vault":{{"id":"v1"}},"fields":{fields}}}"#)).unwrap()
+        serde_json::from_str(&format!(
+            r#"{{"id":"i1","vault":{{"id":"v1"}},"fields":{fields}}}"#
+        ))
+        .unwrap()
     }
 
     #[test]
@@ -340,7 +352,8 @@ mod tests {
                 {"id": "aaa", "title": "alpha key", "vault": {"id": "v2", "name": "Xentro"}}
             ]"#,
         ));
-        let items = list_aws_credential_items(&crate::op::client(fake.clone(), Some("ws"))).unwrap();
+        let items =
+            list_aws_credential_items(&crate::op::client(fake.clone(), Some("ws"))).unwrap();
         assert_eq!(items.len(), 2);
         // Sorted case-insensitively by title.
         assert_eq!(items[0].id, "aaa");
@@ -356,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_aws_credentials_are_read_by_item_id() {
-        use crate::testutil::{item_id, FakeRunner, Output};
+        use crate::testutil::{FakeRunner, Output, item_id};
         let fake = FakeRunner::new();
         fake.respond(Output::ok(format!(
             r#"{{"id":"{}","vault":{{"id":"v1"}},"fields":[
@@ -364,9 +377,14 @@ mod tests {
                 {{"label":"secret access key","value":"secret123"}}]}}"#,
             item_id(7)
         )));
-        let creds = get_aws_credentials_for_item(&crate::op::client(fake.clone(), None), &item_id(7)).unwrap();
+        let creds =
+            get_aws_credentials_for_item(&crate::op::client(fake.clone(), None), &item_id(7))
+                .unwrap();
         assert_eq!(creds.access_key_id, "AKIA1234");
-        assert_eq!(fake.calls()[0].args()[..3], ["item", "get", item_id(7).as_str()]);
+        assert_eq!(
+            fake.calls()[0].args()[..3],
+            ["item", "get", item_id(7).as_str()]
+        );
     }
 
     #[test]

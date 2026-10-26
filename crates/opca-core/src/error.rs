@@ -67,7 +67,9 @@ pub enum OpcaError {
     #[error("{} items are titled {title:?}: {}", ids.len(), ids.join(", "))]
     AmbiguousItem { title: String, ids: Vec<String> },
 
-    #[error("Vault is locked by {holder_email} ({holder_name}) since {acquired_at} for {operation} (on {hostname})")]
+    #[error(
+        "Vault is locked by {holder_email} ({holder_name}) since {acquired_at} for {operation} (on {hostname})"
+    )]
     VaultLocked {
         holder_email: String,
         holder_name: String,

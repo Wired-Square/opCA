@@ -21,7 +21,7 @@ const UI_MS = 15000;
 const OP_MS = 180000;
 const DIALOG = "dialog[open]";
 const MENU_ITEM = '.app-menu [role="menuitem"]';
-const SAVED_LOGIN = ".app-popover .dropdown-item:has(.saved-forget)";
+const SAVED_LOGIN = '[aria-label="Recent logins"] [role="option"]';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const assert = (ok, message) => {
@@ -59,39 +59,35 @@ async function onlyIndex(selector, matching, what) {
   return hits[0];
 }
 
-async function openVaultPicker() {
+async function openConnect() {
   await app.navigate("/");
   await app.waitFor(".connect-form", "visible", UI_MS);
-  // Lists only this account's vaults, so no other account is asked to unlock.
-  await app.type("#account", ACCOUNT);
-  await app.click('[aria-label="Show vaults"]');
-  await app.waitFor(".app-popover", "visible", UI_MS);
 }
 
-async function closePopover() {
-  await app.press("Escape");
-  await app.waitFor(".app-popover", "gone", UI_MS);
+async function openRecent() {
+  await openConnect();
+  if ((await matches(".connect-recent-toggle")).length === 0) return false;
+  await app.click(".connect-recent-toggle");
+  await app.waitFor(SAVED_LOGIN, "visible", UI_MS);
+  return true;
 }
 
 async function savedLogins() {
-  await openVaultPicker();
-  const rows = (await matches(SAVED_LOGIN)).map((m) => m.text);
-  await closePopover();
-  return rows;
+  if (!(await openRecent())) return [];
+  return (await matches(SAVED_LOGIN)).map((m) => m.text);
 }
 
 async function forgetFlowLogin() {
-  await openVaultPicker();
+  if (!(await openRecent())) return;
   const rows = await matches(`${SAVED_LOGIN} .dropdown-item-primary`);
   const index = rows.findIndex((m) => m.text === VAULT);
   if (index >= 0) await app.click(`${SAVED_LOGIN} .saved-forget`, index);
-  await closePopover();
 }
 
 async function pickAccount() {
   await app.type("#account", "");
-  await app.waitFor('[aria-label="Show 1Password accounts"]', "visible", UI_MS);
-  await app.click('[aria-label="Show 1Password accounts"]');
+  await app.waitFor('[aria-label="Browse 1Password accounts"]:not(:disabled)', "visible", UI_MS);
+  await app.click('[aria-label="Browse 1Password accounts"]');
   await app.waitFor(".app-popover .dropdown-item", "visible", UI_MS);
   const rows = await matches(".app-popover .dropdown-item");
   assert((await matches(".app-popover .dropdown-item-secondary")).length === rows.length, "an account row has no address");
@@ -101,8 +97,7 @@ async function pickAccount() {
 }
 
 async function createCaInNewVault() {
-  await app.navigate("/");
-  await app.waitFor(".connect-form", "visible", UI_MS);
+  await openConnect();
   await app.click(".connect-mode-switch");
   await app.call("wait_for", { selector: ".connect-btn", text: "Create vault", state: "visible", timeout_ms: UI_MS });
   await pickAccount();

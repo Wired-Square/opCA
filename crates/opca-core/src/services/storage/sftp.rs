@@ -90,18 +90,16 @@ impl StorageSftp {
         let (host, port) = match host_port.rfind(':') {
             Some(idx) => {
                 let port_str = &host_port[idx + 1..];
-                let port: u16 = port_str.parse().map_err(|_| {
-                    OpcaError::Storage(format!("Invalid port in SFTP URI: {uri}"))
-                })?;
+                let port: u16 = port_str
+                    .parse()
+                    .map_err(|_| OpcaError::Storage(format!("Invalid port in SFTP URI: {uri}")))?;
                 (&host_port[..idx], port)
             }
             None => (host_port, 22),
         };
 
         if host.is_empty() {
-            return Err(OpcaError::Storage(format!(
-                "Empty host in SFTP URI: {uri}"
-            )));
+            return Err(OpcaError::Storage(format!("Empty host in SFTP URI: {uri}")));
         }
 
         Ok(SftpUri {
@@ -117,21 +115,19 @@ impl StorageSftp {
         let addr = format!("{}:{}", parsed.host, parsed.port);
         debug!("[sftp] connecting to {addr}");
 
-        let sock_addr: std::net::SocketAddr = addr.parse().map_err(|e| {
-            OpcaError::Storage(format!("Invalid address {addr}: {e}"))
-        })?;
-        let tcp = TcpStream::connect_timeout(&sock_addr, CONNECT_TIMEOUT).map_err(|e| {
-            OpcaError::Storage(format!("Failed to connect to {addr}: {e}"))
-        })?;
+        let sock_addr: std::net::SocketAddr = addr
+            .parse()
+            .map_err(|e| OpcaError::Storage(format!("Invalid address {addr}: {e}")))?;
+        let tcp = TcpStream::connect_timeout(&sock_addr, CONNECT_TIMEOUT)
+            .map_err(|e| OpcaError::Storage(format!("Failed to connect to {addr}: {e}")))?;
 
-        let mut session = Session::new().map_err(|e| {
-            OpcaError::Storage(format!("Failed to create SSH session: {e}"))
-        })?;
+        let mut session = Session::new()
+            .map_err(|e| OpcaError::Storage(format!("Failed to create SSH session: {e}")))?;
 
         session.set_tcp_stream(tcp);
-        session.handshake().map_err(|e| {
-            OpcaError::Storage(format!("SSH handshake failed with {addr}: {e}"))
-        })?;
+        session
+            .handshake()
+            .map_err(|e| OpcaError::Storage(format!("SSH handshake failed with {addr}: {e}")))?;
 
         // Try SSH agent first
         if session.userauth_agent(&parsed.user).is_ok() {
@@ -141,10 +137,7 @@ impl StorageSftp {
 
         // Fall back to default key files
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let key_candidates = [
-            home.join(".ssh/id_ed25519"),
-            home.join(".ssh/id_rsa"),
-        ];
+        let key_candidates = [home.join(".ssh/id_ed25519"), home.join(".ssh/id_rsa")];
 
         for key_path in &key_candidates {
             if key_path.exists() {
@@ -172,32 +165,27 @@ impl StorageBackend for StorageSftp {
         let parsed = Self::parse_uri(uri)?;
         let session = Self::connect(&parsed)?;
 
-        let sftp = session.sftp().map_err(|e| {
-            OpcaError::Storage(format!("Failed to open SFTP session: {e}"))
-        })?;
+        let sftp = session
+            .sftp()
+            .map_err(|e| OpcaError::Storage(format!("Failed to open SFTP session: {e}")))?;
 
         // Ensure the parent directory exists
         let remote_path = std::path::Path::new(&parsed.path);
-        if let Some(parent) = remote_path.parent() {
-            if parent != std::path::Path::new("/") {
-                // Attempt to create parent directories; ignore errors (they may
-                // already exist).
-                let mut cumulative = PathBuf::from("/");
-                for component in parent.components().skip(1) {
-                    cumulative.push(component);
-                    let _ = sftp.mkdir(&cumulative, 0o755);
-                }
+        if let Some(parent) = remote_path.parent()
+            && parent != std::path::Path::new("/")
+        {
+            // Attempt to create parent directories; ignore errors (they may
+            // already exist).
+            let mut cumulative = PathBuf::from("/");
+            for component in parent.components().skip(1) {
+                cumulative.push(component);
+                let _ = sftp.mkdir(&cumulative, 0o755);
             }
         }
 
-        let mut remote_file = sftp
-            .create(remote_path)
-            .map_err(|e| {
-                OpcaError::Storage(format!(
-                    "Failed to create remote file {}: {e}",
-                    parsed.path
-                ))
-            })?;
+        let mut remote_file = sftp.create(remote_path).map_err(|e| {
+            OpcaError::Storage(format!("Failed to create remote file {}: {e}", parsed.path))
+        })?;
 
         remote_file.write_all(content).map_err(|e| {
             OpcaError::Storage(format!(
@@ -215,9 +203,9 @@ impl StorageBackend for StorageSftp {
         let parsed = Self::parse_uri(uri)?;
         let session = Self::connect(&parsed)?;
 
-        let sftp = session.sftp().map_err(|e| {
-            OpcaError::Storage(format!("Failed to open SFTP session: {e}"))
-        })?;
+        let sftp = session
+            .sftp()
+            .map_err(|e| OpcaError::Storage(format!("Failed to open SFTP session: {e}")))?;
 
         // Verify the remote path (or its parent) is reachable
         let remote_path = std::path::Path::new(&parsed.path);
@@ -243,8 +231,8 @@ mod tests {
 
     #[test]
     fn test_parse_uri_full() {
-        let parsed = StorageSftp::parse_uri("sftp://deploy@backup.example.com:2222/var/www/pki/")
-            .unwrap();
+        let parsed =
+            StorageSftp::parse_uri("sftp://deploy@backup.example.com:2222/var/www/pki/").unwrap();
         assert_eq!(parsed.user, "deploy");
         assert_eq!(parsed.host, "backup.example.com");
         assert_eq!(parsed.port, 2222);

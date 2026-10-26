@@ -12,7 +12,10 @@ use crate::{VaultAction, VaultArgs};
 
 pub fn dispatch(args: VaultArgs, app: &mut AppContext<ShellRunner>) -> Result<(), OpcaError> {
     match args.action {
-        VaultAction::Backup { output: out, password } => handle_backup(app, out, password),
+        VaultAction::Backup {
+            output: out,
+            password,
+        } => handle_backup(app, out, password),
         VaultAction::Restore { input, password } => handle_restore(app, input, password),
         VaultAction::Info { input, password } => handle_info(input, password),
     }

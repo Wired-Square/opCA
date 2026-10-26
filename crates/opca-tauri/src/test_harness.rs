@@ -4,10 +4,10 @@ use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 use opca_core::services::database::{CaConfig, CertificateAuthorityDB};
-use opca_core::testutil::{fake_vault, FakeRunner, Output};
+use opca_core::testutil::{FakeRunner, Output, fake_vault};
 use serde_json::Value;
 use tauri::ipc::{CallbackFn, Invoke, InvokeBody};
-use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY};
+use tauri::test::{INVOKE_KEY, MockRuntime, mock_builder, mock_context, noop_assets};
 use tauri::webview::InvokeRequest;
 use tauri::{App, Listener, Manager, State, WebviewWindow, WebviewWindowBuilder};
 
@@ -31,7 +31,10 @@ impl Harness {
     pub fn with_ca(op_responses: Vec<Output>, handler: impl Handler) -> Self {
         let runner = FakeRunner::new();
         Self::script(&runner, op_responses);
-        let conn = Connection { ca: Some(test_ca(&runner)), ..Connection::default() };
+        let conn = Connection {
+            ca: Some(test_ca(&runner)),
+            ..Connection::default()
+        };
         Self::build(conn, runner, handler)
     }
 
@@ -63,8 +66,14 @@ impl Harness {
             .invoke_handler(handler)
             .build(mock_context(noop_assets()))
             .unwrap();
-        let webview = WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
-        Self { app, webview, runner }
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        Self {
+            app,
+            webview,
+            runner,
+        }
     }
 
     /// Invoke `cmd` over IPC as the frontend's `tauriInvoke(cmd, args)` does.
@@ -89,13 +98,29 @@ impl Harness {
     }
 
     pub fn last_log(&self) -> LogEntry {
-        self.state().action_log.lock().unwrap().last().cloned().unwrap()
+        self.state()
+            .action_log
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap()
     }
 
     /// The argument lists of every `op` call so far that start with `prefix`.
     pub fn op_calls(&self, prefix: &[&str]) -> Vec<Vec<String>> {
-        let starts = |c: &Vec<String>| c.iter().map(String::as_str).take(prefix.len()).eq(prefix.iter().copied());
-        self.runner.calls().iter().map(|c| c.args().to_vec()).filter(starts).collect()
+        let starts = |c: &Vec<String>| {
+            c.iter()
+                .map(String::as_str)
+                .take(prefix.len())
+                .eq(prefix.iter().copied())
+        };
+        self.runner
+            .calls()
+            .iter()
+            .map(|c| c.args().to_vec())
+            .filter(starts)
+            .collect()
     }
 
     /// Collects the payload of every `event` emitted from now on.
@@ -103,7 +128,9 @@ impl Harness {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
         self.app.listen_any(event, move |e| {
-            sink.lock().unwrap().push(serde_json::from_str(e.payload()).unwrap());
+            sink.lock()
+                .unwrap()
+                .push(serde_json::from_str(e.payload()).unwrap());
         });
         seen
     }

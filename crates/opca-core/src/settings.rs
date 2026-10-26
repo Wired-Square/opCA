@@ -110,7 +110,10 @@ fn account_id_via_op(identifier: &str) -> Option<String> {
         .map(|account| account.id)
         .map_err(|e| debug!("[settings] `op account get {identifier}` found nothing: {e}"))
         .ok();
-    cache.lock().ok()?.insert(identifier.to_string(), id.clone());
+    cache
+        .lock()
+        .ok()?
+        .insert(identifier.to_string(), id.clone());
     id
 }
 
@@ -147,14 +150,12 @@ fn configured_accounts() -> &'static [AccountInfo] {
 /// caller has already been through `Op::new`, so the session is live.
 fn signed_in_user() -> Option<&'static str> {
     static USER: OnceLock<Option<String>> = OnceLock::new();
-    USER.get_or_init(|| {
-        match op::client(ShellRunner::new(), None).whoami() {
-            Ok(who) if !who.user_uuid.is_empty() => Some(who.user_uuid),
-            Ok(_) => None,
-            Err(e) => {
-                warn!("[settings] could not identify the signed-in account: {e}");
-                None
-            }
+    USER.get_or_init(|| match op::client(ShellRunner::new(), None).whoami() {
+        Ok(who) if !who.user_uuid.is_empty() => Some(who.user_uuid),
+        Ok(_) => None,
+        Err(e) => {
+            warn!("[settings] could not identify the signed-in account: {e}");
+            None
         }
     })
     .as_deref()
@@ -294,7 +295,10 @@ fn save(settings: &Settings) -> Result<(), OpcaError> {
 /// pass different ones for the same account, and [`account_key`] resolves them
 /// to the same entry.
 pub fn aws_credential_item(account: Option<&str>) -> Option<String> {
-    load().aws_credential_items.get(&account_key(account)).cloned()
+    load()
+        .aws_credential_items
+        .get(&account_key(account))
+        .cloned()
 }
 
 /// Select (or with `None`, clear) the AWS credential item for `account`.
@@ -345,9 +349,24 @@ mod tests {
     /// GUI to send a UUID in the first place.
     fn accounts() -> Vec<AccountInfo> {
         vec![
-            account("wiredsquare.1password.com", "alex@wiredsquare.com", "W-ACCT", "W-USER"),
-            account("my.1password.com", "alex@wiredsquare.com", "A-ACCT", "A-USER"),
-            account("my.1password.com", "alex@ferrara.com.au", "B-ACCT", "B-USER"),
+            account(
+                "wiredsquare.1password.com",
+                "alex@wiredsquare.com",
+                "W-ACCT",
+                "W-USER",
+            ),
+            account(
+                "my.1password.com",
+                "alex@wiredsquare.com",
+                "A-ACCT",
+                "A-USER",
+            ),
+            account(
+                "my.1password.com",
+                "alex@ferrara.com.au",
+                "B-ACCT",
+                "B-USER",
+            ),
         ]
     }
 
@@ -357,7 +376,11 @@ mod tests {
     fn test_match_alias_accepts_every_identifier_in_the_list() {
         let all = accounts();
         for identifier in ["wiredsquare.1password.com", "W-ACCT", "W-USER"] {
-            assert_eq!(match_alias(identifier, &all).as_deref(), Some("W-USER"), "{identifier}");
+            assert_eq!(
+                match_alias(identifier, &all).as_deref(),
+                Some("W-USER"),
+                "{identifier}"
+            );
         }
     }
 
@@ -375,8 +398,14 @@ mod tests {
         // consistent with — better to leave the entry where the user put it.
         assert_eq!(match_alias("my.1password.com", &accounts()), None);
         // The UUIDs still tell them apart.
-        assert_eq!(match_alias("A-ACCT", &accounts()).as_deref(), Some("A-USER"));
-        assert_eq!(match_alias("B-USER", &accounts()).as_deref(), Some("B-USER"));
+        assert_eq!(
+            match_alias("A-ACCT", &accounts()).as_deref(),
+            Some("A-USER")
+        );
+        assert_eq!(
+            match_alias("B-USER", &accounts()).as_deref(),
+            Some("B-USER")
+        );
     }
 
     #[test]
@@ -391,7 +420,12 @@ mod tests {
     fn test_match_alias_ignores_blank_aliases() {
         // An older `op` omits the UUIDs; an empty field must not match an
         // empty identifier and claim an unrelated account.
-        let sparse = vec![account("wiredsquare.1password.com", "alex@wiredsquare.com", "", "")];
+        let sparse = vec![account(
+            "wiredsquare.1password.com",
+            "alex@wiredsquare.com",
+            "",
+            "",
+        )];
         assert_eq!(match_alias("", &sparse), None);
         assert_eq!(match_alias("wiredsquare.1password.com", &sparse), None);
     }
@@ -411,35 +445,45 @@ mod tests {
     /// Stand-in for the real resolver: the list match, plus the one shorthand
     /// `op account get` would resolve for us.
     fn resolver(key: &str) -> Option<String> {
-        match_alias(key, &accounts())
-            .or_else(|| (key == "wired").then(|| "W-USER".to_string()))
+        match_alias(key, &accounts()).or_else(|| (key == "wired").then(|| "W-USER".to_string()))
     }
 
     #[test]
     fn test_migrate_adopts_an_address_keyed_entry() {
         let mut settings = with_entries(&[("wiredsquare.1password.com", "item-1")]);
         migrate(&mut settings, resolver);
-        assert_eq!(settings.aws_credential_items.get("W-USER"), Some(&"item-1".into()));
-        assert!(!settings.aws_credential_items.contains_key("wiredsquare.1password.com"));
+        assert_eq!(
+            settings.aws_credential_items.get("W-USER"),
+            Some(&"item-1".into())
+        );
+        assert!(
+            !settings
+                .aws_credential_items
+                .contains_key("wiredsquare.1password.com")
+        );
     }
 
     #[test]
     fn test_migrate_adopts_an_account_uuid_keyed_entry() {
         let mut settings = with_entries(&[("A-ACCT", "item-2")]);
         migrate(&mut settings, resolver);
-        assert_eq!(settings.aws_credential_items.get("A-USER"), Some(&"item-2".into()));
+        assert_eq!(
+            settings.aws_credential_items.get("A-USER"),
+            Some(&"item-2".into())
+        );
     }
 
     #[test]
     fn test_migrate_merges_a_shorthand_and_an_address() {
         // The real-world case: `opca -a wired aws use` and the GUI's address,
         // one account, one item, two entries.
-        let mut settings = with_entries(&[
-            ("wired", "item-1"),
-            ("wiredsquare.1password.com", "item-1"),
-        ]);
+        let mut settings =
+            with_entries(&[("wired", "item-1"), ("wiredsquare.1password.com", "item-1")]);
         migrate(&mut settings, resolver);
-        assert_eq!(settings.aws_credential_items.get("W-USER"), Some(&"item-1".into()));
+        assert_eq!(
+            settings.aws_credential_items.get("W-USER"),
+            Some(&"item-1".into())
+        );
         assert_eq!(settings.aws_credential_items.len(), 1);
     }
 
@@ -451,7 +495,10 @@ mod tests {
             ("wiredsquare.1password.com", "from-cli"),
         ]);
         migrate(&mut settings, resolver);
-        assert_eq!(settings.aws_credential_items.get("W-USER"), Some(&"canonical".into()));
+        assert_eq!(
+            settings.aws_credential_items.get("W-USER"),
+            Some(&"canonical".into())
+        );
         assert_eq!(settings.aws_credential_items.len(), 1);
     }
 
@@ -459,11 +506,17 @@ mod tests {
     fn test_migrate_resolves_conflicting_aliases_the_same_way_every_run() {
         // Nothing is canonical yet and the two disagree, so one has to lose —
         // sorted key order decides, not whatever the map iterates first.
-        let entries = [("W-ACCT", "from-gui"), ("wiredsquare.1password.com", "from-cli")];
+        let entries = [
+            ("W-ACCT", "from-gui"),
+            ("wiredsquare.1password.com", "from-cli"),
+        ];
         for _ in 0..3 {
             let mut settings = with_entries(&entries);
             migrate(&mut settings, resolver);
-            assert_eq!(settings.aws_credential_items.get("W-USER"), Some(&"from-gui".into()));
+            assert_eq!(
+                settings.aws_credential_items.get("W-USER"),
+                Some(&"from-gui".into())
+            );
             assert_eq!(settings.aws_credential_items.len(), 1);
         }
     }
@@ -475,8 +528,16 @@ mod tests {
             ("some.other.1password.com", "item-4"),
         ]);
         migrate(&mut settings, resolver);
-        assert_eq!(settings.aws_credential_items.get(DEFAULT_ACCOUNT_KEY), Some(&"item-3".into()));
-        assert_eq!(settings.aws_credential_items.get("some.other.1password.com"), Some(&"item-4".into()));
+        assert_eq!(
+            settings.aws_credential_items.get(DEFAULT_ACCOUNT_KEY),
+            Some(&"item-3".into())
+        );
+        assert_eq!(
+            settings
+                .aws_credential_items
+                .get("some.other.1password.com"),
+            Some(&"item-4".into())
+        );
     }
 
     #[test]

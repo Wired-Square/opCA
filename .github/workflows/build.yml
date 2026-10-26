@@ -70,7 +70,7 @@ jobs:
           cat .cargo/mirror.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99
         with:
           targets: ${{ matrix.target }}
 

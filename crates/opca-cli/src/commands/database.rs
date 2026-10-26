@@ -1,6 +1,6 @@
 use opca_core::error::OpcaError;
 use opca_core::op::{Runner, ShellRunner};
-use opca_core::services::ca::{check_crl_batch_update, CertificateAuthority};
+use opca_core::services::ca::{CertificateAuthority, check_crl_batch_update};
 use opca_core::services::database::CaConfig;
 use opca_core::services::local_backup::LocalBackup;
 
@@ -81,7 +81,9 @@ fn handle_config_set<R: Runner>(
             "ca_aws_region" => updates.ca_aws_region = Some(value),
             "crl_batch_enabled" => {
                 updates.crl_batch_enabled = Some(value.parse::<bool>().map_err(|_| {
-                    OpcaError::Other(format!("Invalid boolean for '{key}': {value} (use true or false)"))
+                    OpcaError::Other(format!(
+                        "Invalid boolean for '{key}': {value} (use true or false)"
+                    ))
                 })?);
             }
             _ => {
@@ -161,10 +163,7 @@ fn handle_rebuild<R: Runner>(
     Ok(())
 }
 
-fn handle_upload<R: Runner>(
-    app: &mut AppContext<R>,
-    stores: Vec<String>,
-) -> Result<(), OpcaError> {
+fn handle_upload<R: Runner>(app: &mut AppContext<R>, stores: Vec<String>) -> Result<(), OpcaError> {
     output::title("Uploading CA Database");
 
     let ca = app.ca.as_ref().ok_or(OpcaError::CaNotFound)?;
@@ -215,5 +214,12 @@ fn print_config(config: &CaConfig) {
     field("Private Store", &config.ca_private_store);
     field("Backup Store", &config.ca_backup_store);
     field("AWS Region", &config.ca_aws_region);
-    output::info("CRL Batches", if config.crl_batch_enabled == Some(true) { "on" } else { "off" });
+    output::info(
+        "CRL Batches",
+        if config.crl_batch_enabled == Some(true) {
+            "on"
+        } else {
+            "off"
+        },
+    );
 }

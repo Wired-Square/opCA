@@ -71,38 +71,29 @@
   gap: 20px;
 }
 
-.input-with-dropdown {
-  position: relative;
-}
-
-.input-with-dropdown input {
-  width: 100%;
-  padding-right: 36px;
-  box-sizing: border-box;
-}
-
-.dropdown-toggle {
-  position: absolute;
-  right: 1px;
-  top: 1px;
-  bottom: 1px;
-  width: 34px;
-  background: var(--app-accent);
-  border: none;
-  border-left: 1px solid var(--app-border);
-  color: var(--app-accent-contrast);
-  cursor: pointer;
+.picker-row {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0;
-  transition: opacity 0.15s;
-  font-size: 1.25rem;
-  line-height: 1;
+  gap: 8px;
 }
 
-.dropdown-toggle:hover {
-  opacity: 0.85;
+.picker-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-browse {
+  flex-shrink: 0;
+}
+
+.picker-browse:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.picker-heading {
+  padding-block: 8px 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .app-popover__option:has(> .dropdown-item) {
@@ -112,18 +103,20 @@
 .dropdown-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-
-.dropdown-item-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   min-width: 0;
 }
 
-/* The two lines of a dropdown row — the saved-logins picker shows vault over
-   account, the account picker shows email over sign-in address. */
+.dropdown-item-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The two lines of a row — a vault over its account, or an account's email
+   over its sign-in address. */
 .dropdown-item-primary,
 .dropdown-item-secondary {
   white-space: nowrap;
@@ -140,6 +133,14 @@
 .dropdown-item-secondary {
   font-size: 0.75rem;
   color: var(--text-tertiary);
+}
+
+.connect-recent {
+  margin-top: 16px;
+}
+
+.connect-recent-toggle {
+  width: 100%;
 }
 
 .saved-forget {

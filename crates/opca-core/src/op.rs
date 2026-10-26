@@ -4,10 +4,10 @@
 use std::fmt::Display;
 
 pub use wslib_1password::{
-    accounts, cli_path, find_account, is_item_id, AccountInfo, Assignment, Error, FieldType, Item,
-    ItemRef, ItemSummary, Runner, VaultInfo,
+    AccountInfo, Assignment, Error, FieldType, Item, ItemRef, ItemSummary, Runner, VaultInfo,
+    accounts, cli_path, find_account, is_item_id,
 };
-use wslib_1password::{map_cli_error, Call, Output};
+use wslib_1password::{Call, Output, map_cli_error};
 
 use crate::error::OpcaError;
 
@@ -53,12 +53,16 @@ pub fn connect<R: Runner + Clone>(
 ) -> Result<Vault<R>, OpcaError> {
     let vault = vault.trim();
     if vault.is_empty() {
-        return Err(OpcaError::VaultNotFound("No 1Password vault configured.".into()));
+        return Err(OpcaError::VaultNotFound(
+            "No 1Password vault configured.".into(),
+        ));
     }
     let op = client(runner, account);
     op.sign_in()?;
     op.open_vault(vault).map_err(|e| match e {
-        Error::Cli { .. } => OpcaError::VaultNotFound(format!("1Password vault {vault:?} not found.")),
+        Error::Cli { .. } => {
+            OpcaError::VaultNotFound(format!("1Password vault {vault:?} not found."))
+        }
         other => other.into(),
     })
 }
@@ -96,7 +100,9 @@ pub fn put_document<R: Runner>(
     content: &str,
 ) -> Result<(), OpcaError> {
     match vault.edit_document(&ItemRef::title(title), file_name, content.as_bytes()) {
-        Err(Error::ItemNotFound(_)) => vault.create_document(title, file_name, content.as_bytes())?,
+        Err(Error::ItemNotFound(_)) => {
+            vault.create_document(title, file_name, content.as_bytes())?
+        }
         edited => edited?,
     }
     Ok(())
@@ -119,24 +125,39 @@ pub fn put_item<R: Runner>(
 
 /// The text `reference` names, as `op read` prints it.
 pub fn read_text<R: Runner>(vault: &Vault<R>, reference: &str) -> Result<String, OpcaError> {
-    Ok(vault.op().read(reference)?.into_text()?.expose().to_string())
+    Ok(vault
+        .op()
+        .read(reference)?
+        .into_text()?
+        .expose()
+        .to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{fake_vault, FakeRunner, Output};
+    use crate::testutil::{FakeRunner, Output, fake_vault};
 
     #[test]
     fn put_document_edits_an_existing_document_in_one_call() {
         let fake = FakeRunner::new();
         fake.respond(Output::ok(""));
-        put_document(&fake_vault(&fake), "CA_Database", "ca-db-export.sql", &"x".repeat(200 * 1024)).unwrap();
+        put_document(
+            &fake_vault(&fake),
+            "CA_Database",
+            "ca-db-export.sql",
+            &"x".repeat(200 * 1024),
+        )
+        .unwrap();
 
         let calls = fake.calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(&calls[0].args()[..3], ["document", "edit", "CA_Database"]);
-        assert!(calls[0].args().contains(&"--file-name=ca-db-export.sql".to_string()));
+        assert!(
+            calls[0]
+                .args()
+                .contains(&"--file-name=ca-db-export.sql".to_string())
+        );
         assert_eq!(calls[0].stdin(), None);
         assert_eq!(fake.files(), [b"x".repeat(200 * 1024)]);
     }
@@ -144,8 +165,10 @@ mod tests {
     #[test]
     fn put_document_creates_a_missing_document() {
         let fake = FakeRunner::new();
-        fake.respond(Output::fail("[ERROR] \"CRL\" isn't an item in the \"TestVault\" vault."))
-            .respond(Output::ok(""));
+        fake.respond(Output::fail(
+            "[ERROR] \"CRL\" isn't an item in the \"TestVault\" vault.",
+        ))
+        .respond(Output::ok(""));
         put_document(&fake_vault(&fake), "CRL", "crl.pem", "pem").unwrap();
 
         let calls = fake.calls();
@@ -157,7 +180,9 @@ mod tests {
     fn put_item_edits_and_creates_only_a_missing_item() {
         let fake = FakeRunner::new();
         fake.respond(Output::ok(""))
-            .respond(Output::fail("[ERROR] \"OpenVPN\" isn't an item in the \"TestVault\" vault."))
+            .respond(Output::fail(
+                "[ERROR] \"OpenVPN\" isn't an item in the \"TestVault\" vault.",
+            ))
             .respond(crate::testutil::created("OpenVPN"));
         let vault = fake_vault(&fake);
         let fields = [assign("server.port[text]", 1194).unwrap()];
@@ -188,9 +213,12 @@ mod tests {
     #[test]
     fn a_write_refused_by_a_racing_write_is_made_once_more() {
         let fake = FakeRunner::new();
-        fake.respond(Output::fail(CONFLICT)).respond(crate::testutil::created("CRT_1_a"));
+        fake.respond(Output::fail(CONFLICT))
+            .respond(crate::testutil::created("CRT_1_a"));
         let fields = [assign("cn[text]", "host.example.com").unwrap()];
-        retrying_vault(&fake).create_item("CRT_1_a", "Secure Note", &fields).unwrap();
+        retrying_vault(&fake)
+            .create_item("CRT_1_a", "Secure Note", &fields)
+            .unwrap();
 
         let calls = fake.calls();
         assert_eq!(calls.len(), 2);
@@ -200,9 +228,12 @@ mod tests {
     #[test]
     fn a_second_write_conflict_surfaces() {
         let fake = FakeRunner::new();
-        fake.respond(Output::fail(CONFLICT)).respond(Output::fail(CONFLICT));
+        fake.respond(Output::fail(CONFLICT))
+            .respond(Output::fail(CONFLICT));
         let fields = [assign("cn[text]", "host.example.com").unwrap()];
-        let err = retrying_vault(&fake).edit_item(&ItemRef::title("CRT_1_a"), &fields).unwrap_err();
+        let err = retrying_vault(&fake)
+            .edit_item(&ItemRef::title("CRT_1_a"), &fields)
+            .unwrap_err();
 
         assert!(matches!(err, Error::WriteConflict(_)));
         assert_eq!(fake.calls().len(), 2);
@@ -220,24 +251,37 @@ mod tests {
     #[test]
     fn create_vault_makes_a_new_name() {
         let fake = FakeRunner::new();
-        fake.respond(Output::ok("[]")).respond(Output::ok(r#"{"id":"v9","name":"New CA"}"#));
-        assert_eq!(create_vault(&client(fake.clone(), None), "New CA").unwrap().id, "v9");
+        fake.respond(Output::ok("[]"))
+            .respond(Output::ok(r#"{"id":"v9","name":"New CA"}"#));
+        assert_eq!(
+            create_vault(&client(fake.clone(), None), "New CA")
+                .unwrap()
+                .id,
+            "v9"
+        );
     }
 
     #[test]
     fn an_empty_vault_name_is_refused_unsent() {
         let fake = FakeRunner::new();
-        assert!(matches!(connect(fake.clone(), " ", None), Err(OpcaError::VaultNotFound(_))));
+        assert!(matches!(
+            connect(fake.clone(), " ", None),
+            Err(OpcaError::VaultNotFound(_))
+        ));
         assert!(fake.calls().is_empty());
     }
 
     #[test]
     fn a_vault_op_cannot_name_is_vault_not_found() {
         let fake = FakeRunner::new();
-        fake.respond(Output::ok("{}")).respond(Output::fail("[ERROR] something odd"));
+        fake.respond(Output::ok("{}"))
+            .respond(Output::fail("[ERROR] something odd"));
         let err = connect(fake.clone(), "Private CA", Some("test.1password.com")).unwrap_err();
         assert!(matches!(err, OpcaError::VaultNotFound(m) if m.contains("Private CA")));
-        assert!(fake.calls().iter().all(|c| c.args().ends_with(&["--account".into(), "test.1password.com".into()])));
+        assert!(fake.calls().iter().all(|c| {
+            c.args()
+                .ends_with(&["--account".into(), "test.1password.com".into()])
+        }));
     }
 
     #[test]

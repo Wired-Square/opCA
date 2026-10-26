@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Building needs Rust 1.99, pinned by `rust-toolchain.toml` and declared as the
+  crates' `rust-version`; CI installs the same toolchain.
+- The crates are on the Rust 2024 edition, with Cargo's resolver 3, which
+  picks dependency versions that build on the declared `rust-version`.
+- The Connect page asks for the account first, then the vault. Each has a
+  Browse button, and vaults are listed only when you press it, for the account
+  in the field; a Recent logins dropdown fills both fields.
+- Tauri is updated to 2.12.
+- The MCP dev harness's page code now comes from `@wired-square/mcp-bridge`
+  0.1.0, beside `wslib-mcp` 0.2.0, instead of copies kept in step by tests.
 - Holding a quit until 1Password work finishes now comes from `wslib-tauri`
   0.1.0's quit guard; the app menu reads "Quit opCA" as before.
 - Inspect reads a certificate's, CSR's or CRL's signature algorithm, key and

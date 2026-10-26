@@ -2,9 +2,9 @@ use chrono::Utc;
 use opca_core::error::OpcaError;
 use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::ca::parse_crl_metadata;
-use opca_core::utils::datetime::{format_datetime, DateTimeFormat};
+use opca_core::utils::datetime::{DateTimeFormat, format_datetime};
 
-use crate::app::{with_lock, AppContext};
+use crate::app::{AppContext, with_lock};
 use crate::output;
 use crate::{CrlAction, CrlArgs};
 
@@ -28,7 +28,10 @@ fn handle_create<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
         let crl_pem = ca.generate_crl()?;
         output::print_result("CRL generation", true);
-        let db = ca.ca_database.as_ref().ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
+        let db = ca
+            .ca_database
+            .as_ref()
+            .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
         if db.get_crl_batch()?.is_some() {
             output::print_result("CRL batch upload to the private store", true);
         }
@@ -63,8 +66,7 @@ fn handle_export<R: Runner>(
         output::print_result(&format!("CRL written to {path}"), true);
     } else {
         // stdout
-        output::write_stdout(&data)
-            .map_err(|e| OpcaError::Io(e.to_string()))?;
+        output::write_stdout(&data).map_err(|e| OpcaError::Io(e.to_string()))?;
     }
 
     Ok(())
@@ -79,46 +81,73 @@ fn handle_info<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError> {
     let metadata = parse_crl_metadata(&crl_pem)?;
 
     output::subtitle("Certificate Revocation List");
-    output::info("CRL Number", &metadata.crl_number.map(|n| n.to_string()).unwrap_or_else(|| "N/A".to_string()));
+    output::info(
+        "CRL Number",
+        &metadata
+            .crl_number
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "N/A".to_string()),
+    );
     output::info("Issuer", metadata.issuer.as_deref().unwrap_or("N/A"));
-    output::info("Last Update", metadata.last_update.as_deref().unwrap_or("N/A"));
-    output::info("Next Update", metadata.next_update.as_deref().unwrap_or("N/A"));
+    output::info(
+        "Last Update",
+        metadata.last_update.as_deref().unwrap_or("N/A"),
+    );
+    output::info(
+        "Next Update",
+        metadata.next_update.as_deref().unwrap_or("N/A"),
+    );
     output::info(
         "Revoked Certificates",
-        &metadata.revoked_count.map(|n| n.to_string()).unwrap_or_else(|| "0".to_string()),
+        &metadata
+            .revoked_count
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "0".to_string()),
     );
 
-    let db = ca.ca_database.as_ref().ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
+    let db = ca
+        .ca_database
+        .as_ref()
+        .ok_or_else(|| OpcaError::Other("Database not loaded".into()))?;
     if let Some(batch) = db.get_crl_batch()? {
         let status = batch.status(Utc::now());
         output::subtitle("Pre-signed CRL Batch");
         output::info(
             "CRL Numbers",
-            &format!("{}–{}", batch.first_number, batch.first_number + batch.count - 1),
+            &format!(
+                "{}–{}",
+                batch.first_number,
+                batch.first_number + batch.count - 1
+            ),
         );
         output::info("Due CRL", &status.due_number.to_string());
-        output::info("Signed Until", &format_datetime(status.signed_until, DateTimeFormat::Text));
-        output::info("Unreleased", &format!("{} of {}", status.remaining, status.count));
+        output::info(
+            "Signed Until",
+            &format_datetime(status.signed_until, DateTimeFormat::Text),
+        );
+        output::info(
+            "Unreleased",
+            &format!("{} of {}", status.remaining, status.count),
+        );
     }
 
     // Parse revoked entries from JSON if available
-    if let Some(ref json) = metadata.revoked_json {
-        if let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(json) {
-            if !entries.is_empty() {
-                println!();
-                let headers = &["Serial", "Revocation Date"];
-                let rows: Vec<Vec<String>> = entries
-                    .iter()
-                    .map(|e| {
-                        vec![
-                            e["serial"].as_str().unwrap_or("?").to_string(),
-                            e["date"].as_str().unwrap_or("?").to_string(),
-                        ]
-                    })
-                    .collect();
-                output::print_table(headers, &rows);
-            }
-        }
+    if let Some(ref json) = metadata.revoked_json
+        && let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(json)
+        && !entries.is_empty()
+    {
+        println!();
+        let headers = &["Serial", "Revocation Date"];
+        let rows: Vec<Vec<String>> = entries
+            .iter()
+            .map(|e| {
+                vec![
+                    e["serial"].as_str().unwrap_or("?").to_string(),
+                    e["date"].as_str().unwrap_or("?").to_string(),
+                ]
+            })
+            .collect();
+        output::print_table(headers, &rows);
     }
 
     Ok(())

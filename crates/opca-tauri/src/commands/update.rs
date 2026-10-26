@@ -3,7 +3,7 @@
 //! Queries the GitHub releases API for the latest published release and
 //! compares it against the running application version.
 
-use log::{info, warn, debug};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -68,7 +68,10 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         .map_err(|e| format!("Failed to parse release info: {}", e))?;
 
     if is_newer_version(current_version, &release.tag_name) {
-        info!("[tauri] update available: {} -> {}", current_version, release.tag_name);
+        info!(
+            "[tauri] update available: {} -> {}",
+            current_version, release.tag_name
+        );
         Ok(Some(UpdateInfo {
             version: release.tag_name,
             url: release.html_url,

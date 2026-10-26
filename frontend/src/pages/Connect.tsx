@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, Show, For, onMount, type JSX } from "solid-js";
+import { createResource, createSignal, Show, For, onMount, type JSX } from "solid-js";
 import { errorMessage } from "../api/tauri";
 import { useNavigate } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
@@ -30,8 +30,9 @@ interface SavedLogin {
   account: string | null;
 }
 
-/** Which field's dropdown is open — only ever one at a time. */
-type Dropdown = "vault" | "account";
+/** Which field's list is open — only ever one at a time. */
+type Dropdown = "vault" | "account" | "recent";
+
 
 const STORAGE_KEY = "opca_saved_logins";
 
@@ -65,60 +66,63 @@ function removeLogin(vault: string, account: string | null): SavedLogin[] {
   return logins;
 }
 
-/** A labelled text field with an in-field button that drops a list of choices
- *  below it. Both fields on this page are this shape; `children` are the rows.
- *  The button is hidden when there is nothing to offer. */
+/** A labelled text field with a Browse button beside it that drops a list of
+ *  choices below both; `children` are the rows. */
 function PickerField(props: {
   id: string;
   label: string;
   placeholder: string;
   value: string;
   onInput: (value: string) => void;
-  onFocus?: () => void;
   autofocus?: boolean;
-  /** Toggle glyph and its accessible name; omit to offer no dropdown. */
-  toggle?: { glyph: string; label: string };
+  /** The Browse button's accessible name, and why it is disabled if it is; omit for no button. */
+  browse?: { label: string; disabledReason?: string };
+  heading: string;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
   children: JSX.Element;
 }) {
   let fieldEl!: HTMLDivElement;
+  const headingId = `${props.id}-list-heading`;
   return (
     <div class="form-group">
       <label class="form-label" for={props.id}>{props.label}</label>
-      <div ref={fieldEl} class="input-with-dropdown">
+      <div ref={fieldEl} class="picker-row">
         <input
           id={props.id}
           type="text"
           placeholder={props.placeholder}
           value={props.value}
           onInput={(e) => props.onInput(e.currentTarget.value)}
-          onFocus={() => props.onFocus?.()}
           autofocus={props.autofocus}
           autocomplete="off"
           autocorrect="off"
           autocapitalize="off"
           spellcheck={false}
         />
-        <Show when={props.toggle}>
-          {(toggle) => (
+        <Show when={props.browse}>
+          {(browse) => (
             <button
               type="button"
-              class="dropdown-toggle"
-              aria-label={toggle().label}
+              class="btn-secondary picker-browse"
+              aria-label={browse().label}
               aria-haspopup="listbox"
               aria-expanded={props.open}
+              disabled={!!browse().disabledReason}
+              title={browse().disabledReason}
               onClick={props.onToggle}
-              tabIndex={-1}
             >
-              {toggle().glyph}
+              Browse
             </button>
           )}
         </Show>
         <Show when={props.open}>
-          <Popover anchor={fieldEl} matchWidth role="listbox" onClose={props.onClose}>
-            {props.children}
+          <Popover anchor={fieldEl} matchWidth onClose={props.onClose}>
+            <div id={headingId} class="popover-note picker-heading">{props.heading}</div>
+            <div role="listbox" aria-labelledby={headingId}>
+              {props.children}
+            </div>
           </Popover>
         </Show>
       </div>
@@ -126,8 +130,8 @@ function PickerField(props: {
   );
 }
 
-/** One row of either dropdown: a primary line with a smaller one beneath, and
- *  an optional trailing button. */
+/** One row of a list: a primary line with an optional smaller one beneath, and
+ *  an optional trailing control. */
 function DropdownItem(props: {
   primary: string;
   secondary?: string | null;
@@ -158,11 +162,12 @@ export default function Connect() {
   const [saved, setSaved] = createSignal<SavedLogin[]>([]);
   const [accounts, setAccounts] = createSignal<AccountInfo[]>([]);
   const [openDropdown, setOpenDropdown] = createSignal<Dropdown | null>(null);
+  let recentEl!: HTMLDivElement;
   const [opCli, setOpCli] = createSignal<OpCliStatus | null>(null);
   const [creating, setCreating] = createSignal(false);
 
-  // `op vault list` is slow and may prompt for sign-in, so each account's
-  // vaults are fetched when the dropdown first opens for it, then reused.
+  // `op vault list` is slow and may prompt for sign-in, so it runs only from the
+  // vault Browse button, once per account value.
   const vaultLists = new Map<string, Promise<VaultInfo[]>>();
   function vaultsIn(acct: string) {
     let listing = vaultLists.get(acct);
@@ -175,11 +180,7 @@ export default function Connect() {
   }
   const [listedAccount, setListedAccount] = createSignal<string>();
   const [vaults, { refetch: retryVaults }] = createResource(listedAccount, vaultsIn);
-  const unsavedVaults = createMemo(() => {
-    if (vaults.state !== "ready") return [];
-    const acct = listedAccount() || null;
-    return vaults().filter((v) => !saved().some((l) => l.vault === v.name && l.account === acct));
-  });
+  const accountName = (value: string) => accountLabel(value || null, accounts()) ?? "the default account";
 
   function openVaults() {
     const acct = account().trim();
@@ -192,7 +193,7 @@ export default function Connect() {
     setSaved(loadSavedLogins());
     fetchUpdate();
     // Both are local, sign-in-free lookups; neither gates the other. A failing
-    // account list just leaves the picker hidden — the op CLI status line below
+    // account list just leaves account Browse disabled — the op CLI status line below
     // already reports the case where `op` is missing entirely.
     const [status, configured] = await Promise.all([
       invoke<OpCliStatus>("check_op_cli").catch(() => ({ found: false, path: null })),
@@ -212,11 +213,6 @@ export default function Connect() {
     setVault(login.vault);
     setAccount(login.account ?? "");
     setOpenDropdown(null);
-  }
-
-  function forgetLogin(e: Event, login: SavedLogin) {
-    e.stopPropagation();
-    setSaved(removeLogin(login.vault, login.account));
   }
 
   function selectAccount(picked: AccountInfo) {
@@ -282,58 +278,17 @@ export default function Connect() {
 
         <form class="connect-form" onSubmit={handleSubmit}>
           <PickerField
-            id="vault"
-            label={creating() ? "New 1Password Vault" : "1Password Vault"}
-            placeholder="e.g. Private CA"
-            value={vault()}
-            onInput={(v) => { setVault(v); setOpenDropdown(null); }}
-            onFocus={() => !creating() && saved().length > 0 && openVaults()}
-            autofocus
-            toggle={creating() ? undefined : { glyph: "▾", label: "Show vaults" }}
-            open={openDropdown() === "vault"}
-            onToggle={() => toggle("vault")}
-            onClose={() => setOpenDropdown(null)}
-          >
-            <For each={saved()}>
-              {(login) => (
-                <DropdownItem
-                  primary={login.vault}
-                  secondary={accountLabel(login.account, accounts())}
-                  onSelect={() => selectLogin(login)}
-                >
-                  <button
-                    type="button"
-                    class="saved-forget"
-                    aria-label="Forget this login"
-                    onClick={(e) => forgetLogin(e, login)}
-                    title="Forget this login"
-                  >
-                    &times;
-                  </button>
-                </DropdownItem>
-              )}
-            </For>
-            <For each={unsavedVaults()}>
-              {(v) => <DropdownItem primary={v.name} onSelect={() => { setVault(v.name); setOpenDropdown(null); }} />}
-            </For>
-            <Show when={vaults.loading}>
-              <div class="popover-note"><Spinner message="Loading vaults…" small /></div>
-            </Show>
-            <Show when={vaults.error}>
-              {(err) => <div class="popover-note popover-error">{errorMessage(err())}</div>}
-            </Show>
-            <Show when={vaults.state === "ready" && vaults().length === 0}>
-              <div class="popover-note">No vaults found</div>
-            </Show>
-          </PickerField>
-
-          <PickerField
             id="account"
-            label="Account (optional)"
+            label="1Password Account (optional)"
             placeholder="e.g. my.1password.com"
             value={account()}
             onInput={(v) => { setAccount(v); setOpenDropdown(null); }}
-            toggle={accounts().length > 0 ? { glyph: "▾", label: "Show 1Password accounts" } : undefined}
+            autofocus
+            browse={{
+              label: "Browse 1Password accounts",
+              disabledReason: accounts().length > 0 ? undefined : "No accounts are configured in the op CLI",
+            }}
+            heading="Accounts in the op CLI"
             open={openDropdown() === "account"}
             onToggle={() => toggle("account")}
             onClose={() => setOpenDropdown(null)}
@@ -349,6 +304,34 @@ export default function Connect() {
             </For>
           </PickerField>
 
+          <PickerField
+            id="vault"
+            label={creating() ? "New 1Password Vault" : "1Password Vault"}
+            placeholder="e.g. Private CA"
+            value={vault()}
+            onInput={(v) => { setVault(v); setOpenDropdown(null); }}
+            browse={creating() ? undefined : { label: `Browse vaults in ${accountName(account().trim())}` }}
+            heading={`Vaults in ${accountName(listedAccount() ?? "")}`}
+            open={openDropdown() === "vault"}
+            onToggle={() => toggle("vault")}
+            onClose={() => setOpenDropdown(null)}
+          >
+            <Show when={vaults.state === "ready"}>
+              <For each={vaults()}>
+                {(v) => <DropdownItem primary={v.name} onSelect={() => { setVault(v.name); setOpenDropdown(null); }} />}
+              </For>
+            </Show>
+            <Show when={vaults.loading}>
+              <div class="popover-note"><Spinner message="Loading vaults…" small /></div>
+            </Show>
+            <Show when={vaults.error}>
+              {(err) => <div class="popover-note popover-error">{errorMessage(err())}</div>}
+            </Show>
+            <Show when={vaults.state === "ready" && vaults().length === 0}>
+              <div class="popover-note">No vaults found</div>
+            </Show>
+          </PickerField>
+
           {error() && <p class="connect-error" role="alert">{error()}</p>}
 
           <button class="btn-primary connect-btn" type="submit" disabled={loading() || !vault().trim()}>
@@ -357,6 +340,47 @@ export default function Connect() {
               : loading() ? "Connecting…" : "Connect"}
           </button>
         </form>
+
+        <Show when={!creating() && saved().length > 0}>
+          <div ref={recentEl} class="connect-recent">
+            <button
+              type="button"
+              class="btn-secondary connect-recent-toggle"
+              aria-haspopup="listbox"
+              aria-expanded={openDropdown() === "recent"}
+              onClick={() => setOpenDropdown(openDropdown() === "recent" ? null : "recent")}
+            >
+              Recent logins ▾
+            </button>
+            <Show when={openDropdown() === "recent"}>
+              <Popover anchor={recentEl} matchWidth onClose={() => setOpenDropdown(null)}>
+                <div role="listbox" aria-label="Recent logins">
+                  <For each={saved()}>
+                    {(login) => {
+                      const label = () => accountLabel(login.account, accounts()) ?? "default account";
+                      return (
+                        <DropdownItem primary={login.vault} secondary={label()} onSelect={() => selectLogin(login)}>
+                          <button
+                            type="button"
+                            class="saved-forget"
+                            aria-label={`Forget ${login.vault} in ${label()}`}
+                            title="Forget this login"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSaved(removeLogin(login.vault, login.account));
+                            }}
+                          >
+                            &times;
+                          </button>
+                        </DropdownItem>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Popover>
+            </Show>
+          </div>
+        </Show>
 
         <button class="btn-ghost connect-mode-switch" type="button" onClick={switchMode} disabled={loading()}>
           {creating() ? "Connect to an existing vault" : "New CA in a new vault…"}

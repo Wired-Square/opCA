@@ -114,8 +114,10 @@ impl StorageBackend for StorageRsync {
             // SSH-based rsync — test SSH connectivity
             let output = Command::new("ssh")
                 .args([
-                    "-o", "ConnectTimeout=5",
-                    "-o", "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=5",
+                    "-o",
+                    "BatchMode=yes",
                     &host,
                     "true",
                 ])
@@ -164,8 +166,7 @@ mod tests {
 
     #[test]
     fn test_parse_host() {
-        let host =
-            StorageRsync::parse_host("rsync://deploy@web.example.com/var/www/pki/").unwrap();
+        let host = StorageRsync::parse_host("rsync://deploy@web.example.com/var/www/pki/").unwrap();
         assert_eq!(host, "deploy@web.example.com");
     }
 
@@ -177,16 +178,14 @@ mod tests {
 
     #[test]
     fn test_parse_host_daemon_module() {
-        let host =
-            StorageRsync::parse_host("rsync://fileserver.example.com::opca-backup").unwrap();
+        let host = StorageRsync::parse_host("rsync://fileserver.example.com::opca-backup").unwrap();
         assert_eq!(host, "fileserver.example.com");
     }
 
     #[test]
     fn test_parse_host_daemon_module_with_user() {
         let host =
-            StorageRsync::parse_host("rsync://deploy@fileserver.example.com::opca-backup")
-                .unwrap();
+            StorageRsync::parse_host("rsync://deploy@fileserver.example.com::opca-backup").unwrap();
         assert_eq!(host, "deploy@fileserver.example.com");
     }
 
@@ -208,10 +207,8 @@ mod tests {
 
     #[test]
     fn test_parse_destination_daemon_module() {
-        let dest = StorageRsync::parse_destination(
-            "rsync://fileserver.example.com::opca-backup",
-        )
-        .unwrap();
+        let dest =
+            StorageRsync::parse_destination("rsync://fileserver.example.com::opca-backup").unwrap();
         assert_eq!(dest, "fileserver.example.com::opca-backup");
     }
 }

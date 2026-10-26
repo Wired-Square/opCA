@@ -18,10 +18,15 @@ use crate::{Cli, Commands};
 /// Dispatch the parsed CLI to the appropriate command handler.
 pub fn dispatch(cli: Cli) -> Result<(), OpcaError> {
     if let Commands::Ca(crate::CaArgs {
-        action: crate::CaAction::Init { create_vault: true, .. },
+        action: crate::CaAction::Init {
+            create_vault: true, ..
+        },
     }) = &cli.command
     {
-        let created = op::create_vault(&op::client(ShellRunner::new(), cli.account.as_deref()), &cli.vault)?;
+        let created = op::create_vault(
+            &op::client(ShellRunner::new(), cli.account.as_deref()),
+            &cli.vault,
+        )?;
         output::print_result(&format!("Created vault {}", created.name), true);
     }
 

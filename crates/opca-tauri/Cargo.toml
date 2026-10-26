@@ -1,16 +1,17 @@
 [package]
 name = "opca-tauri"
 version.workspace = true
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 description = "OPCA desktop application — Tauri 2 GUI"
 
 [dependencies]
 opca-core = { path = "../opca-core" }
-tauri = { version = "2", features = [] }
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-log = "2"
-tauri-plugin-shell = "2"
+tauri = { version = "2.12", features = [] }
+tauri-plugin-clipboard-manager = "2.5"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-log = "2.10"
+tauri-plugin-shell = "2.5"
 wslib-tauri = { version = "0.1", registry = "wired-square" }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -27,11 +28,11 @@ md5 = "0.7"
 wslib-crypto-x509 = { version = "0.1.2", registry = "wired-square" }
 wslib-crypto-ca = { version = "0.1.1", registry = "wired-square" }
 wslib-dns = { version = "0.2.1", registry = "wired-square" }
-wslib-mcp = { version = "0.1", registry = "wired-square", features = ["http", "dom", "tauri-bridge"], optional = true }
+wslib-mcp = { version = "0.2", registry = "wired-square", features = ["http", "dom", "tauri-bridge"], optional = true }
 
 [dev-dependencies]
 opca-core = { path = "../opca-core", features = ["test-support"] }
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2.12", features = ["test"] }
 tempfile = "3"
 
 [features]
@@ -39,4 +40,4 @@ tempfile = "3"
 mcp = ["dep:wslib-mcp"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }

@@ -12,7 +12,7 @@ use openssl::pkey::{HasPublic, Id, PKey, PKeyRef, Private};
 use openssl::x509::extension::{
     AuthorityKeyIdentifier, BasicConstraints, KeyUsage, SubjectKeyIdentifier,
 };
-use openssl::x509::{X509Builder, X509Req, X509};
+use openssl::x509::{X509, X509Builder, X509Req};
 use rustls::crypto::CryptoProvider;
 use rustls_pki_types::PrivateKeyDer;
 use serde::{Deserialize, Serialize};
@@ -181,7 +181,10 @@ pub(crate) fn crypto_provider() -> std::sync::Arc<CryptoProvider> {
 
 pub(crate) fn signer_of(key: &PKey<Private>) -> Result<Signer, OpcaError> {
     let der = key.private_key_to_pkcs8()?;
-    Ok(Signer::new(crypto_provider(), &PrivateKeyDer::Pkcs8(der.into()))?)
+    Ok(Signer::new(
+        crypto_provider(),
+        &PrivateKeyDer::Pkcs8(der.into()),
+    )?)
 }
 
 // ---------------------------------------------------------------------------
@@ -345,10 +348,7 @@ impl CertificateBundle {
     }
 
     /// Load a PEM-encoded private key, optionally decrypting with a passphrase.
-    fn load_private_key(
-        pem: &[u8],
-        passphrase: Option<&[u8]>,
-    ) -> Result<PKey<Private>, OpcaError> {
+    fn load_private_key(pem: &[u8], passphrase: Option<&[u8]>) -> Result<PKey<Private>, OpcaError> {
         match passphrase {
             Some(pw) => PKey::private_key_from_pem_passphrase(pem, pw),
             None => PKey::private_key_from_pem(pem),
@@ -423,8 +423,8 @@ impl CertificateBundle {
 
         let not_before =
             Asn1Time::days_from_now(0).map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-        let not_after = Asn1Time::days_from_now(days as u32)
-            .map_err(|e| OpcaError::Crypto(format!("{e}")))?;
+        let not_after =
+            Asn1Time::days_from_now(days as u32).map_err(|e| OpcaError::Crypto(format!("{e}")))?;
 
         let subject = csr.subject_name();
 
@@ -519,7 +519,9 @@ impl CertificateBundle {
             .ok_or_else(|| OpcaError::Crypto("Cannot re-sign CA without a private key".into()))?;
 
         let existing_cert = self.certificate.as_ref().ok_or_else(|| {
-            OpcaError::InvalidCertificate("Cannot re-sign CA without an existing certificate".into())
+            OpcaError::InvalidCertificate(
+                "Cannot re-sign CA without an existing certificate".into(),
+            )
         })?;
 
         // Preserve the serial from the existing certificate
@@ -617,7 +619,9 @@ impl CertificateBundle {
     /// Verifies that the certificate's public key matches this bundle's private key.
     pub fn update_certificate(&mut self, certificate: X509) -> Result<(), OpcaError> {
         let key = self.private_key.as_ref().ok_or_else(|| {
-            OpcaError::InvalidCertificate("Cannot update certificate: private key is not set".into())
+            OpcaError::InvalidCertificate(
+                "Cannot update certificate: private key is not set".into(),
+            )
         })?;
 
         // Compare public keys by DER encoding
@@ -793,28 +797,17 @@ impl CertificateBundle {
                 reversed.reverse();
                 Some(reversed.join(","))
             }
-            "serial" => {
-                let serial = cert
-                    .serial_number()
-                    .to_bn()
-                    .ok()
-                    .and_then(|bn| bn.to_dec_str().ok())
-                    .map(|s| s.to_string());
-                serial
-            }
-            "not_before" => {
-                asn1_time_to_openssl_str(cert.not_before())
-            }
-            "not_after" => {
-                asn1_time_to_openssl_str(cert.not_after())
-            }
+            "serial" => cert
+                .serial_number()
+                .to_bn()
+                .ok()
+                .and_then(|bn| bn.to_dec_str().ok())
+                .map(|s| s.to_string()),
+            "not_before" => asn1_time_to_openssl_str(cert.not_before()),
+            "not_after" => asn1_time_to_openssl_str(cert.not_after()),
             "key_type" => Some(self.public_key_type(cert)),
             "key_size" => {
-                let bits = cert
-                    .public_key()
-                    .ok()
-                    .map(|pk| pk.bits())
-                    .unwrap_or(0);
+                let bits = cert.public_key().ok().map(|pk| pk.bits()).unwrap_or(0);
                 Some(bits.to_string())
             }
             "san" => get_san(cert),
@@ -879,13 +872,15 @@ impl CertificateBundle {
             self.config.cn = self.certificate.as_ref().and_then(extract_cn);
         }
         // Backfill SANs from certificate if not in config
-        if self.config.alt_names.is_none() {
-            if let Some(cert) = self.certificate.as_ref() {
-                let names: Vec<String> =
-                    san::of_certificate(cert).iter().map(ToString::to_string).collect();
-                if !names.is_empty() {
-                    self.config.alt_names = Some(names);
-                }
+        if self.config.alt_names.is_none()
+            && let Some(cert) = self.certificate.as_ref()
+        {
+            let names: Vec<String> = san::of_certificate(cert)
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            if !names.is_empty() {
+                self.config.alt_names = Some(names);
             }
         }
 
@@ -897,9 +892,10 @@ impl CertificateBundle {
                     .and_then(|pk| KeyAlgorithm::matching(&pk))
             })
             .unwrap_or_else(|| self.cert_type.default_key_algorithm());
-        let cn = self.config.cn.as_deref().ok_or_else(|| {
-            OpcaError::InvalidCertificate("CN is required for rekeying".into())
-        })?;
+        let cn =
+            self.config.cn.as_deref().ok_or_else(|| {
+                OpcaError::InvalidCertificate("CN is required for rekeying".into())
+            })?;
         let new_key = Self::generate_private_key(algorithm)?;
         let new_csr = Self::build_csr(cn, &new_key, &self.config)?;
         self.private_key = Some(new_key);
@@ -980,20 +976,17 @@ impl CertificateBundle {
 pub(crate) fn asn1_time_to_openssl_str(asn1: &openssl::asn1::Asn1TimeRef) -> Option<String> {
     let printed = asn1.to_string(); // e.g. "Apr 15 05:13:36 2027 GMT"
     // Try parsing the OpenSSL print format → reformat as ASN1 GeneralizedTime
-    chrono::NaiveDateTime::parse_from_str(
-        printed.trim_end_matches(" GMT"),
-        "%b %e %H:%M:%S %Y",
-    )
-    .ok()
-    .map(|dt| dt.format("%Y%m%d%H%M%SZ").to_string())
-    // Fallback: if the string is already in ASN1 format, return it as-is
-    .or_else(|| {
-        if printed.len() == 15 && printed.ends_with('Z') {
-            Some(printed)
-        } else {
-            Some(printed)
-        }
-    })
+    chrono::NaiveDateTime::parse_from_str(printed.trim_end_matches(" GMT"), "%b %e %H:%M:%S %Y")
+        .ok()
+        .map(|dt| dt.format("%Y%m%d%H%M%SZ").to_string())
+        // Fallback: if the string is already in ASN1 format, return it as-is
+        .or_else(|| {
+            if printed.len() == 15 && printed.ends_with('Z') {
+                Some(printed)
+            } else {
+                Some(printed)
+            }
+        })
 }
 
 /// Extract a single subject entry by NID.
@@ -1011,7 +1004,10 @@ fn extract_cn(cert: &X509) -> Option<String> {
 
 /// Extract Subject Alternative Names as a comma-separated string.
 fn get_san(cert: &X509) -> Option<String> {
-    let names: Vec<String> = san::of_certificate(cert).iter().map(|n| n.tagged()).collect();
+    let names: Vec<String> = san::of_certificate(cert)
+        .iter()
+        .map(|n| n.tagged())
+        .collect();
     (!names.is_empty()).then(|| names.join(", "))
 }
 
@@ -1066,17 +1062,32 @@ mod tests {
             let key = CertificateBundle::generate_private_key(algorithm).unwrap();
             assert_eq!((key.id(), key.bits()), (id, bits), "{algorithm}");
             assert_eq!(KeyAlgorithm::matching(&key), Some(algorithm));
-            assert_eq!(algorithm.to_string().parse::<KeyAlgorithm>().unwrap(), algorithm);
+            assert_eq!(
+                algorithm.to_string().parse::<KeyAlgorithm>().unwrap(),
+                algorithm
+            );
         }
     }
 
     #[test]
     fn default_key_algorithm_is_ec_except_for_apple_developer_csrs() {
-        assert_eq!(CertType::WebServer.default_key_algorithm(), KeyAlgorithm::EcP256);
+        assert_eq!(
+            CertType::WebServer.default_key_algorithm(),
+            KeyAlgorithm::EcP256
+        );
         assert_eq!(CertType::Ca.default_key_algorithm(), KeyAlgorithm::EcP384);
-        assert_eq!(CertType::AppleDev.default_key_algorithm(), KeyAlgorithm::Rsa2048);
-        assert_eq!(CertType::CodeSigning.default_key_algorithm(), KeyAlgorithm::EcP256);
-        let config = CertBundleConfig { key_algorithm: None, ..test_config() };
+        assert_eq!(
+            CertType::AppleDev.default_key_algorithm(),
+            KeyAlgorithm::Rsa2048
+        );
+        assert_eq!(
+            CertType::CodeSigning.default_key_algorithm(),
+            KeyAlgorithm::EcP256
+        );
+        let config = CertBundleConfig {
+            key_algorithm: None,
+            ..test_config()
+        };
         let bundle = CertificateBundle::generate(CertType::Device, "d", config).unwrap();
         assert_eq!(bundle.private_key.unwrap().id(), Id::EC);
     }
@@ -1086,7 +1097,10 @@ mod tests {
         let mut ca = CertificateBundle::generate(
             CertType::Ca,
             "CA",
-            CertBundleConfig { key_algorithm: Some(KeyAlgorithm::EcP384), ..ca_config() },
+            CertBundleConfig {
+                key_algorithm: Some(KeyAlgorithm::EcP384),
+                ..ca_config()
+            },
         )
         .unwrap();
         ca.self_sign_ca().unwrap();
@@ -1100,11 +1114,15 @@ mod tests {
         let mut ca = CertificateBundle::generate(
             CertType::Ca,
             "CA",
-            CertBundleConfig { key_algorithm: Some(KeyAlgorithm::Rsa2048), ..ca_config() },
+            CertBundleConfig {
+                key_algorithm: Some(KeyAlgorithm::Rsa2048),
+                ..ca_config()
+            },
         )
         .unwrap();
         ca.self_sign_ca().unwrap();
-        ca.regenerate_key_and_csr(Some(KeyAlgorithm::EcP256)).unwrap();
+        ca.regenerate_key_and_csr(Some(KeyAlgorithm::EcP256))
+            .unwrap();
         let key = ca.private_key.as_ref().unwrap();
         assert_eq!((key.id(), key.bits()), (Id::EC, 256));
     }
@@ -1167,8 +1185,7 @@ mod tests {
 
     #[test]
     fn test_self_sign_ca() {
-        let mut bundle =
-            CertificateBundle::generate(CertType::Ca, "Test CA", ca_config()).unwrap();
+        let mut bundle = CertificateBundle::generate(CertType::Ca, "Test CA", ca_config()).unwrap();
 
         bundle.self_sign_ca().unwrap();
 
@@ -1203,8 +1220,7 @@ mod tests {
 
     #[test]
     fn test_is_valid_on_ca() {
-        let mut bundle =
-            CertificateBundle::generate(CertType::Ca, "Test CA", ca_config()).unwrap();
+        let mut bundle = CertificateBundle::generate(CertType::Ca, "Test CA", ca_config()).unwrap();
         bundle.self_sign_ca().unwrap();
 
         assert!(bundle.is_valid().unwrap());
@@ -1272,8 +1288,7 @@ mod tests {
         assert!(!p12.is_empty());
 
         // Verify we can parse it back
-        let parsed =
-            openssl::pkcs12::Pkcs12::from_der(&p12).unwrap();
+        let parsed = openssl::pkcs12::Pkcs12::from_der(&p12).unwrap();
         let parsed = parsed.parse2("test123").unwrap();
         assert!(parsed.pkey.is_some());
         assert!(parsed.cert.is_some());
@@ -1292,13 +1307,11 @@ mod tests {
 
     #[test]
     fn test_update_certificate_wrong_key() {
-        let mut bundle =
-            CertificateBundle::generate(CertType::Ca, "CA1", ca_config()).unwrap();
+        let mut bundle = CertificateBundle::generate(CertType::Ca, "CA1", ca_config()).unwrap();
         bundle.self_sign_ca().unwrap();
 
         // Generate a different bundle
-        let mut other =
-            CertificateBundle::generate(CertType::Ca, "CA2", ca_config()).unwrap();
+        let mut other = CertificateBundle::generate(CertType::Ca, "CA2", ca_config()).unwrap();
         other.self_sign_ca().unwrap();
 
         // Try to update bundle with other's cert (different key)
@@ -1410,8 +1423,7 @@ mod tests {
 
     #[test]
     fn test_re_sign_ca_rejects_non_ca() {
-        let bundle =
-            CertificateBundle::generate(CertType::Device, "Not a CA", test_config());
+        let bundle = CertificateBundle::generate(CertType::Device, "Not a CA", test_config());
         let mut bundle = bundle.unwrap();
 
         let result = bundle.re_sign_ca(3650);

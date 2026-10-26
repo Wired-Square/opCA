@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use log::{info, error};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use log::{error, info};
 use md5;
 use rand::RngCore;
 use tauri::{Emitter, State, Window};
@@ -34,7 +34,10 @@ pub async fn vault_backup(
     transfer_to_store: bool,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    info!("[tauri] vault_backup: path='{}' transfer_to_store={}", path, transfer_to_store);
+    info!(
+        "[tauri] vault_backup: path='{}' transfer_to_store={}",
+        path, transfer_to_store
+    );
     let conn = state.ensure_ca()?;
     let ca = conn.ca.as_ref().ok_or("CA not available")?;
 
@@ -45,7 +48,13 @@ pub async fn vault_backup(
         e.to_string()
     })?;
 
-    emit_progress(&window, &format!("Found {} items, encrypting\u{2026}", payload.metadata.item_count));
+    emit_progress(
+        &window,
+        &format!(
+            "Found {} items, encrypting\u{2026}",
+            payload.metadata.item_count
+        ),
+    );
     let json_bytes = serde_json::to_vec(&payload).map_err(|e| {
         let msg = format!("Failed to serialise backup: {e}");
         state.log_err("vault_backup", Some(msg.clone()));
@@ -68,18 +77,19 @@ pub async fn vault_backup(
     if transfer_to_store {
         emit_progress(&window, "Transferring backup to store\u{2026}");
 
-        let db = ca.ca_database.as_ref()
+        let db = ca
+            .ca_database
+            .as_ref()
             .ok_or_else(|| "CA database not available".to_string())?;
         let config = db.get_config().map_err(|e| {
             state.log_err("vault_backup", Some(e.to_string()));
             e.to_string()
         })?;
-        let store_uri = config.ca_backup_store
-            .ok_or_else(|| {
-                let msg = "No backup store configured".to_string();
-                state.log_err("vault_backup", Some(msg.clone()));
-                msg
-            })?;
+        let store_uri = config.ca_backup_store.ok_or_else(|| {
+            let msg = "No backup store configured".to_string();
+            state.log_err("vault_backup", Some(msg.clone()));
+            msg
+        })?;
 
         let filename = Path::new(&path)
             .file_name()
@@ -154,24 +164,41 @@ pub async fn vault_restore(
 
     // Acquire vault lock using the fresh connection
     {
-        let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
-        lock_guard.acquire(&vault, "vault_restore", opca_core::vault_lock::VaultLock::default_ttl())
+        let mut lock_guard = state
+            .vault_lock
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked");
+        lock_guard
+            .acquire(
+                &vault,
+                "vault_restore",
+                opca_core::vault_lock::VaultLock::default_ttl(),
+            )
             .map_err(|e| e.to_string())?;
     }
 
-    emit_progress(&window, &format!("Restoring {} items\u{2026}", payload.metadata.item_count));
+    emit_progress(
+        &window,
+        &format!("Restoring {} items\u{2026}", payload.metadata.item_count),
+    );
     let vb = VaultBackup::new(&vault, &DEFAULT_OP_CONF);
     let on_progress = |item_type: &str, title: &str| {
         emit_progress(&window, &format!("Restoring {}: {}", item_type, title));
     };
     let counts = match vb.restore_backup(&payload, Some(&on_progress)) {
         Ok(c) => {
-            let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
+            let mut lock_guard = state
+                .vault_lock
+                .lock()
+                .expect("mutex poisoned — a prior operation panicked");
             let _ = lock_guard.release(&vault);
             c
         }
         Err(e) => {
-            let mut lock_guard = state.vault_lock.lock().expect("mutex poisoned — a prior operation panicked");
+            let mut lock_guard = state
+                .vault_lock
+                .lock()
+                .expect("mutex poisoned — a prior operation panicked");
             let _ = lock_guard.release(&vault);
             error!("[tauri] vault_restore failed: {e}");
             state.log_err("vault_restore", Some(e.to_string()));
@@ -183,8 +210,17 @@ pub async fn vault_restore(
     let item_breakdown = counts_to_breakdown(&counts);
 
     // Re-install the fresh connection into state so ensure_ca() works without reconnecting.
-    let mut conn = state.conn.lock().expect("mutex poisoned — a prior operation panicked");
-    state.replace_connection(&mut conn, Connection { vault: Some(vault), ..Connection::default() });
+    let mut conn = state
+        .conn
+        .lock()
+        .expect("mutex poisoned — a prior operation panicked");
+    state.replace_connection(
+        &mut conn,
+        Connection {
+            vault: Some(vault),
+            ..Connection::default()
+        },
+    );
 
     state.log_ok(
         "vault_restore",
@@ -204,11 +240,10 @@ pub async fn vault_info(path: String, password: String) -> Result<BackupInfoResu
         .await
         .map_err(|e| format!("Failed to read '{}': {}", path, e))?;
 
-    let plaintext =
-        decrypt_payload(&data, &password).map_err(|e| e.to_string())?;
+    let plaintext = decrypt_payload(&data, &password).map_err(|e| e.to_string())?;
 
-    let payload: BackupPayload = serde_json::from_slice(&plaintext)
-        .map_err(|e| format!("Invalid backup format: {e}"))?;
+    let payload: BackupPayload =
+        serde_json::from_slice(&plaintext).map_err(|e| format!("Invalid backup format: {e}"))?;
 
     let mut type_counts: HashMap<String, usize> = HashMap::new();
     for item in &payload.items {
@@ -321,8 +356,7 @@ fn write_backup_file(path: &str, data: &[u8]) -> Result<(), String> {
 
     #[cfg(not(unix))]
     {
-        std::fs::write(path, data)
-            .map_err(|e| format!("Failed to write '{}': {}", path, e))?;
+        std::fs::write(path, data).map_err(|e| format!("Failed to write '{}': {}", path, e))?;
     }
 
     Ok(())

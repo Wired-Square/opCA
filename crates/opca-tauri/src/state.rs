@@ -3,14 +3,14 @@ use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{info, warn};
-use zeroize::Zeroizing;
+use opca_core::error::OpcaError;
 use opca_core::op::Vault;
 use opca_core::services::ca::{CertIssuanceWarning, CertificateAuthority};
 use opca_core::services::cert::CertificateBundle;
-use opca_core::error::OpcaError;
 use opca_core::services::database::CertificateAuthorityDB;
 use opca_core::services::local_backup::LocalBackup;
 use opca_core::vault_lock::VaultLock;
+use zeroize::Zeroizing;
 
 use crate::commands::dto::LogEntry;
 
@@ -92,21 +92,23 @@ impl AppState {
     /// returned immediately; otherwise the CA is retrieved with a copy of the `Vault`,
     /// which replaces it only on success so an empty vault stays connected.
     pub fn ensure_ca(&self) -> Result<MutexGuard<'_, Connection>, String> {
-        let mut conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
+        let mut conn = self
+            .conn
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked");
 
         if conn.ca.is_none() {
             let vault = conn.vault.clone().ok_or("Not connected")?;
 
             info!("[tauri] loading CA from 1Password");
-            let mut ca = CertificateAuthority::retrieve(vault)
-                .map_err(|e| {
-                    warn!("[tauri] failed to load CA: {e}");
-                    if let OpcaError::DatabaseUnreadable(msg) = &e {
-                        *self.database_error.lock().expect("mutex poisoned") = Some(msg.clone());
-                    }
-                    self.log_err("retrieve_ca", Some(e.to_string()));
-                    e.to_string()
-                })?;
+            let mut ca = CertificateAuthority::retrieve(vault).map_err(|e| {
+                warn!("[tauri] failed to load CA: {e}");
+                if let OpcaError::DatabaseUnreadable(msg) = &e {
+                    *self.database_error.lock().expect("mutex poisoned") = Some(msg.clone());
+                }
+                self.log_err("retrieve_ca", Some(e.to_string()));
+                e.to_string()
+            })?;
             self.log_ok("retrieve_ca", Some("CA loaded from 1Password".to_string()));
             ca.local_backup = LocalBackup::if_enabled(ca.vault.op().account());
             conn.ca = Some(ca);
@@ -122,7 +124,10 @@ impl AppState {
         *conn = next;
         self.forget_preloaded_key();
         *self.database_error.lock().expect("mutex poisoned") = None;
-        self.action_log.lock().expect("mutex poisoned — a prior operation panicked").clear();
+        self.action_log
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked")
+            .clear();
     }
 
     /// Run a closure with a reference to the connected vault.
@@ -132,7 +137,10 @@ impl AppState {
     where
         F: FnOnce(&Vault<Runner>) -> Result<T, String>,
     {
-        let conn = self.conn.lock().expect("mutex poisoned — a prior operation panicked");
+        let conn = self
+            .conn
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked");
         if let Some(ref ca) = conn.ca {
             return f(&ca.vault);
         }
@@ -154,7 +162,10 @@ impl AppState {
             detail,
             success,
         };
-        self.action_log.lock().expect("mutex poisoned — a prior operation panicked").push(entry);
+        self.action_log
+            .lock()
+            .expect("mutex poisoned — a prior operation panicked")
+            .push(entry);
     }
 
     /// Convenience: log a successful action.
@@ -176,12 +187,18 @@ impl AppState {
     /// Remember a freshly-issued certificate's PEM so the detail page can show
     /// it without re-reading the bundle from 1Password.
     pub fn cache_fresh_pem(&self, serial: String, pem: String) {
-        self.fresh_cert_pems.lock().expect("mutex poisoned").insert(serial, pem);
+        self.fresh_cert_pems
+            .lock()
+            .expect("mutex poisoned")
+            .insert(serial, pem);
     }
 
     /// Take (one-shot) a freshly-issued certificate's PEM, if cached.
     pub fn take_fresh_pem(&self, serial: &str) -> Option<String> {
-        self.fresh_cert_pems.lock().expect("mutex poisoned").remove(serial)
+        self.fresh_cert_pems
+            .lock()
+            .expect("mutex poisoned")
+            .remove(serial)
     }
 
     /// Replace the preloaded key with this bundle's. Callers must have ruled
@@ -230,7 +247,12 @@ mod tests {
     #[test]
     fn an_issuance_warning_is_logged_with_one_label() {
         let state = AppState::default();
-        state.log_warnings("create_cert", vec![CertIssuanceWarning { message: "Outlives the CA.".into() }]);
+        state.log_warnings(
+            "create_cert",
+            vec![CertIssuanceWarning {
+                message: "Outlives the CA.".into(),
+            }],
+        );
         let log = state.action_log.lock().unwrap();
         assert_eq!(log[0].detail.as_deref(), Some("Warning: Outlives the CA."));
     }
