@@ -140,9 +140,11 @@
 
 .connect-recent-list {
   list-style: none;
+  max-height: 10.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--app-border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
 }
 
 .connect-recent-row {

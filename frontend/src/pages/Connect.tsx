@@ -33,7 +33,6 @@ interface SavedLogin {
 /** Which field's list is open — only ever one at a time. */
 type Dropdown = "vault" | "account";
 
-const RECENT_SHOWN = 5;
 
 const STORAGE_KEY = "opca_saved_logins";
 
@@ -336,7 +335,7 @@ export default function Connect() {
           <section class="connect-recent" aria-labelledby="connect-recent-title">
             <h2 id="connect-recent-title" class="connect-recent-title">Recent</h2>
             <ul class="connect-recent-list">
-              <For each={saved().slice(0, RECENT_SHOWN)}>
+              <For each={saved()}>
                 {(login) => {
                   const label = () => accountLabel(login.account, accounts()) ?? "default account";
                   return (

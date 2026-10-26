@@ -260,12 +260,12 @@ describe("Connect recent logins", () => {
     expect(JSON.parse(localStorage.getItem("opca_saved_logins")!)).toEqual([{ vault: "Home", account: null }]);
   });
 
-  it("shows the newest five, and nothing when there are none or when creating", async () => {
+  it("lists every login, newest first, and nothing when there are none or when creating", async () => {
     saveLogins(Array.from({ length: 7 }, (_, i) => ({ vault: `V${i}`, account: null })));
     const { unmount } = render(() => <Connect />);
     await screen.findByRole("region", { name: "Recent" });
     expect(within(recent()!).getAllByRole("listitem").map((row) => row.textContent?.replace("×", "")))
-      .toEqual(["V0default account", "V1default account", "V2default account", "V3default account", "V4default account"]);
+      .toEqual(Array.from({ length: 7 }, (_, i) => `V${i}default account`));
     fireEvent.click(screen.getByRole("button", { name: "New CA in a new vault…" }));
     expect(recent()).not.toBeInTheDocument();
     unmount();
