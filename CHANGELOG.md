@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Building needs Rust 1.99, pinned by `rust-toolchain.toml` and declared as the
+  crates' `rust-version`; CI installs the same toolchain.
 - The Connect page asks for the account first, then the vault. Each has a
   Browse button, and vaults are listed only when you press it, for the account
   in the field; recent logins sit below the form and fill both fields.

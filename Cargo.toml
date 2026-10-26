@@ -4,6 +4,7 @@ resolver = "2"
 
 [workspace.package]
 version = "0.102.3"
+rust-version = "1.99"
 
 # RSA key generation in pure Rust takes minutes unoptimised.
 [profile.dev.package.num-bigint-dig]

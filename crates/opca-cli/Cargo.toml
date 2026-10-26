@@ -2,6 +2,7 @@
 name = "opca-cli"
 version.workspace = true
 edition = "2021"
+rust-version.workspace = true
 description = "opCA command-line interface"
 
 [[bin]]

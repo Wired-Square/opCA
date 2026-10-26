@@ -57,7 +57,7 @@ and a [SolidJS](https://www.solidjs.com) frontend.
 ## Requirements
 
 - [1Password CLI (`op`)](https://developer.1password.com/docs/cli/get-started) — signed in to at least one account
-- [Rust toolchain](https://rustup.rs) and [Node.js](https://nodejs.org) (for building from source)
+- [Rust toolchain](https://rustup.rs) 1.99 (pinned by `rust-toolchain.toml`) and [Node.js](https://nodejs.org) (for building from source)
 
 ---
 

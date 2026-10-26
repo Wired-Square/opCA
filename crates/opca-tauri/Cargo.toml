@@ -2,6 +2,7 @@
 name = "opca-tauri"
 version.workspace = true
 edition = "2021"
+rust-version.workspace = true
 description = "OPCA desktop application — Tauri 2 GUI"
 
 [dependencies]
