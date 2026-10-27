@@ -160,3 +160,53 @@ jobs:
           name: opca-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
+
+  # The ACME broker's .deb, built against the runner's libssl3 rather than a
+  # vendored OpenSSL, so Debian's security updates reach it.
+  acme-broker:
+    needs: [create-release]
+    if: always()
+    runs-on: ubuntu-22.04
+
+    env:
+      CARGO_REGISTRIES_WIRED_SQUARE_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Read the wslib crates from the registry mirror
+        shell: bash
+        run: |
+          mkdir -p "${CARGO_HOME:-$HOME/.cargo}"
+          cat .cargo/mirror.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.99
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config dpkg-dev
+          cargo install cargo-deb --version 3.8.0 --locked
+
+      - name: Build the .deb
+        run: |
+          cargo build --release -p opca-acme-broker
+          cargo deb -p opca-acme-broker --no-build --output dist/
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          mv dist/*.deb "dist/opca-acme-broker_${version}_Linux_x64.deb"
+          ls -l dist
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist/*.deb --clobber
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: opca-acme-broker-deb
+          path: dist/
+          if-no-files-found: error

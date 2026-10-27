@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the enrolment and step-ca's state, deletes the subordinate key, makes a new
   one and a new pairing code, and has the running broker reload on SIGHUP,
   which stops step-ca and serves enrolment again with the same API key.
+- The broker ships as a `.deb` (`opca-acme-broker`), built on `v*` tags and
+  attached to the release. It installs both binaries, an `opca-acme` system
+  user, a hardened `Type=notify` systemd unit with `systemctl reload`, and a
+  commented `/etc/opca-acme/broker.toml`, and depends on `step-ca (>= 0.28.1)`.
+  The unit isn't enabled or started on install: set `host`, then
+  `systemctl enable --now opca-acme-broker`.
 
 ### Changed
 

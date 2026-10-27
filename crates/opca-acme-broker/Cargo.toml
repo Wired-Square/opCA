@@ -6,6 +6,26 @@ rust-version.workspace = true
 description = "The ACME broker daemon that holds an opCA subordinate CA"
 publish = false
 
+[package.metadata.deb]
+maintainer = "Wired Square <apps@wiredsquare.com>"
+copyright = "2026, Wired Square"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+Holds an opCA name-constrained subordinate CA, pairs with opCA once, and runs \
+step-ca as its child to issue ACME certificates inside the permitted domains."""
+section = "net"
+priority = "optional"
+depends = "$auto, systemd, step-ca (>= 0.28.1)"
+conf-files = ["/etc/opca-acme/broker.toml"]
+maintainer-scripts = "debian/"
+systemd-units = { enable = false, start = false }
+assets = [
+    ["target/release/opca-acme-broker", "usr/bin/", "755"],
+    ["target/release/opca-acme", "usr/bin/", "755"],
+    ["debian/broker.toml", "etc/opca-acme/broker.toml", "644"],
+    ["debian/opca-acme.sysusers", "usr/lib/sysusers.d/opca-acme.conf", "644"],
+]
+
 [dependencies]
 rustls = { version = "0.23", default-features = false }
 rustls-openssl = { version = "0.4", default-features = false }

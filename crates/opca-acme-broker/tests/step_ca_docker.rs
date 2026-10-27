@@ -371,3 +371,165 @@ fn the_cli_drops_to_the_state_owner_and_reopen_reaches_the_daemon() {
         );
     }
 }
+
+const SYSTEMD: &str = "debian:bookworm";
+const STEP_CA_DEB: &str = "https://github.com/smallstep/certificates/releases/download/v0.28.1/step-ca_0.28.1-1_$(dpkg --print-architecture).deb";
+
+/// `script` run by `sh` in `container`; its output, failing the test if it fails.
+fn shell(container: &str, script: &str, seconds: u64) -> String {
+    let ran = docker(&["exec", container, "sh", "-ec", script], seconds);
+    let said = text(&ran.stdout);
+    assert!(
+        ran.status.success(),
+        "{script}\n{said}\n{}",
+        text(&ran.stderr)
+    );
+    said
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_deb_installs_and_runs_under_systemd() {
+    let Some(_) = enabled() else {
+        return;
+    };
+    let deb = std::env::var("OPCA_ACME_DOCKER_DEB").expect("OPCA_ACME_DOCKER_DEB");
+    let mut run = Docker::new();
+    let host = run.name("systemd");
+    let mount = format!("{deb}:/deb:ro");
+    let boot = "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+                systemd systemd-sysv dbus curl ca-certificates procps > /dev/null && exec /sbin/init";
+    let started = docker(
+        &[
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            &host,
+            "--privileged",
+            "--cgroupns=private",
+            "--tmpfs",
+            "/run",
+            "--tmpfs",
+            "/run/lock",
+            "-p",
+            "127.0.0.1::9443",
+            "-v",
+            &mount,
+            SYSTEMD,
+            "sh",
+            "-c",
+            boot,
+        ],
+        60,
+    );
+    assert!(started.status.success(), "{}", text(&started.stderr));
+    wait_for("systemd to boot", 300, || {
+        let state = docker(&["exec", &host, "systemctl", "is-system-running"], 30);
+        let state = text(&state.stdout);
+        ["running", "degraded"]
+            .contains(&state.trim())
+            .then_some(())
+    });
+
+    let installed = shell(
+        &host,
+        &format!(
+            "curl -fsSLo /tmp/step-ca.deb {STEP_CA_DEB}
+             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/step-ca.deb /deb/*.deb
+             echo enabled=$(systemctl is-enabled opca-acme-broker) active=$(systemctl is-active opca-acme-broker || true)
+             id opca-acme"
+        ),
+        300,
+    );
+    assert!(
+        installed.contains("enabled=disabled active=inactive"),
+        "{installed}"
+    );
+    assert!(
+        installed.contains("set host in /etc/opca-acme/broker.toml"),
+        "{installed}"
+    );
+
+    shell(
+        &host,
+        "sed -i 's/^#host = .*/host = \"acme.home.example\"/' /etc/opca-acme/broker.toml
+         systemctl enable --now opca-acme-broker
+         [ \"$(systemctl is-active opca-acme-broker)\" = active ]",
+        60,
+    );
+    let uri = shell(&host, "opca-acme pairing", 30);
+    let status = shell(&host, "opca-acme status", 30);
+    assert!(
+        status.contains("mode: enrolling") && status.contains("broker: running"),
+        "{status}"
+    );
+    shell(
+        &host,
+        "systemctl reload opca-acme-broker
+         for _ in $(seq 50); do
+             journalctl -u opca-acme-broker | grep -q 'reloaded the state from disk' && exit 0
+             sleep 0.2
+         done
+         exit 1",
+        30,
+    );
+
+    let port = text(&docker(&["port", &host, "9443/tcp"], 30).stdout);
+    let api = Api {
+        uri: PairingUri::parse(SCHEME, uri.trim()).unwrap(),
+        address: port.lines().next().unwrap().trim().parse().unwrap(),
+    };
+    let mut ca = TestCa::new();
+    let operator = ca.client("opCA operator");
+    let (_, body) = api.call(None, "GET", path::ENROLMENT, "").await.unwrap();
+    let offer: EnrolmentOffer = serde_json::from_str(&body).unwrap();
+    let (chain, _, _) = ca.sign(&offer.csr_pem, DOMAINS);
+    let enrolment = Enrolment {
+        operator_pin: operator.key_pin(),
+        ..api.enrolment(&chain, DOMAINS)
+    };
+    let (code, body) = api.post(&enrolment).await;
+    assert_eq!(code, 200, "{body}");
+
+    let issuing = shell(
+        &host,
+        "for _ in $(seq 100); do
+             curl -sfk -o /dev/null https://localhost/acme/acme/directory && break
+             sleep 0.2
+         done
+         curl -sfk -o /dev/null https://localhost/acme/acme/directory
+         echo step-ca-user=$(ps -o user= -C step-ca)
+         echo root-owned=$(find /var/lib/opca-acme -user root | wc -l)
+         opca-acme status",
+        60,
+    );
+    for expected in [
+        "step-ca-user=opca-acme",
+        "root-owned=0",
+        "mode: enrolled",
+        "step-ca: running",
+    ] {
+        assert!(issuing.contains(expected), "{expected}:\n{issuing}");
+    }
+
+    let stopped = shell(
+        &host,
+        "start=$(date +%s)
+         systemctl stop opca-acme-broker
+         echo seconds=$(( $(date +%s) - start ))
+         echo result=$(systemctl show -p Result --value opca-acme-broker)
+         echo step-ca=$(pgrep -x step-ca | wc -l)",
+        60,
+    );
+    assert!(
+        stopped.contains("result=success") && stopped.contains("step-ca=0"),
+        "{stopped}"
+    );
+    let seconds: u64 = stopped
+        .lines()
+        .find_map(|line| line.strip_prefix("seconds="))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(seconds < 30, "{stopped}");
+}
