@@ -222,6 +222,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   are set owner-only (0600).
 - Saving a blank store in the CA's Stores settings now clears it; before, the
   old store stayed and the save looked as if it worked.
+- Saving a blank field in the CA's Configuration settings now clears it;
+  before, the old value stayed.
 - Apple Development is no longer offered when signing a CSR, and the CA refuses
   to sign one: Apple issues these certificates, and opCA's was a `clientAuth`
   certificate Apple can't use. Creating the key and CSR is unchanged.
