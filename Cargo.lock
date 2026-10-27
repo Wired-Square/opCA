@@ -159,7 +159,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -170,7 +170,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -198,6 +198,15 @@ dependencies = [
  "windows-sys 0.60.2",
  "wl-clipboard-rs",
  "x11rb",
+]
+
+[[package]]
+name = "arc-swap"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -681,6 +690,28 @@ dependencies = [
  "pin-project-lite",
  "sync_wrapper",
  "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-server"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "either",
+ "fs-err",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "hyper 1.8.1",
+ "hyper-util",
+ "pin-project-lite",
+ "rustls 0.23.37",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.26.4",
  "tower-service",
 ]
 
@@ -1491,7 +1522,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1753,7 +1784,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1923,6 +1954,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5c95b673b8f6f7235229ae11c5642d81b04c2e64c1e2fb417bc0cf73ca45f29"
+dependencies = [
+ "autocfg",
+ "tokio",
 ]
 
 [[package]]
@@ -2726,7 +2767,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3451,7 +3492,7 @@ dependencies = [
  "png",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3848,6 +3889,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "opca-acme-api"
+version = "0.102.3"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "opca-acme-broker"
+version = "0.102.3"
+dependencies = [
+ "axum",
+ "libc",
+ "opca-acme-api",
+ "opca-core",
+ "rustls 0.23.37",
+ "rustls-openssl",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+ "wslib-crypto",
+ "wslib-crypto-ca",
+ "wslib-crypto-x509",
+ "wslib-file-atomic",
+ "wslib-http-server",
+ "wslib-pairing",
+ "wslib-service",
+ "wslib-telemetry",
+ "wslib-tls",
+]
+
+[[package]]
 name = "opca-cli"
 version = "0.102.3"
 dependencies = [
@@ -4012,7 +4089,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4928,7 +5005,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5397,6 +5474,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shared_child"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5508,7 +5594,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6165,7 +6251,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6215,6 +6301,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "thread_local"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
+dependencies = [
+ "cfg-if",
 ]
 
 [[package]]
@@ -6566,6 +6661,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+ "valuable",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -6587,7 +6706,7 @@ dependencies = [
  "png",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6701,6 +6820,12 @@ dependencies = [
  "serde_core",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vcpkg"
@@ -7126,7 +7251,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7147,7 +7272,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "raw-window-handle",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "windows-version",
 ]
 
@@ -7252,6 +7377,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "windows-service"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "857224b3b211c6f3616921f081ee54721ee3ad2ace2fac6a6337e032f7b4dcf2"
+dependencies = [
+ "bitflags 2.11.0",
+ "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7716,9 +7852,9 @@ dependencies = [
 
 [[package]]
 name = "wslib-crypto"
-version = "0.1.0"
+version = "0.1.2"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
-checksum = "ca9dc637efd525fc82b41da80c94c904db98a9ba83b984d4107b9ad189dda534"
+checksum = "b5efe7111cc4f3e0469134326581482124ae6c2fe5c34a7276a7d42471afe50e"
 dependencies = [
  "p256 0.13.2",
  "p384",
@@ -7792,11 +7928,29 @@ dependencies = [
 
 [[package]]
 name = "wslib-file-atomic"
+version = "0.1.5"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "abfc0ce5f3519700cb11d65c569852dc0c8fc1d42770630c98b2ce935916a7a0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "wslib-http-server"
 version = "0.1.2"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
-checksum = "bb3afb2c53ad723e75e6ae3cd6bd4b266befbc40fb3f14708c0dd910afee587c"
+checksum = "b0e440cef13f82710f19862d8ac6d43f4069ccf4f6f2727dc02614f39c73e4af"
 dependencies = [
- "windows-sys 0.61.2",
+ "axum",
+ "axum-server",
+ "hyper-util",
+ "rustls 0.23.37",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-util",
+ "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -7818,13 +7972,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "wslib-pairing"
+version = "0.1.0"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "160f10ff922dd465e5e3013e11d792f4d6f20f8586b050fe3bb57fd6a73f2945"
+dependencies = [
+ "thiserror 2.0.18",
+ "wslib-file-atomic",
+ "wslib-secret",
+]
+
+[[package]]
 name = "wslib-secret"
+version = "0.1.2"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "ff2dba070a1c0b4ea271ab18eaac581f3b41bfebd7f99c45333b2c1cba2ad5ee"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "sha2",
+ "subtle",
+]
+
+[[package]]
+name = "wslib-service"
+version = "0.1.2"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "f9ee3b3c2745a14b484e60ae4e7f540b171129c780ce037d0bf155c0de54279e"
+dependencies = [
+ "libc",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "windows-service",
+ "windows-sys 0.61.2",
+ "wslib-file-atomic",
+ "wslib-systemd-notify",
+]
+
+[[package]]
+name = "wslib-systemd-notify"
 version = "0.1.1"
 source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
-checksum = "1cecb90fec3688b4d4e14cfcd6aca61f6b41500f1244f65e3e697abf1b0da931"
+checksum = "6b44cc485616f9935e54bc93e23778c2847c50c88e652fc8676caf9790324970"
 dependencies = [
- "serde",
- "subtle",
+ "tokio",
 ]
 
 [[package]]
@@ -7834,6 +8027,38 @@ source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
 checksum = "2f72e239c246bac8657a3213b3b619398e12ccb20b0c94c8d769e810f65e4924"
 dependencies = [
  "tauri",
+]
+
+[[package]]
+name = "wslib-telemetry"
+version = "0.1.9"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "a24c24236e064a435eafa34909ecec1e1fc8069bc787bd8e8396b02e89c92678"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "wslib-tls"
+version = "0.2.2"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "05dbdd2cabffec3d6eee702dbc3811c8a6191d0caff609bd0903661ab3811ee8"
+dependencies = [
+ "http 1.4.0",
+ "libc",
+ "rustls 0.23.37",
+ "rustls-native-certs",
+ "rustls-pki-types",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tracing",
+ "windows-sys 0.61.2",
+ "wslib-crypto",
+ "wslib-crypto-x509",
+ "wslib-file-atomic",
+ "wslib-secret",
 ]
 
 [[package]]

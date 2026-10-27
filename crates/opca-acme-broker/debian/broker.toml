@@ -1,0 +1,18 @@
+# The opCA ACME broker. Set host, then:
+#   systemctl enable --now opca-acme-broker
+
+# Required. The name opCA dials and step-ca serves ACME as. It must be inside
+# the permitted domains, since step-ca's own certificate is issued for it.
+#host = "acme.home.example"
+
+# Where opCA reaches the broker's API.
+#listen = "[::]:9443"
+
+# The permitted domains to ask opCA for; left out, they're chosen in opCA.
+#domains = ["home.example"]
+
+# Where step-ca serves ACME, and the step-ca the broker runs.
+#acme_listen = "[::]:443"
+#step_ca = "/usr/bin/step-ca"
+
+#state_dir = "/var/lib/opca-acme"

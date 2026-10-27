@@ -1,0 +1,47 @@
+[Unit]
+Description=opCA ACME broker
+Documentation=https://github.com/Wired-Square/opCA
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+User=opca-acme
+Group=opca-acme
+ExecStart=/usr/bin/opca-acme-broker
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+# The daemon's grace is 20 s: the listener's drain, then step-ca's stop.
+TimeoutStopSec=30
+StateDirectory=opca-acme
+StateDirectoryMode=0700
+UMask=0077
+
+# step-ca, the broker's child, serves ACME on 443.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

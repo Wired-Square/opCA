@@ -26,6 +26,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   domains in place of a common name and alternative names, and now asks for
   the certificate type first. The certificate detail shows a certificate's
   permitted and excluded names.
+- `opca-acme-api`, the versioned wire types of the API between opCA and an
+  ACME broker: enrolment, status, renewal CSR, chain push, revoke, and the
+  error body.
+- `opca-acme-broker`, a daemon that holds an opCA subordinate CA on a LAN host
+  and issues ACME certificates through step-ca, configured by
+  `/etc/opca-acme/broker.toml`. On its first start it makes the subordinate's
+  EC P-256 key (unencrypted, owner-only) and CSR, its API certificate and a
+  one-time pairing code, and logs the `opca-enrol://` pairing URI, which pins
+  the API key. Later starts reuse them.
+- Enrolment: `GET /v1/enrolment` offers the broker's CSR, host and configured
+  domains, and `POST /v1/enrolment` takes the pairing code, the signed chain,
+  opCA's operator key pin and the issuance settings. Input that doesn't fit the
+  broker's key, the subordinate's name constraints or the configured domains,
+  or whose domains don't cover the broker's host, is refused before the code is
+  tried, so it costs no attempt. The enrolment survives restarts.
+- Once enrolled, the API admits only opCA: the TLS handshake needs a client
+  certificate that chains to the enrolled root and carries the operator key
+  pinned at enrolment, so the root's other certificates are refused. The switch
+  needs no restart. The broker then serves `GET /v1/status`, `POST /v1/csr` (a
+  fresh CSR over the same key), `PUT /v1/chain` (a renewed chain from the same
+  root, checked as at enrolment) and `POST /v1/revoke`, and the enrolment
+  routes answer 404. A revoked broker stays revoked and answers only status and
+  revoke.
+- The broker runs step-ca 0.28.1 or newer as its child, configured from the
+  enrolment: the subordinate as the intermediate, one ACME provisioner with the
+  enrolled challenges and leaf lifetimes, and a name policy allowing only the
+  permitted domains and their subdomains. A new chain reloads it in place, a
+  revoke stops it, and if it dies it is restarted after 10 seconds.
+  `broker.toml` takes `step_ca` (default `/usr/bin/step-ca`) and `acme_listen`
+  (default `[::]:443`), and the status reports whether step-ca is issuing, and
+  its version.
+- `opca-acme`, the broker's command line, run as root or as the broker's user;
+  from root it switches to that user first. `pairing` issues a new pairing code
+  and prints its URI. `status` shows the mode, the code, the subordinate's
+  serial and expiry, and whether the broker and step-ca are running.
+  `enrol --reopen` (root only) archives the enrolment and step-ca's state,
+  replaces the subordinate key, issues a new code and has the running broker
+  wait for enrolment again, keeping its API key.
+- The broker ships as a `.deb` with each release: both binaries, an
+  `opca-acme` system user, a hardened systemd unit (`systemctl reload`
+  re-reads the state) and a commented `broker.toml`, depending on
+  `step-ca (>= 0.28.1)`. It isn't started on install: set `host`, then
+  `systemctl enable --now opca-acme-broker`. See `docs/acme-broker.md`.
 
 ### Changed
 

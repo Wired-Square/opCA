@@ -1,0 +1,12 @@
+[package]
+name = "opca-acme-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Wire types for the API between opCA and its ACME broker"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
