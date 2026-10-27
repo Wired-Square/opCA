@@ -220,6 +220,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (0644), so a web server running as another user can serve the CA
   certificate, CRL and published certificates. Private-store and backup uploads
   are set owner-only (0600).
+- Saving a blank store in the CA's Stores settings now clears it; before, the
+  old store stayed and the save looked as if it worked.
 
 ## [0.102.3] - 2026-10-10
 
