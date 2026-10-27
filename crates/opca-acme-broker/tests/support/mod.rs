@@ -34,7 +34,7 @@ pub const OPERATOR_PIN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef
 /// An in-memory opCA root over a scripted `op`.
 pub struct TestCa {
     pub ca: CertificateAuthority<FakeRunner>,
-    op: FakeRunner,
+    pub op: FakeRunner,
 }
 
 /// A client certificate and its key, as the operator or anyone else presents it.

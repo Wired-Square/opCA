@@ -2,8 +2,10 @@
 //! revocation that go through it.
 
 mod enrol;
+mod renew;
 
 pub use enrol::{EnrolledBroker, fetch_offer, issuance, parse_pairing};
+pub use renew::{BrokerNotice, BrokerRenewal, BrokerRevocation, Renewal};
 
 use std::error::Error;
 use std::sync::Arc;
