@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   constraints or the configured domains is refused before the code is tried,
   so it costs no attempt. Once enrolled, the broker keeps the enrolment across
   restarts and the enrolment routes answer 404.
+- Once enrolled, the broker's API admits only opCA's operator: the TLS
+  handshake needs a client certificate that chains to the enrolled root and
+  carries the key opCA pinned at enrolment, so other certificates from the same
+  root are refused. The switch happens on the open listener without a restart.
+  It serves `GET /v1/status`, `POST /v1/csr` (a fresh CSR over the same key),
+  `PUT /v1/chain` (a renewed chain from the same root, checked as at
+  enrolment) and `POST /v1/revoke`. A revoked broker stays revoked and answers
+  only status and revoke.
 
 ### Changed
 

@@ -6,13 +6,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use opca_acme_api::{
-    API_VERSION, Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, IssuanceConfig, IssuerState,
-    Status, Versions,
+    API_VERSION, Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, IssuanceConfig, Status, Versions,
 };
+use rustls::ServerConfig;
+use rustls::pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
 use wslib_crypto_x509::{CertificateView, NameSubtree, inspect, pem};
 use wslib_pairing::{CodeError, PairingCode, Redemption};
 
+use crate::enrolled::operator_config;
 use crate::{Broker, Error};
 
 /// `redeem` waits for ever on a held lock; uncontended it takes milliseconds.
@@ -35,10 +37,19 @@ pub struct Enrolled {
     pub config: IssuanceConfig,
     /// The API key's pin as the pairing URI gave it to opCA.
     pub api_pin: String,
+    #[serde(default)]
+    pub revoked: bool,
 }
 
 fn enrolment_path(state: &Path) -> PathBuf {
     state.join("enrolment.json")
+}
+
+struct Checked {
+    code: PairingCode,
+    enrolled: Enrolled,
+    status: Status,
+    operator: Arc<ServerConfig>,
 }
 
 pub(crate) fn load(state: &Path) -> Result<Mode, Error> {
@@ -54,6 +65,10 @@ pub(crate) fn load(state: &Path) -> Result<Mode, Error> {
 }
 
 impl Broker {
+    pub(crate) fn enrolment_path(&self) -> PathBuf {
+        enrolment_path(&self.state)
+    }
+
     /// What `GET /v1/enrolment` answers; `None` once enrolled.
     pub fn offer(&self) -> Option<EnrolmentOffer> {
         (self.mode() == Mode::Enrolling).then(|| EnrolmentOffer {
@@ -67,10 +82,10 @@ impl Broker {
     /// Checks `enrolment` whole, then redeems its code and, if accepted,
     /// stores it; a refusal before the redeem costs no attempt.
     pub async fn enrol(self: Arc<Self>, enrolment: Enrolment) -> Result<Status, ErrorBody> {
-        let (code, enrolled, status) = self.check(enrolment)?;
+        let checked = self.check(enrolment)?;
+        let status = checked.status.clone();
         let broker = self.clone();
-        let redeeming =
-            tokio::task::spawn_blocking(move || broker.redeem_and_store(&code, enrolled));
+        let redeeming = tokio::task::spawn_blocking(move || broker.redeem_and_store(checked));
         match tokio::time::timeout(REDEEM_TIMEOUT, redeeming).await {
             Ok(Ok(stored)) => stored.map(|()| status),
             Ok(Err(panicked)) => Err(internal(panicked)),
@@ -78,7 +93,7 @@ impl Broker {
         }
     }
 
-    fn check(&self, enrolment: Enrolment) -> Result<(PairingCode, Enrolled, Status), ErrorBody> {
+    fn check(&self, enrolment: Enrolment) -> Result<Checked, ErrorBody> {
         let code = enrolment
             .code
             .parse::<PairingCode>()
@@ -89,25 +104,36 @@ impl Broker {
                 "the operator pin is not 64 lower-case hex digits",
             ));
         }
-        let subordinate = self.check_chain(&enrolment.chain_pem)?;
+        let (subordinate, root) = self.check_chain(&enrolment.chain_pem)?;
         self.check_config(&enrolment.config, &subordinate)?;
+        let operator =
+            operator_config(&self.provider, &self.serving, root, pin).map_err(bad_request)?;
         let enrolled = Enrolled {
             chain_pem: enrolment.chain_pem,
             operator_pin: enrolment.operator_pin,
             config: enrolment.config,
             api_pin: self.pin().to_string(),
+            revoked: false,
         };
-        let status = status_of(&subordinate, &enrolled.config);
-        Ok((code, enrolled, status))
+        Ok(Checked {
+            status: self.status_from(&subordinate, &enrolled),
+            code,
+            enrolled,
+            operator,
+        })
     }
 
-    fn check_chain(&self, chain_pem: &str) -> Result<CertificateView, ErrorBody> {
+    pub(crate) fn check_chain(
+        &self,
+        chain_pem: &str,
+    ) -> Result<(CertificateView, CertificateDer<'static>), ErrorBody> {
         let chain = pem::certificates(chain_pem).map_err(bad_request)?;
         let [subordinate, .., root] = &chain[..] else {
             return Err(bad_request(
                 "the chain needs the subordinate, then the root",
             ));
         };
+        let root_der = root.clone();
         let (subordinate, root) = (
             inspect(subordinate).map_err(bad_request)?,
             inspect(root).map_err(bad_request)?,
@@ -125,10 +151,10 @@ impl Broker {
         if subordinate.not_after <= SystemTime::now() {
             return Err(bad_request("the subordinate has expired"));
         }
-        Ok(subordinate)
+        Ok((subordinate, root_der))
     }
 
-    fn check_config(
+    pub(crate) fn check_config(
         &self,
         config: &IssuanceConfig,
         subordinate: &CertificateView,
@@ -163,20 +189,22 @@ impl Broker {
     }
 
     /// Staged before the redeem, so that an accepted code cannot meet a failed write.
-    fn redeem_and_store(&self, code: &PairingCode, enrolled: Enrolled) -> Result<(), ErrorBody> {
-        let _one_at_a_time = self.enrolling.lock().unwrap_or_else(|e| e.into_inner());
-        let json = serde_json::to_vec_pretty(&enrolled).map_err(internal)?;
+    fn redeem_and_store(&self, checked: Checked) -> Result<(), ErrorBody> {
+        let _one_at_a_time = self.changing.lock().unwrap_or_else(|e| e.into_inner());
+        let json = serde_json::to_vec_pretty(&checked.enrolled).map_err(internal)?;
         let staged = wslib_file_atomic::Options::new()
-            .stage(&enrolment_path(&self.state), &json)
+            .stage(&self.enrolment_path(), &json)
             .map_err(internal)?;
-        let redeemed = self.code.redeem(code);
+        let redeemed = self.code.redeem(&checked.code);
         let Ok(Redemption::Accepted) = redeemed else {
             let _ = staged.discard();
             return Err(refusal(redeemed));
         };
         staged.promote().map_err(internal)?;
-        tracing::info!("enrolled");
-        *self.mode.write().unwrap_or_else(|e| e.into_inner()) = Mode::Enrolled(enrolled);
+        *self.mode.write().unwrap_or_else(|e| e.into_inner()) = Mode::Enrolled(checked.enrolled);
+        self.tls.reload(checked.operator);
+        tracing::info!("enrolled; the API now requires the operator's client certificate");
+        self.on_new_chain();
         Ok(())
     }
 }
@@ -197,17 +225,7 @@ fn refusal(redeemed: Result<Redemption, CodeError>) -> ErrorBody {
     }
 }
 
-fn status_of(subordinate: &CertificateView, config: &IssuanceConfig) -> Status {
-    Status {
-        state: IssuerState::StepCaDown,
-        subordinate_serial: decimal(&subordinate.serial),
-        subordinate_not_after: rfc_3339(subordinate.not_after),
-        config: config.clone(),
-        versions: versions(),
-    }
-}
-
-fn versions() -> Versions {
+pub(crate) fn versions() -> Versions {
     Versions {
         api: API_VERSION,
         broker: env!("CARGO_PKG_VERSION").into(),
@@ -215,14 +233,14 @@ fn versions() -> Versions {
     }
 }
 
-fn bad_request(message: impl Display) -> ErrorBody {
+pub(crate) fn bad_request(message: impl Display) -> ErrorBody {
     ErrorBody {
         kind: ErrorKind::BadRequest,
         message: message.to_string(),
     }
 }
 
-fn internal(error: impl Display) -> ErrorBody {
+pub(crate) fn internal(error: impl Display) -> ErrorBody {
     tracing::error!(%error, "enrolment failed");
     ErrorBody {
         kind: ErrorKind::Internal,
@@ -230,7 +248,7 @@ fn internal(error: impl Display) -> ErrorBody {
     }
 }
 
-fn decimal(hex: &str) -> String {
+pub(crate) fn decimal(hex: &str) -> String {
     let mut digits = vec![0u32];
     for nibble in hex.chars().filter_map(|c| c.to_digit(16)) {
         let mut carry = nibble;
@@ -253,7 +271,7 @@ fn decimal(hex: &str) -> String {
         .collect()
 }
 
-fn rfc_3339(at: SystemTime) -> String {
+pub(crate) fn rfc_3339(at: SystemTime) -> String {
     let seconds = at
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());

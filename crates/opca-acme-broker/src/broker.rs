@@ -9,10 +9,12 @@ use wslib_crypto::{KeyAlgorithm, Signer};
 use wslib_crypto_ca::{CERTIFICATE_REQUEST, CsrView, Subject, build_csr};
 use wslib_crypto_x509::SubjectAltName;
 use wslib_crypto_x509::pem::{self, PRIVATE_KEY};
+use wslib_http_server::Tls;
 use wslib_pairing::{OneTimeCode, PairingCode, PairingUri, SpkiSha256, Status};
 use wslib_service::Held;
 use wslib_tls::{Location, Serving};
 
+use crate::enrolled::{operator_config, root_of};
 use crate::enrolment::{self, Mode};
 use crate::{Config, Error};
 
@@ -22,11 +24,13 @@ pub const ATTEMPTS: NonZeroU32 = NonZeroU32::new(5).unwrap();
 /// The broker's state: its subordinate key and CSR, its API identity, its
 /// pairing code, and whether it is enrolled.
 pub struct Broker {
-    serving: Serving,
+    pub(crate) provider: Arc<CryptoProvider>,
+    pub(crate) serving: Serving,
+    pub(crate) tls: Tls,
     pub(crate) subordinate: Subordinate,
     pub(crate) code: Arc<OneTimeCode>,
     pub(crate) mode: RwLock<Mode>,
-    pub(crate) enrolling: Mutex<()>,
+    pub(crate) changing: Mutex<()>,
     pub(crate) host: String,
     port: u16,
     pub(crate) domains: Vec<String>,
@@ -47,8 +51,12 @@ impl Broker {
         let provider = Arc::new(default_provider());
         let subordinate = Subordinate::load_or_generate(provider.clone(), state, &config.host)?;
         let location = Location::managed(state.join("api.crt"), state.join("api.key"));
-        let serving =
-            Serving::load_or_mint(provider, location, || vec![name], KeyAlgorithm::EcP256)?;
+        let serving = Serving::load_or_mint(
+            provider.clone(),
+            location,
+            || vec![name],
+            KeyAlgorithm::EcP256,
+        )?;
         let code_path = state.join("pairing-code");
         let (code, issued) = match OneTimeCode::open(&code_path)? {
             Some(code) => (code, None),
@@ -58,12 +66,23 @@ impl Broker {
             }
         };
         let mode = enrolment::load(state)?;
+        let tls = Tls::new(match &mode {
+            Mode::Enrolling => serving.config(),
+            Mode::Enrolled(enrolled) => operator_config(
+                &provider,
+                &serving,
+                root_of(&enrolled.chain_pem)?,
+                &enrolled.operator_pin,
+            )?,
+        });
         let broker = Self {
+            provider,
             serving,
+            tls,
             subordinate,
             code: Arc::new(code),
             mode: RwLock::new(mode),
-            enrolling: Mutex::new(()),
+            changing: Mutex::new(()),
             host: config.host.clone(),
             port: config.listen.port(),
             domains: config.domains.clone(),
@@ -118,6 +137,7 @@ impl Broker {
 /// The subordinate CA's key, unencrypted and owner-only, and its CSR.
 pub struct Subordinate {
     signer: Signer,
+    subject: Subject,
     csr_pem: String,
 }
 
@@ -147,13 +167,21 @@ impl Subordinate {
         let csr_pem = match stored.filter(|pem| carries(pem, &signer, &subject)) {
             Some(pem) => pem,
             None => {
-                let csr = build_csr(&signer, &subject, &[])?;
-                let csr_pem = pem::encode(CERTIFICATE_REQUEST, &csr);
+                let csr_pem = csr(&signer, &subject)?;
                 wslib_file_atomic::replace_readable(&csr_path, csr_pem.as_bytes())?;
                 csr_pem
             }
         };
-        Ok(Self { signer, csr_pem })
+        Ok(Self {
+            signer,
+            subject,
+            csr_pem,
+        })
+    }
+
+    /// A new CSR over the same key, for a renewal.
+    pub fn fresh_csr(&self) -> Result<String, Error> {
+        csr(&self.signer, &self.subject)
     }
 
     /// The DER SubjectPublicKeyInfo of the subordinate key.
@@ -164,6 +192,13 @@ impl Subordinate {
     pub fn csr_pem(&self) -> &str {
         &self.csr_pem
     }
+}
+
+fn csr(signer: &Signer, subject: &Subject) -> Result<String, Error> {
+    Ok(pem::encode(
+        CERTIFICATE_REQUEST,
+        &build_csr(signer, subject, &[])?,
+    ))
 }
 
 fn carries(csr_pem: &str, signer: &Signer, subject: &Subject) -> bool {

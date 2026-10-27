@@ -3,6 +3,7 @@
 mod api;
 mod broker;
 mod config;
+mod enrolled;
 mod enrolment;
 
 pub use api::serve;

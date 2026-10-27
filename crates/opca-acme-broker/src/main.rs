@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error};
+use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error, Mode};
 use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{SpentBy, Status};
 
@@ -21,16 +21,22 @@ fn main() -> ExitCode {
             let listen = config.listen;
             let (broker, uri) =
                 tokio::task::spawn_blocking(move || Broker::start(&config)).await??;
-            match (uri, broker.code_status()?) {
-                (Some(uri), _) => tracing::info!("pairing URI: {}", uri.expose()),
-                (None, Status::Pending { remaining, .. }) => tracing::info!(
+            match (uri, broker.mode(), broker.code_status()?) {
+                (Some(uri), ..) => tracing::info!("pairing URI: {}", uri.expose()),
+                (None, Mode::Enrolled(enrolled), _) if enrolled.revoked => {
+                    tracing::warn!("revoked: answering only status and revoke")
+                }
+                (None, Mode::Enrolled(_), _) => {
+                    tracing::info!("enrolled: requiring the operator's client certificate")
+                }
+                (None, _, Status::Pending { remaining, .. }) => tracing::info!(
                     remaining,
                     "awaiting pairing with the code issued earlier; its URI was logged then"
                 ),
-                (None, Status::Spent(SpentBy::Lockout)) => {
+                (None, _, Status::Spent(SpentBy::Lockout)) => {
                     tracing::warn!("the pairing code is locked out by wrong attempts")
                 }
-                (None, _) => {}
+                (None, ..) => {}
             }
             let listener = Listener::bind(listen, Bounds::SERVING)
                 .await
