@@ -206,6 +206,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Verifying a DKIM record now reports "No TXT record found" when none is
   published, instead of a DNS lookup failure; a lookup that fails (SERVFAIL,
   REFUSED, timeout) is reported as a DNS error. Lookups go through `wslib-dns`.
+- A CSR whose EC key carries explicit curve parameters, as macOS LibreSSL's
+  `openssl req -newkey ec` makes, is now refused with "EC keys must use a named
+  curve" instead of a signature error.
 - `settings.json` is now replaced atomically and readable by its owner alone.
 - The vault lock now excludes a second holder. `op` allows two items one title,
   so creating `CA_Lock` never failed: the lock 1Password created first now wins
