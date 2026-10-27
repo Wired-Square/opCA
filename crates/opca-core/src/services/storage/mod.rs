@@ -21,11 +21,30 @@ use crate::settings;
 // Trait
 // ---------------------------------------------------------------------------
 
+/// Who may read an uploaded object on a store that has file modes.
+///
+/// S3 ignores it: access there is the bucket policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    /// World-readable, for a web server running as another user to serve.
+    Public,
+    Private,
+}
+
+impl Visibility {
+    pub fn file_mode(self) -> u32 {
+        match self {
+            Visibility::Public => 0o644,
+            Visibility::Private => 0o600,
+        }
+    }
+}
+
 /// A backend that can upload content to a remote location and verify
 /// connectivity.
 pub trait StorageBackend {
     /// Upload `content` to the given `uri`.
-    fn upload(&self, content: &[u8], uri: &str) -> Result<(), OpcaError>;
+    fn upload(&self, content: &[u8], uri: &str, visibility: Visibility) -> Result<(), OpcaError>;
 
     /// Test that the backend can reach the remote target.
     fn test_connection(&self, uri: &str) -> Result<(), OpcaError>;

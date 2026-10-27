@@ -8,6 +8,7 @@ use crate::constants::DEFAULT_STORAGE_CONF;
 use crate::error::OpcaError;
 use crate::op::Runner;
 use crate::services::database::models::{CertLookup, CertRecord};
+use crate::services::storage::Visibility;
 
 /// The public-store key of the certificate published for `cn`.
 pub fn published_cert_key(cn: &str) -> String {
@@ -89,7 +90,7 @@ impl<R: Runner> CertificateAuthority<R> {
             .ca_public_store
             .ok_or_else(|| OpcaError::Storage("No public store configured".into()))?;
         let uri = format!("{}/{}", store.trim_end_matches('/'), published_cert_key(cn));
-        self.upload_content(pem.as_bytes(), &uri)?;
+        self.upload_content(pem.as_bytes(), &uri, Visibility::Public)?;
         self.ca_database
             .as_mut()
             .ok_or(OpcaError::CaNotFound)?

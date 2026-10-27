@@ -13,11 +13,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use log::{debug, info};
-use ssh2::Session;
+use ssh2::{FileStat, OpenFlags, OpenType, Session};
 
 use crate::error::OpcaError;
 
-use super::StorageBackend;
+use super::{StorageBackend, Visibility};
 
 /// SFTP-based storage backend.
 pub struct StorageSftp;
@@ -160,7 +160,7 @@ impl StorageSftp {
 }
 
 impl StorageBackend for StorageSftp {
-    fn upload(&self, content: &[u8], uri: &str) -> Result<(), OpcaError> {
+    fn upload(&self, content: &[u8], uri: &str, visibility: Visibility) -> Result<(), OpcaError> {
         info!("[sftp] uploading {} bytes to {}", content.len(), uri);
         let parsed = Self::parse_uri(uri)?;
         let session = Self::connect(&parsed)?;
@@ -183,9 +183,31 @@ impl StorageBackend for StorageSftp {
             }
         }
 
-        let mut remote_file = sftp.create(remote_path).map_err(|e| {
-            OpcaError::Storage(format!("Failed to create remote file {}: {e}", parsed.path))
-        })?;
+        let mode = visibility.file_mode();
+        let mut remote_file = sftp
+            .open_mode(
+                remote_path,
+                OpenFlags::WRITE | OpenFlags::TRUNCATE,
+                mode as i32,
+                OpenType::File,
+            )
+            .map_err(|e| {
+                OpcaError::Storage(format!("Failed to create remote file {}: {e}", parsed.path))
+            })?;
+
+        // The open mode only reaches a new file, and through the server's umask.
+        remote_file
+            .setstat(FileStat {
+                size: None,
+                uid: None,
+                gid: None,
+                perm: Some(mode),
+                atime: None,
+                mtime: None,
+            })
+            .map_err(|e| {
+                OpcaError::Storage(format!("Failed to set mode on {}: {e}", parsed.path))
+            })?;
 
         remote_file.write_all(content).map_err(|e| {
             OpcaError::Storage(format!(

@@ -147,9 +147,11 @@ Organised by concern under [src/](../crates/opca-core/src):
     contain secret material.
   - [storage/](../crates/opca-core/src/services/storage) — publishing
     backends behind a `StorageBackend` trait: `rsync://`, `sftp://`/`scp://`,
-    and `s3://`. A URI factory picks the right backend per upload. AWS
-    credentials are read straight from a 1Password item with `op item get`
-    (see [AWS credentials](#aws-credentials)).
+    and `s3://`. A URI factory picks the right backend per upload. Each
+    upload says whether it is public or private: rsync and sftp write public
+    objects 0644 and private ones 0600, while S3 leaves access to the bucket
+    policy. AWS credentials are read straight from a 1Password item with
+    `op item get` (see [AWS credentials](#aws-credentials)).
   - [route53.rs](../crates/opca-core/src/services/route53.rs) — AWS SDK
     calls for DKIM TXT record deployment, the value split into 255-octet
     quoted strings by `wslib_dns::txt::{split, quote}`, and the DKIM DNS check

@@ -216,6 +216,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   vault for five minutes.
 - An `op` call 1Password refuses as racing another write (409 Conflict) is
   made once more, so lock contention no longer fails the holder's own write.
+- Uploads to an `rsync://` or `sftp://` public store are now world-readable
+  (0644), so a web server running as another user can serve the CA
+  certificate, CRL and published certificates. Private-store and backup uploads
+  are set owner-only (0600).
 
 ## [0.102.3] - 2026-10-10
 

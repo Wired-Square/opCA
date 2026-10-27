@@ -33,7 +33,7 @@ use crate::services::database::models::{
     ExternalCertRecord, IgnoreReason, SerialType,
 };
 use crate::services::local_backup::{self, BackupSource, LocalBackup};
-use crate::services::storage;
+use crate::services::storage::{self, Visibility};
 use crate::utils::datetime::{self, DateTimeFormat};
 use wslib_crypto_ca::{
     Authority, CrlView, Csr, KeyIdentifierMethod, Profile, Revocation, SanPolicy, Serial, Validity,
@@ -955,7 +955,7 @@ impl<R: Runner> CertificateAuthority<R> {
         self.store_ca_database()?;
 
         if let Some(uri) = batch_uri {
-            self.upload_content(crls.concat().as_bytes(), &uri)
+            self.upload_content(crls.concat().as_bytes(), &uri, Visibility::Private)
                 .map_err(|e| OpcaError::CrlBatchUpload(e.to_string()))?;
         }
 
@@ -1603,12 +1603,17 @@ impl<R: Runner> CertificateAuthority<R> {
     ///
     /// AWS credentials are resolved only for `s3://` targets, so `rsync://`
     /// and `sftp://` uploads never touch the CA config or 1Password.
-    pub fn upload_content(&self, content: &[u8], store_uri: &str) -> Result<(), OpcaError> {
+    pub fn upload_content(
+        &self,
+        content: &[u8],
+        store_uri: &str,
+        visibility: Visibility,
+    ) -> Result<(), OpcaError> {
         let creds = storage::needs_aws_credentials(store_uri)
             .then(|| self.aws_credentials())
             .transpose()?;
         let backend = storage::storage_from_uri_with_creds(store_uri, creds.as_ref())?;
-        backend.upload(content, store_uri)
+        backend.upload(content, store_uri, visibility)
     }
 
     /// The AWS region configured for this CA, if any.
@@ -1640,7 +1645,7 @@ impl<R: Runner> CertificateAuthority<R> {
             .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         let binary_db = db.export_database_binary()?;
-        self.upload_content(&binary_db, &uri)
+        self.upload_content(&binary_db, &uri, Visibility::Private)
     }
 
     /// Upload the CA certificate to the public store.
@@ -1664,7 +1669,7 @@ impl<R: Runner> CertificateAuthority<R> {
         };
 
         let cert_pem = self.get_certificate()?;
-        self.upload_content(cert_pem.as_bytes(), &uri)
+        self.upload_content(cert_pem.as_bytes(), &uri, Visibility::Public)
     }
 
     /// Upload the CRL to the public store.
@@ -1691,7 +1696,7 @@ impl<R: Runner> CertificateAuthority<R> {
             .crl
             .as_ref()
             .ok_or_else(|| OpcaError::CertificateNotFound("CRL not found".into()))?;
-        self.upload_content(crl.as_bytes(), &uri)
+        self.upload_content(crl.as_bytes(), &uri, Visibility::Public)
     }
 
     // -----------------------------------------------------------------------

@@ -12,6 +12,7 @@ use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::error::OpcaError;
 use opca_core::op::{self, Assignment};
 use opca_core::services::backup::{decrypt_payload, encrypt_payload};
+use opca_core::services::storage::Visibility;
 use opca_core::services::vault::{BackupPayload, VaultBackup};
 
 use crate::commands::dto::{BackupInfoResult, BackupItemCount, RestoreResult};
@@ -97,10 +98,11 @@ pub async fn vault_backup(
             .unwrap_or_else(|| "backup.opca".to_string());
         let upload_uri = format!("{}/{}", store_uri.trim_end_matches('/'), filename);
 
-        ca.upload_content(&encrypted, &upload_uri).map_err(|e| {
-            state.log_err("vault_backup", Some(e.to_string()));
-            e.to_string()
-        })?;
+        ca.upload_content(&encrypted, &upload_uri, Visibility::Private)
+            .map_err(|e| {
+                state.log_err("vault_backup", Some(e.to_string()));
+                e.to_string()
+            })?;
 
         state.log_ok(
             "vault_backup",
