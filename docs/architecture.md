@@ -677,7 +677,10 @@ the webview and `opca-core`.
 
 `wslib-tauri`'s `quit_guard` plugin, given `AppState::is_busy` in `main.rs`,
 keeps the app from exiting part-way through an `op` operation. `AppState::is_busy` is true while
-the `conn` mutex (held by every `op` call) or `private_store_lock` is held. An
+the `conn` mutex (held by every `op` call) or `private_store_lock` is held, or
+while this app holds `CA_Lock`, which a mutation keeps across its separate
+`acquire_lock` and `release_lock` commands, up to the lock's TTL (a failed
+release leaves it held, but stale after that). An
 `ExitRequested` or window `CloseRequested` arriving then is prevented, the
 frontend is sent `quit-pending` (shown as a notice), and a watcher exits once
 the app is idle. macOS's predefined Quit terminates without an event that can

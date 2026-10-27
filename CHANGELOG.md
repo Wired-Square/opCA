@@ -225,6 +225,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (0644), so a web server running as another user can serve the CA
   certificate, CRL and published certificates. Private-store and backup uploads
   are set owner-only (0600).
+- Quitting while a change holds the vault lock now waits for it to finish,
+  rather than exiting between its steps and leaving `CA_Lock` held until it
+  goes stale. A restore in progress holds a quit the same way. A quit waits at
+  most until the lock's TTL runs out.
 - Saving a blank store in the CA's Stores settings now clears it; before, the
   old store stayed and the save looked as if it worked.
 - Saving a blank field in the CA's Configuration settings now clears it;

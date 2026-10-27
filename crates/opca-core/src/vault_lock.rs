@@ -15,6 +15,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 
@@ -37,8 +38,14 @@ const DEFAULT_TTL: u64 = 300;
 /// Advisory lock backed by a 1Password Secure Note.
 pub struct VaultLock {
     lock_title: String,
-    /// The id of the lock item this instance holds.
-    held: Option<String>,
+    held: Option<Held>,
+}
+
+/// The lock item this instance holds, and when it goes stale.
+struct Held {
+    id: String,
+    acquired: Instant,
+    ttl: Duration,
 }
 
 /// One `CA_Lock` item: its id, when 1Password created it, and its fields by label.
@@ -128,7 +135,11 @@ impl VaultLock {
         };
         match self.contest(vault, &mine) {
             Ok(()) => {
-                self.held = Some(mine.id);
+                self.held = Some(Held {
+                    id: mine.id,
+                    acquired: Instant::now(),
+                    ttl: Duration::from_secs(ttl),
+                });
                 Ok(())
             }
             Err(e) => {
@@ -164,8 +175,8 @@ impl VaultLock {
     /// This is idempotent — calling release when the lock is not held
     /// is a no-op.
     pub fn release<R: Runner>(&mut self, vault: &Vault<R>) -> Result<(), OpcaError> {
-        if let Some(id) = &self.held {
-            delete_lock(vault, id)?;
+        if let Some(held) = &self.held {
+            delete_lock(vault, &held.id)?;
             self.held = None;
         }
         Ok(())
@@ -174,6 +185,13 @@ impl VaultLock {
     /// Whether the lock is currently held by this instance.
     pub fn held(&self) -> bool {
         self.held.is_some()
+    }
+
+    /// Whether the lock is held by this instance and not yet past its TTL.
+    pub fn held_within_ttl(&self) -> bool {
+        self.held
+            .as_ref()
+            .is_some_and(|held| held.acquired.elapsed() < held.ttl)
     }
 
     /// The default TTL in seconds.
