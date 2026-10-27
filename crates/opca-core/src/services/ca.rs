@@ -3,6 +3,7 @@
 //! Orchestrates all PKI operations: CA initialisation, certificate signing,
 //! revocation, CRL generation, 1Password storage, and remote uploads.
 
+pub mod operator;
 pub mod subordinate;
 
 use std::collections::HashMap;

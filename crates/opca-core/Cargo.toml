@@ -36,11 +36,18 @@ tracing = { version = "0.1", features = ["log"] }
 aws-sdk-s3 = "1"
 aws-sdk-route53 = "1"
 aws-credential-types = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time"] }
 wslib-dns = { version = "0.2.1", registry = "wired-square", features = ["hickory"] }
 ssh2 = "0.9"
 dirs = "6"
 whoami = "1"
+opca-acme-api = { path = "../opca-acme-api" }
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+tokio-rustls = { version = "0.26", default-features = false }
+wslib-pairing = { version = "0.1.0", registry = "wired-square" }
+wslib-tls = { version = "0.2.2", registry = "wired-square" }
 
 [dev-dependencies]
 wslib-1password = { version = "0.1.1", registry = "wired-square", features = ["testing"] }

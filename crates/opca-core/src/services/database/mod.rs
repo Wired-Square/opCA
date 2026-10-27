@@ -1156,6 +1156,32 @@ impl CertificateAuthorityDB {
         Ok(())
     }
 
+    pub fn set_broker_endpoint(
+        &self,
+        id: i64,
+        url: &str,
+        pinned_key: &str,
+    ) -> Result<(), OpcaError> {
+        self.conn.execute(
+            "UPDATE brokers SET url = ?2, pinned_key = ?3, updated_at = ?4 WHERE id = ?1",
+            rusqlite::params![
+                id,
+                url,
+                pinned_key,
+                datetime::now_utc_str(DateTimeFormat::Openssl)
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn touch_broker(&self, id: i64) -> Result<(), OpcaError> {
+        self.conn.execute(
+            "UPDATE brokers SET last_contact = ?2 WHERE id = ?1",
+            rusqlite::params![id, datetime::now_utc_str(DateTimeFormat::Openssl)],
+        )?;
+        Ok(())
+    }
+
     /// Marks the broker whose current subordinate is `serial`, however it was revoked.
     pub fn revoke_brokers_of(&self, serial: &str) -> Result<(), OpcaError> {
         self.conn.execute(

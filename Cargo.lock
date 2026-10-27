@@ -3952,7 +3952,11 @@ dependencies = [
  "dirs 6.0.0",
  "foreign-types 0.3.2",
  "gethostname",
+ "http-body-util",
+ "hyper 1.8.1",
+ "hyper-util",
  "log",
+ "opca-acme-api",
  "openssl",
  "openssl-sys",
  "pbkdf2",
@@ -3969,6 +3973,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tracing",
  "whoami",
  "wslib-1password",
@@ -3978,6 +3983,8 @@ dependencies = [
  "wslib-dns",
  "wslib-dns-mail",
  "wslib-file-atomic",
+ "wslib-pairing",
+ "wslib-tls",
 ]
 
 [[package]]

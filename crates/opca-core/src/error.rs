@@ -109,6 +109,9 @@ pub enum OpcaError {
     #[error("Cryptographic operation failed: {0}")]
     Crypto(String),
 
+    #[error("ACME broker: {0}")]
+    Broker(#[from] crate::services::acme_broker::BrokerError),
+
     // ---- General ----
     #[error("I/O error: {0}")]
     Io(String),

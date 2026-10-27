@@ -1,3 +1,4 @@
+pub mod acme_broker;
 pub mod backup;
 pub mod ca;
 pub mod cert;

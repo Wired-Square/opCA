@@ -121,7 +121,7 @@ impl<R: Runner> CertificateAuthority<R> {
         self.db()?.query_all_brokers()
     }
 
-    fn db(&self) -> Result<&CertificateAuthorityDB, OpcaError> {
+    pub(crate) fn db(&self) -> Result<&CertificateAuthorityDB, OpcaError> {
         self.ca_database
             .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))
@@ -186,7 +186,7 @@ impl<R: Runner> CertificateAuthority<R> {
         })
     }
 
-    fn broker(&self, id: i64) -> Result<Broker, OpcaError> {
+    pub(crate) fn broker(&self, id: i64) -> Result<Broker, OpcaError> {
         self.db()?
             .query_broker(id)?
             .ok_or_else(|| OpcaError::CertificateNotFound(format!("subordinate {id}")))
