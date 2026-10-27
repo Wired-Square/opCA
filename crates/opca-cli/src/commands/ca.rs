@@ -254,7 +254,15 @@ fn handle_list<R: Runner>(
     let certs = db.query_all_certs()?;
     let ext_certs = db.query_all_external_certs(None)?;
 
-    let headers = &["Serial", "CN", "Title", "Type", "Status", "Expiry"];
+    let headers = &[
+        "Serial",
+        "CN",
+        "Title",
+        "Type",
+        "Status",
+        "Expiry",
+        "Published",
+    ];
     let mut rows: Vec<Vec<String>> = Vec::new();
 
     for cert in &certs {
@@ -297,6 +305,7 @@ fn handle_list<R: Runner>(
             cert.cert_type.clone().unwrap_or_default(),
             display_status.to_string(),
             cert.expiry_date.clone().unwrap_or_default(),
+            cert.published_at.clone().unwrap_or_default(),
         ]);
     }
 
@@ -332,6 +341,7 @@ fn handle_list<R: Runner>(
                     .unwrap_or_else(|| "external".to_string()),
                 display_status.to_string(),
                 ext.expiry_date.clone().unwrap_or_default(),
+                String::new(),
             ]);
         }
     }

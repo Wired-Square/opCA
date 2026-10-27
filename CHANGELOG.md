@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   own command or from the certificate list, puts it on the CRL and marks its
   record revoked. Renew and Rekey on the certificate list refuse a subordinate.
 - `opca subordinate sign`, `renew`, `revoke` and `list`.
+- `opca cert publish <serial|CN>`, and a Published column in `opca ca list`.
+  `opca cert renew` says where it republished, or why it couldn't.
 - The CSR page's Sign tab offers Subordinate CA, asking for the permitted
   domains in place of a common name and alternative names, and now asks for
   the certificate type first. The certificate detail shows a certificate's
