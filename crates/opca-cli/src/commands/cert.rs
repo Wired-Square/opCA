@@ -1,7 +1,7 @@
 use opca_core::error::OpcaError;
 use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle};
-use opca_core::services::database::CertLookup;
+use opca_core::services::database::{CertLookup, CertificateAuthorityDB};
 
 use crate::app::{AppContext, with_lock};
 use crate::output;
@@ -25,6 +25,7 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
         CertAction::Renew(args) => handle_renew(app, args),
         CertAction::Revoke(revoke_args) => handle_revoke(app, revoke_args),
         CertAction::Delete(id) => handle_delete(app, id),
+        CertAction::Publish { id } => handle_publish(app, &id),
     }
 }
 
@@ -236,16 +237,23 @@ fn handle_renew<R: Runner>(app: &mut AppContext<R>, args: CertRenewArgs) -> Resu
 
     with_lock(app, "cert_renew", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warnings) =
-            ca.renew_certificate_bundle(&lookup, args.days)?;
+        let renewal = ca.renew_certificate_bundle(&lookup, args.days)?;
         output::print_result(
-            &format!("Certificate renewed (new serial {new_serial})"),
+            &format!("Certificate renewed (new serial {})", renewal.serial),
             true,
         );
-        for w in &issuance_warnings {
+        for w in &renewal.warnings {
             output::warning(&w.message);
         }
-        print!("{new_pem}");
+        match &renewal.republished {
+            Some(Ok(uri)) => output::print_result(&format!("Published to {uri}"), true),
+            Some(Err(e)) => output::warning(&format!(
+                "Publishing the renewal failed: {e}. Retry with `opca cert publish {}`",
+                renewal.serial
+            )),
+            None => {}
+        }
+        print!("{}", renewal.pem);
         Ok(())
     })
 }
@@ -335,9 +343,30 @@ fn handle_delete<R: Runner>(app: &mut AppContext<R>, id: CertIdentifier) -> Resu
     })
 }
 
+fn handle_publish<R: Runner>(app: &mut AppContext<R>, id: &str) -> Result<(), OpcaError> {
+    output::title("Publishing Certificate");
+
+    with_lock(app, "cert_publish", |app| {
+        let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+        let lookup = serial_or_cn(ca.ca_database.as_ref().ok_or(OpcaError::CaNotFound)?, id)?;
+        let uri = ca.publish_certificate(&lookup)?;
+        output::print_result(&format!("Published to {uri}"), true);
+        Ok(())
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn serial_or_cn(db: &CertificateAuthorityDB, id: &str) -> Result<CertLookup, OpcaError> {
+    let serial = CertLookup::Serial(id.to_string());
+    Ok(if db.query_cert(&serial, false)?.is_some() {
+        serial
+    } else {
+        CertLookup::Cn(id.to_string())
+    })
+}
 
 /// A CN is shared by every renewal of a certificate, so it names a delete only
 /// when exactly one of its certificates is revoked or expired.
@@ -443,4 +472,42 @@ pub fn get_password(prompt: &str) -> Result<String, OpcaError> {
 pub fn get_password_single(prompt: &str) -> Result<String, OpcaError> {
     rpassword::prompt_password_stderr(prompt)
         .map_err(|e| OpcaError::Other(format!("Failed to read password: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+    use opca_core::services::database::{CaConfig, CertRecord};
+
+    use super::*;
+    use crate::{Cli, Commands};
+
+    #[test]
+    fn publish_takes_one_serial_or_cn() {
+        let cli =
+            Cli::try_parse_from(["opca", "-v", "CA", "cert", "publish", "*.example.com"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Cert(CertArgs {
+                action: CertAction::Publish { id }
+            }) if id == "*.example.com"
+        ));
+        assert!(Cli::try_parse_from(["opca", "-v", "CA", "cert", "publish"]).is_err());
+    }
+
+    #[test]
+    fn a_publish_id_is_a_serial_when_one_matches_and_otherwise_a_cn() {
+        let mut db = CertificateAuthorityDB::new(&CaConfig::default()).unwrap();
+        db.add_cert(&CertRecord {
+            serial: "7".into(),
+            cn: Some("www.example.com".into()),
+            ..CertRecord::default()
+        })
+        .unwrap();
+
+        assert!(matches!(serial_or_cn(&db, "7").unwrap(), CertLookup::Serial(s) if s == "7"));
+        for id in ["8", "www.example.com"] {
+            assert!(matches!(serial_or_cn(&db, id).unwrap(), CertLookup::Cn(cn) if cn == id));
+        }
+    }
 }

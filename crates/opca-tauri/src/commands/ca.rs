@@ -8,7 +8,7 @@ use opca_core::services::ca::{CertificateAuthority, check_crl_batch_update};
 use opca_core::services::database::CaConfig;
 use opca_core::services::local_backup::LocalBackup;
 use opca_core::services::storage::{
-    get_aws_credentials, needs_aws_credentials, storage_from_uri_with_creds,
+    Visibility, get_aws_credentials, needs_aws_credentials, storage_from_uri_with_creds,
 };
 
 use crate::commands::dto::{CaConfigDto, CaInfo};
@@ -212,7 +212,7 @@ pub async fn sync_private_store(app: AppHandle, state: State<'_, AppState>) -> R
             })
             .transpose()
             .and_then(|creds| storage_from_uri_with_creds(&job.uri, creds.as_ref()))
-            .and_then(|backend| backend.upload(&job.bytes, &job.uri));
+            .and_then(|backend| backend.upload(&job.bytes, &job.uri, Visibility::Private));
         match result {
             Ok(()) => {
                 *state

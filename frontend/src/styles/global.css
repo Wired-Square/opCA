@@ -460,7 +460,8 @@ a:hover {
 
 .status-ignored,
 .status-superseded,
-.status-stale {
+.status-stale,
+.status-published {
   color: var(--app-text-muted);
   background: var(--neutral-tint);
   border: 1px solid var(--neutral-edge);

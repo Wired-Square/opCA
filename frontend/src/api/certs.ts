@@ -89,6 +89,12 @@ export async function renewCert(serial: string): Promise<RenewRekeyResult> {
   );
 }
 
+export async function publishCert(serial: string): Promise<string> {
+  return withLock("publish_cert", () =>
+    tauriInvoke<string>("publish_cert", { serial }),
+  );
+}
+
 export async function rekeyCert(
   serial: string,
   keyAlgorithm: KeyAlgorithm | null,

@@ -11,7 +11,7 @@ use log::{debug, error, info};
 use crate::error::OpcaError;
 use crate::utils::block_on;
 
-use super::{AwsCredentials, StorageBackend};
+use super::{AwsCredentials, StorageBackend, Visibility};
 
 /// S3-based storage backend.
 pub struct StorageS3 {
@@ -39,7 +39,7 @@ impl StorageS3 {
 }
 
 impl StorageBackend for StorageS3 {
-    fn upload(&self, content: &[u8], uri: &str) -> Result<(), OpcaError> {
+    fn upload(&self, content: &[u8], uri: &str, _: Visibility) -> Result<(), OpcaError> {
         info!("[s3] uploading {} bytes to {}", content.len(), uri);
         let (bucket_name, key) = parse_s3_uri(uri)?;
         let client = self.sdk_client();

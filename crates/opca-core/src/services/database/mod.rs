@@ -427,7 +427,7 @@ impl CertificateAuthorityDB {
 const CERT_COLUMNS: &str = "serial, cn, title, status, expiry_date, revocation_date, subject,
     cert_type, not_before, key_type, key_size, issuer, san,
     ignored_at, ignored_by, ignored_reason, ignored_note,
-    has_private_key, has_chain, deleted_at";
+    has_private_key, has_chain, deleted_at, published_at";
 
 impl CertificateAuthorityDB {
     /// Add a certificate record to the database.
@@ -437,9 +437,9 @@ impl CertificateAuthorityDB {
                 (serial, cn, title, status, expiry_date, revocation_date, subject,
                  cert_type, not_before, key_type, key_size, issuer, san,
                  ignored_at, ignored_by, ignored_reason, ignored_note,
-                 has_private_key, has_chain, deleted_at)
+                 has_private_key, has_chain, deleted_at, published_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             rusqlite::params![
                 record.serial,
                 record.cn,
@@ -461,6 +461,7 @@ impl CertificateAuthorityDB {
                 record.has_private_key,
                 record.has_chain,
                 record.deleted_at,
+                record.published_at,
             ],
         )?;
         self.dirty = true;
@@ -476,8 +477,8 @@ impl CertificateAuthorityDB {
                 not_before = ?8, key_type = ?9, key_size = ?10,
                 issuer = ?11, san = ?12,
                 ignored_at = ?13, ignored_by = ?14, ignored_reason = ?15, ignored_note = ?16,
-                has_private_key = ?17, has_chain = ?18, deleted_at = ?19
-             WHERE serial = ?20",
+                has_private_key = ?17, has_chain = ?18, deleted_at = ?19, published_at = ?20
+             WHERE serial = ?21",
             rusqlite::params![
                 record.cn,
                 record.title,
@@ -498,6 +499,7 @@ impl CertificateAuthorityDB {
                 record.has_private_key,
                 record.has_chain,
                 record.deleted_at,
+                record.published_at,
                 record.serial,
             ],
         )?;
@@ -574,6 +576,25 @@ impl CertificateAuthorityDB {
             "UPDATE certificate_authority SET deleted_at = ?1
              WHERE serial = ?2 AND deleted_at IS NULL",
             rusqlite::params![now, serial],
+        )?;
+
+        if rows == 0 {
+            return Err(OpcaError::CertificateNotFound(serial.to_string()));
+        }
+
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Stamp a certificate as the one published for its CN, unstamping any other.
+    pub fn mark_cert_published(&mut self, serial: &str, cn: &str) -> Result<(), OpcaError> {
+        let now =
+            crate::utils::datetime::now_utc_str(crate::utils::datetime::DateTimeFormat::Openssl);
+        let rows = self.conn.execute(
+            "UPDATE certificate_authority
+             SET published_at = CASE WHEN serial = ?1 THEN ?2 END
+             WHERE serial = ?1 OR (cn = ?3 AND published_at IS NOT NULL)",
+            rusqlite::params![serial, now, cn],
         )?;
 
         if rows == 0 {
@@ -667,6 +688,7 @@ impl CertificateAuthorityDB {
             has_private_key: row.get(17)?,
             has_chain: row.get(18)?,
             deleted_at: row.get(19)?,
+            published_at: row.get(20)?,
         })
     }
 }

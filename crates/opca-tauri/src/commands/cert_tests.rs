@@ -1,6 +1,6 @@
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 use opca_core::services::database::{CaConfig, CertLookup};
-use opca_core::testutil::{Output, created};
+use opca_core::testutil::{Output, created, item_json};
 use serde_json::{Value, json};
 
 use super::cert::*;
@@ -11,6 +11,9 @@ use crate::test_harness::{Handler, Harness};
 fn handler() -> impl Handler {
     tauri::generate_handler![
         create_cert,
+        get_cert_info,
+        publish_cert,
+        renew_cert,
         revoke_cert,
         delete_cert,
         bulk_revoke_certs,
@@ -463,4 +466,155 @@ fn inspecting_a_csr_reports_its_subject_key_and_signature() {
         cert.public_key_fingerprint_sha256
     );
     assert!(result.text_dump.contains("Certificate Request"));
+}
+
+fn set_public_store(h: &Harness, uri: String) {
+    let state = h.state();
+    let conn = state.conn.lock().unwrap();
+    conn.db()
+        .unwrap()
+        .update_config(&CaConfig {
+            ca_public_store: Some(uri),
+            ..CaConfig::default()
+        })
+        .unwrap();
+}
+
+/// An rsync public store in a temp dir, with the `certs/` it needs.
+fn public_store(h: &Harness) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("certs")).unwrap();
+    set_public_store(h, format!("rsync://{}", dir.path().display()));
+    dir
+}
+
+fn issue_bundle(h: &Harness, cn: &str) -> CertificateBundle {
+    h.answer([created(cn), Output::ok("")]);
+    let state = h.state();
+    let mut conn = state.conn.lock().unwrap();
+    let config = CertBundleConfig {
+        cn: Some(cn.into()),
+        ..CertBundleConfig::default()
+    };
+    conn.ca
+        .as_mut()
+        .unwrap()
+        .generate_certificate_bundle(CertType::WebServer, cn, config, None)
+        .unwrap()
+        .0
+}
+
+fn answer_item(h: &Harness, bundle: &CertificateBundle) {
+    h.answer([Output::ok(item_json(
+        &bundle.title,
+        &[
+            ("certificate", &bundle.certificate_pem().unwrap()),
+            ("private_key", &bundle.private_key_pem().unwrap()),
+            ("certificate_signing_request", &bundle.csr_pem().unwrap()),
+            ("type", &bundle.cert_type.to_string()),
+        ],
+    ))]);
+}
+
+fn publish(h: &Harness, bundle: &CertificateBundle) -> Result<Value, Value> {
+    answer_item(h, bundle);
+    h.answer_writes(1);
+    h.invoke("publish_cert", json!({ "serial": serial_of(bundle) }))
+}
+
+fn renew(h: &Harness, bundle: &CertificateBundle) -> Value {
+    answer_item(h, bundle);
+    h.answer([created("CRT"), Output::ok("")]);
+    h.invoke("renew_cert", json!({ "serial": serial_of(bundle) }))
+        .unwrap()
+}
+
+fn serial_of(bundle: &CertificateBundle) -> String {
+    bundle.get_certificate_attrib("serial").unwrap().unwrap()
+}
+
+fn published_object(dir: &tempfile::TempDir) -> String {
+    std::fs::read_to_string(dir.path().join("certs/www.example.com.pem")).unwrap()
+}
+
+#[test]
+fn publish_cert_uploads_the_cert_and_the_detail_says_when() {
+    let h = Harness::with_ca(vec![], handler());
+    let dir = public_store(&h);
+    let leaf = issue_bundle(&h, "www.example.com");
+    let serial = serial_of(&leaf);
+
+    let uri = format!("rsync://{}/certs/www.example.com.pem", dir.path().display());
+    assert_eq!(publish(&h, &leaf), Ok(json!(uri)));
+    assert_eq!(published_object(&dir), leaf.certificate_pem().unwrap());
+    let log = h.last_log();
+    assert!(log.success);
+    assert_eq!(
+        log.detail,
+        Some(format!("Published certificate {serial} to {uri}"))
+    );
+    let detail = h
+        .invoke("get_cert_info", json!({ "serial": serial }))
+        .unwrap();
+    assert!(detail["published_at"].is_string(), "{detail}");
+}
+
+#[test]
+fn publish_cert_refuses_a_revoked_cert_and_logs_why() {
+    let h = Harness::with_ca(vec![], handler());
+    let dir = public_store(&h);
+    let serial = issue_revoked(&h, "www.example.com");
+
+    let err = h
+        .invoke("publish_cert", json!({ "serial": serial }))
+        .unwrap_err();
+
+    assert!(err.as_str().unwrap().contains("revoked"), "{err}");
+    let log = h.last_log();
+    assert_eq!((log.action.as_str(), log.success), ("publish_cert", false));
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("certs")).unwrap().count(),
+        0
+    );
+}
+
+#[test]
+fn renew_cert_says_where_it_republished_a_published_cert() {
+    let h = Harness::with_ca(vec![], handler());
+    let dir = public_store(&h);
+    let leaf = issue_bundle(&h, "www.example.com");
+    let uri = publish(&h, &leaf).unwrap();
+
+    let result = renew(&h, &leaf);
+
+    assert_eq!(result["published_to"], uri);
+    assert_eq!(result["publish_error"], Value::Null);
+    assert_eq!(json!(published_object(&dir)), result["pem"]);
+}
+
+#[test]
+fn renew_cert_reports_a_failed_republish_and_keeps_the_renewal() {
+    let h = Harness::with_ca(vec![], handler());
+    let dir = public_store(&h);
+    let leaf = issue_bundle(&h, "www.example.com");
+    publish(&h, &leaf).unwrap();
+    set_public_store(&h, format!("rsync://{}/missing", dir.path().display()));
+
+    let result = renew(&h, &leaf);
+
+    assert_eq!(result["published_to"], Value::Null);
+    assert!(result["publish_error"].is_string(), "{result}");
+    let log = h.last_log();
+    assert!(!log.success);
+    let new_serial = result["serial"].as_str().unwrap();
+    assert!(
+        log.detail
+            .unwrap()
+            .starts_with(&format!("Renewed, but publishing {new_serial} failed")),
+    );
+    assert!(
+        h.invoke("get_cert_info", json!({ "serial": new_serial }))
+            .is_ok()
+    );
+    assert_eq!(published_object(&dir), leaf.certificate_pem().unwrap());
 }

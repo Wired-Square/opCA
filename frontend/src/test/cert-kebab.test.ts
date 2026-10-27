@@ -18,3 +18,24 @@ describe("certKebabItems delete gating", () => {
     expect(labels({ status: "Expired", cert_type: "ca" })).not.toContain("Delete");
   });
 });
+
+describe("certKebabItems publish gating", () => {
+  const publishable = (cert: Partial<CertListItem>) =>
+    certKebabItems(cert as CertListItem, { ...handlers, onPublish: noop }).some((i) => i.label === "Publish");
+
+  it("offers Publish on a valid leaf with a CN", () => {
+    expect(publishable({ status: "Valid", cert_type: "webserver", cn: "www.example.com" })).toBe(true);
+  });
+
+  it("withholds Publish from revoked, expired, CA and subordinate certs, and one with no CN", () => {
+    expect(publishable({ status: "Revoked", cert_type: "webserver", cn: "a.example.com" })).toBe(false);
+    expect(publishable({ status: "Expired", cert_type: "webserver", cn: "a.example.com" })).toBe(false);
+    expect(publishable({ status: "Valid", cert_type: "ca", cn: "Test CA" })).toBe(false);
+    expect(publishable({ status: "Valid", cert_type: "subordinateca", cn: "Broker CA" })).toBe(false);
+    expect(publishable({ status: "Valid", cert_type: "webserver", cn: null })).toBe(false);
+  });
+
+  it("leaves Publish out where no handler is given", () => {
+    expect(labels({ status: "Valid", cert_type: "webserver", cn: "www.example.com" })).not.toContain("Publish");
+  });
+});

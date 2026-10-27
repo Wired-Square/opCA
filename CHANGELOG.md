@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A certificate can be published to the public store as `certs/<CN>.pem`, for
+  a server that made its own key to fetch. A CN names its latest certificate,
+  and publishing one unpublishes the others with that CN. Revoked, expired and
+  CA certificates are refused. Renewing a published certificate publishes the
+  renewal; if that upload fails, the renewal stands and the failure is
+  reported. The CA database records when each was published (schema v18).
 - A subordinate CA can be signed from a CSR for a list of permitted domains:
   path length 0, `serverAuth` only, and critical name constraints that permit
   those domains and exclude every IP address. It lasts 90 days unless asked
@@ -25,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   own command or from the certificate list, puts it on the CRL and marks its
   record revoked. Renew and Rekey on the certificate list refuse a subordinate.
 - `opca subordinate sign`, `renew`, `revoke` and `list`.
+- `opca cert publish <serial|CN>`, and a Published column in `opca ca list`.
+  `opca cert renew` says where it republished, or why it couldn't.
+- The certificate detail shows a Published badge and when, and offers Publish
+  for a valid certificate with a CN that isn't a CA. After a renew, the new
+  certificate's page says where the renewal was published, or why publishing it
+  failed, and Publish retries it. Bulk renew logs a failed republish in the
+  Activity Log.
 - The CSR page's Sign tab offers Subordinate CA, asking for the permitted
   domains in place of a common name and alternative names, and now asks for
   the certificate type first. The certificate detail shows a certificate's
@@ -92,6 +105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   delivered.
 - `opca broker enrol`, `list`, `status`, `renew` (one, or `--all`) and
   `revoke`.
+- `contrib/cert-fetch.sh`, for a server to fetch its published certificate
+  under a timer: it installs the certificate only if it chains to the CA, is
+  not on the CA's verified CRL, has not expired, matches the server's key and
+  outlasts the installed one, then runs an optional reload command. Any
+  failure keeps the installed file, exits non-zero and posts to Slack, like
+  `openvpn-crl-fetch.sh`.
+- `docs/cert-delivery.md`: setting up a server to fetch its published
+  certificate, from its own key and CSR to a systemd timer or cron job.
 
 ### Changed
 
@@ -195,6 +216,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   vault for five minutes.
 - An `op` call 1Password refuses as racing another write (409 Conflict) is
   made once more, so lock contention no longer fails the holder's own write.
+- Uploads to an `rsync://` or `sftp://` public store are now world-readable
+  (0644), so a web server running as another user can serve the CA
+  certificate, CRL and published certificates. Private-store and backup uploads
+  are set owner-only (0600).
 
 ## [0.102.3] - 2026-10-10
 

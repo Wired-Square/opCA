@@ -10,7 +10,7 @@ use log::{debug, info};
 
 use crate::error::OpcaError;
 
-use super::StorageBackend;
+use super::{StorageBackend, Visibility};
 
 /// Rsync-based storage backend.
 pub struct StorageRsync;
@@ -63,7 +63,7 @@ impl StorageRsync {
 }
 
 impl StorageBackend for StorageRsync {
-    fn upload(&self, content: &[u8], uri: &str) -> Result<(), OpcaError> {
+    fn upload(&self, content: &[u8], uri: &str, visibility: Visibility) -> Result<(), OpcaError> {
         info!("[rsync] uploading {} bytes to {}", content.len(), uri);
         let destination = Self::parse_destination(uri)?;
 
@@ -78,8 +78,13 @@ impl StorageBackend for StorageRsync {
         let tmp_path = tmp.path().to_string_lossy().to_string();
 
         // rsync's size-and-mtime quick check would skip a same-size re-upload within a second.
+        // macOS's openrsync takes only symbolic --chmod modes.
+        let chmod = match visibility {
+            Visibility::Public => "--chmod=u=rw,go=r",
+            Visibility::Private => "--chmod=u=rw,go=",
+        };
         let output = Command::new("rsync")
-            .args(["-avz", "--ignore-times", &tmp_path, &destination])
+            .args(["-avz", "--ignore-times", chmod, &tmp_path, &destination])
             .output()
             .map_err(|e| OpcaError::Storage(format!("Failed to run rsync: {e}")))?;
 
@@ -203,6 +208,25 @@ mod tests {
         assert!(!StorageRsync::is_daemon_uri(
             "rsync://deploy@host.example.com/var/www/"
         ));
+    }
+
+    #[cfg(unix)]
+    fn uploaded_mode(dir: &tempfile::TempDir, visibility: Visibility) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.path().join("object.pem");
+        StorageRsync
+            .upload(b"pem", &format!("rsync://{}", path.display()), visibility)
+            .unwrap();
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_upload_sets_mode_by_visibility() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(uploaded_mode(&dir, Visibility::Public), 0o644);
+        assert_eq!(uploaded_mode(&dir, Visibility::Private), 0o600);
+        assert_eq!(uploaded_mode(&dir, Visibility::Public), 0o644);
     }
 
     #[test]

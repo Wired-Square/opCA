@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use opca_core::crypto::utils::encrypt_private_key_pem;
 use opca_core::error::OpcaError;
-use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::ca::{CertificateAuthority, Renewal};
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 use opca_core::services::database::{CertLookup, CertRecord, ExternalCertRecord, is_expiring_soon};
 use opca_core::services::san;
@@ -278,6 +278,7 @@ pub(super) fn record_to_detail(
         chain_pem,
         expiring_soon,
         name_constraints,
+        published_at: record.published_at.clone(),
     }
 }
 
@@ -491,7 +492,12 @@ pub async fn renew_cert(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] renew_cert: serial={serial}");
-    let (new_pem, new_serial, issuance_warnings) = ca
+    let Renewal {
+        pem,
+        serial: new_serial,
+        warnings,
+        republished,
+    } = ca
         .renew_certificate_bundle(&CertLookup::Serial(serial.clone()), None)
         .map_err(|e| {
             warn!("[tauri] renew_cert failed: {e}");
@@ -499,17 +505,61 @@ pub async fn renew_cert(
             e.to_string()
         })?;
 
-    state.log_warnings("renew_cert", issuance_warnings);
-
+    state.log_warnings("renew_cert", warnings);
     state.log_ok(
         "renew_cert",
         Some(format!("Renewed certificate {serial} → {new_serial}")),
     );
-    state.cache_fresh_pem(new_serial.clone(), new_pem.clone());
+    log_republish(&state, "renew_cert", &new_serial, &republished);
+    let (published_to, publish_error) = match republished {
+        Some(Ok(uri)) => (Some(uri), None),
+        Some(Err(e)) => (None, Some(e.to_string())),
+        None => (None, None),
+    };
+    state.cache_fresh_pem(new_serial.clone(), pem.clone());
     Ok(RenewRekeyResult {
         serial: new_serial,
-        pem: new_pem,
+        pem,
+        published_to,
+        publish_error,
     })
+}
+
+fn log_republish(
+    state: &AppState,
+    label: &str,
+    serial: &str,
+    republished: &Option<Result<String, OpcaError>>,
+) {
+    match republished {
+        Some(Ok(uri)) => state.log_ok(label, format!("Published certificate {serial} to {uri}")),
+        Some(Err(e)) => state.log_err(
+            label,
+            format!("Renewed, but publishing {serial} failed: {e}"),
+        ),
+        None => {}
+    }
+}
+
+#[tauri::command]
+pub async fn publish_cert(state: State<'_, AppState>, serial: String) -> Result<String, String> {
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    info!("[tauri] publish_cert: serial={serial}");
+    let uri = ca
+        .publish_certificate(&CertLookup::Serial(serial.clone()))
+        .map_err(|e| {
+            warn!("[tauri] publish_cert failed: {e}");
+            state.log_err("publish_cert", Some(e.to_string()));
+            e.to_string()
+        })?;
+
+    state.log_ok(
+        "publish_cert",
+        Some(format!("Published certificate {serial} to {uri}")),
+    );
+    Ok(uri)
 }
 
 #[tauri::command]
@@ -540,6 +590,8 @@ pub async fn rekey_cert(
     Ok(RenewRekeyResult {
         serial: new_serial,
         pem: new_pem,
+        published_to: None,
+        publish_error: None,
     })
 }
 
@@ -687,11 +739,12 @@ pub async fn bulk_renew_certs<R: Runtime>(
         "bulk_renew",
         "Renewing",
         |ca, serial| {
-            let (new_pem, new_serial, warnings) =
+            let renewal =
                 ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()), None)?;
-            state.log_warnings("bulk_renew", warnings);
-            state.cache_fresh_pem(new_serial.clone(), new_pem);
-            Ok(Some(new_serial))
+            state.log_warnings("bulk_renew", renewal.warnings);
+            log_republish(&state, "bulk_renew", &renewal.serial, &renewal.republished);
+            state.cache_fresh_pem(renewal.serial.clone(), renewal.pem);
+            Ok(Some(renewal.serial))
         },
     )
 }

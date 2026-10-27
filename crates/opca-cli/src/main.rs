@@ -312,6 +312,12 @@ pub enum CertAction {
 
     /// Delete a revoked or expired x509 certificate
     Delete(CertIdentifier),
+
+    /// Publish a certificate to the public store as certs/<CN>.pem for its server to fetch
+    Publish {
+        /// Serial number, or a CN to publish its latest certificate
+        id: String,
+    },
 }
 
 #[derive(Args)]

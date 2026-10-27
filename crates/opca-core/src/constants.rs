@@ -78,12 +78,15 @@ pub struct StorageConf {
     pub crl_file: &'static str,
     /// Private-store key of the pre-signed CRL batch.
     pub crl_batch_file: &'static str,
+    /// Public-store prefix of certificates published for servers to fetch.
+    pub published_cert_dir: &'static str,
 }
 
 pub const DEFAULT_STORAGE_CONF: StorageConf = StorageConf {
     ca_cert_file: "ca.crt",
     crl_file: "crl.pem",
     crl_batch_file: "pending-crl/crl-batch.pem",
+    published_cert_dir: "certs",
 };
 
 /// Pre-signed CRL batches: CRL `i` is valid from `T0 + i·PERIOD` for `WINDOW`.

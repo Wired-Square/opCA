@@ -231,6 +231,8 @@ export interface CertDetail extends CertListItem {
   chain_pem: string | null;
   /** Read from `cert_pem`, so only after the backfill. */
   name_constraints: NameConstraints | null;
+  /** When it was last uploaded to the public store for its server to fetch. */
+  published_at: string | null;
 }
 
 /** Subtrees as `example.com` or `10.0.0.0/8`. */
@@ -243,6 +245,9 @@ export interface NameConstraints {
 export interface RenewRekeyResult {
   serial: string;
   pem: string;
+  /** Set when a renew republished: the URI written, or why the upload failed. */
+  published_to: string | null;
+  publish_error: string | null;
 }
 
 /** Outcome of one cert in a bulk operation. `new_serial` is set for a

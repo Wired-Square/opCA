@@ -4,6 +4,7 @@
 //! revocation, CRL generation, 1Password storage, and remote uploads.
 
 pub mod operator;
+pub mod publish;
 pub mod subordinate;
 
 use std::collections::HashMap;
@@ -32,7 +33,7 @@ use crate::services::database::models::{
     ExternalCertRecord, IgnoreReason, SerialType,
 };
 use crate::services::local_backup::{self, BackupSource, LocalBackup};
-use crate::services::storage;
+use crate::services::storage::{self, Visibility};
 use crate::utils::datetime::{self, DateTimeFormat};
 use wslib_crypto_ca::{
     Authority, CrlView, Csr, KeyIdentifierMethod, Profile, Revocation, SanPolicy, Serial, Validity,
@@ -225,6 +226,16 @@ pub struct CertificateAuthority<R: Runner> {
     pub crl: Option<String>,
     /// Written on every database save when set; see [`LocalBackup`].
     pub local_backup: Option<LocalBackup>,
+}
+
+/// A renewed certificate. `republished` is set when the renewed one was published:
+/// the URI written, or why the upload failed. The renewal is stored either way.
+#[derive(Debug)]
+pub struct Renewal {
+    pub pem: String,
+    pub serial: String,
+    pub warnings: Vec<CertIssuanceWarning>,
+    pub republished: Option<Result<String, OpcaError>>,
 }
 
 /// A self-contained snapshot for uploading the CA database to the private
@@ -666,15 +677,13 @@ impl<R: Runner> CertificateAuthority<R> {
         Ok(())
     }
 
-    /// Renew a previously signed certificate from its stored CSR.
-    ///
-    /// Returns the renewed certificate PEM, the new serial, and an optional
-    /// warning if the certificate would outlive the CA.
+    /// Renew a previously signed certificate from its stored CSR, and publish
+    /// the renewal if the certificate was published.
     pub fn renew_certificate_bundle(
         &mut self,
         lookup: &CertLookup,
         days: Option<u32>,
-    ) -> Result<(String, String, Vec<CertIssuanceWarning>), OpcaError> {
+    ) -> Result<Renewal, OpcaError> {
         info!("[ca] renewing certificate {lookup:?}");
         let db = self
             .ca_database
@@ -729,10 +738,22 @@ impl<R: Runner> CertificateAuthority<R> {
         // replaced, rather than waiting for it to expire and be superseded.
         self.store_certbundle_for(&cert_bundle, None, None, false)?;
         self.auto_ignore_predecessor(&old_serial, &new_serial, IgnoreReason::Renewed)?;
+        let pem = cert_bundle.certificate_pem()?;
+        let republished = cert_record
+            .published_at
+            .is_some()
+            .then(|| self.upload_published(&new_serial, &cn, &pem));
+        if let Some(Err(e)) = &republished {
+            warn!("[ca] renewal {new_serial} was not published: {e}");
+        }
         self.store_ca_database()?;
 
-        let pem = cert_bundle.certificate_pem()?;
-        Ok((pem, new_serial, warnings))
+        Ok(Renewal {
+            pem,
+            serial: new_serial,
+            warnings,
+            republished,
+        })
     }
 
     /// Rekey a previously signed certificate — generate a new private key and
@@ -934,7 +955,7 @@ impl<R: Runner> CertificateAuthority<R> {
         self.store_ca_database()?;
 
         if let Some(uri) = batch_uri {
-            self.upload_content(crls.concat().as_bytes(), &uri)
+            self.upload_content(crls.concat().as_bytes(), &uri, Visibility::Private)
                 .map_err(|e| OpcaError::CrlBatchUpload(e.to_string()))?;
         }
 
@@ -1582,12 +1603,17 @@ impl<R: Runner> CertificateAuthority<R> {
     ///
     /// AWS credentials are resolved only for `s3://` targets, so `rsync://`
     /// and `sftp://` uploads never touch the CA config or 1Password.
-    pub fn upload_content(&self, content: &[u8], store_uri: &str) -> Result<(), OpcaError> {
+    pub fn upload_content(
+        &self,
+        content: &[u8],
+        store_uri: &str,
+        visibility: Visibility,
+    ) -> Result<(), OpcaError> {
         let creds = storage::needs_aws_credentials(store_uri)
             .then(|| self.aws_credentials())
             .transpose()?;
         let backend = storage::storage_from_uri_with_creds(store_uri, creds.as_ref())?;
-        backend.upload(content, store_uri)
+        backend.upload(content, store_uri, visibility)
     }
 
     /// The AWS region configured for this CA, if any.
@@ -1619,7 +1645,7 @@ impl<R: Runner> CertificateAuthority<R> {
             .as_ref()
             .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
         let binary_db = db.export_database_binary()?;
-        self.upload_content(&binary_db, &uri)
+        self.upload_content(&binary_db, &uri, Visibility::Private)
     }
 
     /// Upload the CA certificate to the public store.
@@ -1643,7 +1669,7 @@ impl<R: Runner> CertificateAuthority<R> {
         };
 
         let cert_pem = self.get_certificate()?;
-        self.upload_content(cert_pem.as_bytes(), &uri)
+        self.upload_content(cert_pem.as_bytes(), &uri, Visibility::Public)
     }
 
     /// Upload the CRL to the public store.
@@ -1670,7 +1696,7 @@ impl<R: Runner> CertificateAuthority<R> {
             .crl
             .as_ref()
             .ok_or_else(|| OpcaError::CertificateNotFound("CRL not found".into()))?;
-        self.upload_content(crl.as_bytes(), &uri)
+        self.upload_content(crl.as_bytes(), &uri, Visibility::Public)
     }
 
     // -----------------------------------------------------------------------
@@ -1926,6 +1952,7 @@ fn format_db_item(
         has_private_key: Some(bundle.private_key.is_some()),
         has_chain: Some(bundle.chain.as_ref().is_some_and(|c| !c.is_empty())),
         deleted_at: None,
+        published_at: None,
     })
 }
 

@@ -93,6 +93,9 @@ Organised by concern under [src/](../crates/opca-core/src):
   - [ca/subordinate.rs](../crates/opca-core/src/services/ca/subordinate.rs)
     — signing, renewing, revoking and listing name-constrained subordinate CAs
     (see [Subordinate CAs](#subordinate-cas)).
+  - [ca/publish.rs](../crates/opca-core/src/services/ca/publish.rs) —
+    publishing leaf certificates to the public store for their servers to
+    fetch (see [Published certificates](#published-certificates)).
   - [ca/operator.rs](../crates/opca-core/src/services/ca/operator.rs) and
     [acme_broker/](../crates/opca-core/src/services/acme_broker) — the
     operator identity and opCA's client for its ACME brokers (see
@@ -124,7 +127,7 @@ Organised by concern under [src/](../crates/opca-core/src):
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v17). A dump that fails to
+    automatic, forward-only migrations (currently v18). A dump that fails to
     parse or never reaches its `COMMIT` (truncated) is rejected as
     `OpcaError::DatabaseUnreadable`.
   - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
@@ -144,9 +147,11 @@ Organised by concern under [src/](../crates/opca-core/src):
     contain secret material.
   - [storage/](../crates/opca-core/src/services/storage) — publishing
     backends behind a `StorageBackend` trait: `rsync://`, `sftp://`/`scp://`,
-    and `s3://`. A URI factory picks the right backend per upload. AWS
-    credentials are read straight from a 1Password item with `op item get`
-    (see [AWS credentials](#aws-credentials)).
+    and `s3://`. A URI factory picks the right backend per upload. Each
+    upload says whether it is public or private: rsync and sftp write public
+    objects 0644 and private ones 0600, while S3 leaves access to the bucket
+    policy. AWS credentials are read straight from a 1Password item with
+    `op item get` (see [AWS credentials](#aws-credentials)).
   - [route53.rs](../crates/opca-core/src/services/route53.rs) — AWS SDK
     calls for DKIM TXT record deployment, the value split into 255-octet
     quoted strings by `wslib_dns::txt::{split, quote}`, and the DKIM DNS check
@@ -357,6 +362,38 @@ notification Lambda) can publish fresh CRLs while the desktop is closed:
   leftover record once they are off. The CRL page shows it; the dashboard shows
   a CRL Batch tile and judges CRL expiry (warning and action item) by its
   signed-until rather than CRL 0's `nextUpdate`.
+
+### Published certificates
+
+A server that made its own key fetches its certificate from the public store
+(operator setup in [cert-delivery.md](cert-delivery.md)). `publish_certificate`
+uploads the leaf PEM to `<public store>/certs/<CN>.pem` (`published_cert_key`:
+characters outside `[A-Za-z0-9.-]` become `_`, so `*.example.com` is
+`certs/_.example.com.pem`) and stamps the row's `published_at` (schema v18),
+clearing it on the other rows with that CN: a CN names its latest publish. A
+lookup by CN takes the CN's highest serial. Revoked, expired, CA and
+subordinate certificates and ones with no CN are refused. `rsync://` stores
+need `certs/` to exist.
+
+`renew_certificate_bundle` publishes the renewal of a published certificate
+before storing the database. A failed upload doesn't fail the renew:
+`Renewal::republished` carries the URI or the error. A rekey is never
+republished, as its new key won't match the server's. Revoking leaves the
+object (`Storage` has no delete); the fetch script checks the CRL.
+`rebuild_database` reads 1Password items, which don't record publishing, so
+every row comes back unpublished.
+
+Surfaces: `opca cert publish <serial|CN>` and the Published column of
+`opca ca list`; the Tauri command `publish_cert`, `CertDetail.published_at`,
+and `renew_cert`'s `published_to` / `publish_error` (bulk renew logs a failed
+republish). The certificate page shows a Published badge and date, offers
+Publish (`canPublishCert` in `api/certActions.ts`), and after a renew
+`renewAndGo` passes the republish outcome to the new certificate's page in its
+query. On the server,
+[contrib/cert-fetch.sh](../contrib/cert-fetch.sh) installs a fetched
+certificate only if it chains to the CA, isn't on the verified CRL, hasn't
+expired, matches the server's key and outlasts the installed one, then runs a
+reload command.
 
 ### Subordinate CAs
 
