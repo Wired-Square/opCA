@@ -1,7 +1,7 @@
 use std::io;
 use std::num::NonZeroU32;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, RwLock};
 
 use rustls::crypto::CryptoProvider;
 use rustls_openssl::default_provider;
@@ -13,19 +13,25 @@ use wslib_pairing::{OneTimeCode, PairingCode, PairingUri, SpkiSha256, Status};
 use wslib_service::Held;
 use wslib_tls::{Location, Serving};
 
+use crate::enrolment::{self, Mode};
 use crate::{Config, Error};
 
 pub const SCHEME: &str = "opca-enrol";
 pub const ATTEMPTS: NonZeroU32 = NonZeroU32::new(5).unwrap();
 
-/// The broker's state: its subordinate key and CSR, its API identity and its pairing code.
+/// The broker's state: its subordinate key and CSR, its API identity, its
+/// pairing code, and whether it is enrolled.
 pub struct Broker {
     serving: Serving,
-    subordinate: Subordinate,
-    code: OneTimeCode,
-    host: String,
+    pub(crate) subordinate: Subordinate,
+    pub(crate) code: Arc<OneTimeCode>,
+    pub(crate) mode: RwLock<Mode>,
+    pub(crate) enrolling: Mutex<()>,
+    pub(crate) host: String,
     port: u16,
-    _state: Held,
+    pub(crate) domains: Vec<String>,
+    pub(crate) state: PathBuf,
+    _held: Held,
 }
 
 impl Broker {
@@ -51,14 +57,28 @@ impl Broker {
                 (code, Some(plain))
             }
         };
+        let mode = enrolment::load(state)?;
         let broker = Self {
             serving,
             subordinate,
-            code,
+            code: Arc::new(code),
+            mode: RwLock::new(mode),
+            enrolling: Mutex::new(()),
             host: config.host.clone(),
             port: config.listen.port(),
-            _state: held,
+            domains: config.domains.clone(),
+            state: state.into(),
+            _held: held,
         };
+        if let Mode::Enrolled(enrolled) = broker.mode()
+            && enrolled.api_pin != broker.pin().to_string()
+        {
+            tracing::error!(
+                recorded = %enrolled.api_pin,
+                serving = %broker.pin(),
+                "the API key is not the one opCA pinned at enrolment, so opCA will refuse it"
+            );
+        }
         let uri = issued.map(|plain| broker.uri(plain)).transpose()?;
         Ok((broker, uri))
     }
@@ -74,6 +94,10 @@ impl Broker {
     /// The SHA-256 of the API key's SubjectPublicKeyInfo, as the pairing URI carries it.
     pub fn pin(&self) -> SpkiSha256 {
         SpkiSha256::from(*self.serving.key_fingerprint().0.as_bytes())
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn code_status(&self) -> Result<Status, Error> {

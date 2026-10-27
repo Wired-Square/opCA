@@ -159,7 +159,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -170,7 +170,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -198,6 +198,15 @@ dependencies = [
  "windows-sys 0.60.2",
  "wl-clipboard-rs",
  "x11rb",
+]
+
+[[package]]
+name = "arc-swap"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -681,6 +690,28 @@ dependencies = [
  "pin-project-lite",
  "sync_wrapper",
  "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-server"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "either",
+ "fs-err",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "hyper 1.8.1",
+ "hyper-util",
+ "pin-project-lite",
+ "rustls 0.23.37",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.26.4",
  "tower-service",
 ]
 
@@ -1491,7 +1522,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1753,7 +1784,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1923,6 +1954,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5c95b673b8f6f7235229ae11c5642d81b04c2e64c1e2fb417bc0cf73ca45f29"
+dependencies = [
+ "autocfg",
+ "tokio",
 ]
 
 [[package]]
@@ -2726,7 +2767,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3451,7 +3492,7 @@ dependencies = [
  "png",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3859,17 +3900,23 @@ dependencies = [
 name = "opca-acme-broker"
 version = "0.102.3"
 dependencies = [
+ "axum",
+ "opca-acme-api",
+ "opca-core",
  "rustls 0.23.37",
  "rustls-openssl",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
+ "tokio-rustls 0.26.4",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "wslib-crypto",
  "wslib-crypto-ca",
  "wslib-crypto-x509",
  "wslib-file-atomic",
+ "wslib-http-server",
  "wslib-pairing",
  "wslib-service",
  "wslib-telemetry",
@@ -4041,7 +4088,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4957,7 +5004,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5546,7 +5593,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6203,7 +6250,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6658,7 +6705,7 @@ dependencies = [
  "png",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7203,7 +7250,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7224,7 +7271,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "raw-window-handle",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "windows-version",
 ]
 
@@ -7886,6 +7933,23 @@ checksum = "abfc0ce5f3519700cb11d65c569852dc0c8fc1d42770630c98b2ce935916a7a0"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "wslib-http-server"
+version = "0.1.2"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "b0e440cef13f82710f19862d8ac6d43f4069ccf4f6f2727dc02614f39c73e4af"
+dependencies = [
+ "axum",
+ "axum-server",
+ "hyper-util",
+ "rustls 0.23.37",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-util",
+ "tower",
+ "tracing",
 ]
 
 [[package]]

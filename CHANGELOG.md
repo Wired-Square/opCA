@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   CA's EC P-256 key (owner-only, unencrypted) and CSR, its API certificate and
   a one-time pairing code, and logs the `opca-enrol://` pairing URI, which
   pins the API key. Later starts load them and make nothing new.
+- The broker serves enrolment on its `listen` address: `GET /v1/enrolment`
+  offers its CSR, host and configured domains, and `POST /v1/enrolment` takes
+  the pairing code, the signed chain, opCA's operator pin and the issuance
+  config. Input that doesn't fit the broker's key, the subordinate's name
+  constraints or the configured domains is refused before the code is tried,
+  so it costs no attempt. Once enrolled, the broker keeps the enrolment across
+  restarts and the enrolment routes answer 404.
 
 ### Changed
 

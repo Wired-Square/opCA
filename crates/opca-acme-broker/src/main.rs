@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error};
+use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{SpentBy, Status};
 
 fn main() -> ExitCode {
@@ -16,6 +18,7 @@ fn main() -> ExitCode {
         .run(|stop| async move {
             wslib_telemetry::Telemetry::new("info").init();
             let config = Config::load(&path)?;
+            let listen = config.listen;
             let (broker, uri) =
                 tokio::task::spawn_blocking(move || Broker::start(&config)).await??;
             match (uri, broker.code_status()?) {
@@ -29,7 +32,10 @@ fn main() -> ExitCode {
                 }
                 (None, _) => {}
             }
-            stop.await;
+            let listener = Listener::bind(listen, Bounds::SERVING)
+                .await
+                .map_err(|e| format!("listening on {listen}: {e}"))?;
+            opca_acme_broker::serve(Arc::new(broker), listener, stop).await?;
             Ok::<_, Error>(())
         })
         .map_or_else(ExitCode::from, |()| ExitCode::SUCCESS)
