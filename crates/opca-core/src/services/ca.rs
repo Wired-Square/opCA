@@ -476,6 +476,12 @@ impl<R: Runner> CertificateAuthority<R> {
                     .into(),
             ));
         }
+        if *cert_type == CertType::AppleDev {
+            return Err(OpcaError::Other(
+                "Apple issues Apple Development certificates: upload the CSR to the Apple Developer portal"
+                    .into(),
+            ));
+        }
         let csr = verified_csr(csr)?;
         let ca_config = self
             .ca_database
@@ -1826,7 +1832,7 @@ fn profile_for(cert_type: &CertType, rsa_subject: bool, ca_config: &CaConfig) ->
         ..Profile::default()
     };
     match cert_type {
-        CertType::AppleDev | CertType::Device => Profile {
+        CertType::Device => Profile {
             key_usage: key_usage(rsa_subject),
             extended_key_usage: Some(Extension::non_critical(vec![Eku::ClientAuth])),
             names: SanPolicy::CommonNameAndRequested,
@@ -3479,6 +3485,24 @@ mod tests {
             ca.issue_certificate(leaf.csr.as_ref().unwrap(), &CertType::Device, Some(0))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn an_apple_development_csr_is_refused() {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let leaf = CertificateBundle::generate(
+            CertType::AppleDev,
+            "dev",
+            CertBundleConfig {
+                cn: Some("dev".into()),
+                ..CertBundleConfig::default()
+            },
+        )
+        .unwrap();
+        let err = ca
+            .issue_certificate(leaf.csr.as_ref().unwrap(), &CertType::AppleDev, None)
+            .unwrap_err();
+        assert!(err.to_string().contains("Apple issues"), "{err}");
     }
 
     // -----------------------------------------------------------------------

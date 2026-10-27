@@ -550,7 +550,7 @@ pub enum CsrAction {
 
         /// Certificate type
         #[arg(short = 't', long, default_value = "webserver",
-              value_parser = ["appledev", "codesigning", "device", "vpnclient", "vpnserver", "webserver"])]
+              value_parser = ["codesigning", "device", "vpnclient", "vpnserver", "webserver"])]
         csr_type: String,
 
         /// CN override

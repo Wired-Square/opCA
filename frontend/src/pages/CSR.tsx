@@ -36,7 +36,7 @@ const CSR_TYPES = [
   ...CERT_TYPES,
 ];
 
-const SIGN_TYPES = [...CSR_TYPES, { value: "subordinateca", label: "Subordinate CA" }];
+const SIGN_TYPES = [...CERT_TYPES, { value: "subordinateca", label: "Subordinate CA" }];
 
 export default function CSR() {
   const [tab, setTab] = createSignal<Tab>("list");
