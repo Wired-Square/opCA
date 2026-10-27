@@ -3,44 +3,39 @@ use std::sync::Arc;
 use opca_acme_api::{
     API_VERSION, ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuerState, Status, Versions,
 };
-use rustls::client::danger::HandshakeSignatureValid;
+use rustls::ServerConfig;
 use rustls::crypto::CryptoProvider;
-use rustls::pki_types::{CertificateDer, UnixTime};
-use rustls::server::WebPkiClientVerifier;
-use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::{
-    CertificateError, DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig,
-    SignatureScheme,
-};
+use rustls::pki_types::CertificateDer;
+use wslib_crypto::KeyAlgorithm;
 use wslib_crypto_x509::{CertificateView, inspect, pem};
 use wslib_http_server::PeerCertificates;
 use wslib_pairing::SpkiSha256;
-use wslib_tls::{KeyFingerprint, Serving};
+use wslib_tls::{KeyFingerprint, Location, Serving};
 
 use crate::enrolment::{Enrolled, Mode, bad_request, decimal, internal, rfc_3339};
 use crate::step_ca::Files;
 use crate::{Broker, Error};
 
 /// The API's TLS once enrolled: a client must chain to `root` and present the operator's key.
+/// Blocks: the pinned `Serving` is a second one, read from the same files.
 pub(crate) fn operator_config(
     provider: &Arc<CryptoProvider>,
     serving: &Serving,
     root: CertificateDer<'static>,
     operator_pin: &str,
 ) -> Result<Arc<ServerConfig>, Error> {
-    let mut roots = RootCertStore::empty();
-    roots.add(root)?;
-    let chained =
-        WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider.clone()).build()?;
-    let verifier = OperatorOnly {
-        chained,
-        operator_pin: operator_pin.into(),
-    };
-    let config = ServerConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()?
-        .with_client_cert_verifier(Arc::new(verifier))
-        .with_cert_resolver(serving.config().cert_resolver.clone());
-    Ok(Arc::new(config))
+    let pin = operator_pin.parse()?;
+    let location = serving.location();
+    let pinned = Serving::load_or_mint(
+        provider.clone(),
+        Location::named(location.cert(), location.key()),
+        Vec::new,
+        KeyAlgorithm::EcP256,
+    )?;
+    if pinned.key_fingerprint() != serving.key_fingerprint() {
+        return Err("the API key on disk is not the one being served".into());
+    }
+    Ok(pinned.with_client_auth_pinned(&[root], pin)?.config())
 }
 
 pub(crate) fn root_of(chain_pem: &str) -> Result<CertificateDer<'static>, Error> {
@@ -52,59 +47,6 @@ pub(crate) fn root_of(chain_pem: &str) -> Result<CertificateDer<'static>, Error>
 fn key_pin(certificate: &CertificateDer<'_>) -> Option<String> {
     let fingerprint = KeyFingerprint::of(certificate).ok()?;
     Some(SpkiSha256::from(*fingerprint.0.as_bytes()).to_string())
-}
-
-/// The root also issues VPN and device certificates for client auth, so
-/// chaining to it is not enough: the key must be the operator's too.
-#[derive(Debug)]
-struct OperatorOnly {
-    chained: Arc<dyn ClientCertVerifier>,
-    operator_pin: String,
-}
-
-impl ClientCertVerifier for OperatorOnly {
-    fn root_hint_subjects(&self) -> &[DistinguishedName] {
-        self.chained.root_hint_subjects()
-    }
-
-    fn verify_client_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        intermediates: &[CertificateDer<'_>],
-        now: UnixTime,
-    ) -> Result<ClientCertVerified, rustls::Error> {
-        let verified = self
-            .chained
-            .verify_client_cert(end_entity, intermediates, now)?;
-        match key_pin(end_entity) {
-            Some(pin) if pin == self.operator_pin => Ok(verified),
-            _ => Err(rustls::Error::InvalidCertificate(
-                CertificateError::ApplicationVerificationFailure,
-            )),
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.chained.verify_tls12_signature(message, cert, dss)
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        self.chained.verify_tls13_signature(message, cert, dss)
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.chained.supported_verify_schemes()
-    }
 }
 
 impl Broker {
