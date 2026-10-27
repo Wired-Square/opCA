@@ -217,6 +217,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A vault backup no longer carries `CA_Lock`, and a restore skips one an older
   backup carries, so restoring a backup the app took no longer locks the new
   vault for five minutes.
+- Opening or restoring an older backup that carries `CA_Lock` no longer counts
+  the lock as a certificate in its item counts.
 - An `op` call 1Password refuses as racing another write (409 Conflict) is
   made once more, so lock contention no longer fails the holder's own write.
 - Uploads to an `rsync://` or `sftp://` public store are now world-readable
