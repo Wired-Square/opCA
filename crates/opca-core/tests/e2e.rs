@@ -456,6 +456,82 @@ fn t26_cert_delete_revoked() {
     eprintln!("[e2e] Deleted revoked cert {} ({title})", s.deleted_serial);
 }
 
+fn broker_csr() -> Vec<u8> {
+    let config = opca_core::services::cert::CertBundleConfig {
+        cn: Some("E2E Broker CA".to_string()),
+        ..Default::default()
+    };
+    opca_core::services::cert::CertificateBundle::generate(
+        CertType::SubordinateCa,
+        "E2E Broker CA",
+        config,
+    )
+    .expect("broker CSR")
+    .csr
+    .expect("CSR missing")
+    .to_pem()
+    .expect("CSR PEM")
+}
+
+#[test]
+fn t27_subordinate_sign_renew_revoke() {
+    skip_unless_integration!();
+
+    let state = STATE.lock().unwrap();
+    let s = state.as_ref().expect("t01 must run first");
+    let mut ca = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
+    let domains = vec!["e2e.home.arpa".to_string()];
+
+    let signed = ca
+        .sign_subordinate(&broker_csr(), &domains, None)
+        .expect("sign subordinate failed");
+    let id = signed.broker.id;
+    let first_serial = signed.broker.subordinate_serial.clone();
+
+    let mut ca = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
+    assert_eq!(
+        ca.list_subordinates().expect("list failed"),
+        [signed.broker],
+        "the broker row must reach CA_Database"
+    );
+
+    let renewed = ca
+        .renew_subordinate(id, &broker_csr(), None, false, None)
+        .expect("renew subordinate failed")
+        .broker;
+    assert_eq!(renewed.id, id);
+    assert_ne!(renewed.subordinate_serial, first_serial);
+    assert_predecessor_ignored(&ca, &first_serial, &renewed.subordinate_serial, "renewed");
+
+    let revoked = ca
+        .revoke_subordinate(id)
+        .expect("revoke subordinate failed");
+    let crl = ca.generate_crl().expect("generate_crl failed");
+    let crl = openssl::x509::X509Crl::from_pem(crl.as_bytes()).expect("parse CRL");
+    let on_crl = crl.get_revoked().into_iter().flatten().any(|r| {
+        r.serial_number()
+            .to_bn()
+            .unwrap()
+            .to_dec_str()
+            .unwrap()
+            .to_string()
+            == revoked.subordinate_serial
+    });
+    assert!(on_crl, "the revoked subordinate must be on the CRL");
+
+    let ca = CertificateAuthority::retrieve(make_vault(&s.vault)).expect("CA retrieve failed");
+    let stored = ca.list_subordinates().expect("list failed");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(
+        stored[0].state,
+        opca_core::services::database::BrokerState::Revoked
+    );
+    eprintln!(
+        "[e2e] Subordinate {id}: {first_serial} → {} revoked",
+        revoked.subordinate_serial
+    );
+}
+
 #[test]
 fn t30_crl_generate() {
     skip_unless_integration!();

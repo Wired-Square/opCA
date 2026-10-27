@@ -328,6 +328,53 @@ pub struct OpenVpnProfile {
     pub generated: bool,
 }
 
+/// Whether a broker's subordinate may still issue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrokerState {
+    Active,
+    Revoked,
+}
+
+impl BrokerState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+
+impl FromStr for BrokerState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(Self::Active),
+            "revoked" => Ok(Self::Revoked),
+            other => Err(format!("Unknown broker state: {other}")),
+        }
+    }
+}
+
+/// A subordinate CA and the ACME broker holding its key; `url` is `None` for
+/// one signed by hand.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Broker {
+    pub id: i64,
+    pub subordinate_serial: String,
+    pub url: Option<String>,
+    pub pinned_key: Option<String>,
+    pub permitted_domains: Vec<String>,
+    pub state: BrokerState,
+    pub last_contact: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    /// From the subordinate's certificate row.
+    pub cn: Option<String>,
+    pub expiry_date: Option<String>,
+}
+
 /// Schema migration report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationInfo {

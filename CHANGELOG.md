@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A subordinate CA can be signed from a CSR for a list of permitted domains:
+  path length 0, `serverAuth` only, and critical name constraints that permit
+  those domains and exclude every IP address. It lasts 90 days unless asked
+  otherwise, and never past the root. The CSR's own names are not copied, and
+  a CSR naming a host outside the domains is refused.
+- The CA database records each subordinate in a new `brokers` table (schema
+  v17), ready for the ACME broker that will hold it. One signed by hand has no
+  broker URL.
+- A subordinate is renewed from a fresh CSR and keeps its record and domains;
+  renewing it for other domains needs the change confirmed. Revoking it, by its
+  own command or from the certificate list, puts it on the CRL and marks its
+  record revoked. Renew and Rekey on the certificate list refuse a subordinate.
+- `opca subordinate sign`, `renew`, `revoke` and `list`.
+- The CSR page's Sign tab offers Subordinate CA, asking for the permitted
+  domains in place of a common name and alternative names, and now asks for
+  the certificate type first. The certificate detail shows a certificate's
+  permitted and excluded names.
+
 ### Changed
 
 - Building needs Rust 1.99, pinned by `rust-toolchain.toml` and declared as the

@@ -155,8 +155,12 @@ export function isTlsServer(certType: string): boolean {
   return certType === "webserver" || certType === "vpnserver";
 }
 
+/** Mirrors `SUBORDINATE_CA_DAYS`. */
+export const SUBORDINATE_CA_DAYS = 90;
+
 /** Mirrors `CertType::default_days`. */
 export function defaultCertDays(certType: string, caDays: number): number {
+  if (certType === "subordinateca") return SUBORDINATE_CA_DAYS;
   return isTlsServer(certType) ? Math.min(caDays, APPLE_TLS_MAX_DAYS) : caDays;
 }
 
@@ -222,6 +226,14 @@ export interface CertDetail extends CertListItem {
   has_chain: boolean | null;
   /** PEM-encoded issuer chain — populated by the slow backfill path. */
   chain_pem: string | null;
+  /** Read from `cert_pem`, so only after the backfill. */
+  name_constraints: NameConstraints | null;
+}
+
+/** Subtrees as `example.com` or `10.0.0.0/8`. */
+export interface NameConstraints {
+  permitted: string[];
+  excluded: string[];
 }
 
 /** Result of a renew or rekey — the new cert lives at a new serial. */
@@ -358,6 +370,32 @@ export interface SignCsrRequest {
 
 export interface SignCsrResult {
   cert: CertListItem;
+  cert_pem: string;
+}
+
+export interface SignSubordinateRequest {
+  csr_pem: string;
+  domains: string[];
+  days?: number;
+}
+
+/** A subordinate CA and the ACME broker holding its key; `url` is null for one signed by hand. */
+export interface Broker {
+  id: number;
+  subordinate_serial: string;
+  url: string | null;
+  pinned_key: string | null;
+  permitted_domains: string[];
+  state: "active" | "revoked";
+  last_contact: string | null;
+  created_at: string;
+  updated_at: string;
+  cn: string | null;
+  expiry_date: string | null;
+}
+
+export interface SignedSubordinate {
+  broker: Broker;
   cert_pem: string;
 }
 

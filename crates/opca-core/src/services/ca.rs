@@ -3,6 +3,8 @@
 //! Orchestrates all PKI operations: CA initialisation, certificate signing,
 //! revocation, CRL generation, 1Password storage, and remote uploads.
 
+pub mod subordinate;
+
 use std::collections::HashMap;
 
 use chrono::{DateTime, SubsecRound, Utc};
@@ -456,6 +458,23 @@ impl<R: Runner> CertificateAuthority<R> {
         days: u32,
     ) -> Result<X509, OpcaError> {
         debug!("[ca] signing {cert_type} certificate");
+        if *cert_type == CertType::SubordinateCa {
+            return Err(OpcaError::Other(
+                "A subordinate CA is signed with its permitted domains, not as a certificate type"
+                    .into(),
+            ));
+        }
+        let csr = verified_csr(csr)?;
+        let ca_config = self
+            .ca_database
+            .as_ref()
+            .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?
+            .get_config()?;
+        let profile = profile_for(cert_type, csr.has_rsa_key(), &ca_config);
+        self.issue(&csr, &profile, days)
+    }
+
+    fn issue(&mut self, csr: &Csr, profile: &Profile, days: u32) -> Result<X509, OpcaError> {
         let db = self
             .ca_database
             .as_mut()
@@ -473,22 +492,13 @@ impl<R: Runner> CertificateAuthority<R> {
             .as_ref()
             .ok_or_else(|| OpcaError::CaNotFound)?;
 
-        let provider = crypto_provider();
-        let csr = Csr::from_der(
-            &csr.to_der()?,
-            provider.signature_verification_algorithms.all,
-        )
-        .map_err(|e| OpcaError::InvalidCertificate(format!("CSR: {e}")))?;
-
-        let ca_config = db.get_config()?;
         let serial = Serial::try_from(db.increment_serial(SerialType::Cert, None)?)?;
         let now = Utc::now();
         let validity = Validity {
             not_before: now.into(),
             not_after: (now + chrono::Duration::days(days.into())).into(),
         };
-        let profile = profile_for(cert_type, csr.has_rsa_key(), &ca_config);
-        let cert = authority_of(ca_cert, ca_key)?.issue(&csr, &profile, &serial, validity)?;
+        let cert = authority_of(ca_cert, ca_key)?.issue(csr, profile, &serial, validity)?;
         Ok(X509::from_der(&cert)?)
     }
 
@@ -809,6 +819,7 @@ impl<R: Runner> CertificateAuthority<R> {
 
         let db = self.ca_database.as_mut().unwrap();
         db.process_ca_database(Some(&item_serial), false)?;
+        db.revoke_brokers_of(&item_serial)?;
 
         self.store_ca_database()?;
 
@@ -1744,6 +1755,14 @@ impl<R: Runner> CertificateAuthority<R> {
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn verified_csr(csr: &X509Req) -> Result<Csr, OpcaError> {
+    Csr::from_der(
+        &csr.to_der()?,
+        crypto_provider().signature_verification_algorithms.all,
+    )
+    .map_err(|e| OpcaError::InvalidCertificate(format!("CSR: {e}")))
+}
+
 fn authority_of(
     ca_cert: &X509,
     ca_key: &openssl::pkey::PKey<openssl::pkey::Private>,
@@ -1812,6 +1831,17 @@ fn profile_for(cert_type: &CertType, rsa_subject: bool, ca_config: &CaConfig) ->
             crl_distribution_points: ca_config.crl_url.iter().cloned().collect(),
             ca_issuers: ca_config.ca_url.iter().cloned().collect(),
             ..leaf
+        },
+        // Name constraints come from the domains it is signed for.
+        CertType::SubordinateCa => Profile {
+            basic_constraints: Some(Extension::critical(Bc::Authority {
+                path_length: Some(0),
+            })),
+            key_usage: Some(Extension::critical(vec![Ku::KeyCertSign, Ku::CrlSign])),
+            extended_key_usage: Some(Extension::non_critical(vec![Eku::ServerAuth])),
+            crl_distribution_points: ca_config.crl_url.iter().cloned().collect(),
+            ca_issuers: ca_config.ca_url.iter().cloned().collect(),
+            ..Profile::default()
         },
         _ => leaf,
     }
@@ -2103,13 +2133,13 @@ mod tests {
     }
 
     /// Scripts `n` empty successes: a document or item write each.
-    fn answer_writes(ca: &CertificateAuthority<FakeRunner>, n: usize) {
+    pub(super) fn answer_writes(ca: &CertificateAuthority<FakeRunner>, n: usize) {
         for _ in 0..n {
             ca.vault.op().runner().respond(Output::ok(""));
         }
     }
 
-    fn calls(ca: &CertificateAuthority<FakeRunner>) -> Vec<Vec<String>> {
+    pub(super) fn calls(ca: &CertificateAuthority<FakeRunner>) -> Vec<Vec<String>> {
         ca.vault
             .op()
             .runner()
@@ -2550,7 +2580,7 @@ mod tests {
         assert_eq!(validity(&crl), (this_update, next_update));
     }
 
-    fn ca_with_key(algorithm: KeyAlgorithm) -> CertificateAuthority<FakeRunner> {
+    pub(super) fn ca_with_key(algorithm: KeyAlgorithm) -> CertificateAuthority<FakeRunner> {
         let config = CertBundleConfig {
             cn: Some("Test CA".to_string()),
             key_algorithm: Some(algorithm),

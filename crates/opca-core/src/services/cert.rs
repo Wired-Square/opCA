@@ -39,6 +39,7 @@ pub enum CertType {
     VpnClient,
     VpnServer,
     WebServer,
+    SubordinateCa,
 }
 
 impl fmt::Display for CertType {
@@ -53,6 +54,7 @@ impl fmt::Display for CertType {
             CertType::VpnClient => write!(f, "vpnclient"),
             CertType::VpnServer => write!(f, "vpnserver"),
             CertType::WebServer => write!(f, "webserver"),
+            CertType::SubordinateCa => write!(f, "subordinateca"),
         }
     }
 }
@@ -71,6 +73,7 @@ impl FromStr for CertType {
             "vpnclient" => Ok(CertType::VpnClient),
             "vpnserver" => Ok(CertType::VpnServer),
             "webserver" => Ok(CertType::WebServer),
+            "subordinateca" => Ok(CertType::SubordinateCa),
             other => Err(OpcaError::InvalidCertificate(format!(
                 "Unknown certificate type: {other}"
             ))),
@@ -94,16 +97,19 @@ impl CertType {
     }
 
     pub fn default_days(&self, ca_days: u32) -> u32 {
-        if self.is_tls_server() {
-            ca_days.min(APPLE_TLS_MAX_DAYS)
-        } else {
-            ca_days
+        match self {
+            CertType::SubordinateCa => SUBORDINATE_CA_DAYS,
+            _ if self.is_tls_server() => ca_days.min(APPLE_TLS_MAX_DAYS),
+            _ => ca_days,
         }
     }
 }
 
 /// macOS and iOS reject TLS server certificates valid for longer, even from a private root.
 pub const APPLE_TLS_MAX_DAYS: u32 = 825;
+
+/// Re-signed every 4-weekly session, a subordinate always has 62 days left for its leaves.
+pub const SUBORDINATE_CA_DAYS: u32 = 90;
 
 // ---------------------------------------------------------------------------
 // Key algorithm
@@ -1329,6 +1335,7 @@ mod tests {
             ("vpnclient", CertType::VpnClient),
             ("vpnserver", CertType::VpnServer),
             ("webserver", CertType::WebServer),
+            ("subordinateca", CertType::SubordinateCa),
         ] {
             assert_eq!(ct.to_string(), s);
             assert_eq!(CertType::from_str(s).unwrap(), ct);

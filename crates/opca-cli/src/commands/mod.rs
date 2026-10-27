@@ -6,6 +6,7 @@ pub mod csr;
 pub mod database;
 pub mod dkim;
 pub mod openvpn;
+pub mod subordinate;
 pub mod vault;
 
 use opca_core::error::OpcaError;
@@ -60,6 +61,7 @@ pub fn dispatch(cli: Cli) -> Result<(), OpcaError> {
         Commands::Database(args) => database::dispatch(args, &mut app),
         Commands::Dkim(args) => dkim::dispatch(args, &mut app),
         Commands::Openvpn(args) => openvpn::dispatch(args, &mut app),
+        Commands::Subordinate(args) => subordinate::dispatch(args, &mut app),
         Commands::Vault(args) => vault::dispatch(args, &mut app),
     }
 }

@@ -136,7 +136,7 @@ fn is_uri(v: &str) -> bool {
 
 /// RFC 1123 hostname; a wildcard is allowed only as the whole first label, and
 /// an all-numeric last label is refused so a mistyped IP isn't taken as a name.
-fn is_dns_name(v: &str, allow_wildcard: bool) -> bool {
+pub(crate) fn is_dns_name(v: &str, allow_wildcard: bool) -> bool {
     let name = match v.strip_prefix("*.") {
         Some(rest) if allow_wildcard => rest,
         _ => v,

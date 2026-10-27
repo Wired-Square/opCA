@@ -128,6 +128,7 @@ impl CertificateAuthorityDB {
         conn.execute_batch(schema::CREATE_OPENVPN_TEMPLATE_TABLE)?;
         conn.execute_batch(schema::CREATE_OPENVPN_PROFILE_TABLE)?;
         conn.execute_batch(schema::CREATE_DKIM_TABLE)?;
+        conn.execute_batch(schema::CREATE_BROKERS_TABLE)?;
         Self::create_indexes(&conn)?;
 
         Ok(Self {
@@ -1085,6 +1086,108 @@ impl CertificateAuthorityDB {
             })
         })
         .transpose()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Brokers
+// ---------------------------------------------------------------------------
+
+const BROKER_SELECT: &str = "SELECT b.id, b.subordinate_serial, b.url, b.pinned_key,
+        b.permitted_domains, b.state, b.last_contact, b.created_at, b.updated_at,
+        c.cn, c.expiry_date
+    FROM brokers b LEFT JOIN certificate_authority c ON c.serial = b.subordinate_serial";
+
+fn domains_json(domains: &[String]) -> Result<String, OpcaError> {
+    serde_json::to_string(domains).map_err(|e| OpcaError::Database(e.to_string()))
+}
+
+impl CertificateAuthorityDB {
+    pub fn add_broker(&self, serial: &str, domains: &[String]) -> Result<i64, OpcaError> {
+        let now = datetime::now_utc_str(DateTimeFormat::Openssl);
+        self.conn.execute(
+            "INSERT INTO brokers (subordinate_serial, permitted_domains, state, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            rusqlite::params![
+                serial,
+                domains_json(domains)?,
+                BrokerState::Active.as_str(),
+                now
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn query_broker(&self, id: i64) -> Result<Option<Broker>, OpcaError> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("{BROKER_SELECT} WHERE b.id = ?1"),
+                [id],
+                Self::row_to_broker,
+            )
+            .optional()?)
+    }
+
+    pub fn query_all_brokers(&self) -> Result<Vec<Broker>, OpcaError> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("{BROKER_SELECT} ORDER BY b.id"))?;
+        let rows = stmt.query_map([], Self::row_to_broker)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn move_broker_to(
+        &self,
+        id: i64,
+        serial: &str,
+        domains: &[String],
+    ) -> Result<(), OpcaError> {
+        self.conn.execute(
+            "UPDATE brokers SET subordinate_serial = ?2, permitted_domains = ?3, updated_at = ?4
+             WHERE id = ?1",
+            rusqlite::params![
+                id,
+                serial,
+                domains_json(domains)?,
+                datetime::now_utc_str(DateTimeFormat::Openssl)
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Marks the broker whose current subordinate is `serial`, however it was revoked.
+    pub fn revoke_brokers_of(&self, serial: &str) -> Result<(), OpcaError> {
+        self.conn.execute(
+            "UPDATE brokers SET state = ?2, updated_at = ?3 WHERE subordinate_serial = ?1",
+            rusqlite::params![
+                serial,
+                BrokerState::Revoked.as_str(),
+                datetime::now_utc_str(DateTimeFormat::Openssl)
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn row_to_broker(row: &rusqlite::Row<'_>) -> rusqlite::Result<Broker> {
+        let invalid = |column, e: Box<dyn std::error::Error + Send + Sync>| {
+            rusqlite::Error::FromSqlConversionFailure(column, rusqlite::types::Type::Text, e)
+        };
+        let domains: String = row.get(4)?;
+        let state: String = row.get(5)?;
+        Ok(Broker {
+            id: row.get(0)?,
+            subordinate_serial: row.get(1)?,
+            url: row.get(2)?,
+            pinned_key: row.get(3)?,
+            permitted_domains: serde_json::from_str(&domains).map_err(|e| invalid(4, e.into()))?,
+            state: state.parse().map_err(|e: String| invalid(5, e.into()))?,
+            last_contact: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+            cn: row.get(9)?,
+            expiry_date: row.get(10)?,
+        })
     }
 }
 

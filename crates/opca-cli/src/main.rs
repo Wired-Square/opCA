@@ -50,6 +50,8 @@ pub enum Commands {
     Dkim(DkimArgs),
     /// OpenVPN artefact management
     Openvpn(OpenvpnArgs),
+    /// Name-constrained subordinate CAs for ACME brokers
+    Subordinate(SubordinateArgs),
     /// Vault backup and restore
     Vault(VaultArgs),
 }
@@ -551,6 +553,65 @@ pub enum CsrAction {
         #[arg(long)]
         days: Option<u32>,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Subordinate
+// ---------------------------------------------------------------------------
+
+#[derive(Args)]
+pub struct SubordinateArgs {
+    #[command(subcommand)]
+    pub action: SubordinateAction,
+}
+
+#[derive(Subcommand)]
+pub enum SubordinateAction {
+    /// Sign a broker's CSR as a subordinate CA limited to the given domains
+    Sign {
+        /// Path to CSR file (PEM or DER)
+        #[arg(short = 'c', long)]
+        csr_file: String,
+
+        /// Permitted domain, covering every name below it (repeatable)
+        #[arg(short = 'd', long = "domain", required = true)]
+        domains: Vec<String>,
+
+        /// Validity in days (default: 90)
+        #[arg(long)]
+        days: Option<u32>,
+    },
+
+    /// Sign a fresh CSR for a subordinate, keeping its domains unless changed
+    Renew {
+        /// Subordinate ID, as `opca subordinate list` shows it
+        id: i64,
+
+        /// Path to CSR file (PEM or DER)
+        #[arg(short = 'c', long)]
+        csr_file: String,
+
+        /// Permitted domain, replacing the recorded ones (repeatable; needs --change-domains if they differ)
+        #[arg(short = 'd', long = "domain")]
+        domains: Vec<String>,
+
+        /// Confirm that the renewal changes the permitted domains
+        #[arg(long, requires = "domains")]
+        change_domains: bool,
+
+        /// Validity in days (default: 90)
+        #[arg(long)]
+        days: Option<u32>,
+    },
+
+    /// Revoke a subordinate and regenerate the CRL
+    Revoke {
+        /// Subordinate ID, as `opca subordinate list` shows it
+        id: i64,
+    },
+
+    /// List subordinates
+    List,
 }
 
 // ---------------------------------------------------------------------------

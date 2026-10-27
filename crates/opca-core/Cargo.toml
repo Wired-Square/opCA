@@ -27,8 +27,8 @@ rustls-openssl = "0.4"
 rustls = { version = "0.23", default-features = false }
 rustls-pki-types = "1.12"
 wslib-crypto = { version = "0.1", registry = "wired-square" }
-wslib-crypto-x509 = { version = "0.1.2", registry = "wired-square" }
-wslib-crypto-ca = { version = "0.1.1", registry = "wired-square" }
+wslib-crypto-x509 = { version = "0.1.3", registry = "wired-square" }
+wslib-crypto-ca = { version = "0.2.0", registry = "wired-square" }
 wslib-dns-mail = { version = "0.5.1", registry = "wired-square" }
 wslib-1password = { version = "0.1.1", registry = "wired-square" }
 # wslib-1password traces each `op` call; this forwards them to `log`.

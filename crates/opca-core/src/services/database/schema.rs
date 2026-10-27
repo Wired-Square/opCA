@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 16;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 17;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v16 — current)
+// Table DDL (v17 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -151,6 +151,20 @@ pub const CREATE_OPENVPN_PROFILE_TABLE: &str = "
         template TEXT,
         serial TEXT,
         generated INTEGER NOT NULL DEFAULT 1
+    )
+";
+
+pub const CREATE_BROKERS_TABLE: &str = "
+    CREATE TABLE IF NOT EXISTS brokers (
+        id INTEGER PRIMARY KEY,
+        subordinate_serial TEXT NOT NULL,
+        url TEXT,
+        pinned_key TEXT,
+        permitted_domains TEXT NOT NULL,
+        state TEXT NOT NULL,
+        last_contact TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
     )
 ";
 
@@ -463,8 +477,19 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v15→v16: {e}")))?;
 
         version = 16;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 16, ok: true });
+    }
+
+    // v16 → v17: subordinate CAs and the ACME brokers that hold them.
+    if version == 16 {
+        conn.execute_batch(CREATE_BROKERS_TABLE)
+            .map_err(|e| OpcaError::SchemaMigration(format!("v16→v17 brokers: {e}")))?;
+        conn.execute_batch("UPDATE config SET schema_version = 17 WHERE id = 1;")
+            .map_err(|e| OpcaError::SchemaMigration(format!("v16→v17: {e}")))?;
+
+        version = 17;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 17, ok: true });
     }
 
     info.migrated = true;
