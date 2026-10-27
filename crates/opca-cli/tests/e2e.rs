@@ -869,6 +869,24 @@ fn t51_database_export() {
 }
 
 // ---------------------------------------------------------------------------
+// Broker tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn t60_broker_list() {
+    skip_unless_integration!();
+    bail_if_failed!();
+    let state = get_state();
+    let s = state.as_ref().expect("t01 must run first");
+    let output = run_opca(s, &["broker", "list"]);
+    assert_ok(&output, "broker list");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("(no entries)"));
+    assert!(stdout.contains("Total: 0 broker(s)"));
+}
+
+// ---------------------------------------------------------------------------
 // Cleanup — always runs, even after failures
 // ---------------------------------------------------------------------------
 

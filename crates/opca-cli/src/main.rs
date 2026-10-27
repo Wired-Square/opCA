@@ -36,6 +36,8 @@ pub struct Cli {
 pub enum Commands {
     /// AWS credential selection (per-user, per-machine)
     Aws(AwsArgs),
+    /// ACME brokers: enrol them, and renew and revoke their subordinate CAs
+    Broker(BrokerArgs),
     /// Certificate Authority operations
     Ca(CaArgs),
     /// Certificate operations
@@ -612,6 +614,63 @@ pub enum SubordinateAction {
 
     /// List subordinates
     List,
+}
+
+// ---------------------------------------------------------------------------
+// Broker
+// ---------------------------------------------------------------------------
+
+#[derive(Args)]
+pub struct BrokerArgs {
+    #[command(subcommand)]
+    pub action: BrokerAction,
+}
+
+#[derive(Subcommand)]
+pub enum BrokerAction {
+    /// Pair with a broker, then sign its subordinate CA and hand it over
+    Enrol {
+        /// The pairing string the broker printed (opca-enrol://host:port#pin=…&code=…)
+        pairing: String,
+
+        /// Permitted domain, when the broker has none configured (repeatable)
+        #[arg(short = 'd', long = "domain")]
+        domains: Vec<String>,
+
+        /// Enrol without asking to confirm the broker's offer
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// List brokers and what needs attention
+    List,
+
+    /// Ask a broker for its status
+    Status {
+        /// Broker ID, as `opca broker list` shows it
+        id: i64,
+    },
+
+    /// Renew subordinate CAs through their brokers
+    Renew {
+        /// Broker ID, as `opca broker list` shows it
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        id: Option<i64>,
+
+        /// Renew every active broker
+        #[arg(long)]
+        all: bool,
+
+        /// Confirm the domains the broker now asks for
+        #[arg(long, conflicts_with = "all")]
+        change_domains: bool,
+    },
+
+    /// Revoke a broker's subordinate CA, regenerate the CRL and tell the broker
+    Revoke {
+        /// Broker ID, as `opca broker list` shows it
+        id: i64,
+    },
 }
 
 // ---------------------------------------------------------------------------
