@@ -236,16 +236,23 @@ fn handle_renew<R: Runner>(app: &mut AppContext<R>, args: CertRenewArgs) -> Resu
 
     with_lock(app, "cert_renew", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let (new_pem, new_serial, issuance_warnings) =
-            ca.renew_certificate_bundle(&lookup, args.days)?;
+        let renewal = ca.renew_certificate_bundle(&lookup, args.days)?;
         output::print_result(
-            &format!("Certificate renewed (new serial {new_serial})"),
+            &format!("Certificate renewed (new serial {})", renewal.serial),
             true,
         );
-        for w in &issuance_warnings {
+        for w in &renewal.warnings {
             output::warning(&w.message);
         }
-        print!("{new_pem}");
+        match &renewal.republished {
+            Some(Ok(uri)) => output::print_result(&format!("Published to {uri}"), true),
+            Some(Err(e)) => output::warning(&format!(
+                "Publishing the renewal failed: {e}. Retry with `opca cert publish {}`",
+                renewal.serial
+            )),
+            None => {}
+        }
+        print!("{}", renewal.pem);
         Ok(())
     })
 }

@@ -44,6 +44,7 @@ fn make_cert(serial: &str, cn: &str, expiry: &str) -> CertRecord {
         has_private_key: Some(true),
         has_chain: Some(false),
         deleted_at: None,
+        published_at: None,
     }
 }
 
@@ -1219,7 +1220,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 12); // v5→v6 … v15→v16, v16→v17
+    assert_eq!(info.steps.len(), 13); // v5→v6 … v16→v17, v17→v18
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1258,6 +1259,7 @@ fn a_v14_dump_imports_with_crl_batches_off() {
              DROP TABLE brokers;
              ALTER TABLE config DROP COLUMN crl_batch_enabled;
              ALTER TABLE config DROP COLUMN openvpn_template_import;
+             ALTER TABLE certificate_authority DROP COLUMN published_at;
              UPDATE config SET schema_version = 14 WHERE id = 1;",
         )
         .unwrap();
@@ -1265,7 +1267,7 @@ fn a_v14_dump_imports_with_crl_batches_off() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v14_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (14, 3));
+    assert_eq!((info.from_version, info.steps.len()), (14, 4));
     let config = db.get_config().unwrap();
     assert_eq!(
         (config.schema_version, config.crl_batch_enabled),
@@ -1282,6 +1284,7 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
         .execute_batch(
             "DROP TABLE brokers;
              ALTER TABLE config DROP COLUMN openvpn_template_import;
+             ALTER TABLE certificate_authority DROP COLUMN published_at;
              UPDATE config SET schema_version = 15 WHERE id = 1;",
         )
         .unwrap();
@@ -1289,7 +1292,7 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v15_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (15, 2));
+    assert_eq!((info.from_version, info.steps.len()), (15, 3));
     assert_eq!(
         db.openvpn_template_import().unwrap(),
         TemplateImport::NotImported
@@ -1370,6 +1373,7 @@ fn a_v16_dump_gains_an_empty_brokers_table() {
     db.conn
         .execute_batch(
             "DROP TABLE brokers;
+             ALTER TABLE certificate_authority DROP COLUMN published_at;
              UPDATE config SET schema_version = 16 WHERE id = 1;",
         )
         .unwrap();
@@ -1378,12 +1382,71 @@ fn a_v16_dump_gains_an_empty_brokers_table() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v16_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (16, 1));
+    assert_eq!((info.from_version, info.steps.len()), (16, 2));
     assert_eq!(
         db.get_config().unwrap().schema_version,
         Some(DEFAULT_SCHEMA_VERSION)
     );
     assert!(db.query_all_brokers().unwrap().is_empty());
+}
+
+#[test]
+fn a_v17_dump_imports_with_nothing_published() {
+    let mut db = test_db();
+    db.add_cert(&make_cert("2", "www.example.com", "20301231235959Z"))
+        .unwrap();
+    db.conn
+        .execute_batch(
+            "ALTER TABLE certificate_authority DROP COLUMN published_at;
+             UPDATE config SET schema_version = 17 WHERE id = 1;",
+        )
+        .unwrap();
+    let v17_sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+    assert!(!v17_sql.contains("published_at"));
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(&v17_sql).unwrap();
+
+    assert_eq!((info.from_version, info.steps.len()), (17, 1));
+    let cert = db
+        .query_cert(&CertLookup::Serial("2".into()), false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(cert.cn.as_deref(), Some("www.example.com"));
+    assert_eq!(cert.published_at, None);
+}
+
+#[test]
+fn publishing_a_cert_unpublishes_the_others_with_its_cn() {
+    let mut db = test_db();
+    for (serial, cn) in [
+        ("2", "www.example.com"),
+        ("3", "www.example.com"),
+        ("4", "mail.example.com"),
+    ] {
+        db.add_cert(&make_cert(serial, cn, "20301231235959Z"))
+            .unwrap();
+    }
+    let published = |db: &CertificateAuthorityDB| -> Vec<String> {
+        db.query_all_certs()
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.published_at.is_some())
+            .map(|c| c.serial)
+            .collect()
+    };
+
+    db.mark_cert_published("2", "www.example.com").unwrap();
+    db.mark_cert_published("4", "mail.example.com").unwrap();
+    assert_eq!(published(&db), ["2", "4"]);
+
+    db.mark_cert_published("3", "www.example.com").unwrap();
+    assert_eq!(published(&db), ["3", "4"]);
+
+    let (db, _) = CertificateAuthorityDB::from_sql_dump(
+        &String::from_utf8(db.export_database().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(published(&db), ["3", "4"]);
 }
 
 fn broker_db() -> CertificateAuthorityDB {
@@ -1553,6 +1616,7 @@ fn test_iterdump_null_handling() {
         has_private_key: None,
         has_chain: None,
         deleted_at: None,
+        published_at: None,
     };
     db.add_cert(&cert).unwrap();
 
@@ -1584,6 +1648,7 @@ fn test_iterdump_single_quote_escaping() {
         has_private_key: None,
         has_chain: None,
         deleted_at: None,
+        published_at: None,
     };
     db.add_cert(&cert).unwrap();
 

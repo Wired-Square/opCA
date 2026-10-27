@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A certificate can be published to the public store as `certs/<CN>.pem`, for
+  a server that made its own key to fetch. A CN names its latest certificate,
+  and publishing one unpublishes the others with that CN. Revoked, expired and
+  CA certificates are refused. Renewing a published certificate publishes the
+  renewal; if that upload fails, the renewal stands and the failure is
+  reported. The CA database records when each was published (schema v18).
 - A subordinate CA can be signed from a CSR for a list of permitted domains:
   path length 0, `serverAuth` only, and critical name constraints that permit
   those domains and exclude every IP address. It lasts 90 days unless asked

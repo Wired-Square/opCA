@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use opca_core::crypto::utils::encrypt_private_key_pem;
 use opca_core::error::OpcaError;
-use opca_core::services::ca::CertificateAuthority;
+use opca_core::services::ca::{CertificateAuthority, Renewal};
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
 use opca_core::services::database::{CertLookup, CertRecord, ExternalCertRecord, is_expiring_soon};
 use opca_core::services::san;
@@ -491,7 +491,12 @@ pub async fn renew_cert(
     let ca = conn.ca.as_mut().ok_or("CA not available")?;
 
     info!("[tauri] renew_cert: serial={serial}");
-    let (new_pem, new_serial, issuance_warnings) = ca
+    let Renewal {
+        pem: new_pem,
+        serial: new_serial,
+        warnings: issuance_warnings,
+        ..
+    } = ca
         .renew_certificate_bundle(&CertLookup::Serial(serial.clone()), None)
         .map_err(|e| {
             warn!("[tauri] renew_cert failed: {e}");
@@ -687,11 +692,11 @@ pub async fn bulk_renew_certs<R: Runtime>(
         "bulk_renew",
         "Renewing",
         |ca, serial| {
-            let (new_pem, new_serial, warnings) =
+            let renewal =
                 ca.renew_certificate_bundle(&CertLookup::Serial(serial.to_string()), None)?;
-            state.log_warnings("bulk_renew", warnings);
-            state.cache_fresh_pem(new_serial.clone(), new_pem);
-            Ok(Some(new_serial))
+            state.log_warnings("bulk_renew", renewal.warnings);
+            state.cache_fresh_pem(renewal.serial.clone(), renewal.pem);
+            Ok(Some(renewal.serial))
         },
     )
 }

@@ -71,6 +71,8 @@ pub struct CertRecord {
     /// Whether an issuer chain is stored alongside this cert in 1Password.
     pub has_chain: Option<bool>,
     pub deleted_at: Option<String>,
+    /// When this cert was last uploaded to `certs/<CN>.pem` in the public store.
+    pub published_at: Option<String>,
 }
 
 /// Reason a certificate was ignored. `Manual` comes from the UI's "Ignore"

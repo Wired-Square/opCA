@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 17;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 18;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v17 — current)
+// Table DDL (v18 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -57,7 +57,8 @@ pub const CREATE_CA_TABLE: &str = "
         ignored_note TEXT,
         has_private_key INTEGER,
         has_chain INTEGER,
-        deleted_at TEXT
+        deleted_at TEXT,
+        published_at TEXT
     )
 ";
 
@@ -488,8 +489,20 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
             .map_err(|e| OpcaError::SchemaMigration(format!("v16→v17: {e}")))?;
 
         version = 17;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 17, ok: true });
+    }
+
+    // v17 → v18: certificates published to the public store for servers to fetch.
+    if version == 17 {
+        conn.execute_batch(
+            "ALTER TABLE certificate_authority ADD COLUMN published_at TEXT;
+             UPDATE config SET schema_version = 18 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v17→v18: {e}")))?;
+
+        version = 18;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 18, ok: true });
     }
 
     info.migrated = true;

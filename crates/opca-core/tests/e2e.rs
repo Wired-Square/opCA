@@ -334,9 +334,10 @@ fn t23_cert_renew() {
     let lookup = CertLookup::Title(s.server_cert_title.clone());
     let old_serial = cert_serial(&ca, &lookup);
 
-    let (new_pem, new_serial, _warning) = ca
+    let renewal = ca
         .renew_certificate_bundle(&lookup, None)
         .expect("renew failed");
+    let (new_pem, new_serial) = (renewal.pem, renewal.serial);
 
     assert!(new_pem.contains("BEGIN CERTIFICATE"));
     assert_ne!(new_serial, old_serial, "renew must mint a new serial");
