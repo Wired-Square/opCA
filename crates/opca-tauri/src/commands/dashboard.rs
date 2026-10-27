@@ -6,6 +6,9 @@ use opca_core::services::ca::{CaExpiryWarning, CrlExpiryWarning, assess_crl_expi
 use opca_core::services::cert::APPLE_TLS_MAX_DAYS;
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
+use opca_core::services::database::BrokerState;
+
+use crate::commands::broker::broker_rows;
 use crate::commands::crl::crl_batch_dto;
 use crate::commands::dto::{ActionItemDto, CaExpiryWarningDto, CrlExpiryWarningDto, DashboardData};
 use crate::state::AppState;
@@ -108,6 +111,16 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         .map(|rows| rows.len())
         .unwrap_or(0);
 
+    let active_brokers: Vec<_> = broker_rows(ca.list_subordinates().map_err(|e| e.to_string())?)
+        .into_iter()
+        .filter(|row| row.broker.state == BrokerState::Active)
+        .collect();
+    let brokers = active_brokers.len();
+    let brokers_flagged = active_brokers
+        .into_iter()
+        .filter(|row| !row.concerns.is_empty())
+        .collect();
+
     if db_changed {
         if let Err(e) = ca.store_ca_database() {
             warn!("[tauri] get_dashboard: failed to persist database after rescan: {e}");
@@ -147,6 +160,8 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         has_public_store,
         crl_batch_enabled,
         crl_batch,
+        brokers,
+        brokers_flagged,
         action_items,
     })
 }

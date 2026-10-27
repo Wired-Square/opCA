@@ -37,6 +37,34 @@ pub enum Renewal {
     },
 }
 
+impl Renewal {
+    pub fn is_renewed(&self) -> bool {
+        matches!(self, Self::Renewed { .. })
+    }
+}
+
+impl std::fmt::Display for Renewal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Renewed { serial, .. } => write!(f, "renewed (serial {serial})"),
+            Self::DomainsChanged {
+                recorded,
+                configured,
+            } => write!(
+                f,
+                "now asks for {} instead of {}; nothing was signed",
+                configured.join(", "),
+                recorded.join(", ")
+            ),
+            Self::Unreachable { error } => write!(f, "unreachable: {error}"),
+            Self::NotDelivered { serial, error } => {
+                write!(f, "signed (serial {serial}) but not delivered: {error}")
+            }
+            Self::Failed { error } => write!(f, "failed: {error}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BrokerRenewal {
     pub id: i64,

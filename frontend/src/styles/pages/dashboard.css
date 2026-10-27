@@ -173,3 +173,10 @@
 .action-item--info .action-item-dot {
   background: var(--app-accent);
 }
+
+.flagged-brokers {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 0.8125rem;
+  color: var(--app-warn);
+}

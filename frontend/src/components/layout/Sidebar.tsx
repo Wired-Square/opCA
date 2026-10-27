@@ -22,6 +22,7 @@ const navItems: NavItem[] = [
   { label: "Certificates", path: "/certs", icon: "cert", gated: true },
   { label: "CRL", path: "/crl", icon: "crl", gated: true },
   { label: "CSR", path: "/csr", icon: "csr", gated: true },
+  { label: "ACME Servers", path: "/acme", icon: "acme", gated: true },
   { label: "DKIM", path: "/dkim", icon: "dkim", gated: true },
   { label: "OpenVPN", path: "/openvpn", icon: "vpn", gated: true },
   { label: "Database", path: "/database", icon: "database", gated: true },

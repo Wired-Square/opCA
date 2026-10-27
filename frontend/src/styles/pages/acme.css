@@ -1,0 +1,54 @@
+.page-acme {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.broker-url {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--app-text-muted);
+}
+
+.broker-outcomes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.broker-outcome {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--success-edge);
+  background: var(--success-tint);
+}
+
+.broker-outcome--bad {
+  border-color: var(--error-edge);
+  background: var(--error-tint);
+}
+
+.broker-outcome-name {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.broker-outcome-text {
+  flex: 1;
+  font-size: 0.875rem;
+}
+
+.enrol-domains {
+  margin: 0;
+  padding-left: 18px;
+}

@@ -1,10 +1,13 @@
 //! opCA's client for its ACME brokers' API, and the enrolment, renewal and
 //! revocation that go through it.
 
+mod concern;
 mod enrol;
 mod renew;
 
+pub use concern::{Concern, concerns};
 pub use enrol::{EnrolledBroker, fetch_offer, issuance, parse_pairing};
+pub use opca_acme_api as api;
 pub use renew::{BrokerNotice, BrokerRenewal, BrokerRevocation, Renewal};
 
 use std::error::Error;

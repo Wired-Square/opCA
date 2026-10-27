@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, TryLockError};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use log::{info, warn};
 use opca_core::error::OpcaError;
 use opca_core::op::Vault;
+use opca_core::services::ca::operator::Operator;
 use opca_core::services::ca::{CertIssuanceWarning, CertificateAuthority};
 use opca_core::services::cert::CertificateBundle;
 use opca_core::services::database::CertificateAuthorityDB;
@@ -29,6 +30,8 @@ pub type Runner = opca_core::testutil::FakeRunner;
 pub struct Connection {
     pub vault: Option<Vault<Runner>>,
     pub ca: Option<CertificateAuthority<Runner>>,
+    /// Minted by the first broker call, so a session without brokers never makes `CA_Operator`.
+    pub operator: Option<(Instant, Operator)>,
 }
 
 impl Connection {
