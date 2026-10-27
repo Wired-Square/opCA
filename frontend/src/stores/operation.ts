@@ -65,6 +65,15 @@ const operationLabels: Record<string, string> = {
   import_csr_cert: "Importing CSR certificate\u2026",
   decode_csr: "Decoding CSR\u2026",
 
+  // ACME servers
+  fetch_broker_offer: "Contacting broker\u2026",
+  enrol_broker: "Enrolling broker\u2026",
+  list_brokers: "Loading ACME servers\u2026",
+  broker_status: "Checking broker\u2026",
+  renew_broker: "Renewing broker\u2026",
+  renew_all_brokers: "Renewing brokers\u2026",
+  revoke_broker: "Revoking broker\u2026",
+
   // DKIM
   list_dkim_keys: "Loading DKIM keys\u2026",
   get_dkim_info: "Loading DKIM info\u2026",

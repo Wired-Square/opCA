@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use opca_acme_api::{Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, IssuanceConfig, Status};
-use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
 use wslib_crypto_x509::{CertificateView, NameSubtree, inspect, pem};
@@ -42,7 +41,7 @@ fn enrolment_path(state: &Path) -> PathBuf {
 struct Checked {
     code: PairingCode,
     enrolled: Enrolled,
-    operator: Arc<ServerConfig>,
+    root: CertificateDer<'static>,
 }
 
 pub(crate) fn load(state: &Path) -> Result<Mode, Error> {
@@ -95,8 +94,6 @@ impl Broker {
         }
         let (subordinate, root) = self.check_chain(&enrolment.chain_pem)?;
         self.check_config(&enrolment.config, &subordinate)?;
-        let operator =
-            operator_config(&self.provider, &self.serving, root, pin).map_err(bad_request)?;
         let enrolled = Enrolled {
             chain_pem: enrolment.chain_pem,
             operator_pin: enrolment.operator_pin,
@@ -107,7 +104,7 @@ impl Broker {
         Ok(Checked {
             code,
             enrolled,
-            operator,
+            root,
         })
     }
 
@@ -181,6 +178,13 @@ impl Broker {
 
     /// Staged before the redeem, so that an accepted code cannot meet a failed write.
     fn redeem_and_store(&self, checked: Checked) -> Result<(), ErrorBody> {
+        let operator = operator_config(
+            &self.provider,
+            &self.serving,
+            checked.root,
+            &checked.enrolled.operator_pin,
+        )
+        .map_err(bad_request)?;
         let json = serde_json::to_vec_pretty(&checked.enrolled).map_err(internal)?;
         let staged = wslib_file_atomic::Options::new()
             .stage(&self.enrolment_path(), &json)
@@ -192,7 +196,7 @@ impl Broker {
         };
         staged.promote().map_err(internal)?;
         *self.mode.write().unwrap_or_else(|e| e.into_inner()) = Mode::Enrolled(checked.enrolled);
-        self.tls.reload(checked.operator);
+        self.tls.reload(operator);
         tracing::info!("enrolled; the API now requires the operator's client certificate");
         self.on_new_chain();
         Ok(())

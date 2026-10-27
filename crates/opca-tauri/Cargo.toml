@@ -35,6 +35,10 @@ opca-core = { path = "../opca-core", features = ["test-support"] }
 tauri = { version = "2.12", features = ["test"] }
 tempfile = "3"
 
+[target.'cfg(unix)'.dev-dependencies]
+opca-acme-broker = { path = "../opca-acme-broker" }
+wslib-http-server = { version = "0.1.2", registry = "wired-square" }
+
 [features]
 # Dev-only MCP server for the UI harness; refused in release builds (see main.rs).
 mcp = ["dep:wslib-mcp"]

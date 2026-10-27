@@ -1443,6 +1443,29 @@ fn a_broker_moves_to_a_new_serial_and_can_be_revoked() {
 }
 
 #[test]
+fn a_brokers_endpoint_and_last_contact_are_recorded_and_exported() {
+    let db = broker_db();
+    let id = db.add_broker("100", &domains(&["home.arpa"])).unwrap();
+
+    db.set_broker_endpoint(id, "https://acme.home.arpa:9443", "ab12")
+        .unwrap();
+    db.touch_broker(id).unwrap();
+
+    let broker = db.query_broker(id).unwrap().unwrap();
+    assert_eq!(
+        (broker.url.as_deref(), broker.pinned_key.as_deref()),
+        (Some("https://acme.home.arpa:9443"), Some("ab12"))
+    );
+    let contact = broker.last_contact.clone().unwrap();
+    assert!(contact.len() == 15 && contact.ends_with('Z'), "{contact}");
+    let (db, _) = CertificateAuthorityDB::from_sql_dump(
+        &String::from_utf8(db.export_database().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(db.query_broker(id).unwrap().unwrap(), broker);
+}
+
+#[test]
 fn brokers_survive_export_and_import() {
     let db = broker_db();
     db.add_broker("100", &domains(&["home.arpa", "o'brien.example"]))

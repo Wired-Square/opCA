@@ -1,5 +1,8 @@
 pub mod aws;
 pub mod backup;
+pub mod broker;
+#[cfg(all(test, unix))]
+mod broker_tests;
 pub mod ca;
 pub mod cert;
 #[cfg(test)]

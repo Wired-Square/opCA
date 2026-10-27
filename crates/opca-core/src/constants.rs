@@ -27,6 +27,7 @@ pub struct OpConf {
     pub ta_item: &'static str,
     pub ta_key_size_item: &'static str,
     pub lock_title: &'static str,
+    pub operator_title: &'static str,
 }
 
 pub const DEFAULT_OP_CONF: OpConf = OpConf {
@@ -54,6 +55,7 @@ pub const DEFAULT_OP_CONF: OpConf = OpConf {
     ta_item: "tls_authentication.static_key",
     ta_key_size_item: "tls_authentication.key_size[text]",
     lock_title: "CA_Lock",
+    operator_title: "CA_Operator",
 };
 
 /// Default key sizes for the RSA-only artefacts; certificate keys use

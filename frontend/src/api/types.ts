@@ -50,6 +50,9 @@ export interface DashboardData {
   has_public_store: boolean;
   crl_batch_enabled: boolean;
   crl_batch: CrlBatch | null;
+  /** Active brokers, and those of them that need attention. */
+  brokers: number;
+  brokers_flagged: BrokerRow[];
   action_items: ActionItem[];
 }
 
@@ -392,6 +395,73 @@ export interface Broker {
   updated_at: string;
   cn: string | null;
   expiry_date: string | null;
+}
+
+/** Why an active broker wants attention; `days` is negative once expired. */
+export type Concern =
+  | { concern: "expiring"; days: number }
+  | { concern: "silent"; days: number }
+  | { concern: "not_delivered" };
+
+export interface BrokerRow extends Broker {
+  concerns: Concern[];
+}
+
+export interface BrokerVersions {
+  api: number;
+  broker: string;
+  step_ca: string;
+}
+
+/** What a broker asks opCA to sign; sent back unchanged to enrol. */
+export interface EnrolmentOffer {
+  csr_pem: string;
+  host: string;
+  configured_domains: string[];
+  versions: BrokerVersions;
+}
+
+export interface BrokerOffer {
+  address: string;
+  pin: string;
+  offer: EnrolmentOffer;
+}
+
+export interface BrokerStatus {
+  state: "issuing" | "step_ca_down" | "revoked";
+  subordinate_serial: string;
+  subordinate_not_after: string;
+  config: {
+    permitted_domains: string[];
+    leaf_days: number;
+    leaf_max_days: number;
+    challenges: string[];
+  };
+  versions: BrokerVersions;
+}
+
+export type BrokerError =
+  | { kind: "unreachable" | "wrong_key" | "malformed"; message: string }
+  | { kind: "refused"; message: string }
+  | { kind: "status"; status: number };
+
+export type Renewal =
+  | { outcome: "renewed"; serial: string; status: BrokerStatus }
+  | { outcome: "domains_changed"; recorded: string[]; configured: string[] }
+  | { outcome: "unreachable"; error: BrokerError }
+  | { outcome: "not_delivered"; serial: string; error: BrokerError }
+  | { outcome: "failed"; error: string };
+
+export type BrokerRenewal = Renewal & { id: number };
+
+export type BrokerRevocation = { broker: Broker } & (
+  | { notice: "told"; status: BrokerStatus }
+  | { notice: "not_told"; error: BrokerError }
+);
+
+export interface EnrolledBroker {
+  broker: Broker;
+  status: BrokerStatus;
 }
 
 export interface SignedSubordinate {

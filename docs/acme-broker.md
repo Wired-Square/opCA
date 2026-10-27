@@ -6,10 +6,6 @@ holds a name-constrained subordinate CA that opCA signs, and runs
 [step-ca](https://smallstep.com/docs/step-ca/) as its child to answer ACME. The subordinate can
 only issue for the domains opCA permitted it, and its key never leaves the host.
 
-**Pairing from the opCA app isn't available yet.** The broker side is complete, but opCA's
-page for adding and renewing brokers comes in a later release. Until then a subordinate can be
-signed by hand (`opca subordinate sign`), which doesn't use the broker.
-
 ## Install
 
 The broker needs Debian 12 (bookworm) or later with systemd, and step-ca 0.28.1 or newer.
@@ -74,6 +70,61 @@ sudo opca-acme pairing
 
 `pairing` works only while the broker is waiting to pair.
 
+## Enrol, renew and revoke in opCA
+
+opCA manages its brokers from the **ACME Servers** page or the `opca broker` commands. Both
+need the CA loaded, and every write takes the vault lock.
+
+**Enrol.** On the ACME Servers page choose **Enrol Broker** and paste the pairing URI, or run:
+
+```sh
+opca broker enrol 'opca-enrol://acme.home.example:9443#pin=…&code=…'
+```
+
+opCA connects with the `pin` checked, before the code goes on the wire, and shows the broker's
+host, address, key and versions, and the domains. If `broker.toml` sets `domains`, those are
+used and can't be changed in opCA. Otherwise enter them in the dialog, or pass `--domain` once
+per domain (`enrol` refuses without them). Confirm, or pass `--yes`, and opCA signs the
+subordinate and hands it to the broker with the code. The terms are 30-day leaves, at most 45
+days, over http-01, dns-01 and tls-alpn-01.
+
+The first broker call in a vault creates a `CA_Operator` item holding the key opCA presents to
+its brokers. Each session issues a short-lived certificate for that key, which isn't kept.
+
+If the broker doesn't take the subordinate (the network drops, say), it shows as "signed, not
+delivered". Enrol again with the same pairing string: opCA sends the same subordinate rather
+than signing another.
+
+**List and status.** The page, and `opca broker list`, show each broker's state, domains,
+subordinate expiry and last contact, and flag one that needs attention:
+
+- its subordinate expires within 30 days;
+- opCA hasn't heard from it in over 35 days;
+- it was signed but not delivered.
+
+The dashboard's ACME Servers tile shows the same flags. **Status**, or `opca broker status <id>`,
+asks the broker for its mode, subordinate and whether step-ca is issuing.
+
+**Renew.** Renew one broker from its row menu or with `opca broker renew <id>`, or every broker
+with **Renew All** or `opca broker renew --all`. Renewal is a deliberate action: do it at each
+signing session, before the dashboard flags expiry. Each broker makes a fresh CSR over the same
+key, opCA signs it, and the broker reloads step-ca with the new chain. The result is reported for
+each broker; an unreachable one is never skipped silently, and `renew` exits non-zero unless
+every broker renewed.
+
+If `domains` in `broker.toml` has changed, nothing is signed and opCA asks you to confirm the new
+domains: **Confirm and Renew** on the page, or `opca broker renew <id> --change-domains`. If the
+new chain doesn't reach the broker, the next renewal signs afresh.
+
+**Revoke.** **Revoke** in the row menu, or `opca broker revoke <id>`, puts the subordinate on the
+CRL, regenerates the CRL and tells the broker, which stops step-ca. The revocation stands even
+if the broker can't be reached; revoke again to tell it once it's back.
+
+**No external account binding.** ACME clients can't be required to use EAB: open-source step-ca
+0.28.1 refuses to create EAB keys ("only available in Certificate Manager"). Any client that can
+reach the ACME port can register, and still gets only names inside the permitted domains whose
+challenges it passes. Limit who can reach port 443 at the network.
+
 ## Status
 
 ```sh
@@ -104,8 +155,9 @@ Only root can do this. It asks you to type `reopen` (or pass `--yes`), then:
 - makes a new key, a new CSR and a new pairing code, and prints the URI.
 
 The running broker reloads, stops step-ca and waits to pair again. Its API key, and so the
-`pin`, stays the same. Revoke the old subordinate in opCA: `opca subordinate revoke <id>`,
-with the id from `opca subordinate list`.
+`pin`, stays the same. Revoke the old subordinate in opCA (**Revoke** on the ACME Servers page,
+or `opca broker revoke <id>`). The broker is no longer enrolled, so opCA reports that it wasn't
+told, which is expected here.
 
 ## Revoke
 
@@ -113,8 +165,9 @@ When opCA revokes the subordinate and tells the broker, the broker stops step-ca
 revoked across restarts. It then answers opCA's status and revoke calls and nothing else. To use
 the host again, re-open enrolment.
 
-Revoking with `opca subordinate revoke <id>` alone puts the subordinate on the CRL but doesn't reach
-the broker.
+Revoking with `opca subordinate revoke <id>`, or from the certificate list, puts the subordinate
+on the CRL but doesn't reach the broker. Revoke from the ACME Servers page or with
+`opca broker revoke <id>` to do both.
 
 ## Ports and the ACME directory
 

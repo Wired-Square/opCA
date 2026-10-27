@@ -3,7 +3,10 @@
 //! These structs bridge opca-core domain types to the frontend.
 //! They are Serialize-only — the frontend never sends them back.
 
+use opca_core::services::acme_broker::Concern;
+use opca_core::services::acme_broker::api::EnrolmentOffer;
 use opca_core::services::cert::KeyAlgorithm;
+use opca_core::services::database::Broker;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -29,6 +32,9 @@ pub struct DashboardData {
     pub has_public_store: bool,
     pub crl_batch_enabled: bool,
     pub crl_batch: Option<CrlBatchDto>,
+    /// Active brokers, and those of them that need attention.
+    pub brokers: usize,
+    pub brokers_flagged: Vec<BrokerRow>,
     pub action_items: Vec<ActionItemDto>,
 }
 
@@ -399,6 +405,29 @@ pub struct SignSubordinateRequest {
     pub csr_pem: String,
     pub domains: Vec<String>,
     pub days: Option<u32>,
+}
+
+/// A broker's offer as fetched, sent back unchanged with the operator's domains to enrol.
+#[derive(Debug, Deserialize)]
+pub struct EnrolBrokerRequest {
+    pub pairing: String,
+    pub offer: EnrolmentOffer,
+    #[serde(default)]
+    pub domains: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BrokerOfferDto {
+    pub address: String,
+    pub pin: String,
+    pub offer: EnrolmentOffer,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BrokerRow {
+    #[serde(flatten)]
+    pub broker: Broker,
+    pub concerns: Vec<Concern>,
 }
 
 /// `domains` replaces the recorded ones only with `change_domains`.

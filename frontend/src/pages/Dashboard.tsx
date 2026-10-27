@@ -8,9 +8,11 @@ import { Notice, createAction } from "@wired-square/kit";
 import { ActionOutcome } from "../components/ResultBanner";
 import { failureOf, headed } from "../utils/acting";
 import { setRecoveryOpen } from "../components/DatabaseRecoveryDialog";
+import { concernText } from "../api/brokers";
 import type {
   ActionItem,
   ActionKind,
+  BrokerRow,
   CrlBatch,
   CrlInfo,
   DashboardData,
@@ -202,6 +204,10 @@ export default function Dashboard() {
                 </span>
                 <span class="stat-card-detail">awaiting signature</span>
               </div>
+
+              <Show when={d().brokers > 0}>
+                <BrokersTile total={d().brokers} flagged={d().brokers_flagged} onClick={() => navigate("/acme")} />
+              </Show>
             </div>
 
             <h3 class="section-heading">Certificates</h3>
@@ -272,5 +278,29 @@ function CrlBatchTile(props: { batch: CrlBatch | null; onClick: () => void }) {
         />
       )}
     </Show>
+  );
+}
+
+function BrokersTile(props: { total: number; flagged: BrokerRow[]; onClick: () => void }) {
+  const count = () => props.flagged.length;
+  return (
+    <StatusBubble
+      label="ACME Servers"
+      status={count() === 0 ? `${props.total} healthy` : `${count()} of ${props.total} need attention`}
+      tone={count() === 0 ? "success" : "warning"}
+      onClick={props.onClick}
+    >
+      <Show when={count() > 0}>
+        <ul class="flagged-brokers">
+          <For each={props.flagged}>
+            {(b) => (
+              <li>
+                <span class="mono">{b.cn ?? b.url}</span>: {b.concerns.map(concernText).join(", ")}
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+    </StatusBubble>
   );
 }

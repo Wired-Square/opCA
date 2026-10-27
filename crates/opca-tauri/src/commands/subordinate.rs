@@ -9,7 +9,10 @@ use crate::commands::cert::regenerate_crl_after_revoke;
 use crate::commands::dto::{RenewSubordinateRequest, SignSubordinateRequest};
 use crate::state::AppState;
 
-fn logged<'a>(state: &'a AppState, action: &'a str) -> impl Fn(OpcaError) -> String + 'a {
+pub(crate) fn logged<'a>(
+    state: &'a AppState,
+    action: &'a str,
+) -> impl Fn(OpcaError) -> String + 'a {
     move |e| {
         state.log_err(action, Some(e.to_string()));
         e.to_string()

@@ -100,9 +100,30 @@ def make_db(db_path, crl_batch_enabled=None):
     conn.close()
 
 
-def run_checks(aws_lambda, tmp_path, ca_pem, crl_pem):
+def openssl_time(at):
+    return at.strftime('%Y%m%d%H%M%SZ')
+
+
+def add_broker(db_path, now, serial, expires_in, contacted_ago, state='active',
+               url='https://acme.home.arpa:9443'):
+    conn = sqlite3.connect(db_path)
+    conn.execute('CREATE TABLE IF NOT EXISTS brokers (id INTEGER PRIMARY KEY, subordinate_serial, url, '
+                 'pinned_key, permitted_domains, state, last_contact, created_at, updated_at)')
+    conn.execute('INSERT INTO certificate_authority VALUES (?, ?, ?, NULL, ?, NULL)',
+                 (serial, f'acme-{serial}.home.arpa', openssl_time(now + timedelta(days=expires_in)),
+                  openssl_time(now) if state == 'revoked' else None))
+    last_contact = None if contacted_ago is None else openssl_time(now - timedelta(days=contacted_ago))
+    conn.execute('INSERT INTO brokers (subordinate_serial, url, permitted_domains, state, last_contact) '
+                 "VALUES (?, ?, '[]', ?, ?)", (serial, url, state, last_contact))
+    conn.commit()
+    conn.close()
+
+
+def run_checks(aws_lambda, tmp_path, ca_pem, crl_pem, brokers=()):
     db_path = tmp_path / 'checks.sqlite'
     make_db(db_path)
+    for broker in brokers:
+        add_broker(db_path, aws_lambda.now, **broker)
 
     fresh = {'last_modified': aws_lambda.now}
     return aws_lambda.run_tests(
@@ -354,3 +375,54 @@ def test_failed_release_warns_and_overdue_crl_expires_soon(aws_lambda, run_lambd
     assert 'Publishing the released CRL failed' in msg
     assert 'CRL will expire soon [2 days, 0 hours, 0 minutes]' in msg
     assert warning
+
+
+def run_broker_checks(aws_lambda, tmp_path, *brokers):
+    return run_checks(aws_lambda, tmp_path, *make_pem_ca_and_crl('p256', aws_lambda.now), brokers)
+
+
+def test_broker_with_a_subordinate_near_expiry_alerts(aws_lambda, tmp_path):
+    msg, warning = run_broker_checks(aws_lambda, tmp_path,
+                                     dict(serial='10', expires_in=30, contacted_ago=3))
+
+    assert '[1] ACME brokers need attention' in msg
+    assert '[10] acme-10.home.arpa - subordinate expires in 30 days' in msg
+    assert warning
+
+
+@pytest.mark.parametrize('contacted_ago, concern', [
+    (36, 'not heard from in 36 days'),
+    (None, 'signed, not delivered'),
+])
+def test_stale_broker_alerts(aws_lambda, tmp_path, contacted_ago, concern):
+    msg, warning = run_broker_checks(aws_lambda, tmp_path,
+                                     dict(serial='11', expires_in=60, contacted_ago=contacted_ago))
+
+    assert f'[11] acme-11.home.arpa - {concern}' in msg
+    assert warning
+
+
+def test_fresh_broker_does_not_alert(aws_lambda, tmp_path):
+    msg, warning = run_broker_checks(aws_lambda, tmp_path,
+                                     dict(serial='12', expires_in=60, contacted_ago=35))
+
+    assert '1 ACME brokers are current' in msg
+    assert not warning
+
+
+def test_revoked_and_hand_signed_subordinates_are_skipped(aws_lambda, tmp_path):
+    msg, warning = run_broker_checks(
+        aws_lambda, tmp_path,
+        dict(serial='13', expires_in=5, contacted_ago=None, state='revoked'),
+        dict(serial='14', expires_in=60, contacted_ago=None, url=None),
+    )
+
+    assert 'ACME Brokers' not in msg
+    assert not warning
+
+
+def test_dump_without_a_brokers_table_has_no_broker_section(aws_lambda, tmp_path):
+    msg, warning = run_broker_checks(aws_lambda, tmp_path)
+
+    assert 'ACME Brokers' not in msg
+    assert not warning

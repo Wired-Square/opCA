@@ -35,6 +35,10 @@ slack_url = os.environ.get('SLACK_URL')
 PEM_CRL = re.compile(r'-----BEGIN X509 CRL-----.+?-----END X509 CRL-----', re.DOTALL)
 # Batch CRLs are replaced 3 days (W - P) before nextUpdate; less left means a release is overdue.
 BATCH_CRL_WARN_DAYS = 3
+# Match the app's dashboard (opca-core acme_broker/concern.rs).
+BROKER_EXPIRY_WARN_DAYS = 30
+# One missed four-weekly signing session, plus a week.
+BROKER_SILENT_DAYS = 35
 
 
 def ca_database_handler(file, query):
@@ -57,6 +61,46 @@ def crl_batch_enabled(db_path):
         # A dump older than schema v15 has no flag: batches off.
         return False
     return bool(rows and rows[0][0])
+
+def active_brokers(db_path):
+    try:
+        return ca_database_handler(db_path, """
+            SELECT b.subordinate_serial, COALESCE(c.cn, b.url), c.expiry_date, b.last_contact
+            FROM brokers b LEFT JOIN certificate_authority c ON c.serial = b.subordinate_serial
+            WHERE b.state = 'active' AND b.url IS NOT NULL
+        """)
+    except sqlite3.OperationalError:
+        # A dump older than schema v17 has no brokers.
+        return []
+
+def broker_concerns(expiry_str, last_contact_str):
+    def days_until(stamp):
+        return timestamp_until(datetime.strptime(stamp, '%Y%m%d%H%M%SZ'))['days']
+
+    found = []
+    if expiry_str and (left := days_until(expiry_str)) <= BROKER_EXPIRY_WARN_DAYS:
+        found.append(f'subordinate expired {-left} days ago' if left < 0 else f'subordinate expires in {left} days')
+    if not last_contact_str:
+        found.append('signed, not delivered')
+    elif (silent := -days_until(last_contact_str)) > BROKER_SILENT_DAYS:
+        found.append(f'not heard from in {silent} days')
+    return found
+
+def check_brokers(db_path):
+    brokers = active_brokers(db_path)
+    if not brokers:
+        return '', False
+
+    flagged = [f'    [{serial}] {name} - {", ".join(found)}\n'
+               for serial, name, expiry_str, last_contact_str in brokers
+               if (found := broker_concerns(expiry_str, last_contact_str))]
+
+    msg = concat_msg('\n*ACME Brokers*')
+    if flagged:
+        msg += concat_msg(f'  ⚠️ *[{len(flagged)}] ACME brokers need attention.*\n{"".join(flagged)}')
+    else:
+        msg += concat_msg(f'  ✅ {len(brokers)} ACME brokers are current')
+    return msg, bool(flagged)
 
 def concat_msg(msg):
     print(msg)
@@ -258,6 +302,10 @@ def run_tests(ca_cert_data, crl_data, db_data, crl_warn_days=None):
                               f'{expiring_ext_certs['msg']}')
         else:
             msg += concat_msg(f'  ✅ No external certificates expiring in the next {days} days.')
+
+    broker_msg, broker_warning = check_brokers(db_data['path'])
+    msg += broker_msg
+    warning = warning or broker_warning
 
     msg += concat_msg('\n*CA Certificate*')
     # Check CA Certificate validity

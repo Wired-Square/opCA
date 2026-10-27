@@ -40,6 +40,14 @@ const icons: Record<string, () => JSX.Element> = {
       <line x1="9" y1="15" x2="15" y2="15" />
     </svg>
   ),
+  acme: () => (
+    <svg viewBox="0 0 24 24">
+      <rect x="3" y="4" width="18" height="7" rx="1" />
+      <rect x="3" y="13" width="18" height="7" rx="1" />
+      <line x1="7" y1="7.5" x2="7.01" y2="7.5" />
+      <line x1="7" y1="16.5" x2="7.01" y2="16.5" />
+    </svg>
+  ),
   dkim: () => (
     <svg viewBox="0 0 24 24">
       <rect x="2" y="4" width="20" height="16" rx="2" />
