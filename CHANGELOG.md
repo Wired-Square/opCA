@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The CA database records each subordinate in a new `brokers` table (schema
   v17), ready for the ACME broker that will hold it. One signed by hand has no
   broker URL.
+- The notification Lambda warns about an ACME broker whose subordinate expires
+  within 30 days, or that opCA hasn't reached in over 35 days or ever. Revoked
+  brokers and subordinates signed by hand are skipped.
 - A subordinate is renewed from a fresh CSR and keeps its record and domains;
   renewing it for other domains needs the change confirmed. Revoking it, by its
   own command or from the certificate list, puts it on the CRL and marks its
