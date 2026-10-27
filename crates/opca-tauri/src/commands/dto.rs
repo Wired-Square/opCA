@@ -188,6 +188,7 @@ pub struct CertDetail {
     pub expiring_soon: bool,
     /// Read from `cert_pem`, so only once the backfill has fetched it.
     pub name_constraints: Option<NameConstraintsDto>,
+    pub published_at: Option<String>,
 }
 
 /// Subtrees as `example.com` or `10.0.0.0/8`.
@@ -217,6 +218,9 @@ pub struct RenewRekeyResult {
     pub serial: String,
     /// PEM of the newly issued certificate.
     pub pem: String,
+    /// Set when a renew republished: the URI written, or why the upload failed.
+    pub published_to: Option<String>,
+    pub publish_error: Option<String>,
 }
 
 /// Live progress for a bulk operation, emitted as a `bulk-progress` event after

@@ -16,6 +16,12 @@ export function canDeleteCert(cert: CertListItem): boolean {
   return (status === "revoked" || status === "expired") && cert.cert_type !== "ca";
 }
 
+/** Only a valid leaf with a CN can be published: its CN names the object. */
+export function canPublishCert(cert: CertListItem): boolean {
+  const type = cert.cert_type?.toLowerCase();
+  return cert.status?.toLowerCase() === "valid" && type !== "ca" && type !== "subordinateca" && !!cert.cn;
+}
+
 type Navigate = ReturnType<typeof useNavigate>;
 
 export interface CertActionHandlers {
@@ -25,6 +31,7 @@ export interface CertActionHandlers {
   onDelete: () => void;
   onIgnore: () => void;
   onUnignore: () => void;
+  onPublish?: () => void;
 }
 
 /** Build a certificate's action menu items, gated on its state. Shared by the
@@ -39,6 +46,9 @@ export function certKebabItems(
   const items: MenuAction[] = [{ label: "Rekey", disabled, onSelect: h.onRekey }];
   if (status === "valid") {
     items.push({ label: "Renew", disabled, onSelect: h.onRenew });
+    if (h.onPublish && canPublishCert(cert)) {
+      items.push({ label: "Publish", disabled, onSelect: h.onPublish });
+    }
     items.push({ label: "Revoke", danger: true, disabled, onSelect: h.onRevoke });
   }
   if ((status === "expired" || cert.expiring_soon) && !cert.ignored_at && !cert.superseded_by) {
@@ -65,8 +75,11 @@ export async function rekeyAndGo(
   navigate(`/certs/${result.serial}?freshFrom=${serial}&op=rekey`);
 }
 
-/** Renew `serial` and navigate to the new cert. */
+/** Renew `serial` and navigate to the new cert, carrying how its republish went. */
 export async function renewAndGo(navigate: Navigate, serial: string): Promise<void> {
   const result = await renewCert(serial);
-  navigate(`/certs/${result.serial}?freshFrom=${serial}&op=renew`);
+  const query = new URLSearchParams({ freshFrom: serial, op: "renew" });
+  if (result.published_to) query.set("publishedTo", result.published_to);
+  if (result.publish_error) query.set("publishError", result.publish_error);
+  navigate(`/certs/${result.serial}?${query}`);
 }

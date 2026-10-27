@@ -141,6 +141,7 @@ fn main() {
             commands::cert::delete_cert,
             commands::cert::renew_cert,
             commands::cert::rekey_cert,
+            commands::cert::publish_cert,
             commands::cert::ignore_cert,
             commands::cert::unignore_cert,
             commands::cert::bulk_rekey_certs,

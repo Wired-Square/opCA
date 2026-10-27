@@ -1,7 +1,7 @@
 import { Show, For, createSignal, createResource, createEffect, onCleanup } from "solid-js";
 import { CopyButton, DateModeToggle, Notice, createAction, createFlash } from "@wired-square/kit";
 import { useParams, useNavigate, useSearchParams } from "@solidjs/router";
-import { getCertInfo, backfillCert, unignoreCert, getCertPrivateKey, recordCertCopy, forgetPreloadedKey } from "../api/certs";
+import { getCertInfo, backfillCert, unignoreCert, publishCert, getCertPrivateKey, recordCertCopy, forgetPreloadedKey } from "../api/certs";
 import { certKebabItems, certLabel, rekeyAndGo, renewAndGo } from "../api/certActions";
 import { getVpnProfileForCn, generateOpenVpnProfile } from "../api/openvpn";
 import type { CertDetail } from "../api/types";
@@ -37,7 +37,7 @@ export default function CertInfo() {
   const [showRevoke, setShowRevoke] = createSignal(false);
   const [showDelete, setShowDelete] = createSignal(false);
   const [showRekey, setShowRekey] = createSignal(false);
-  /** Renew and unignore share one action: the kebab disables all of its
+  /** Renew, publish and unignore share one action: the kebab disables all of its
    *  items together, so there is nothing to tell their busy states apart. */
   const headerAction = createAction();
   const [showKeyCopy, setShowKeyCopy] = createSignal(false);
@@ -104,6 +104,20 @@ export default function CertInfo() {
     });
   }
 
+  function handlePublish() {
+    const serial = params.serial as string;
+    if (!serial) return;
+    // Not a refetch: that would drop the PEM the backfill fetched.
+    const publish = async () => {
+      const uri = await publishCert(serial);
+      return { uri, published_at: (await getCertInfo(serial)).published_at };
+    };
+    void headerAction.run(headed("Publish failed", publish), ({ uri, published_at }) => {
+      mutate((d) => d && { ...d, published_at });
+      headerAction.succeed(`Published ${label()} to ${uri}`);
+    });
+  }
+
   // Header actions menu — gating shared with the certificates list kebab.
   function certActions(d: CertDetail): MenuAction[] {
     return certKebabItems(d, {
@@ -113,6 +127,7 @@ export default function CertInfo() {
       onDelete: () => setShowDelete(true),
       onIgnore: () => setShowIgnore(true),
       onUnignore: handleUnignore,
+      onPublish: handlePublish,
     }, headerAction.pending());
   }
 
@@ -168,6 +183,10 @@ export default function CertInfo() {
         <Notice tone="bad">{failureOf(detail.error)}</Notice>
 
         <ActionOutcome action={headerAction} />
+        <Notice tone="bad">
+          {searchParams.publishError &&
+            `The renewal was not published: ${searchParams.publishError}. Publish it from the actions menu to try again.`}
+        </Notice>
         <ActionOutcome action={regenerateVpn} />
 
         <Show when={detail.loading}>
@@ -226,6 +245,9 @@ export default function CertInfo() {
                     {searchParams.op === "rekey"
                       ? " — this certificate has a new private key and certificate. Copy both below."
                       : " — a new certificate with the same private key. Copy the certificate below."}
+                    <Show when={searchParams.publishedTo}>
+                      {" "}Published to <span class="mono">{searchParams.publishedTo}</span>.
+                    </Show>
                   </span>
                 </div>
               </Show>
@@ -319,7 +341,13 @@ export default function CertInfo() {
                   <Show when={d().ignored_at}>
                     <span class="status-badge status-ignored">ignored</span>
                   </Show>
+                  <Show when={d().published_at}>
+                    <span class="status-badge status-published">published</span>
+                  </Show>
                 </div>
+                <Show when={d().published_at}>
+                  <Row label="Published" value={dateText(d().published_at)} />
+                </Show>
                 <Row label="Subject" value={d().subject} mono copy />
                 <Row label="Issuer" value={d().issuer} mono copy />
                 <Row label={<>Valid From <DateModeToggle /></>} value={dateText(d().not_before)} />

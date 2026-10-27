@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `opca subordinate sign`, `renew`, `revoke` and `list`.
 - `opca cert publish <serial|CN>`, and a Published column in `opca ca list`.
   `opca cert renew` says where it republished, or why it couldn't.
+- The certificate detail shows a Published badge and when, and offers Publish
+  for a valid certificate with a CN that isn't a CA. After a renew, the new
+  certificate's page says where the renewal was published, or why publishing it
+  failed, and Publish retries it. Bulk renew logs a failed republish in the
+  Activity Log.
 - The CSR page's Sign tab offers Subordinate CA, asking for the permitted
   domains in place of a common name and alternative names, and now asks for
   the certificate type first. The certificate detail shows a certificate's
