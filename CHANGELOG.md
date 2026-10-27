@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   domains in place of a common name and alternative names, and now asks for
   the certificate type first. The certificate detail shows a certificate's
   permitted and excluded names.
+- `opca-acme-api`, the versioned wire types for the API between opCA and the
+  ACME broker: enrolment, status, renewal CSR, chain push, revoke, and the
+  error body.
 
 ### Changed
 
