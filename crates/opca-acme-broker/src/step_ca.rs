@@ -236,7 +236,7 @@ impl StepCa {
             .spawn()
         {
             Ok(child) => {
-                self.running.send_replace(child.id());
+                self.record(child.id());
                 tracing::info!(pid = child.id(), "started step-ca");
                 Some(child)
             }
@@ -251,7 +251,7 @@ impl StepCa {
         loop {
             if let Some(mut running) = child.take() {
                 let exit = running.wait().await;
-                self.running.send_replace(None);
+                self.record(None);
                 if !self.is_current(generation) {
                     tracing::info!(?exit, "step-ca stopped");
                     return;
@@ -267,17 +267,36 @@ impl StepCa {
         }
     }
 
+    /// Also in `step-ca.pid` beside the config, for `opca-acme status`.
+    fn record(&self, pid: Option<u32>) {
+        self.running.send_replace(pid);
+        let path = pid_file(&self.config);
+        let recorded = match pid {
+            Some(pid) => wslib_file_atomic::replace_readable(&path, pid.to_string().as_bytes()),
+            None => std::fs::remove_file(&path).or_else(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => Ok(()),
+                _ => Err(e),
+            }),
+        };
+        if let Err(error) = recorded {
+            tracing::warn!(%error, path = %path.display(), "could not record step-ca's pid");
+        }
+    }
+
     fn is_current(&self, generation: u64) -> bool {
         let supervised = self.lock();
         supervised.wanted && supervised.generation == generation
     }
 }
 
-fn signal(pid: u32, signal: libc::c_int) {
-    if let Ok(pid) = libc::pid_t::try_from(pid) {
-        // SAFETY: kill takes plain integers; a stale pid is at worst refused.
-        unsafe { libc::kill(pid, signal) };
-    }
+pub(crate) fn pid_file(config: &Path) -> PathBuf {
+    config.with_file_name("step-ca.pid")
+}
+
+/// Whether `signal` reached `pid`; signal 0 asks only whether it is alive.
+pub(crate) fn signal(pid: u32, signal: libc::c_int) -> bool {
+    // SAFETY: kill takes plain integers; a stale pid is at worst refused.
+    libc::pid_t::try_from(pid).is_ok_and(|pid| unsafe { libc::kill(pid, signal) } == 0)
 }
 
 #[cfg(test)]

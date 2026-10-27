@@ -3,7 +3,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error, Mode};
+use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error, Mode, cli};
+use tokio::signal::unix::{SignalKind, signal};
 use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{SpentBy, Status};
 
@@ -23,7 +24,9 @@ fn main() -> ExitCode {
         .grace(GRACE)
         .run(|stop| async move {
             wslib_telemetry::Telemetry::new("info").init();
+            let mut reopened = signal(SignalKind::hangup())?;
             let config = Config::load(&path)?;
+            let pid_file = cli::daemon_pid_file(&config.state_dir);
             let listen = config.listen;
             let (broker, uri) =
                 tokio::task::spawn_blocking(move || Broker::start(&config)).await??;
@@ -48,9 +51,24 @@ fn main() -> ExitCode {
                 .await
                 .map_err(|e| format!("listening on {listen}: {e}"))?;
             let broker = Arc::new(broker);
+            wslib_file_atomic::replace_readable(
+                &pid_file,
+                std::process::id().to_string().as_bytes(),
+            )?;
+            tokio::spawn({
+                let broker = broker.clone();
+                async move {
+                    while reopened.recv().await.is_some() {
+                        if let Err(error) = broker.reload().await {
+                            tracing::error!(error = %error.message, "could not reload the state");
+                        }
+                    }
+                }
+            });
             broker.start_issuing();
             let served = opca_acme_broker::serve(broker.clone(), listener, stop).await;
             broker.stop_issuing(STEP_CA_PATIENCE).await;
+            let _ = std::fs::remove_file(&pid_file);
             served?;
             Ok::<_, Error>(())
         })

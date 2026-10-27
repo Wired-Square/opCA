@@ -8,6 +8,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use opca_acme_api::{
@@ -31,7 +32,9 @@ struct Docker {
 
 impl Docker {
     fn new() -> Self {
-        let prefix = format!("opca-e-{}", std::process::id());
+        static RUNS: AtomicUsize = AtomicUsize::new(0);
+        let run = RUNS.fetch_add(1, Ordering::Relaxed);
+        let prefix = format!("opca-e-{}-{run}", std::process::id());
         let made = docker(&["network", "create", &prefix], 30);
         assert!(made.status.success(), "{}", text(&made.stderr));
         Self {
@@ -309,4 +312,62 @@ async fn step_ca_issues_inside_the_policy_and_reloads_on_a_renewal() {
         let found = docker(&["exec", &broker, "pgrep", "-x", "step-ca"], 30);
         (!found.status.success()).then_some(())
     });
+}
+
+const PRIVILEGES: &str = r#"set -u
+useradd --system --no-create-home opca-acme
+useradd --no-create-home other
+install -d -m 700 -o opca-acme -g opca-acme /state
+printf 'host = "acme.home.example"\nlisten = "127.0.0.1:9443"\nstate_dir = "/state"\nstep_ca = "/opt/opca/step-ca"\nacme_listen = "127.0.0.1:8443"\n' > /etc/broker.toml
+runuser -u opca-acme -- /opt/opca/opca-acme-broker --config /etc/broker.toml > /tmp/broker.log 2>&1 &
+for _ in $(seq 100); do [ -f /state/broker.pid ] && break; sleep 0.1; done
+cli="/opt/opca/opca-acme --config /etc/broker.toml"
+no_root_files() { [ -z "$(find /state -user root)" ]; }
+$cli pairing | grep -q '^opca-enrol://acme.home.example:9443#pin=' && echo PAIRING-AS-ROOT
+no_root_files && echo NO-ROOT-FILES
+runuser -u opca-acme -- $cli status | grep -q 'broker: running' && echo STATUS-AS-OWNER
+runuser -u other -- $cli status 2> /tmp/err || grep -q 'as root or as the owner' /tmp/err && echo OTHER-REFUSED
+runuser -u opca-acme -- $cli enrol --reopen --yes 2> /tmp/err || grep -q 'only root' /tmp/err && echo OWNER-REOPEN-REFUSED
+before=$(sha256sum < /state/subordinate.key)
+$cli enrol --reopen --yes | grep -q '^opca-enrol://' && echo REOPEN-AS-ROOT
+[ "$before" != "$(sha256sum < /state/subordinate.key)" ] && echo NEW-KEY
+for _ in $(seq 50); do grep -q 'reloaded the state from disk' /tmp/broker.log && break; sleep 0.1; done
+grep -q 'reloaded the state from disk' /tmp/broker.log && echo DAEMON-RELOADED
+kill -0 "$(cat /state/broker.pid)" && echo DAEMON-ALIVE
+no_root_files && echo STILL-NO-ROOT-FILES
+"#;
+
+#[test]
+fn the_cli_drops_to_the_state_owner_and_reopen_reaches_the_daemon() {
+    let Some(bin) = enabled() else {
+        return;
+    };
+    let mut run = Docker::new();
+    let name = run.name("cli");
+    let mount = format!("{}:/opt/opca:ro", bin.display());
+    let ran = docker(
+        &[
+            "run", "--rm", "--name", &name, "-v", &mount, RUNTIME, "sh", "-c", PRIVILEGES,
+        ],
+        120,
+    );
+    let said = text(&ran.stdout);
+    for marker in [
+        "PAIRING-AS-ROOT",
+        "NO-ROOT-FILES",
+        "STATUS-AS-OWNER",
+        "OTHER-REFUSED",
+        "OWNER-REOPEN-REFUSED",
+        "REOPEN-AS-ROOT",
+        "NEW-KEY",
+        "DAEMON-RELOADED",
+        "DAEMON-ALIVE",
+        "STILL-NO-ROOT-FILES",
+    ] {
+        assert!(
+            said.lines().any(|line| line == marker),
+            "{marker} missing:\n{said}\n{}",
+            text(&ran.stderr)
+        );
+    }
 }

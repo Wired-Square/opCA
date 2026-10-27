@@ -280,3 +280,70 @@ async fn opca_that_lost_the_enrolment_answer_finds_it_through_status() {
         serial
     );
 }
+
+#[tokio::test]
+async fn a_held_state_lock_times_out_a_change_while_status_still_answers() {
+    let state = private_tempdir();
+    let (broker, uri) = opca_acme_broker::Broker::start(&config(state.path(), &[])).unwrap();
+    let patience = std::time::Duration::from_millis(300);
+    let running = run(state, broker.with_lock_timeout(patience), uri).await;
+    let mut ca = TestCa::new();
+    let operator = ca.client("opCA operator");
+    let (chain, serial, id) = ca.sign(running.broker.subordinate().csr_pem(), DOMAINS);
+    let enrolment = opca_acme_api::Enrolment {
+        operator_pin: operator.key_pin(),
+        ..running.enrolment(&chain, DOMAINS)
+    };
+    assert_eq!(running.post(&enrolment).await.0, 200);
+    let fresh = running.broker.subordinate().fresh_csr().unwrap();
+    let (renewed, renewed_serial) = ca.renew(id, &fresh);
+    let update = serde_json::to_string(&ChainUpdate {
+        chain_pem: renewed,
+        config: enrolment.config,
+    })
+    .unwrap();
+
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(running.state.path().join("state.lock"))
+        .unwrap();
+    held.lock().unwrap();
+    let started = std::time::Instant::now();
+    let (put, status) = tokio::join!(
+        running.call(Some(&operator), "PUT", path::CHAIN, &update),
+        running.call(Some(&operator), "GET", path::STATUS, ""),
+    );
+    let (code, body) = put.unwrap();
+    assert_eq!((code, error(&body)), (500, ErrorKind::Internal), "{body}");
+    assert!(started.elapsed() < patience * 4, "{:?}", started.elapsed());
+    let (code, body) = status.unwrap();
+    assert_eq!(code, 200);
+    assert_eq!(
+        serde_json::from_str::<Status>(&body)
+            .unwrap()
+            .subordinate_serial,
+        serial
+    );
+
+    drop(held);
+    let mut finished = String::new();
+    for _ in 0..100 {
+        let (_, body) = running
+            .call(Some(&operator), "GET", path::STATUS, "")
+            .await
+            .unwrap();
+        finished = serde_json::from_str::<Status>(&body)
+            .unwrap()
+            .subordinate_serial;
+        if finished == renewed_serial {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        finished, renewed_serial,
+        "the change finished once the lock was free"
+    );
+}

@@ -145,14 +145,20 @@ impl Broker {
     pub(crate) fn fresh_csr(&self, enrolled: &Enrolled) -> Result<FreshCsr, ErrorBody> {
         refuse_if_revoked(enrolled)?;
         Ok(FreshCsr {
-            csr_pem: self.subordinate.fresh_csr().map_err(internal)?,
+            csr_pem: self.subordinate().fresh_csr().map_err(internal)?,
             configured_domains: self.domains.clone(),
         })
     }
 
     /// A renewed chain over the same key and root, with its config, checked as enrolment checks them.
-    pub(crate) fn update_chain(&self, update: ChainUpdate) -> Result<Status, ErrorBody> {
-        let _one_at_a_time = self.changing.lock().unwrap_or_else(|e| e.into_inner());
+    pub(crate) async fn update_chain(
+        self: Arc<Self>,
+        update: ChainUpdate,
+    ) -> Result<Status, ErrorBody> {
+        self.locked(|broker| broker.store_chain(update)).await
+    }
+
+    fn store_chain(&self, update: ChainUpdate) -> Result<Status, ErrorBody> {
         let current = self.enrolled()?;
         refuse_if_revoked(&current)?;
         let (subordinate, root) = self.check_chain(&update.chain_pem)?;
@@ -173,8 +179,11 @@ impl Broker {
     }
 
     /// Final: a revoked broker answers its status and further revokes, and nothing else.
-    pub(crate) fn revoke(&self) -> Result<Status, ErrorBody> {
-        let _one_at_a_time = self.changing.lock().unwrap_or_else(|e| e.into_inner());
+    pub(crate) async fn revoke(self: Arc<Self>) -> Result<Status, ErrorBody> {
+        self.locked(Broker::store_revocation).await
+    }
+
+    fn store_revocation(&self) -> Result<Status, ErrorBody> {
         let current = self.enrolled()?;
         if current.revoked {
             return self.status(&current);
@@ -189,8 +198,9 @@ impl Broker {
         self.status(&revoked)
     }
 
+    /// From disk, not memory, so that a reopen the daemon has yet to reload is not undone.
     fn enrolled(&self) -> Result<Enrolled, ErrorBody> {
-        match self.mode() {
+        match crate::enrolment::load(&self.state).map_err(internal)? {
             Mode::Enrolled(enrolled) => Ok(enrolled),
             Mode::Enrolling => Err(internal("not enrolled")),
         }

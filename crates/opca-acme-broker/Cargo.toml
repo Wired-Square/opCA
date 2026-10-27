@@ -10,7 +10,7 @@ publish = false
 rustls = { version = "0.23", default-features = false }
 rustls-openssl = { version = "0.4", default-features = false }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", default-features = false, features = ["process", "rt", "time"] }
+tokio = { version = "1", default-features = false, features = ["process", "rt", "signal", "time"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 tracing = "0.1"
 wslib-crypto = { version = "0.1.2", registry = "wired-square" }

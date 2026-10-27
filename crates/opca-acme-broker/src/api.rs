@@ -63,11 +63,14 @@ async fn fresh_csr(State(broker): Shared, Operator(enrolled): Operator) -> Respo
 }
 
 async fn chain(State(broker): Shared, _: Operator, body: Bytes) -> Response {
-    reply(parse(&body).and_then(|update| broker.update_chain(update)))
+    match parse(&body) {
+        Ok(update) => reply(broker.update_chain(update).await),
+        Err(refusal) => reply::<()>(Err(refusal)),
+    }
 }
 
 async fn revoke(State(broker): Shared, _: Operator) -> Response {
-    reply(broker.revoke())
+    reply(broker.revoke().await)
 }
 
 /// The enrolment, for a request on a connection that presented the operator's

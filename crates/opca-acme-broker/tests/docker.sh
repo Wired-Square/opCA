@@ -24,10 +24,10 @@ TOML
 cp "$root/.cargo/config.toml" "$work/src/.cargo/config.toml"
 (cd "$work/src" && cargo vendor --versioned-dirs vendor >> .cargo/config.toml)
 
-docker run --rm --name "opca-e-build-$$" -v "$work/src:/src" -w /src \
-    -e CARGO_TARGET_DIR=/src/target rust:1.99-bookworm \
+docker run --rm --name "opca-e-build-$$" -v "$work:/work" -w /work/src \
+    -e CARGO_TARGET_DIR=/work/target rust:1.99-bookworm \
     cargo build --offline -p opca-acme-broker
-cp "$work/src/target/debug/opca-acme-broker" "$work/bin/"
+cp "$work/target/debug/opca-acme-broker" "$work/target/debug/opca-acme" "$work/bin/"
 
 docker create --name "opca-e-extract-$$" smallstep/step-ca:0.28.1 > /dev/null
 docker cp "opca-e-extract-$$:/usr/local/bin/step-ca" "$work/bin/step-ca"

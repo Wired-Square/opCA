@@ -60,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   takes `step_ca` (default `/usr/bin/step-ca`) and `acme_listen` (default
   `[::]:443`), and the status reports whether step-ca is issuing and its
   version.
+- `opca-acme`, the broker's command line, run as root or as the state
+  directory's owner, and from root it drops to that owner before touching
+  anything. `pairing` issues a new pairing code and prints its URI while the
+  broker is enrolling. `status` reads the mode, the code, the subordinate's
+  serial and expiry, and whether the broker and step-ca are running from the
+  state directory. `enrol --reopen` (root only, confirmed or `--yes`) archives
+  the enrolment and step-ca's state, deletes the subordinate key, makes a new
+  one and a new pairing code, and has the running broker reload on SIGHUP,
+  which stops step-ca and serves enrolment again with the same API key.
 
 ### Changed
 

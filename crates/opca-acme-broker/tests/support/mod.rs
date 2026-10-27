@@ -215,6 +215,11 @@ pub fn fake_step_ca() -> PathBuf {
 /// Starts a broker in `state` and serves it on a loopback port of its own.
 pub async fn start(state: TempDir, domains: &[&str], uri: Option<PairingUri>) -> Running {
     let (broker, issued) = Broker::start(&config(state.path(), domains)).unwrap();
+    run(state, broker, issued.or(uri)).await
+}
+
+/// Serves `broker`, started in `state`, as `start` does.
+pub async fn run(state: TempDir, broker: Broker, uri: Option<PairingUri>) -> Running {
     let broker = Arc::new(broker);
     let listener = Listener::bind(format!("{LOOPBACK}:0").parse().unwrap(), Bounds::SERVING)
         .await
@@ -230,9 +235,7 @@ pub async fn start(state: TempDir, domains: &[&str], uri: Option<PairingUri>) ->
         state,
         broker,
         api: Api {
-            uri: issued
-                .or(uri)
-                .expect("a URI, issued now or kept from before"),
+            uri: uri.expect("a URI, issued now or kept from before"),
             address,
         },
     }

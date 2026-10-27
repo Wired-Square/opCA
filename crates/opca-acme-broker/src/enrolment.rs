@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use opca_acme_api::{Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, IssuanceConfig, Status};
 use rustls::ServerConfig;
@@ -14,10 +14,6 @@ use wslib_pairing::{CodeError, PairingCode, Redemption};
 
 use crate::enrolled::operator_config;
 use crate::{Broker, Error};
-
-/// `redeem` waits for ever on a held lock; uncontended it takes milliseconds.
-/// This sits well inside the listener's 10 s drain and a client's patience.
-const REDEEM_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Whether the broker is waiting to pair, or paired with an opCA.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,7 +65,7 @@ impl Broker {
     /// What `GET /v1/enrolment` answers; `None` once enrolled.
     pub fn offer(&self) -> Option<EnrolmentOffer> {
         (self.mode() == Mode::Enrolling).then(|| EnrolmentOffer {
-            csr_pem: self.subordinate.csr_pem().into(),
+            csr_pem: self.subordinate().csr_pem().into(),
             host: self.host.clone(),
             configured_domains: self.domains.clone(),
             versions: self.versions(),
@@ -81,13 +77,9 @@ impl Broker {
     pub async fn enrol(self: Arc<Self>, enrolment: Enrolment) -> Result<Status, ErrorBody> {
         let checked = self.check(enrolment)?;
         let enrolled = checked.enrolled.clone();
-        let broker = self.clone();
-        let redeeming = tokio::task::spawn_blocking(move || broker.redeem_and_store(checked));
-        match tokio::time::timeout(REDEEM_TIMEOUT, redeeming).await {
-            Ok(Ok(stored)) => stored.and_then(|()| self.status(&enrolled)),
-            Ok(Err(panicked)) => Err(internal(panicked)),
-            Err(_) => Err(internal("timed out waiting for the pairing code's lock")),
-        }
+        self.locked(move |broker| broker.redeem_and_store(checked))
+            .await?;
+        self.status(&enrolled)
     }
 
     fn check(&self, enrolment: Enrolment) -> Result<Checked, ErrorBody> {
@@ -134,7 +126,7 @@ impl Broker {
             inspect(subordinate).map_err(bad_request)?,
             inspect(root).map_err(bad_request)?,
         );
-        if subordinate.spki != self.subordinate.spki() {
+        if subordinate.spki != self.subordinate().spki() {
             return Err(bad_request(
                 "the chain's first certificate is not for this broker's key",
             ));
@@ -189,7 +181,6 @@ impl Broker {
 
     /// Staged before the redeem, so that an accepted code cannot meet a failed write.
     fn redeem_and_store(&self, checked: Checked) -> Result<(), ErrorBody> {
-        let _one_at_a_time = self.changing.lock().unwrap_or_else(|e| e.into_inner());
         let json = serde_json::to_vec_pretty(&checked.enrolled).map_err(internal)?;
         let staged = wslib_file_atomic::Options::new()
             .stage(&self.enrolment_path(), &json)
@@ -306,6 +297,8 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]

@@ -2,6 +2,7 @@
 
 mod api;
 mod broker;
+pub mod cli;
 mod config;
 mod enrolled;
 mod enrolment;
