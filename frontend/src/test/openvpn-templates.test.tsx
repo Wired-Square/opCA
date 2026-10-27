@@ -38,4 +38,46 @@ describe("OpenVPN templates", () => {
     releaseHome({ content: "home config" });
     expect(await screen.findByDisplayValue("home config")).toBe(editor);
   });
+
+  function deferredTemplates() {
+    const release: Record<string, (detail: { content: string }) => void> = {};
+    getOpenVpnTemplate.mockImplementation((name: string) =>
+      new Promise((resolve) => { release[name] = resolve; }),
+    );
+    return release;
+  }
+
+  it("a slower earlier load doesn't replace the selected template", async () => {
+    const release = deferredTemplates();
+    render(() => <OpenVPN />);
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+
+    fireEvent.click(await screen.findByText("office"));
+    fireEvent.click(screen.getByText("home"));
+    release.home({ content: "home config" });
+    const editor = await screen.findByDisplayValue("home config");
+
+    release.office({ content: "office config" });
+    await Promise.resolve();
+    expect(editor).toHaveValue("home config");
+  });
+
+  it("stays loading until the selected template's load finishes", async () => {
+    const release = deferredTemplates();
+    render(() => <OpenVPN />);
+    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+    fireEvent.click(await screen.findByText("office"));
+    release.office({ content: "office config" });
+    const editor = await screen.findByDisplayValue("office config");
+
+    fireEvent.click(screen.getByText("home"));
+    fireEvent.click(screen.getByText("office"));
+    release.home({ content: "home config" });
+    await Promise.resolve();
+    expect(screen.getByRole("button", { name: "Save Template" })).toBeDisabled();
+
+    release.office({ content: "office config v2" });
+    expect(await screen.findByDisplayValue("office config v2")).toBe(editor);
+    expect(screen.getByRole("button", { name: "Save Template" })).toBeEnabled();
+  });
 });

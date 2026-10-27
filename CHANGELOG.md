@@ -229,6 +229,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   certificate Apple can't use. Creating the key and CSR is unchanged.
 - Selecting an OpenVPN template no longer flashes "Loading template..." in
   place of the editor.
+- Selecting two OpenVPN templates in quick succession no longer shows the
+  first one's content under the second's name, and the editor stays loading
+  until the selected one arrives.
 
 ## [0.102.3] - 2026-10-10
 
