@@ -225,6 +225,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Apple Development is no longer offered when signing a CSR, and the CA refuses
   to sign one: Apple issues these certificates, and opCA's was a `clientAuth`
   certificate Apple can't use. Creating the key and CSR is unchanged.
+- Selecting an OpenVPN template no longer flashes "Loading template..." in
+  place of the editor.
 
 ## [0.102.3] - 2026-10-10
 

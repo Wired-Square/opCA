@@ -709,11 +709,7 @@ export default function OpenVPN() {
             </div>
           </Show>
 
-          <Show when={loadingTemplate()}>
-            <Spinner message="Loading template..." />
-          </Show>
-
-          <Show when={selectedTemplate() && !loadingTemplate()}>
+          <Show when={selectedTemplate()}>
             <div class="template-section">
               <h3>{selectedTemplate()}</h3>
               <textarea
@@ -726,7 +722,7 @@ export default function OpenVPN() {
                 <button
                   class="btn-primary"
                   onClick={handleSaveTemplate}
-                  disabled={acting() || !templateContent().trim()}
+                  disabled={acting() || loadingTemplate() || !templateContent().trim()}
                 >
                   {acting() ? "Saving..." : "Save Template"}
                 </button>
