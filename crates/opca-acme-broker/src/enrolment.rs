@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use opca_acme_api::{
-    API_VERSION, Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, IssuanceConfig, Status, Versions,
-};
+use opca_acme_api::{Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, IssuanceConfig, Status};
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
@@ -48,7 +46,6 @@ fn enrolment_path(state: &Path) -> PathBuf {
 struct Checked {
     code: PairingCode,
     enrolled: Enrolled,
-    status: Status,
     operator: Arc<ServerConfig>,
 }
 
@@ -75,7 +72,7 @@ impl Broker {
             csr_pem: self.subordinate.csr_pem().into(),
             host: self.host.clone(),
             configured_domains: self.domains.clone(),
-            versions: versions(),
+            versions: self.versions(),
         })
     }
 
@@ -83,11 +80,11 @@ impl Broker {
     /// stores it; a refusal before the redeem costs no attempt.
     pub async fn enrol(self: Arc<Self>, enrolment: Enrolment) -> Result<Status, ErrorBody> {
         let checked = self.check(enrolment)?;
-        let status = checked.status.clone();
+        let enrolled = checked.enrolled.clone();
         let broker = self.clone();
         let redeeming = tokio::task::spawn_blocking(move || broker.redeem_and_store(checked));
         match tokio::time::timeout(REDEEM_TIMEOUT, redeeming).await {
-            Ok(Ok(stored)) => stored.map(|()| status),
+            Ok(Ok(stored)) => stored.and_then(|()| self.status(&enrolled)),
             Ok(Err(panicked)) => Err(internal(panicked)),
             Err(_) => Err(internal("timed out waiting for the pairing code's lock")),
         }
@@ -116,7 +113,6 @@ impl Broker {
             revoked: false,
         };
         Ok(Checked {
-            status: self.status_from(&subordinate, &enrolled),
             code,
             enrolled,
             operator,
@@ -176,6 +172,9 @@ impl Broker {
             "the config permits no domains"
         } else if permitted != constrained {
             "the config's domains are not those the subordinate's name constraints permit"
+        } else if !host_within(&self.host, &config.permitted_domains) {
+            "the broker's host is not a name within the permitted domains, and step-ca's own \
+             TLS certificate is issued for it"
         } else if !self.domains.is_empty() && permitted != lowercase(&self.domains) {
             "the config's domains are not those configured on the broker"
         } else if config.leaf_days == 0 || config.leaf_days > config.leaf_max_days {
@@ -225,12 +224,14 @@ fn refusal(redeemed: Result<Redemption, CodeError>) -> ErrorBody {
     }
 }
 
-pub(crate) fn versions() -> Versions {
-    Versions {
-        api: API_VERSION,
-        broker: env!("CARGO_PKG_VERSION").into(),
-        step_ca: String::new(),
-    }
+/// Whether `host` is a DNS name equal to or under one of `domains`.
+pub(crate) fn host_within(host: &str, domains: &[String]) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host.parse::<std::net::IpAddr>().is_err()
+        && domains.iter().any(|domain| {
+            let domain = domain.to_ascii_lowercase();
+            host == domain || host.ends_with(&format!(".{domain}"))
+        })
 }
 
 pub(crate) fn bad_request(message: impl Display) -> ErrorBody {
@@ -306,6 +307,17 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_host_must_be_a_name_within_the_domains() {
+        let domains = ["home.example".to_string()];
+        assert!(host_within("home.example", &domains));
+        assert!(host_within("ACME.Home.Example.", &domains));
+        assert!(!host_within("acme.lab.example", &domains));
+        assert!(!host_within("evilhome.example", &domains));
+        assert!(!host_within("10.0.0.5", &domains));
+        assert!(!host_within("::1", &domains));
+    }
 
     #[test]
     fn serials_read_as_decimal() {

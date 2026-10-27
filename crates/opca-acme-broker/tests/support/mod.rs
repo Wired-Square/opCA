@@ -2,9 +2,10 @@
 
 use std::fs;
 use std::io;
+use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use opca_acme_api::{Challenge, Enrolment, ErrorBody, ErrorKind, IssuanceConfig};
 use opca_acme_broker::{Broker, Config};
@@ -25,7 +26,9 @@ use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{PairingUri, SpkiSha256};
 use wslib_tls::{KeyFingerprint, Outbound, Trust};
 
-pub const HOST: &str = "127.0.0.1";
+/// The broker's host, inside the test domain; it is dialled at [`LOOPBACK`].
+pub const HOST: &str = "acme.home.example";
+pub const LOOPBACK: &str = "127.0.0.1";
 pub const OPERATOR_PIN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 /// An in-memory opCA root over a scripted `op`.
@@ -152,8 +155,21 @@ impl TestCa {
 pub struct Running {
     pub state: TempDir,
     pub broker: Arc<Broker>,
+    pub api: Api,
+}
+
+impl std::ops::Deref for Running {
+    type Target = Api;
+
+    fn deref(&self) -> &Api {
+        &self.api
+    }
+}
+
+/// A broker's API as opCA reaches it: pinned by the URI, dialled at `address`.
+pub struct Api {
     pub uri: PairingUri,
-    pub port: u16,
+    pub address: SocketAddr,
 }
 
 pub fn private_tempdir() -> TempDir {
@@ -167,18 +183,44 @@ pub fn config(state: &Path, domains: &[&str]) -> Config {
         host: HOST.into(),
         domains: domains.iter().map(|d| d.to_string()).collect(),
         state_dir: state.into(),
+        step_ca: fake_step_ca(),
         ..Config::parse(r#"host = "unused.example""#).unwrap()
     }
+}
+
+/// A stand-in step-ca that logs its starts and reloads beside its config.
+pub fn fake_step_ca() -> PathBuf {
+    static FAKE: OnceLock<PathBuf> = OnceLock::new();
+    FAKE.get_or_init(|| {
+        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake-step-ca");
+        let staged = path.with_extension(std::process::id().to_string());
+        fs::write(
+            &staged,
+            "#!/bin/sh\n\
+             [ \"$1\" = version ] && { echo 'Smallstep CA/0.28.1 (fake)'; exit 0; }\n\
+             log=\"$(dirname \"$1\")/fake-step-ca.log\"\n\
+             trap 'echo hup >> \"$log\"' HUP\n\
+             trap 'exit 0' TERM\n\
+             echo start >> \"$log\"\n\
+             while :; do sleep 1 & wait $!; done\n",
+        )
+        .unwrap();
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&staged, &path).unwrap();
+        path
+    })
+    .clone()
 }
 
 /// Starts a broker in `state` and serves it on a loopback port of its own.
 pub async fn start(state: TempDir, domains: &[&str], uri: Option<PairingUri>) -> Running {
     let (broker, issued) = Broker::start(&config(state.path(), domains)).unwrap();
     let broker = Arc::new(broker);
-    let listener = Listener::bind(format!("{HOST}:0").parse().unwrap(), Bounds::SERVING)
+    let listener = Listener::bind(format!("{LOOPBACK}:0").parse().unwrap(), Bounds::SERVING)
         .await
         .unwrap();
-    let port = listener.local_addr().port();
+    let address = listener.local_addr();
+    broker.start_issuing();
     tokio::spawn(opca_acme_broker::serve(
         broker.clone(),
         listener,
@@ -187,10 +229,12 @@ pub async fn start(state: TempDir, domains: &[&str], uri: Option<PairingUri>) ->
     Running {
         state,
         broker,
-        uri: issued
-            .or(uri)
-            .expect("a URI, issued now or kept from before"),
-        port,
+        api: Api {
+            uri: issued
+                .or(uri)
+                .expect("a URI, issued now or kept from before"),
+            address,
+        },
     }
 }
 
@@ -198,7 +242,7 @@ pub async fn serve(state: TempDir, domains: &[&str]) -> Running {
     start(state, domains, None).await
 }
 
-impl Running {
+impl Api {
     /// A connection that pins the URI's key, as opCA dials, presenting `identity` if given.
     pub async fn connect(&self, identity: Option<&Identity>) -> io::Result<Connection> {
         let mut trust = Trust::default();
@@ -212,9 +256,10 @@ impl Running {
                 .unwrap(),
             None => outbound.client_config(),
         };
-        let tcp = TcpStream::connect((HOST, self.port)).await?;
+        let tcp = TcpStream::connect(self.address).await?;
+        let name = ServerName::try_from(self.uri.host().to_owned()).unwrap();
         let tls = TlsConnector::from(Arc::new(client))
-            .connect(ServerName::try_from(HOST).unwrap(), tcp)
+            .connect(name, tcp)
             .await?;
         Ok(Connection(tls))
     }
@@ -250,7 +295,9 @@ impl Running {
             },
         }
     }
+}
 
+impl Running {
     pub fn remaining(&self) -> u32 {
         match self.broker.code_status().unwrap() {
             wslib_pairing::Status::Pending { remaining, .. } => remaining,
@@ -306,6 +353,20 @@ impl Connection {
             String::from_utf8(body).unwrap(),
         ))
     }
+}
+
+/// What the fake step-ca has logged, waiting a little for it to catch up with `expected`.
+pub async fn step_ca_log(state: &Path, expected: &[&str]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for _ in 0..100 {
+        let text = fs::read_to_string(state.join("fake-step-ca.log")).unwrap_or_default();
+        lines = text.lines().map(str::to_owned).collect();
+        if lines == expected {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    lines
 }
 
 pub fn wrong(code: &str) -> String {

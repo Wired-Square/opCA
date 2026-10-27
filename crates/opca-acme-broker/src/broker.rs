@@ -1,4 +1,5 @@
 use std::io;
+use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -15,7 +16,8 @@ use wslib_service::Held;
 use wslib_tls::{Location, Serving};
 
 use crate::enrolled::{operator_config, root_of};
-use crate::enrolment::{self, Mode};
+use crate::enrolment::{self, Mode, host_within};
+use crate::step_ca::{Files, StepCa, check_version};
 use crate::{Config, Error};
 
 pub const SCHEME: &str = "opca-enrol";
@@ -35,6 +37,8 @@ pub struct Broker {
     port: u16,
     pub(crate) domains: Vec<String>,
     pub(crate) state: PathBuf,
+    pub(crate) step_ca: Arc<StepCa>,
+    pub(crate) acme_listen: SocketAddr,
     _held: Held,
 }
 
@@ -46,6 +50,7 @@ impl Broker {
         if !name.is_host() {
             return Err(format!("{} is not a host name or address", config.host).into());
         }
+        let version = check_version(&config.step_ca)?;
         let state = config.state_dir.as_path();
         let held = wslib_service::private_directory(state)?;
         let provider = Arc::new(default_provider());
@@ -87,6 +92,12 @@ impl Broker {
             port: config.listen.port(),
             domains: config.domains.clone(),
             state: state.into(),
+            step_ca: StepCa::new(
+                config.step_ca.clone(),
+                Files::in_state(state).config,
+                version,
+            ),
+            acme_listen: config.acme_listen,
             _held: held,
         };
         if let Mode::Enrolled(enrolled) = broker.mode()
@@ -96,6 +107,16 @@ impl Broker {
                 recorded = %enrolled.api_pin,
                 serving = %broker.pin(),
                 "the API key is not the one opCA pinned at enrolment, so opCA will refuse it"
+            );
+        }
+        if issued.is_some()
+            && (config.host.parse::<std::net::IpAddr>().is_ok()
+                || !(config.domains.is_empty() || host_within(&config.host, &config.domains)))
+        {
+            tracing::warn!(
+                host = %config.host,
+                "the host is not a name within the configured domains, so enrolment will be \
+                 refused: step-ca's own TLS certificate is issued for it"
             );
         }
         let uri = issued.map(|plain| broker.uri(plain)).transpose()?;

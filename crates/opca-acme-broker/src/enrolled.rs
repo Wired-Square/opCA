@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use opca_acme_api::{ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuerState, Status};
+use opca_acme_api::{
+    API_VERSION, ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuerState, Status, Versions,
+};
 use rustls::client::danger::HandshakeSignatureValid;
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, UnixTime};
@@ -15,7 +17,8 @@ use wslib_http_server::PeerCertificates;
 use wslib_pairing::SpkiSha256;
 use wslib_tls::{KeyFingerprint, Serving};
 
-use crate::enrolment::{Enrolled, Mode, bad_request, decimal, internal, rfc_3339, versions};
+use crate::enrolment::{Enrolled, Mode, bad_request, decimal, internal, rfc_3339};
+use crate::step_ca::Files;
 use crate::{Broker, Error};
 
 /// The API's TLS once enrolled: a client must chain to `root` and present the operator's key.
@@ -135,7 +138,7 @@ impl Broker {
             subordinate_serial: decimal(&subordinate.serial),
             subordinate_not_after: rfc_3339(subordinate.not_after),
             config: enrolled.config.clone(),
-            versions: versions(),
+            versions: self.versions(),
         }
     }
 
@@ -200,16 +203,55 @@ impl Broker {
         Ok(())
     }
 
-    /// step-ca's seam: what it reports once it runs as the broker's child.
     fn issuer_state(&self) -> IssuerState {
-        IssuerState::StepCaDown
+        if self.step_ca.is_running() {
+            IssuerState::Issuing
+        } else {
+            IssuerState::StepCaDown
+        }
     }
 
-    /// step-ca's seam: start it, or reload it with the stored chain.
-    pub(crate) fn on_new_chain(&self) {}
+    /// Writes step-ca's config from the stored enrolment, then starts it or has it reload.
+    pub(crate) fn on_new_chain(&self) {
+        let Mode::Enrolled(enrolled) = self.mode() else {
+            return;
+        };
+        if enrolled.revoked {
+            return;
+        }
+        let written = Files::in_state(&self.state).write(
+            &enrolled.chain_pem,
+            &self.host,
+            self.acme_listen,
+            &enrolled.config,
+        );
+        match written {
+            Ok(()) => self.step_ca.start_or_reload(),
+            Err(error) => tracing::error!(%error, "could not write step-ca's config"),
+        }
+    }
 
-    /// step-ca's seam: stop it for good.
-    fn on_revoked(&self) {}
+    fn on_revoked(&self) {
+        self.step_ca.stop();
+    }
+
+    /// Starts step-ca when enrolled and not revoked; needs a Tokio runtime.
+    pub fn start_issuing(&self) {
+        self.on_new_chain();
+    }
+
+    /// Stops step-ca, killing it if it hasn't gone within `patience`.
+    pub async fn stop_issuing(&self, patience: std::time::Duration) {
+        self.step_ca.stop_and_wait(patience).await;
+    }
+
+    pub(crate) fn versions(&self) -> Versions {
+        Versions {
+            api: API_VERSION,
+            broker: env!("CARGO_PKG_VERSION").into(),
+            step_ca: self.step_ca.version.to_string(),
+        }
+    }
 }
 
 fn refuse_if_revoked(enrolled: &Enrolled) -> Result<(), ErrorBody> {

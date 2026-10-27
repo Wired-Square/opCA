@@ -117,7 +117,15 @@ async fn only_the_operators_certificate_is_admitted() {
 async fn the_operator_reaches_every_route_and_the_enrolment_routes_are_gone() {
     let mut enrolled = enrolled().await;
     let status = enrolled.status().await;
-    assert_eq!(status.state, IssuerState::StepCaDown);
+    assert_eq!(status.state, IssuerState::Issuing);
+    let state = enrolled.running.state.path();
+    assert_eq!(step_ca_log(state, &["start"]).await, ["start"]);
+    let written: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(state.join("step-ca.json")).unwrap()).unwrap();
+    assert_eq!(
+        written["authority"]["policy"]["x509"]["allow"]["dns"][0],
+        "home.example"
+    );
     assert_eq!(status.config, enrolled.config);
 
     let (code, body) = enrolled.as_operator("POST", path::CSR, "").await;
@@ -142,6 +150,13 @@ async fn the_operator_reaches_every_route_and_the_enrolment_routes_are_gone() {
         panic!("not enrolled");
     };
     assert_eq!(stored.chain_pem, renewed);
+    assert_eq!(answered.state, IssuerState::Issuing);
+    assert_eq!(
+        step_ca_log(state, &["start", "hup"]).await,
+        ["start", "hup"]
+    );
+    let intermediate = std::fs::read_to_string(state.join("step-ca-intermediate.crt")).unwrap();
+    assert!(renewed.starts_with(intermediate.trim_end()));
 
     let (code, body) = enrolled.as_operator("POST", path::REVOKE, "").await;
     assert_eq!(code, 200, "{body}");
@@ -195,8 +210,13 @@ async fn a_revoked_broker_answers_only_status_and_revoke_and_stays_revoked() {
     );
 
     let Enrolled { running, .. } = enrolled;
-    let restarted = start(running.state, &[], Some(running.uri)).await;
+    let restarted = start(running.state, &[], Some(running.api.uri)).await;
     assert!(matches!(restarted.broker.mode(), Mode::Enrolled(e) if e.revoked));
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(
+        step_ca_log(restarted.state.path(), &["start"]).await,
+        ["start"]
+    );
 }
 
 #[tokio::test]
@@ -208,7 +228,7 @@ async fn a_restart_while_enrolled_comes_up_requiring_the_operator() {
         serial,
         ..
     } = enrolled;
-    let restarted = start(running.state, &[], Some(running.uri)).await;
+    let restarted = start(running.state, &[], Some(running.api.uri)).await;
 
     assert!(refused(&restarted, None).await);
     let (code, body) = restarted

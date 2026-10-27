@@ -5,6 +5,7 @@ mod broker;
 mod config;
 mod enrolled;
 mod enrolment;
+mod step_ca;
 
 pub use api::serve;
 pub use broker::{ATTEMPTS, Broker, SCHEME, Subordinate};

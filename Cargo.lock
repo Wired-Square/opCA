@@ -3901,6 +3901,7 @@ name = "opca-acme-broker"
 version = "0.102.3"
 dependencies = [
  "axum",
+ "libc",
  "opca-acme-api",
  "opca-core",
  "rustls 0.23.37",

@@ -69,6 +69,7 @@ async fn bad_input_is_a_bad_request_that_costs_no_attempt() {
         .split_inclusive("-----END CERTIFICATE-----\n")
         .next()
         .unwrap();
+    let (elsewhere, _, _) = ca.sign(running.broker.subordinate().csr_pem(), &["lab.example"]);
     let (wider, _, _) = ca.sign(
         running.broker.subordinate().csr_pem(),
         &["home.example", "lab.example"],
@@ -96,6 +97,7 @@ async fn bad_input_is_a_bad_request_that_costs_no_attempt() {
             ..good.clone()
         },
         running.enrolment(&chain, &["lab.example"]),
+        running.enrolment(&elsewhere, &["lab.example"]),
         running.enrolment(&wider, &["home.example", "lab.example"]),
     ];
     let breaks: [fn(&mut IssuanceConfig); 3] = [

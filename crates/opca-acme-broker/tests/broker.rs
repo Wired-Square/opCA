@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -13,6 +15,7 @@ use wslib_pairing::{OneTimeCode, PairingUri, Redemption, Status};
 fn config(state: &Path) -> Config {
     Config {
         state_dir: state.into(),
+        step_ca: support::fake_step_ca(),
         ..Config::parse(r#"host = "acme.home.example""#).unwrap()
     }
 }
@@ -176,6 +179,8 @@ fn the_config_needs_only_a_host() {
     assert_eq!(config.listen, "[::]:9443".parse().unwrap());
     assert!(config.domains.is_empty());
     assert_eq!(config.state_dir, Path::new("/var/lib/opca-acme"));
+    assert_eq!(config.step_ca, Path::new("/usr/bin/step-ca"));
+    assert_eq!(config.acme_listen, "[::]:443".parse().unwrap());
 
     let full = Config::parse(
         r#"

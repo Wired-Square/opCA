@@ -1,10 +1,15 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error, Mode};
 use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{SpentBy, Status};
+
+/// The listener's 10 s drain, then step-ca's stop.
+const STEP_CA_PATIENCE: Duration = Duration::from_secs(5);
+const GRACE: Duration = Duration::from_secs(20);
 
 fn main() -> ExitCode {
     let path = match config_path() {
@@ -15,6 +20,7 @@ fn main() -> ExitCode {
         }
     };
     wslib_service::Daemon::new("opca-acme-broker")
+        .grace(GRACE)
         .run(|stop| async move {
             wslib_telemetry::Telemetry::new("info").init();
             let config = Config::load(&path)?;
@@ -41,7 +47,11 @@ fn main() -> ExitCode {
             let listener = Listener::bind(listen, Bounds::SERVING)
                 .await
                 .map_err(|e| format!("listening on {listen}: {e}"))?;
-            opca_acme_broker::serve(Arc::new(broker), listener, stop).await?;
+            let broker = Arc::new(broker);
+            broker.start_issuing();
+            let served = opca_acme_broker::serve(broker.clone(), listener, stop).await;
+            broker.stop_issuing(STEP_CA_PATIENCE).await;
+            served?;
             Ok::<_, Error>(())
         })
         .map_or_else(ExitCode::from, |()| ExitCode::SUCCESS)

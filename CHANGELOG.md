@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `PUT /v1/chain` (a renewed chain from the same root, checked as at
   enrolment) and `POST /v1/revoke`. A revoked broker stays revoked and answers
   only status and revoke.
+- The broker runs step-ca (0.28.1 or newer, checked at start) as its child.
+  From the enrolment it writes step-ca's config: the subordinate as the
+  intermediate, one ACME provisioner with the enrolled challenges, a name
+  policy allowing only the permitted domains and their subdomains, and the
+  enrolled leaf lifetimes. Since step-ca's own TLS certificate is issued for
+  the broker's host, an enrolment or chain whose domains don't cover that host
+  is refused. A new chain reloads step-ca with SIGHUP, a revoke
+  stops it, and if it dies it is restarted after 10 seconds. `broker.toml`
+  takes `step_ca` (default `/usr/bin/step-ca`) and `acme_listen` (default
+  `[::]:443`), and the status reports whether step-ca is issuing and its
+  version.
 
 ### Changed
 
