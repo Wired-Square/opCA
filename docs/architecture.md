@@ -347,7 +347,7 @@ notification Lambda) can publish fresh CRLs while the desktop is closed:
   Revoking (app, bulk and CLI) regenerates, so it re-signs and uploads too; the
   app's error says whether regenerating or uploading failed. With no private
   store configured, generating refuses before signing anything.
-- `rsync://` and `sftp://` stores need the `pending-crl/` directory to exist.
+- An `rsync://` store needs the `pending-crl/` directory to exist; `sftp://` creates it.
 - The Lambda releases the due CRL (see *Lambda notification*). OpenVPN servers
   pull the published CRL with
   [contrib/openvpn-crl-fetch.sh](../contrib/openvpn-crl-fetch.sh); operator
