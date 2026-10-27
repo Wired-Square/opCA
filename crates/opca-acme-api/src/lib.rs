@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 pub const API_VERSION: u32 = 1;
 
+/// The scheme of the pairing string a broker prints for opCA.
+pub const PAIRING_SCHEME: &str = "opca-enrol";
+
 pub mod path {
     pub const ENROLMENT: &str = "/v1/enrolment";
     pub const STATUS: &str = "/v1/status";

@@ -22,7 +22,7 @@ use crate::enrolment::{self, Mode, host_within, internal};
 use crate::step_ca::{Files, StepCa, check_version};
 use crate::{Config, Error};
 
-pub const SCHEME: &str = "opca-enrol";
+pub use opca_acme_api::PAIRING_SCHEME as SCHEME;
 pub const ATTEMPTS: NonZeroU32 = NonZeroU32::new(5).unwrap();
 
 /// A held lock, the code's or the state's, would otherwise block for ever;

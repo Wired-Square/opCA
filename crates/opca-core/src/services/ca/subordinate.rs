@@ -11,6 +11,7 @@ use wslib_crypto_x509::{IpSubtree, NameConstraints, NameSubtree, SubjectAltName}
 use super::{CertificateAuthority, profile_for, verified_csr};
 use crate::error::OpcaError;
 use crate::op::Runner;
+use crate::services::acme_broker::Endpoint;
 use crate::services::cert::{CertBundleConfig, CertType, CertificateBundle};
 use crate::services::database::CertificateAuthorityDB;
 use crate::services::database::models::{Broker, BrokerState, CertLookup, IgnoreReason};
@@ -53,6 +54,16 @@ pub fn permitted_domains(domains: &[String]) -> Result<Vec<String>, OpcaError> {
         ));
     }
     Ok(out)
+}
+
+/// Whether two lists of permitted domains name the same ones, in any order.
+pub(crate) fn same_domains(a: &[String], b: &[String]) -> bool {
+    let sorted = |domains: &[String]| {
+        let mut domains = domains.to_vec();
+        domains.sort();
+        domains
+    };
+    sorted(a) == sorted(b)
 }
 
 fn within(domains: &[String], name: &str) -> bool {
@@ -109,10 +120,26 @@ impl<R: Runner> CertificateAuthority<R> {
         domains: &[String],
         days: Option<u32>,
     ) -> Result<SignedSubordinate, OpcaError> {
+        self.sign_subordinate_at(csr, domains, days, None)
+    }
+
+    /// As [`sign_subordinate`](Self::sign_subordinate), with the row pointing
+    /// at `broker` in the same store.
+    pub(crate) fn sign_subordinate_at(
+        &mut self,
+        csr: &[u8],
+        domains: &[String],
+        days: Option<u32>,
+        broker: Option<&Endpoint>,
+    ) -> Result<SignedSubordinate, OpcaError> {
         let domains = permitted_domains(domains)?;
         info!("[ca] signing subordinate CA for {}", domains.join(", "));
         let bundle = self.issue_subordinate(csr, &domains, days)?;
         let id = self.db()?.add_broker(&serial_of(&bundle)?, &domains)?;
+        if let Some(endpoint) = broker {
+            self.db()?
+                .set_broker_endpoint(id, &endpoint.url(), &endpoint.pin().to_string())?;
+        }
         self.store_ca_database()?;
         self.signed(id, &bundle)
     }
@@ -216,12 +243,7 @@ impl<R: Runner> CertificateAuthority<R> {
             None => broker.permitted_domains.clone(),
             Some(requested) => {
                 let requested = permitted_domains(requested)?;
-                let sorted = |domains: &[String]| {
-                    let mut domains = domains.to_vec();
-                    domains.sort();
-                    domains
-                };
-                if sorted(&requested) != sorted(&broker.permitted_domains) && !change_domains {
+                if !same_domains(&requested, &broker.permitted_domains) && !change_domains {
                     return Err(OpcaError::Other(format!(
                         "Subordinate {id} is limited to {}; renewing it for {} needs the change confirmed",
                         broker.permitted_domains.join(", "),

@@ -1,6 +1,10 @@
 //! opCA's client for its ACME brokers' API, and the enrolment, renewal and
 //! revocation that go through it.
 
+mod enrol;
+
+pub use enrol::{EnrolledBroker, fetch_offer, issuance, parse_pairing};
+
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
