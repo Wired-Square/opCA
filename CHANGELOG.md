@@ -220,6 +220,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (0644), so a web server running as another user can serve the CA
   certificate, CRL and published certificates. Private-store and backup uploads
   are set owner-only (0600).
+- Saving a blank store in the CA's Stores settings now clears it; before, the
+  old store stayed and the save looked as if it worked.
+- Apple Development is no longer offered when signing a CSR, and the CA refuses
+  to sign one: Apple issues these certificates, and opCA's was a `clientAuth`
+  certificate Apple can't use. Creating the key and CSR is unchanged.
+- Selecting an OpenVPN template no longer flashes "Loading template..." in
+  place of the editor.
 
 ## [0.102.3] - 2026-10-10
 

@@ -221,3 +221,22 @@ describe("CA settings CRL batch toggle", () => {
     expect(await screen.findByText("Not used while CRL batches are on.")).toBeInTheDocument();
   });
 });
+
+describe("CA settings stores", () => {
+  beforeEach(() => {
+    setAppState("vaultState", "valid_ca");
+    vi.clearAllMocks();
+  });
+
+  it("a blank store save clears the store", async () => {
+    getCaConfig.mockResolvedValue(config({ ca_public_store: "s3://bucket/ca", ca_backup_store: "s3://bucket/backup" }));
+    render(() => <CA />);
+    fireEvent.click(screen.getByRole("button", { name: "Stores" }));
+
+    fireEvent.input(await screen.findByLabelText("Public Store"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Stores" }));
+
+    await waitFor(() => expect(updateCaConfig).toHaveBeenCalled());
+    expect(updateCaConfig.mock.calls[0][0]).toMatchObject({ ca_public_store: "", ca_backup_store: "s3://bucket/backup", ca_private_store: null });
+  });
+});

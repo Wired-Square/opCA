@@ -86,4 +86,11 @@ describe("CSR Sign tab", () => {
     );
     expect(signSubordinate).not.toHaveBeenCalled();
   });
+
+  it("does not offer Apple Development, whose certificate Apple issues", async () => {
+    await decoded();
+    const types = Array.from((screen.getByLabelText("Certificate Type") as HTMLSelectElement).options, (o) => o.value);
+    expect(types).toContain("device");
+    expect(types).not.toContain("appledev");
+  });
 });

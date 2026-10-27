@@ -336,3 +336,18 @@ fn cert_issuer_subject(cert: &X509) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::Cli;
+
+    #[test]
+    fn appledev_is_a_csr_to_create_not_one_to_sign() {
+        let csr =
+            |args: &[&str]| Cli::try_parse_from([&["opca", "-v", "CA", "csr"], args].concat());
+        assert!(csr(&["create", "-t", "appledev", "-n", "dev", "--email", "a@b.c"]).is_ok());
+        assert!(csr(&["sign", "--csr-pem", "pem", "-t", "appledev"]).is_err());
+    }
+}

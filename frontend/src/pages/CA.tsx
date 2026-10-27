@@ -258,8 +258,7 @@ function StoresTab(props: { config: () => CaConfig | undefined; onSave: () => vo
   const [form, setForm] = createSignal<Partial<CaConfig>>({});
 
   const merged = () => ({ ...props.config(), ...form() } as CaConfig);
-  const set = (key: keyof CaConfig, value: string | null) =>
-    setForm((f) => ({ ...f, [key]: value || null }));
+  const set = (key: keyof CaConfig, value: string) => setForm((f) => ({ ...f, [key]: value }));
   const usesS3 = () =>
     [merged().ca_public_store, merged().ca_private_store, merged().ca_backup_store].some(
       (uri) => uri?.startsWith("s3://"),
