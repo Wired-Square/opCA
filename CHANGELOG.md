@@ -111,6 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   outlasts the installed one, then runs an optional reload command. Any
   failure keeps the installed file, exits non-zero and posts to Slack, like
   `openvpn-crl-fetch.sh`.
+- `docs/cert-delivery.md`: setting up a server to fetch its published
+  certificate, from its own key and CSR to a systemd timer or cron job.
 
 ### Changed
 

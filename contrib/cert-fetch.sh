@@ -8,6 +8,7 @@
 # verified), has not expired, matches the private key at KEY_PATH and expires later than the
 # installed one; RELOAD_COMMAND then runs under sh. On any failure the installed file is kept.
 # Exits non-zero (and posts to SLACK_WEBHOOK_URL, if set) on failure.
+# See docs/cert-delivery.md.
 #
 set -euo pipefail
 
