@@ -72,6 +72,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   re-reads the state) and a commented `broker.toml`, depending on
   `step-ca (>= 0.28.1)`. It isn't started on install: set `host`, then
   `systemctl enable --now opca-acme-broker`. See `docs/acme-broker.md`.
+- opCA enrols an ACME broker from its pairing string. It checks the broker's
+  key against the pin before sending the code, shows the broker's host, key and
+  domains, then signs the subordinate and hands it over. Domains set on the
+  broker can't be changed in opCA. If the broker doesn't take the subordinate,
+  enrolling again sends the same one rather than signing another. The first
+  broker call creates a `CA_Operator` item holding the key opCA presents to its
+  brokers; the client certificate for it lasts a day and isn't recorded.
+- Brokers are renewed one at a time or all together: each makes a fresh CSR
+  over its key, and opCA signs it and pushes the chain. A broker asking for
+  other domains is renewed only once they are confirmed, and one that can't be
+  reached is reported, never skipped. Revoking a broker puts its subordinate on
+  the CRL, regenerates the CRL and tells the broker to stop issuing. The
+  revocation stands if the broker can't be reached; revoking again tells it.
+- An ACME Servers page lists brokers with their state, domains, subordinate
+  expiry and last contact, and enrols, renews, revokes and checks them. A
+  dashboard tile flags a broker whose subordinate expires within 30 days, that
+  hasn't been heard from in over 35 days, or that was signed but never
+  delivered.
+- `opca broker enrol`, `list`, `status`, `renew` (one, or `--all`) and
+  `revoke`.
 
 ### Changed
 
@@ -157,6 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The frontend now depends on `@wired-square/kit` 0.2.0, fetched from the
   `mirror.wiredsquare.com` npm mirror, and loads its stylesheets ahead of
   opca's own.
+- The ACME broker admits only opCA's operator through `wslib-tls` 0.2.3's
+  pinned client auth instead of its own verifier.
 
 ### Fixed
 

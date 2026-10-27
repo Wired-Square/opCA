@@ -93,6 +93,10 @@ Organised by concern under [src/](../crates/opca-core/src):
   - [ca/subordinate.rs](../crates/opca-core/src/services/ca/subordinate.rs)
     — signing, renewing, revoking and listing name-constrained subordinate CAs
     (see [Subordinate CAs](#subordinate-cas)).
+  - [ca/operator.rs](../crates/opca-core/src/services/ca/operator.rs) and
+    [acme_broker/](../crates/opca-core/src/services/acme_broker) — the
+    operator identity and opCA's client for its ACME brokers (see
+    [ACME broker client](#acme-broker-client)).
   - [cert.rs](../crates/opca-core/src/services/cert.rs) —
     per-certificate bundle operations (build, sign, import/export, inspect).
     `KeyAlgorithm` (`ec-p256`, `ec-p384`, `rsa-2048`, `rsa-4096`) picks the key,
@@ -167,7 +171,7 @@ Organised by concern under [src/](../crates/opca-core/src):
 
 ## 1Password vault as the source of truth
 
-OPCA stores ten logical kinds of item. Titles and field labels are fixed in
+OPCA stores eleven logical kinds of item. Titles and field labels are fixed in
 [constants.rs](../crates/opca-core/src/constants.rs).
 
 | Item | Title | Kind | Purpose |
@@ -182,6 +186,7 @@ OPCA stores ten logical kinds of item. Titles and field labels are fixed in
 | VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial, `generated`) is also written to the `openvpn_profile` table and persisted, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. A profile can be **registered without generating** (`generated = 0`, no document yet) and produced later via Regenerate; such rows surface as Needs Regen. Legacy profiles may still be titled `VPN_<cn>`. |
 | DKIM | `DKIM_<domain>_<selector>` | Secure Note | DKIM key pair and metadata; the public key is published at `<selector>._domainkey.<domain>` |
 | Lock | `CA_Lock` | Secure Note | Advisory lock for concurrent-write safety |
+| Operator | `CA_Operator` | Secure Note | The EC P-256 key opCA presents to its ACME brokers, made on the first broker call (see [ACME broker client](#acme-broker-client)) |
 
 ### Why a shadow SQLite database?
 
@@ -393,8 +398,99 @@ carries `name_constraints` (read with `CertificateView::name_constraints`
 once the backfill has the PEM), shown on the certificate page.
 
 When the key lives on an ACME broker, the broker makes the CSR and pairs with
-opCA to receive the chain: see [ACME broker](#acme-broker-opca-acme-broker).
-Nothing in opca-core calls a broker yet, so `url` and `pinned_key` stay `NULL`.
+opCA to receive the chain: see [ACME broker client](#acme-broker-client) for
+opCA's side and [ACME broker](#acme-broker-opca-acme-broker) for the daemon.
+
+### ACME broker client
+
+[acme_broker/](../crates/opca-core/src/services/acme_broker) is opCA's client
+for the broker API, shared by the app and the CLI. `BrokerClient` speaks
+HTTP/1.1 (hyper over tokio-rustls) to an `Endpoint`: the host and port, and
+the API key's SPKI SHA-256, pinned through `wslib_tls::Outbound`. The pin comes
+from the pairing URI while enrolling and from `brokers.pinned_key` after. Each
+call is capped at 15 s, and fails as a `BrokerError`: `Unreachable`, `WrongKey`
+(the pin didn't match), `Refused` (the broker's `ErrorBody`), `Status` or
+`Malformed`. Each successful call to an enrolled broker stamps
+`brokers.last_contact`.
+
+**Operator identity.** Once enrolled, a broker admits only a client
+certificate that chains to the root and carries the key it pinned at
+enrolment. `CertificateAuthority::operator`
+([ca/operator.rs](../crates/opca-core/src/services/ca/operator.rs)) reads
+that key from the `CA_Operator` item, creating it on first use, so a CA with
+no brokers never gains the item. It then issues a client certificate for it
+from the root: the VpnClient profile (clientAuth only), CN `opCA operator`,
+valid for a day and backdated 5 minutes, with a random serial. The certificate
+isn't recorded in the database and spends no serial. The broker pins the key,
+so the certificate can be minted again each session.
+
+**Enrolment** (`enrol.rs`). `parse_pairing` reads the `opca-enrol://` string
+and `fetch_offer` makes `GET /v1/enrolment` over the pinned connection, so a
+wrong pin fails before the code is sent. The offer (host, CSR, configured
+domains, versions) is shown, and `enrol_broker` takes it back with the
+operator's domains. It fetches the offer again and refuses if it changed. The
+broker's own domains, when it has any, must match any the operator gave, in
+any order; otherwise the operator's are used. It signs the CSR with
+`sign_subordinate`, recording `url` and `pinned_key` in the same store, then
+`POST`s the code, the chain, the operator's pin and the issuance terms
+(30-day leaves, at most 45, over http-01, dns-01 and tls-alpn-01). A row with a `url` but no `last_contact` is signed but
+not delivered. Enrolling again with the same pairing string resends that
+chain rather than signing twice. It refuses if the broker's key or domains
+have changed since ("revoke it first"), or if the broker already took it.
+
+**Renewal** (`renew.rs`). `renew_broker` calls `GET /v1/status` and
+`POST /v1/csr`, signs the fresh CSR with `renew_subordinate`, and
+`PUT /v1/chain`s it with the broker's current issuance config. It answers a
+`Renewal`:
+
+- `Renewed`;
+- `DomainsChanged`: the broker now asks for other domains, and nothing was
+  signed. Renewing with `change_domains` confirms them;
+- `Unreachable`: nothing was signed;
+- `NotDelivered`: signed and recorded, but the push failed. The next renewal
+  signs afresh, and the undelivered certificate is auto-ignored as renewed;
+- `Failed`.
+
+`renew_all_brokers` renews every active broker with a `url` and reports each,
+so an unreachable one is never skipped silently. Renewal is an explicit
+action, not part of CRL generation.
+
+**Revoke.** `revoke_broker` revokes the subordinate through the root
+(`revoke_subordinate`), then `POST /v1/revoke`s. The revocation stands whether
+or not the broker answers (`BrokerNotice::Told` / `NotTold`), and revoking an
+already revoked row only tells the broker again, which is how an unreachable
+broker is retried. The caller regenerates the CRL, as after any revoke.
+
+**Concerns** (`concern.rs`). `concerns` flags an active broker with a `url`
+whose subordinate expires within 30 days, whose `last_contact` is older than
+35 days, or which is signed but not delivered. The dashboard tile, the ACME
+Servers page and `opca broker list` use it, and the Lambda applies the same
+thresholds (see [What it checks](#what-it-checks)).
+
+Surfaces:
+
+- **Tauri** — [commands/broker.rs](../crates/opca-tauri/src/commands/broker.rs):
+  `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `broker_status`,
+  `renew_broker`, `renew_all_brokers` and `revoke_broker`. The connection mints
+  the operator on the first broker call and keeps it (`Connection::operator`),
+  minting another after 20 hours. A reconnect drops it. Every command but the
+  offer and the list runs under `withLock`, status included, since it stamps
+  `last_contact` and stores the database. `revoke_broker` regenerates the CRL
+  as the certificate revoke does.
+- **Frontend** — [pages/AcmeServers.tsx](../frontend/src/pages/AcmeServers.tsx)
+  (`/acme`, "ACME Servers" in the sidebar) lists brokers with a `url`: state,
+  domains, subordinate expiry, last contact and concerns. Enrol Broker opens
+  [EnrolBrokerDialog](../frontend/src/components/EnrolBrokerDialog.tsx) (paste,
+  review the offer, confirm), and Renew All, per-row Status, Renew and Revoke
+  sit beside it. A `DomainsChanged` outcome offers Confirm and Renew. The
+  dashboard's ACME Servers tile shows while there is an active broker, and
+  lists the flagged ones. Subordinates signed by hand stay on the CSR page.
+- **CLI** — [commands/broker.rs](../crates/opca-cli/src/commands/broker.rs):
+  `opca broker enrol <pairing> [--domain …] [--yes]` (refuses before prompting
+  when neither the broker nor `--domain` gives domains), `list`,
+  `status <id>`, `renew <id> [--change-domains]` or `renew --all` (non-zero
+  unless every broker renewed), and `revoke <id>` (revokes, regenerates and
+  prints the CRL, then tells the broker). Writes run under the vault lock.
 
 ### AWS credentials
 
@@ -522,8 +618,10 @@ page's manual `upload_ca_database` remains a synchronous, foreground sync.)
     optional passphrase and return encrypted PKCS#8.
   - `database_error` — why the connected vault's `CA_Database` couldn't be
     loaded, shown by the recovery dialog. Cleared with the connection.
+  - `conn.operator` — the ACME operator identity and when it was minted (see
+    [ACME broker client](#acme-broker-client)). Dropped with the connection.
 - [commands/](../crates/opca-tauri/src/commands) — one module per
-  feature area (`aws`, `backup`, `ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
+  feature area (`aws`, `backup`, `broker`, `ca`, `cert`, `crl`, `csr`, `database`, `dkim`, `openvpn`,
   `subordinate`, `vault`, `lock`, `connect`, `dashboard`, `files`, `logs`, `update`). Each
   module exposes `#[tauri::command]` async functions that deserialise DTOs,
   call into `opca-core`, and return serialisable results. DTO shapes are
@@ -608,7 +706,8 @@ generate) to flush the change.
 
 The DTO surfaces both a reshaped CA status (value + expiry + graduated
 warning) and a mirrored CRL status (next_update, or a batch's signed-until,
-+ graduated warning from `assess_crl_expiry`), along with a `pending_csrs` count and an
++ graduated warning from `assess_crl_expiry`), along with a `pending_csrs` count,
+the active broker count and the flagged `brokers_flagged` rows, and an
 `action_items: Vec<ActionItemDto>` list. Action items carry a stable `id`,
 severity, human-readable message, button label, and an `action` token that
 the frontend dispatches on (`regenerate_and_upload_crl`, `regenerate_crl`,
@@ -897,7 +996,9 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
   never selects a mutating menu item.
 - **ACME broker** — `cargo test -p opca-acme-broker` runs in-process over
   loopback against a fake step-ca (a shell script) and an in-memory opca-core
-  CA (a dev-dependency, with `test-support`). `sh
+  CA (a dev-dependency, with `test-support`);
+  [tests/opca_client.rs](../crates/opca-acme-broker/tests/opca_client.rs) runs
+  opca-core's broker client against it. `sh
   crates/opca-acme-broker/tests/docker.sh` is the gated Docker check: see
   [Packaging and verification](#packaging-and-verification).
 - **GUI flow** — with the dev app up and disconnected, `npm run harness:flow`
@@ -931,7 +1032,7 @@ Organised under [src/](../crates/opca-acme-broker/src):
   mode and the checks a chain and its `IssuanceConfig` must pass, shared with
   the chain push.
 - [enrolled.rs](../crates/opca-acme-broker/src/enrolled.rs) — enrolled mode:
-  the operator verifier, status, fresh CSR, chain push, revoke, and the hooks
+  the operator-only TLS config, status, fresh CSR, chain push, revoke, and the hooks
   into step-ca.
 - [api.rs](../crates/opca-acme-broker/src/api.rs) — the axum routes, served by
   `wslib-http-server`.
@@ -943,7 +1044,8 @@ Organised under [src/](../crates/opca-acme-broker/src):
 
 ### How it meets opca-core
 
-The broker doesn't link opca-core. opCA signs the broker's CSR with
+The broker doesn't link opca-core; opca-core's
+[client](#acme-broker-client) calls it. opCA signs the broker's CSR with
 `sign_subordinate` and later re-signs a fresh one with `renew_subordinate`
 (see [Subordinate CAs](#subordinate-cas)); each subordinate is a row in the
 `brokers` table. The broker checks what comes back on its own: the chain's
@@ -963,9 +1065,11 @@ survives re-enrolment.
   `GET`/`POST /v1/enrolment`. The POST redeems the code (5 attempts) after
   every check passes. The record is staged before the redeem and promoted after
   it, so an accepted code can't meet a failed write.
-- **Enrolled** — a `ServerConfig` whose `OperatorOnly` verifier needs a client
-  certificate that chains to the enrolled root *and* whose key matches the
-  operator pin, since the root also issues VPN and device certificates.
+- **Enrolled** — `wslib_tls::Serving::with_client_auth_pinned(root, pin)`:
+  a client certificate must chain to the enrolled root *and* carry the
+  operator's pinned key, since the root also issues VPN and device
+  certificates. It consumes its `Serving`, so the broker loads a second one
+  from the same files and refuses if that key differs from the served one.
   `Tls::reload` swaps it in on the open listener. Each enrolled route also
   checks the presented certificate (`PeerCertificates`), which turns away a
   connection opened before the swap. Routes: `GET /v1/status`, `POST /v1/csr`,
@@ -1080,6 +1184,14 @@ downloads and calls `run_tests`, which reports on:
   one (never rolls back; one bad CRL refuses the batch), and warns when fewer
   than 2 are unreleased or the batch can't be read. Off, the batch is never
   fetched.
+- **ACME brokers** — from the `brokers` table, for each active broker with a
+  `url`: its subordinate (read from its certificate row) expiring within 30
+  days, a `last_contact` older than 35 days, or none at all (signed, not
+  delivered). These are the app's [concern](#acme-broker-client) thresholds.
+  The Lambda can't reach brokers on the LAN, so the age of `last_contact` is
+  its only sign that one is unreachable. Revoked brokers and subordinates
+  signed by hand are skipped, and a dump from before the table (schema v17)
+  has no section.
 
 Results are concatenated into a single Slack-formatted message. Any failing
 check sets a `warning` flag that switches the Slack bot icon from
