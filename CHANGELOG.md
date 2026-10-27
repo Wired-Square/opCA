@@ -100,6 +100,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   delivered.
 - `opca broker enrol`, `list`, `status`, `renew` (one, or `--all`) and
   `revoke`.
+- `contrib/cert-fetch.sh`, for a server to fetch its published certificate
+  under a timer: it installs the certificate only if it chains to the CA, is
+  not on the CA's verified CRL, has not expired, matches the server's key and
+  outlasts the installed one, then runs an optional reload command. Any
+  failure keeps the installed file, exits non-zero and posts to Slack, like
+  `openvpn-crl-fetch.sh`.
 
 ### Changed
 
