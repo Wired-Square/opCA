@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `opca-acme-api`, the versioned wire types for the API between opCA and the
   ACME broker: enrolment, status, renewal CSR, chain push, revoke, and the
   error body.
+- `opca-acme-broker`, the ACME broker daemon, reading
+  `/etc/opca-acme/broker.toml`. On its first start it makes the subordinate
+  CA's EC P-256 key (owner-only, unencrypted) and CSR, its API certificate and
+  a one-time pairing code, and logs the `opca-enrol://` pairing URI, which
+  pins the API key. Later starts load them and make nothing new.
 
 ### Changed
 
