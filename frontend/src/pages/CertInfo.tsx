@@ -362,7 +362,7 @@ export default function CertInfo() {
                     </Show>
                   </span>
                   <Show when={sanList(d()).length > 0} fallback={<span class="detail-value">{"\u2014"}</span>}>
-                    <div class="san-list">
+                    <div class="san-values">
                       <For each={sanList(d())}>
                         {(name) => <CopyableValue value={name} mono />}
                       </For>

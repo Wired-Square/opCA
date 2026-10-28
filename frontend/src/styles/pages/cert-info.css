@@ -85,3 +85,10 @@
   font-size: 0.8125rem;
   color: var(--text-tertiary);
 }
+
+.san-values {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}

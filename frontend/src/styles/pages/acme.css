@@ -12,6 +12,12 @@
   display: block;
   font-size: 0.75rem;
   color: var(--app-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.page-acme .status-badge {
+  padding: 2px 10px;
+  font-size: 0.75rem;
 }
 
 .broker-outcomes {

@@ -29,7 +29,7 @@ export const lightTheme = {
   "--app-bg": "#FFFFFF",
   "--app-surface": "#F5F5F7",
   "--bg-elevated": "#FFFFFF",
-  "--bg-stripe": "#F5F5F7",
+  "--bg-stripe": "#ECECEE",
   "--bg-hover": "#E8E8ED",
   "--app-border": "#D2D2D7",
   "--border-light": "#E8E8ED",

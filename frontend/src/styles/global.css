@@ -444,7 +444,8 @@ a:hover {
   letter-spacing: 0.02em;
 }
 
-.status-valid {
+.status-valid,
+.status-active {
   color: var(--app-good);
   background: var(--success-tint);
   border: 1px solid var(--success-edge);
@@ -452,7 +453,8 @@ a:hover {
 
 .status-invalid,
 .status-expired,
-.status-revoked {
+.status-revoked,
+.status-not-delivered {
   color: var(--app-bad);
   background: var(--error-tint);
   border: 1px solid var(--error-edge);
@@ -468,7 +470,8 @@ a:hover {
   margin-left: 6px;
 }
 
-.status-expiring {
+.status-expiring,
+.status-silent {
   color: var(--app-warn);
   background: var(--warning-tint);
   border: 1px solid var(--warning-edge);

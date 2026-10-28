@@ -1,18 +1,5 @@
 import { For, Show, createResource, createSignal } from "solid-js";
-import {
-  Badge,
-  Badges,
-  Button,
-  Confirm,
-  NothingYet,
-  Notice,
-  Table,
-  Td,
-  Th,
-  Tr,
-  createAction,
-  type Tone,
-} from "@wired-square/kit";
+import { Badges, Button, Confirm, DateModeToggle, NothingYet, Notice, createAction, type Tone } from "@wired-square/kit";
 import {
   brokerErrorText,
   brokerStatus,
@@ -135,59 +122,63 @@ export default function AcmeServers() {
               />
             }
           >
-            <Table
-              head={
-                <>
-                  <Th>Broker</Th>
-                  <Th>Domains</Th>
-                  <Th>State</Th>
-                  <Th>Subordinate expires</Th>
-                  <Th>Last contact</Th>
-                  <Th unseen>Actions</Th>
-                </>
-              }
-            >
-              <For each={rows()}>
-                {(b) => (
-                  <Tr dim={b.state === "revoked"}>
-                    <Td strong>
-                      <span class="mono">{brokerName(b)}</span>
-                      <span class="broker-url mono">{b.url}</span>
-                    </Td>
-                    <Td>{b.permitted_domains.join(", ")}</Td>
-                    <Td>
-                      <Badges>
-                        <Badge tone={b.state === "active" ? "good" : "neutral"}>{b.state}</Badge>
-                        <Show when={notDelivered(b)}>
-                          <Badge tone="bad" title="Signed, but the broker has not taken it; enrol again with the same pairing string">
-                            not delivered
-                          </Badge>
-                        </Show>
-                        <For each={b.concerns.filter((c) => c.concern !== "not_delivered")}>
-                          {(c) => <Badge tone="warn">{concernText(c)}</Badge>}
-                        </For>
-                      </Badges>
-                    </Td>
-                    <Td numeric>
-                      <StoredDate value={b.expiry_date} />
-                    </Td>
-                    <Td numeric muted>
-                      <StoredDate value={b.last_contact} />
-                    </Td>
-                    <Td controls>
-                      <ActionMenu
-                        aria-label={`Actions for ${brokerName(b)}`}
-                        items={[
-                          { label: "Status", onSelect: () => checkStatus(b.id), disabled: notDelivered(b) },
-                          { label: "Renew", onSelect: () => renewOne(b.id), disabled: b.state !== "active" },
-                          { label: "Revoke", onSelect: () => setRevoking(b), danger: true },
-                        ]}
-                      />
-                    </Td>
-                  </Tr>
-                )}
-              </For>
-            </Table>
+            <div class="data-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Broker</th>
+                    <th>Domains</th>
+                    <th>State</th>
+                    <th>Subordinate Expires <DateModeToggle /></th>
+                    <th>Last Contact</th>
+                    <th class="kebab-col"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <For each={rows()}>
+                    {(b) => (
+                      <tr class="data-table-row" classList={{ "data-table-row-ignored": b.state === "revoked" }}>
+                        <td>
+                          {brokerName(b)}
+                          <Show when={b.cn && b.url}>
+                            <span class="broker-url mono">{b.url}</span>
+                          </Show>
+                        </td>
+                        <td>{b.permitted_domains.join(", ")}</td>
+                        <td>
+                          <Badges>
+                            <span class={`status-badge status-${b.state}`}>{b.state}</span>
+                            <Show when={notDelivered(b)}>
+                              <span
+                                class="status-badge status-not-delivered"
+                                title="Signed, but the broker has not taken it; enrol again with the same pairing string"
+                              >
+                                not delivered
+                              </span>
+                            </Show>
+                            <For each={b.concerns.filter((c) => c.concern !== "not_delivered")}>
+                              {(c) => <span class={`status-badge status-${c.concern}`}>{concernText(c)}</span>}
+                            </For>
+                          </Badges>
+                        </td>
+                        <td class="mono"><StoredDate value={b.expiry_date} /></td>
+                        <td class="mono"><StoredDate value={b.last_contact} /></td>
+                        <td class="kebab-col">
+                          <ActionMenu
+                            aria-label={`Actions for ${brokerName(b)}`}
+                            items={[
+                              { label: "Status", onSelect: () => checkStatus(b.id), disabled: notDelivered(b) },
+                              { label: "Renew", onSelect: () => renewOne(b.id), disabled: b.state !== "active" },
+                              { label: "Revoke", onSelect: () => setRevoking(b), danger: true },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </For>
+                </tbody>
+              </table>
+            </div>
           </Show>
         )}
       </Show>

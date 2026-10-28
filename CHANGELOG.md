@@ -200,6 +200,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   opca's own.
 - The ACME broker admits only opCA's operator through `wslib-tls` 0.2.3's
   pinned client auth instead of its own verifier.
+- The ACME Servers page's table now looks like the certificate list: state
+  and concerns as status pills, the broker's name over its URL, and the UTC /
+  Local toggle on the dates. Long dates wrap rather than scrolling the table
+  sideways.
 
 ### Fixed
 
@@ -241,6 +245,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Selecting two OpenVPN templates in quick succession no longer shows the
   first one's content under the second's name, and the editor stays loading
   until the selected one arrives.
+- Light theme: detail rows inside a dialog, such as the Enrol ACME Broker
+  review, now show their alternating stripes.
+- A certificate's alternative names use the row's width, like its subject,
+  instead of wrapping a short name such as "DNS:test cert" mid-word.
 
 ## [0.102.3] - 2026-10-10
 

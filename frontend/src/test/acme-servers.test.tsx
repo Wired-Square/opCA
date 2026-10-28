@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@solidjs/testing-library";
+import { DateModes } from "@wired-square/kit";
 import AcmeServers from "../pages/AcmeServers";
 import Dashboard from "../pages/Dashboard";
 import { setAppState } from "../stores/app";
@@ -59,9 +60,39 @@ describe("ACME servers page", () => {
 
     const healthy = await rowOf("acme.home.arpa");
     expect(healthy).toHaveTextContent("home.arpa");
-    expect(healthy).toHaveTextContent("active");
+    expect(within(healthy).getByText("active")).toHaveClass("status-badge", "status-active");
     expect(healthy).not.toHaveTextContent("not delivered");
-    expect(await rowOf("acme.lab.example")).toHaveTextContent("not delivered");
+    expect(within(await rowOf("acme.lab.example")).getByText("not delivered")).toHaveClass("status-badge");
+  });
+
+  it("shows the broker's URL under its name and dates in the shared UTC/local mode", async () => {
+    render(() => (
+      <DateModes initial="utc" locale="en-AU">
+        <AcmeServers />
+      </DateModes>
+    ));
+
+    const healthy = await rowOf("acme.home.arpa");
+    expect(within(healthy).getByText("https://acme.home.arpa:9443")).toHaveClass("broker-url");
+    expect(within(healthy).getByText("1 Jan 2027, 00:00:00 UTC")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /Subordinate Expires/ })).toContainElement(
+      screen.getByRole("button", { name: "UTC" }),
+    );
+  });
+
+  it("dims a revoked broker and offers its actions from the row menu", async () => {
+    listBrokers.mockResolvedValue([row({ state: "revoked" }), pending]);
+    render(() => <AcmeServers />);
+
+    const revoked = await rowOf("acme.home.arpa");
+    expect(revoked).toHaveClass("data-table-row-ignored");
+    fireEvent.click(within(revoked).getByRole("button", { name: "Actions for acme.home.arpa" }));
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((i) => [i.textContent, i.getAttribute("aria-disabled") === "true"])).toEqual([
+      ["Status", false],
+      ["Renew", true],
+      ["Revoke", false],
+    ]);
   });
 
   it("renews all and reports each broker, offering to confirm changed domains", async () => {
