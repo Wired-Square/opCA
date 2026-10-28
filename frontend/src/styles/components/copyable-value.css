@@ -17,10 +17,6 @@
   background: var(--bg-elevated);
 }
 
-.copyable-value .app-copy__value {
-  word-break: break-all;
-}
-
 /* Copy glyph sits faint until the row is hovered. */
 .copyable-value .stored-copy-icon {
   color: var(--app-text);

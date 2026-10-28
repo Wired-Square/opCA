@@ -243,6 +243,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   until the selected one arrives.
 - Light theme: detail rows inside a dialog, such as the Enrol ACME Broker
   review, now show their alternating stripes.
+- A certificate's alternative names use the row's width, like its subject,
+  instead of wrapping a short name such as "DNS:test cert" mid-word.
 
 ## [0.102.3] - 2026-10-10
 
