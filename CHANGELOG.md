@@ -241,6 +241,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Selecting two OpenVPN templates in quick succession no longer shows the
   first one's content under the second's name, and the editor stays loading
   until the selected one arrives.
+- Light theme: detail rows inside a dialog, such as the Enrol ACME Broker
+  review, now show their alternating stripes.
 
 ## [0.102.3] - 2026-10-10
 
