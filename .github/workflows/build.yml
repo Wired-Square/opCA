@@ -71,8 +71,10 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.99
-        with:
-          targets: ${{ matrix.target }}
+
+      # The action installs 1.99.1, but rust-toolchain.toml's "1.99" is a separate rustup toolchain.
+      - name: Add the build target to the pinned toolchain
+        run: rustup target add ${{ matrix.target }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The macOS Intel build is produced again; 0.102.4 shipped without one.
+
 ## [0.102.4] - 2026-10-28
 
 ### Added
