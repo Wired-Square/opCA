@@ -200,6 +200,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   opca's own.
 - The ACME broker admits only opCA's operator through `wslib-tls` 0.2.3's
   pinned client auth instead of its own verifier.
+- The ACME Servers page's table now looks like the certificate list: state
+  and concerns as status pills, the broker's name over its URL, and the UTC /
+  Local toggle on the dates. Long dates wrap rather than scrolling the table
+  sideways.
 
 ### Fixed
 
