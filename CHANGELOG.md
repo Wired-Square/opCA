@@ -206,6 +206,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Verifying a DKIM record now reports "No TXT record found" when none is
   published, instead of a DNS lookup failure; a lookup that fails (SERVFAIL,
   REFUSED, timeout) is reported as a DNS error. Lookups go through `wslib-dns`.
+- A CSR whose EC key carries explicit curve parameters, as macOS LibreSSL's
+  `openssl req -newkey ec` makes, is now refused with "EC keys must use a named
+  curve" instead of a signature error.
 - `settings.json` is now replaced atomically and readable by its owner alone.
 - The vault lock now excludes a second holder. `op` allows two items one title,
   so creating `CA_Lock` never failed: the lock 1Password created first now wins
@@ -214,19 +217,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A vault backup no longer carries `CA_Lock`, and a restore skips one an older
   backup carries, so restoring a backup the app took no longer locks the new
   vault for five minutes.
+- Opening or restoring an older backup that carries `CA_Lock` no longer counts
+  the lock as a certificate in its item counts.
 - An `op` call 1Password refuses as racing another write (409 Conflict) is
   made once more, so lock contention no longer fails the holder's own write.
 - Uploads to an `rsync://` or `sftp://` public store are now world-readable
   (0644), so a web server running as another user can serve the CA
   certificate, CRL and published certificates. Private-store and backup uploads
   are set owner-only (0600).
+- Quitting while a change holds the vault lock now waits for it to finish,
+  rather than exiting between its steps and leaving `CA_Lock` held until it
+  goes stale. A restore in progress holds a quit the same way. A quit waits at
+  most until the lock's TTL runs out.
 - Saving a blank store in the CA's Stores settings now clears it; before, the
   old store stayed and the save looked as if it worked.
+- Saving a blank field in the CA's Configuration settings now clears it;
+  before, the old value stayed.
 - Apple Development is no longer offered when signing a CSR, and the CA refuses
   to sign one: Apple issues these certificates, and opCA's was a `clientAuth`
   certificate Apple can't use. Creating the key and CSR is unchanged.
 - Selecting an OpenVPN template no longer flashes "Loading template..." in
   place of the editor.
+- Selecting two OpenVPN templates in quick succession no longer shows the
+  first one's content under the second's name, and the editor stays loading
+  until the selected one arrives.
 
 ## [0.102.3] - 2026-10-10
 

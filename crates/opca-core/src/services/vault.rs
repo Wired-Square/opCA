@@ -52,6 +52,18 @@ pub struct BackupPayload {
     pub items: Vec<BackupItem>,
 }
 
+impl BackupPayload {
+    /// The items a restore writes: a backup made before the lock was left out still carries it.
+    pub fn restorable_items<'a>(
+        &'a self,
+        op_config: &'a OpConf,
+    ) -> impl Iterator<Item = &'a BackupItem> {
+        self.items
+            .iter()
+            .filter(|i| i.title != op_config.lock_title)
+    }
+}
+
 /// Counts of restored items by type.
 pub type RestoreCounts = std::collections::HashMap<String, usize>;
 
@@ -177,13 +189,12 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
             ));
         }
 
-        let mut items = payload.items.clone();
-        items.retain(|i| i.title != self.op_config.lock_title);
+        let mut items: Vec<_> = payload.restorable_items(self.op_config).collect();
         items.sort_by_key(|i| restore_order(&i.item_type));
 
         let mut counts = RestoreCounts::new();
 
-        for item in &items {
+        for item in items {
             if let Some(cb) = on_progress {
                 cb(&item.item_type, &item.title);
             }

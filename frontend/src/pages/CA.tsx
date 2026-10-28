@@ -205,7 +205,7 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
 
   const merged = () => ({ ...props.config(), ...form() } as CaConfig);
   const set = (key: keyof CaConfig, value: string | number | null) =>
-    setForm((f) => ({ ...f, [key]: value || null }));
+    setForm((f) => ({ ...f, [key]: value }));
 
   const handleSave = () =>
     save.run(headed("Save failed", () => updateCaConfig(merged())), () => {
@@ -227,10 +227,10 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <FormField label="State" value={merged().state} onChange={(v) => set("state", v)} />
               <FormField label="Country" value={merged().country} onChange={(v) => set("country", v)} />
               <FormField label="Certificate Days" value={String(merged().days ?? "")}
-                onChange={(v) => set("days", v ? parseInt(v) : null)} type="number"
+                onChange={(v) => set("days", parseInt(v) || null)} type="number"
                 warning={caDaysOverAppleLimit(merged().days)} />
               <FormField label="CRL Days" value={String(merged().crl_days ?? "")}
-                onChange={(v) => set("crl_days", v ? parseInt(v) : null)} type="number"
+                onChange={(v) => set("crl_days", parseInt(v) || null)} type="number"
                 hint={merged().crl_batch_enabled ? "Not used while CRL batches are on." : null} />
               <FormField label="CA URL" value={merged().ca_url} onChange={(v) => set("ca_url", v)} />
               <FormField label="CRL URL" value={merged().crl_url} onChange={(v) => set("crl_url", v)} />

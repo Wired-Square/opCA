@@ -181,7 +181,10 @@ pub async fn vault_restore(
 
     emit_progress(
         &window,
-        &format!("Restoring {} items\u{2026}", payload.metadata.item_count),
+        &format!(
+            "Restoring {} items\u{2026}",
+            payload.restorable_items(&DEFAULT_OP_CONF).count()
+        ),
     );
     let vb = VaultBackup::new(&vault, &DEFAULT_OP_CONF);
     let on_progress = |item_type: &str, title: &str| {
@@ -248,7 +251,7 @@ pub async fn vault_info(path: String, password: String) -> Result<BackupInfoResu
         serde_json::from_slice(&plaintext).map_err(|e| format!("Invalid backup format: {e}"))?;
 
     let mut type_counts: HashMap<String, usize> = HashMap::new();
-    for item in &payload.items {
+    for item in payload.restorable_items(&DEFAULT_OP_CONF) {
         *type_counts.entry(item.item_type.clone()).or_insert(0) += 1;
     }
 
@@ -256,7 +259,7 @@ pub async fn vault_info(path: String, password: String) -> Result<BackupInfoResu
         opca_version: payload.metadata.opca_version,
         vault_name: payload.metadata.vault_name,
         backup_date: payload.metadata.backup_date,
-        item_count: payload.metadata.item_count,
+        item_count: type_counts.values().sum(),
         item_breakdown: counts_to_breakdown(&type_counts),
     })
 }
@@ -375,4 +378,50 @@ fn counts_to_breakdown(counts: &HashMap<String, usize>) -> Vec<BackupItemCount> 
         .collect();
     breakdown.sort_by(|a, b| a.item_type.cmp(&b.item_type));
     breakdown
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opca_core::services::vault::{
+        BackupItem, BackupMetadata, ITEM_TYPE_CA, ITEM_TYPE_CERTIFICATE,
+    };
+
+    #[test]
+    fn backup_info_leaves_out_a_vault_lock_the_backup_carries() {
+        let item = |item_type: &str, title: &str| BackupItem {
+            item_type: item_type.into(),
+            title: title.into(),
+            data: "{}".into(),
+        };
+        let payload = BackupPayload {
+            metadata: BackupMetadata {
+                opca_version: "0.1.0".into(),
+                backup_date: "20261023000000Z".into(),
+                vault_name: "TestVault".into(),
+                item_count: 3,
+            },
+            items: vec![
+                item(ITEM_TYPE_CA, "CA"),
+                item(ITEM_TYPE_CERTIFICATE, "CRT_1_a"),
+                item(ITEM_TYPE_CERTIFICATE, DEFAULT_OP_CONF.lock_title),
+            ],
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.opca");
+        let plaintext = serde_json::to_vec(&payload).unwrap();
+        std::fs::write(&path, encrypt_payload(&plaintext, "pw").unwrap()).unwrap();
+
+        let info =
+            tauri::async_runtime::block_on(vault_info(path.display().to_string(), "pw".into()))
+                .unwrap();
+
+        assert_eq!(info.item_count, 2);
+        let certificates = info
+            .item_breakdown
+            .iter()
+            .find(|c| c.item_type == ITEM_TYPE_CERTIFICATE)
+            .unwrap();
+        assert_eq!(certificates.count, 1);
+    }
 }

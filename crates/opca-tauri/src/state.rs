@@ -83,9 +83,16 @@ struct PreloadedKey {
 
 impl AppState {
     /// Whether a 1Password operation is running: every `op` call holds the
-    /// connection, and the private-store upload holds its own lock.
+    /// connection, the private-store upload holds its own lock, and a mutation
+    /// holds the CA lock across its separate commands until the lock's TTL.
     pub fn is_busy(&self) -> bool {
-        is_held(&self.conn) || is_held(&self.private_store_lock)
+        is_held(&self.conn)
+            || is_held(&self.private_store_lock)
+            || is_held(&self.vault_lock)
+            || self
+                .vault_lock
+                .try_lock()
+                .is_ok_and(|lock| lock.held_within_ttl())
     }
 
     /// Ensure the CA is loaded, lazily retrieving it from 1Password on first call.
@@ -280,5 +287,47 @@ mod tests {
 
         let _upload = state.private_store_lock.lock().unwrap();
         assert!(state.is_busy());
+    }
+
+    fn acquired_lock(state: &AppState, ttl: u64) -> Vault<Runner> {
+        use opca_core::constants::DEFAULT_OP_CONF;
+        use opca_core::testutil::{Output, created, fake_vault, item_id, summary_json};
+        let fake = Runner::new();
+        fake.respond(Output::ok(
+            r#"{"id":"U1","email":"a@example.com","name":"A"}"#,
+        ))
+        .respond(created(DEFAULT_OP_CONF.lock_title))
+        .respond(Output::ok(format!(
+            "[{}]",
+            summary_json(&item_id(1), DEFAULT_OP_CONF.lock_title)
+        )))
+        .respond(Output::ok(""));
+        let vault = fake_vault(&fake);
+        state
+            .vault_lock
+            .lock()
+            .unwrap()
+            .acquire(&vault, "create_cert", ttl)
+            .unwrap();
+        vault
+    }
+
+    #[test]
+    fn busy_while_the_ca_lock_is_held_between_commands() {
+        let state = AppState::default();
+        let vault = acquired_lock(&state, 300);
+        assert!(state.is_busy());
+
+        state.vault_lock.lock().unwrap().release(&vault).unwrap();
+        assert!(!state.is_busy());
+    }
+
+    #[test]
+    fn a_ca_lock_past_its_ttl_no_longer_holds_a_quit() {
+        let state = AppState::default();
+        acquired_lock(&state, 0);
+
+        assert!(state.vault_lock.lock().unwrap().held());
+        assert!(!state.is_busy());
     }
 }

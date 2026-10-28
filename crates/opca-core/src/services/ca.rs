@@ -13,6 +13,7 @@ use chrono::{DateTime, SubsecRound, Utc};
 use foreign_types::ForeignType;
 use log::{debug, error, info, warn};
 use openssl::asn1::Asn1Time;
+use openssl::ec::Asn1Flag;
 use openssl::x509::{X509, X509Req};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -1789,11 +1790,22 @@ impl<R: Runner> CertificateAuthority<R> {
 // ---------------------------------------------------------------------------
 
 fn verified_csr(csr: &X509Req) -> Result<Csr, OpcaError> {
+    if has_explicit_curve_parameters(csr) {
+        return Err(OpcaError::InvalidCertificate(
+            "CSR: EC keys must use a named curve".into(),
+        ));
+    }
     Csr::from_der(
         &csr.to_der()?,
         crypto_provider().signature_verification_algorithms.all,
     )
     .map_err(|e| OpcaError::InvalidCertificate(format!("CSR: {e}")))
+}
+
+fn has_explicit_curve_parameters(csr: &X509Req) -> bool {
+    csr.public_key()
+        .and_then(|key| key.ec_key())
+        .is_ok_and(|key| key.group().asn1_flag() != Asn1Flag::NAMED_CURVE)
 }
 
 fn authority_of(
@@ -3503,6 +3515,32 @@ mod tests {
             .issue_certificate(leaf.csr.as_ref().unwrap(), &CertType::AppleDev, None)
             .unwrap_err();
         assert!(err.to_string().contains("Apple issues"), "{err}");
+    }
+
+    #[test]
+    fn an_ec_csr_with_explicit_curve_parameters_is_refused_for_its_curve() {
+        use openssl::ec::{EcGroup, EcKey};
+        let mut group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
+        group.set_asn1_flag(Asn1Flag::EXPLICIT_CURVE);
+        let key = openssl::pkey::PKey::from_ec_key(EcKey::generate(&group).unwrap()).unwrap();
+        let mut name = openssl::x509::X509NameBuilder::new().unwrap();
+        name.append_entry_by_nid(Nid::COMMONNAME, "explicit.example")
+            .unwrap();
+        let mut csr = openssl::x509::X509ReqBuilder::new().unwrap();
+        csr.set_subject_name(&name.build()).unwrap();
+        csr.set_pubkey(&key).unwrap();
+        csr.sign(&key, openssl::hash::MessageDigest::sha256())
+            .unwrap();
+
+        let csr = X509Req::from_der(&csr.build().to_der().unwrap()).unwrap();
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        let err = ca
+            .sign_certificate(&csr, &CertType::WebServer, 365)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("EC keys must use a named curve"),
+            "{err}"
+        );
     }
 
     // -----------------------------------------------------------------------

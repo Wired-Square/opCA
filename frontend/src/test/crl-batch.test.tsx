@@ -240,3 +240,34 @@ describe("CA settings stores", () => {
     expect(updateCaConfig.mock.calls[0][0]).toMatchObject({ ca_public_store: "", ca_backup_store: "s3://bucket/backup", ca_private_store: null });
   });
 });
+
+describe("CA settings configuration", () => {
+  beforeEach(() => {
+    setAppState("vaultState", "valid_ca");
+    vi.clearAllMocks();
+  });
+
+  it("a blank field save clears the field", async () => {
+    getCaConfig.mockResolvedValue(config({ org: "Wired Square", crl_url: "http://crl.example/ca.crl" }));
+    render(() => <CA />);
+    fireEvent.click(screen.getByRole("button", { name: "Configuration" }));
+
+    fireEvent.input(await screen.findByLabelText("Organisation"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Configuration" }));
+
+    await waitFor(() => expect(updateCaConfig).toHaveBeenCalled());
+    expect(updateCaConfig.mock.calls[0][0]).toMatchObject({ org: "", crl_url: "http://crl.example/ca.crl", ou: null });
+  });
+
+  it("a zero day count is left untouched", async () => {
+    getCaConfig.mockResolvedValue(config());
+    render(() => <CA />);
+    fireEvent.click(screen.getByRole("button", { name: "Configuration" }));
+
+    fireEvent.input(await screen.findByLabelText("Certificate Days"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Configuration" }));
+
+    await waitFor(() => expect(updateCaConfig).toHaveBeenCalled());
+    expect(updateCaConfig.mock.calls[0][0].days).toBeNull();
+  });
+});

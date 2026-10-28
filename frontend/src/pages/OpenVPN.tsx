@@ -274,21 +274,25 @@ export default function OpenVPN() {
 
   // ── Configuration handlers ────────────────────────────────────
 
+  let latestTemplateLoad = 0;
   async function handleLoadTemplate(name: string) {
+    const load = ++latestTemplateLoad;
+    const isLatest = () => load === latestTemplateLoad;
     setSelectedTemplate(name);
     if (!name) {
       setTemplateContent("");
+      setLoadingTemplate(false);
       return;
     }
     setLoadingTemplate(true);
     setError(null);
     try {
       const detail = await getOpenVpnTemplate(name);
-      setTemplateContent(detail.content);
+      if (isLatest()) setTemplateContent(detail.content);
     } catch (e) {
-      setError(errorMessage(e));
+      if (isLatest()) setError(errorMessage(e));
     } finally {
-      setLoadingTemplate(false);
+      if (isLatest()) setLoadingTemplate(false);
     }
   }
 
