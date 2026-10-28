@@ -3,7 +3,7 @@ members = ["crates/opca-core", "crates/opca-cli", "crates/opca-tauri", "crates/o
 resolver = "3"
 
 [workspace.package]
-version = "0.102.3"
+version = "0.102.4"
 edition = "2024"
 rust-version = "1.99"
 
