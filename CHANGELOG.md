@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   not reuse the account key. The leaf is `serverAuth` only, lasts the
   configured days (never past the cap or the subordinate), and is served with
   the subordinate.
+- The ACME broker can validate http-01, dns-01 and tls-alpn-01 challenges
+  itself. http-01 follows up to 10 redirects, only to ports 80 and 443, and
+  reads at most 1 KiB.
 
 ### Fixed
 

@@ -1095,6 +1095,13 @@ Organised under [src/](../crates/opca-acme-broker/src):
     only, backdated a minute, for `leaf_days` (or the order's `notAfter`)
     capped at `leaf_max_days` and the subordinate's end, and served with the
     chain minus the root. Refusals are `Problem`s with RFC 8555's types.
+  - [validate.rs](../crates/opca-acme-broker/src/acme/validate.rs) —
+    `Validator` over a `wslib_dns::Resolver`, with injectable ports: http-01
+    (hyper, up to 10 redirects to a DNS host over http on 80 or https on 443,
+    1 KiB body), dns-01 (any TXT at `_acme-challenge.<base>` equal to the
+    digest) and tls-alpn-01 (RFC 8737; any certificate is taken, and the
+    handshake is checked against its key, since webpki refuses the critical
+    acmeIdentifier). 10 s per validation.
 - [cli.rs](../crates/opca-acme-broker/src/cli.rs) and
   [bin/opca-acme.rs](../crates/opca-acme-broker/src/bin/opca-acme.rs) — the
   `opca-acme` command line.

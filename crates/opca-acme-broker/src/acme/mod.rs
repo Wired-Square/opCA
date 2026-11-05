@@ -44,6 +44,7 @@ trait Named: Copy {
 mod issue;
 mod problem;
 pub mod store;
+pub mod validate;
 
 pub use issue::{Issuer, check_identifier};
 pub use problem::{Problem, ProblemType};
