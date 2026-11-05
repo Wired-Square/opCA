@@ -11,7 +11,7 @@ use opca_core::services::acme_broker::{
 };
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::ca::operator::Operator;
-use opca_core::services::database::Broker;
+use opca_core::services::database::{Broker, BrokerCert};
 
 use crate::commands::cert::regenerate_crl_after_revoke;
 use crate::commands::dto::{BrokerOfferDto, BrokerRow, EnrolBrokerRequest};
@@ -116,6 +116,13 @@ pub async fn list_brokers(state: State<'_, AppState>) -> Result<Vec<BrokerRow>, 
     Ok(broker_rows(
         ca.list_subordinates().map_err(|e| e.to_string())?,
     ))
+}
+
+#[tauri::command]
+pub async fn list_broker_certs(state: State<'_, AppState>) -> Result<Vec<BrokerCert>, String> {
+    let conn = state.ensure_ca()?;
+    let ca = conn.ca.as_ref().ok_or("CA not available")?;
+    ca.list_broker_certs().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

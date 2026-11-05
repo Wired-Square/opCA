@@ -1,5 +1,6 @@
 import { tauriInvoke, withLock } from "./tauri";
 import type {
+  BrokerCert,
   BrokerError,
   BrokerOffer,
   BrokerRenewal,
@@ -26,6 +27,10 @@ export async function enrolBroker(request: {
 
 export async function listBrokers(): Promise<BrokerRow[]> {
   return tauriInvoke<BrokerRow[]>("list_brokers");
+}
+
+export async function listBrokerCerts(): Promise<BrokerCert[]> {
+  return tauriInvoke<BrokerCert[]>("list_broker_certs");
 }
 
 export async function brokerStatus(id: number): Promise<BrokerStatus> {

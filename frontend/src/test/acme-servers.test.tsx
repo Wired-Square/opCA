@@ -4,9 +4,11 @@ import { DateModes } from "@wired-square/kit";
 import AcmeServers from "../pages/AcmeServers";
 import Dashboard from "../pages/Dashboard";
 import { setAppState } from "../stores/app";
-import type { BrokerRow, DashboardData } from "../api/types";
+import type { BrokerCert, BrokerRow, DashboardData } from "../api/types";
 
 const listBrokers = vi.hoisted(() => vi.fn());
+const listBrokerCerts = vi.hoisted(() => vi.fn());
+const brokerStatus = vi.hoisted(() => vi.fn());
 const renewBroker = vi.hoisted(() => vi.fn());
 const renewAllBrokers = vi.hoisted(() => vi.fn());
 const revokeBroker = vi.hoisted(() => vi.fn());
@@ -15,6 +17,8 @@ const navigate = vi.hoisted(() => vi.fn());
 vi.mock("../api/brokers", async (actual) => ({
   ...(await actual<object>()),
   listBrokers,
+  listBrokerCerts,
+  brokerStatus,
   renewBroker,
   renewAllBrokers,
   revokeBroker,
@@ -47,12 +51,27 @@ const pending = row({
   concerns: [{ concern: "not_delivered" }],
 });
 
+const cert = (overrides: Partial<BrokerCert> = {}): BrokerCert => ({
+  broker_id: 1,
+  serial: "111",
+  common_name: "nas.home.arpa",
+  sans: ["nas.home.arpa", "files.home.arpa"],
+  not_before: "20261101000000Z",
+  not_after: "20991201000000Z",
+  issuer_serial: "10",
+  revoked_at: null,
+  revocation_reason: null,
+  changed: 1,
+  ...overrides,
+});
+
 const rowOf = async (name: string) => (await screen.findByText(name)).closest("tr") as HTMLElement;
 
 describe("ACME servers page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listBrokers.mockResolvedValue([row(), pending]);
+    listBrokerCerts.mockResolvedValue([]);
   });
 
   it("lists each broker with its domains, state and a marker for one not delivered", async () => {
@@ -78,6 +97,54 @@ describe("ACME servers page", () => {
     expect(screen.getByRole("columnheader", { name: /Subordinate Expires/ })).toContainElement(
       screen.getByRole("button", { name: "UTC" }),
     );
+  });
+
+  it("counts each broker's issued certificates and lists them on demand", async () => {
+    listBrokerCerts.mockResolvedValue([
+      cert(),
+      cert({ serial: "222", common_name: null, sans: ["printer.home.arpa"], revoked_at: "20261102000000Z", changed: 3 }),
+      cert({ serial: "333", common_name: "old.home.arpa", sans: ["old.home.arpa"], not_after: "20200101000000Z" }),
+    ]);
+    render(() => <AcmeServers />);
+
+    const pendingRow = await rowOf("acme.lab.example");
+    expect(within(pendingRow).queryByRole("button", { name: /issued/ })).toBeNull();
+    const toggle = await within(await rowOf("acme.home.arpa")).findByRole("button", { name: "3 issued, 1 revoked" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("table", { name: /Certificates issued by/ })).toBeNull();
+
+    fireEvent.click(toggle);
+
+    const issued = within(screen.getByRole("table", { name: "Certificates issued by acme.home.arpa" }));
+    const state = (name: string) => within(issued.getByText(name).closest("tr") as HTMLElement);
+    expect(state("nas.home.arpa").getByText("files.home.arpa")).toHaveClass("broker-sans");
+    expect(state("nas.home.arpa").getByText("valid")).toHaveClass("status-valid");
+    expect(state("printer.home.arpa").getByText("revoked")).toHaveClass("status-revoked");
+    expect(state("old.home.arpa").getByText("expired")).toHaveClass("status-expired");
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("table", { name: /Certificates issued by/ })).toBeNull();
+  });
+
+  it("reports the issued counts with the status and refreshes the list it synced", async () => {
+    brokerStatus.mockResolvedValue({
+      state: "issuing",
+      subordinate_serial: "10",
+      subordinate_not_after: "2027-01-01T00:00:00Z",
+      config: { permitted_domains: ["home.arpa"], leaf_days: 30, leaf_max_days: 45, challenges: [] },
+      versions: { api: 1, broker: "0.103.0" },
+      issued: { total: 4, revoked: 1 },
+    });
+    render(() => <AcmeServers />);
+    const healthy = await rowOf("acme.home.arpa");
+    expect(listBrokerCerts).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(healthy).getByRole("button", { name: "Actions for acme.home.arpa" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Status" }));
+
+    expect(
+      await screen.findByText("acme.home.arpa: issuing, serial 10, broker 0.103.0, 4 issued, 1 revoked"),
+    ).toBeInTheDocument();
+    expect(listBrokerCerts).toHaveBeenCalledTimes(2);
   });
 
   it("dims a revoked broker and offers its actions from the row menu", async () => {

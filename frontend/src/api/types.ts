@@ -442,6 +442,22 @@ export interface BrokerStatus {
     challenges: string[];
   };
   versions: BrokerVersions;
+  /** `null` from a broker that could not count them, or one older than the count. */
+  issued: { total: number; revoked: number } | null;
+}
+
+/** A certificate a broker issued, as last synced; times are ASN.1 `YYYYMMDDHHMMSSZ`. */
+export interface BrokerCert {
+  broker_id: number;
+  serial: string;
+  common_name: string | null;
+  sans: string[];
+  not_before: string;
+  not_after: string;
+  issuer_serial: string;
+  revoked_at: string | null;
+  revocation_reason: number | null;
+  changed: number;
 }
 
 export type BrokerError =

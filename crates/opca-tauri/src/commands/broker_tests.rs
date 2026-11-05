@@ -19,6 +19,7 @@ fn handler() -> impl Handler {
         fetch_broker_offer,
         enrol_broker,
         list_brokers,
+        list_broker_certs,
         broker_status,
         renew_broker,
         renew_all_brokers,
@@ -100,8 +101,9 @@ fn listing_without_a_broker_call_never_mints_the_operator() {
     let h = Harness::with_ca(vec![], handler());
 
     let listed = h.invoke("list_brokers", json!({})).unwrap();
+    let certs = h.invoke("list_broker_certs", json!({})).unwrap();
 
-    assert_eq!(listed, json!([]));
+    assert_eq!((listed, certs), (json!([]), json!([])));
     assert!(h.op_calls(&[]).is_empty());
 }
 

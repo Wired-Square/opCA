@@ -5,6 +5,7 @@
 mod support;
 
 use opca_acme_api::IssuerState;
+use opca_acme_broker::Broker as Daemon;
 use opca_acme_broker::{ATTEMPTS, Mode, SCHEME};
 use opca_core::error::OpcaError;
 use opca_core::services::acme_broker::{BrokerError, BrokerNotice, Renewal, fetch_offer, issuance};
@@ -68,7 +69,10 @@ struct Enrolled {
 }
 
 async fn enrolled(configured: &[&str]) -> Enrolled {
-    let running = serve(private_tempdir(), configured).await;
+    enrolled_on(serve(private_tempdir(), configured).await).await
+}
+
+async fn enrolled_on(running: Running) -> Enrolled {
     let mut ca = TestCa::new();
     let operator = first_operator(&ca);
     let pairing = pairing(&running);
@@ -422,4 +426,97 @@ async fn a_vpn_client_of_the_same_root_is_refused_where_the_operator_is_accepted
     let status = ca.ca.broker_status(&operator, id).unwrap();
     assert_eq!(status.subordinate_serial, row(&ca, id).subordinate_serial);
     assert!(row(&ca, id).last_contact > stamped, "stamped again");
+}
+
+/// The certificates opCA has synced from its brokers: serial and whether revoked.
+fn synced(ca: &TestCa) -> Vec<(String, bool)> {
+    let mut synced: Vec<_> = ca
+        .ca
+        .list_broker_certs()
+        .unwrap()
+        .into_iter()
+        .map(|cert| (cert.serial, cert.revoked_at.is_some()))
+        .collect();
+    synced.sort();
+    synced
+}
+
+fn serials(synced: &[(&str, bool)]) -> Vec<(String, bool)> {
+    synced.iter().map(|&(s, r)| (s.to_owned(), r)).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn enrolment_status_and_renewal_sync_the_issued_list_a_page_at_a_time() {
+    let state = private_tempdir();
+    let (daemon, uri) = Daemon::start(&config(state.path(), &[])).await.unwrap();
+    let running = run(state, daemon.with_issued_page(1), uri).await;
+    record(running.broker.acme(), "11", "a.home.example").await;
+    record(running.broker.acme(), "22", "b.home.example").await;
+
+    let Enrolled {
+        running,
+        mut ca,
+        operator,
+        id,
+    } = enrolled_on(running).await;
+    assert_eq!(synced(&ca), serials(&[("11", false), ("22", false)]));
+    let [cert, ..] = &ca
+        .ca
+        .ca_database
+        .as_ref()
+        .unwrap()
+        .query_broker_certs()
+        .unwrap()[..]
+    else {
+        panic!("nothing synced");
+    };
+    assert_eq!(cert.broker_id, id);
+    assert!(cert.not_after.len() == 15 && cert.not_after.ends_with('Z'));
+
+    let store = running.broker.acme();
+    store.revoke("11", Some(1)).await.unwrap();
+    record(store, "33", "c.home.example").await;
+    stores(&ca, 1);
+    let status = ca.ca.broker_status(&operator, id).unwrap();
+    assert_eq!(
+        synced(&ca),
+        serials(&[("11", true), ("22", false), ("33", false)])
+    );
+    assert_eq!(status.issued.map(|c| (c.total, c.revoked)), Some((3, 1)));
+
+    store.revoke("22", None).await.unwrap();
+    issues(&ca, 1);
+    stores(&ca, 1);
+    let renewal = ca.ca.renew_broker(&operator, id, false).unwrap();
+    assert!(renewal.is_renewed(), "{renewal:?}");
+    assert_eq!(
+        synced(&ca),
+        serials(&[("11", true), ("22", true), ("33", false)])
+    );
+    assert!(ca.op.is_done());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_sync_leaves_the_status_standing() {
+    let Enrolled {
+        running,
+        mut ca,
+        operator,
+        id,
+    } = enrolled(&[]).await;
+    let path = running.state.path().join("acme.db");
+    let pool = wslib_db_sqlite::sqlx::SqlitePool::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap();
+    wslib_db_sqlite::sqlx::query("DROP TABLE certificates")
+        .execute(&pool)
+        .await
+        .unwrap();
+    stores(&ca, 1);
+
+    let status = ca.ca.broker_status(&operator, id).unwrap();
+
+    assert_eq!(status.issued, None, "the broker can't count either");
+    assert!(synced(&ca).is_empty());
+    assert!(ca.op.is_done(), "the database was still stored");
 }

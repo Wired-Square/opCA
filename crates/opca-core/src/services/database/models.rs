@@ -377,6 +377,23 @@ pub struct Broker {
     pub expiry_date: Option<String>,
 }
 
+/// A certificate an ACME broker issued, as last synced from it; times are OpenSSL format.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BrokerCert {
+    pub broker_id: i64,
+    pub serial: String,
+    pub common_name: Option<String>,
+    pub sans: Vec<String>,
+    pub not_before: String,
+    pub not_after: String,
+    /// The serial of the broker's subordinate that issued it.
+    pub issuer_serial: String,
+    pub revoked_at: Option<String>,
+    pub revocation_reason: Option<u8>,
+    /// The broker's change sequence: the highest is where the next sync starts.
+    pub changed: i64,
+}
+
 /// Schema migration report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationInfo {

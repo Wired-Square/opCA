@@ -121,6 +121,11 @@ new chain doesn't reach the broker, the next renewal signs afresh.
 CRL, regenerates the CRL and tells the broker, which stops serving ACME. The revocation stands even
 if the broker can't be reached; revoke again to tell it once it's back.
 
+**Issued certificates.** The page's **Issued** column counts the certificates each broker has
+issued and revoked; click it to list them, with their names, expiry and state. opCA brings the
+list up to date whenever it talks to the broker (status, enrolment, renewal, revoke), and keeps it
+in the CA database. A broker that can't send it doesn't stop the call: opCA logs it and carries on.
+
 **No external account binding yet.** ACME clients can't be required to use EAB. Any client that
 can reach the ACME port can register, and still gets only names inside the permitted domains whose
 challenges it passes. Limit who can reach port 443 at the network.

@@ -127,7 +127,7 @@ Organised by concern under [src/](../crates/opca-core/src):
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v18). A dump that fails to
+    automatic, forward-only migrations (currently v19). A dump that fails to
     parse or never reaches its `COMMIT` (truncated) is rejected as
     `OpcaError::DatabaseUnreadable`.
   - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
@@ -498,6 +498,17 @@ or not the broker answers (`BrokerNotice::Told` / `NotTold`), and revoking an
 already revoked row only tells the broker again, which is how an unreachable
 broker is retried. The caller regenerates the CRL, as after any revoke.
 
+**Issued list.** Whenever opCA talks to an enrolled broker (status, enrolment,
+renewal, revoke), `sync_issued` pages through `GET /v1/issued` from the
+broker's cursor and writes the rows to `broker_certs` (schema v19), keyed by
+broker id and serial, before the database is stored. Each row keeps the
+broker's `changed` sequence, and the highest one per broker is its cursor, so
+a revocation of a row already synced replaces it. Times are converted to the
+database's OpenSSL format. The sync rides on the call and costs no `op`
+round-trip of its own; a failure, such as a broker older than the list, is
+logged and never fails the call. `issuer_serial` tells a reopened broker's
+earlier subordinate apart; nothing filters on it yet.
+
 **Concerns** (`concern.rs`). `concerns` flags an active broker with a `url`
 whose subordinate expires within 30 days, whose `last_contact` is older than
 35 days, or which is signed but not delivered. The dashboard tile, the ACME
@@ -507,16 +518,18 @@ thresholds (see [What it checks](#what-it-checks)).
 Surfaces:
 
 - **Tauri** — [commands/broker.rs](../crates/opca-tauri/src/commands/broker.rs):
-  `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `broker_status`,
-  `renew_broker`, `renew_all_brokers` and `revoke_broker`. The connection mints
+  `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `list_broker_certs`,
+  `broker_status`, `renew_broker`, `renew_all_brokers` and `revoke_broker`. The connection mints
   the operator on the first broker call and keeps it (`Connection::operator`),
   minting another after 20 hours. A reconnect drops it. Every command but the
-  offer and the list runs under `withLock`, status included, since it stamps
+  offer and the lists runs under `withLock`, status included, since it stamps
   `last_contact` and stores the database. `revoke_broker` regenerates the CRL
   as the certificate revoke does.
 - **Frontend** — [pages/AcmeServers.tsx](../frontend/src/pages/AcmeServers.tsx)
   (`/acme`, "ACME Servers" in the sidebar) lists brokers with a `url`: state,
-  domains, subordinate expiry, last contact and concerns. Enrol Broker opens
+  domains, subordinate expiry, last contact, concerns and the count of
+  certificates each issued, which expands into a table of them (name and
+  other SANs, expiry, valid, expired or revoked). Enrol Broker opens
   [EnrolBrokerDialog](../frontend/src/components/EnrolBrokerDialog.tsx) (paste,
   review the offer, confirm), and Renew All, per-row Status, Renew and Revoke
   sit beside it. A `DomainsChanged` outcome offers Confirm and Renew. The
