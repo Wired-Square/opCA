@@ -4,7 +4,7 @@
 use std::fs::DirBuilder;
 use std::io;
 use std::net::{Ipv6Addr, SocketAddr};
-use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use axum::Router;
@@ -171,6 +171,8 @@ pub async fn serve_health(
         removed => removed?,
     }
     let listener = UnixListener::bind(&socket)?;
+    // The console connects as group root without DAC override, so it needs the group's write bit.
+    std::fs::set_permissions(&socket, PermissionsExt::from_mode(0o660))?;
     let healthz = move || {
         let body = serde_json::to_vec(&health()).expect("the health serialises");
         async move { ([(header::CONTENT_TYPE, "application/json")], body).into_response() }

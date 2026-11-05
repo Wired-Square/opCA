@@ -181,6 +181,8 @@ async fn health_answers_only_healthz_under_the_apps_base() {
         serde_json::from_str::<serde_json::Value>(&body).unwrap(),
         serde_json::json!({"state": "enrolled", "api_port": 1, "acme_port": 2})
     );
+    let mode = fs::metadata(&socket).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o660, "the console connects through the group");
     let (status, _) = socket_answer(&socket, "/healthz").await;
     assert!(status.ends_with("404 Not Found"), "{status}");
 
