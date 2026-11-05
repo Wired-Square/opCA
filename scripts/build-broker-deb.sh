@@ -1,8 +1,8 @@
 #!/bin/sh
 # Builds opca-acme-broker and its .deb for one Linux platform in a throwaway
-# container of that platform (emulated when it isn't the host's), from a
-# vendored copy of the two crates. The binaries land in <work>/<arch>/bin and
-# the .deb in <work>/<arch>/deb.
+# container of that platform (emulated when it isn't the host's), from the
+# vendored copy stage-broker-src.sh makes. The binaries land in
+# <work>/<arch>/bin and the .deb in <work>/<arch>/deb.
 #
 # usage: scripts/build-broker-deb.sh [--platform linux/arm64|linux/amd64]
 set -eu
@@ -19,28 +19,12 @@ case $platform in
 esac
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-crate=$root/crates/opca-acme-broker
 work=${OPCA_ACME_DOCKER_WORK:-$root/target/acme-docker}
 out=$work/$arch
 
-rm -rf "$work/src" "$out/deb" "$out/bin"
-mkdir -p "$work/src/crates" "$work/src/.cargo" "$out/bin"
-rsync -a --exclude target "$root/crates/opca-acme-api" "$crate" "$work/src/crates/"
-sed -i.orig '/^\[dev-dependencies\]/,$d' "$work/src/crates/opca-acme-broker/Cargo.toml"
-cp "$root/Cargo.lock" "$root/LICENSE" "$work/src/"
-version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -1)
-cat > "$work/src/Cargo.toml" <<TOML
-[workspace]
-members = ["crates/opca-acme-api", "crates/opca-acme-broker"]
-resolver = "3"
-
-[workspace.package]
-version = "$version"
-edition = "2024"
-rust-version = "1.99"
-TOML
-cp "$root/.cargo/config.toml" "$work/src/.cargo/config.toml"
-(cd "$work/src" && cargo vendor --versioned-dirs vendor >> .cargo/config.toml)
+rm -rf "$out/deb" "$out/bin"
+mkdir -p "$out/bin"
+"$root/scripts/stage-broker-src.sh" "$work"
 
 docker run --rm --platform "$platform" --name "opca-deb-$arch-$$" -v "$work:/work" \
     -w /work/src -e "CARGO_TARGET_DIR=/work/$arch/target" -e "ARCH=$arch" \

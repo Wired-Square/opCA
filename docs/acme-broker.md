@@ -239,6 +239,49 @@ kept, and the state directory is untouched. Coming from a broker that ran step-c
 `step_ca` from `broker.toml` if you set it, and then the `step-ca` package if nothing else uses
 it. The old `step-ca*` files in the state directory are no longer read.
 
+## As an ApplianceOS app
+
+The broker also ships as the `opca-acme` app for ApplianceOS, one image per architecture (arm64
+for now). It holds only the broker; there's no `opca-acme` command line in it. Its manifest
+declares:
+
+| | |
+|---|---|
+| Listeners | `api` on 9443 (opCA) and `acme` on 8443 (appliances), both on at install |
+| Volume | `data`, at `/data`: the state lives in `/data/state` |
+| Options | `host` (required) and `domains` (optional), as in `broker.toml` |
+
+**Set `host` after installing.** Until it's set the app is healthy but does nothing else: it
+reports that it needs a host, answers both ports with a 503 saying so, and makes no keys. Setting
+the option restarts the app, which then starts as the broker does on Debian and logs the pairing
+URI. On ApplianceOS after 0.1.10 the URI names the API's host port as the console mapped it,
+which may not be 9443. An
+appliance's ACME directory is `https://<host>:<acme port>/acme/directory`, with the `acme`
+listener's host port.
+
+Options come first; `/data/broker.toml`, with the same `host` and `domains` keys, second. A
+blank option gives way to it.
+
+The app is backed up cold, with the app stopped, so the backup is whole but includes the
+subordinate key: keep app backups as carefully as the key itself.
+
+To build it and pack it into an archive the console's **Apps › Install** takes:
+
+```sh
+scripts/build-acme-app.sh --keys <dir> --platform linux/arm64
+```
+
+It needs Docker with buildx, OpenSSL 3, `jq` and an ApplianceOS checkout (`APPLIANCEOS`, by
+default `../ApplianceOS`). It signs with the throwaway keys in `<dir>`, made there if it holds
+none, as source `opca-test` (`--source` changes it); add `<dir>/root.pem` under **Apps › Sources**
+with that name before installing. The image and the archive land in `target/acme-app/`. To run
+the image locally as the console would:
+
+```sh
+OPCA_ACME_APP_IMAGE=$PWD/target/acme-app/opca-acme-<version>-arm64.tar \
+    cargo test -p opca-acme-broker --test broker_docker the_app_image
+```
+
 ## Building the `.deb`
 
 ```sh

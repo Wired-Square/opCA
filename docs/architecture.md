@@ -1074,6 +1074,10 @@ Organised under [src/](../crates/opca-acme-broker/src):
   `host` (required), `listen` (`[::]:9443`), `domains`, `state_dir`
   (`/var/lib/opca-acme`), `acme_listen` (`[::]:443`). Unknown keys are
   refused, so a `step_ca` left from the step-ca broker stops the start.
+  `advertised_port`, never read from the file, is the port the pairing URI
+  names when it isn't `listen`'s.
+- [app.rs](../crates/opca-acme-broker/src/app.rs) — the broker as an
+  ApplianceOS app; see [As an ApplianceOS app](#as-an-applianceos-app).
 - [broker.rs](../crates/opca-acme-broker/src/broker.rs) — `Broker::start`
   checks the host and the state directory
   (`wslib_service::private_directory`), then loads or makes the subordinate key
@@ -1262,6 +1266,27 @@ TLS config back and stops the ACME listener. `acme.db` and the listener's pair
 stay: the store's accounts and issued certificates are the host's, and the pair
 is reissued on the next enrolment, since its chain is no longer the enrolled one.
 
+### As an ApplianceOS app
+
+`opca-acme-broker --app` is the image's entrypoint. `App::load` reads `host`
+and `domains` from `/data/options.json`, which the console writes from the
+manifest's options before each start, and then from the app's own
+`/data/broker.toml` (the same two keys), a blank value giving way to the next.
+The listeners are fixed at the manifest's ports, `api` 9443 and `acme` 8443,
+and the state lives in `/data/state` (0700). `APPLIANCE_LISTENER_API_PORT`, the
+host port the console mapped, becomes `advertised_port`, so the pairing URI
+names the port opCA dials; both variables are reported, and absent ones fall
+back to the manifest's ports.
+
+With no host, `serve_needing_host` touches no state: it binds both listeners,
+answers every request on them with a plain-HTTP 503 saying the broker needs a
+host, and is healthy. Setting the option restarts the container, which then
+starts the broker as usual. `serve_health` answers only
+`GET /apps/opca-acme/healthz` on `/run/appliance/app.sock`, with the state
+(`needs_host`, `enrolling`, `enrolled` or `revoked`) and both ports. The
+pairing URI is in the container's log. The console stops the app before it
+snapshots `/data`, so `acme.db` needs no backup hooks.
+
 ### Packaging and verification
 
 [debian/](../crates/opca-acme-broker/debian) holds the systemd unit
@@ -1272,10 +1297,13 @@ the crate's `Cargo.toml` drives `cargo-deb`; the `acme-broker` job in
 [build.yml](../.github/workflows/build.yml) builds `-p opca-acme-broker` alone
 against the system libssl3 and attaches the `.deb` to `v*` releases.
 
+[scripts/stage-broker-src.sh](../scripts/stage-broker-src.sh) stages the two
+crates without their dev-dependencies, with every dependency vendored, for
+builds that can't reach the registries.
 [scripts/build-broker-deb.sh](../scripts/build-broker-deb.sh) `--platform
-linux/arm64|linux/amd64` builds the Linux binaries and the `.deb` in a throwaway
-`rust:1.99-bookworm` container of that platform (emulated when it isn't the
-host's) from a vendored copy of the two crates, into `target/acme-docker/<arch>/`.
+linux/arm64|linux/amd64` builds the Linux binaries and the `.deb` from it in a
+throwaway `rust:1.99-bookworm` container of that platform (emulated when it
+isn't the host's), into `target/acme-docker/<arch>/`.
 [tests/docker.sh](../crates/opca-acme-broker/tests/docker.sh) takes the same
 flag, builds, and runs
 [tests/broker_docker.rs](../crates/opca-acme-broker/tests/broker_docker.rs)
@@ -1283,6 +1311,24 @@ with `OPCA_ACME_DOCKER_TEST=1` in containers of that platform: the command
 line's privilege drop and reopen, and the `.deb` installed, enrolled and
 serving the ACME listener's certificate for `host` under systemd in
 `debian:bookworm`. Without the variable those tests skip.
+
+[scripts/build-acme-app.sh](../scripts/build-acme-app.sh) `--keys <dir>
+--platform linux/arm64` builds the app image from the staged crates with
+[appliance/Dockerfile](../crates/opca-acme-broker/appliance/Dockerfile) on the
+`appliance-image` buildx builder: the broker compiled in `rust:1.99-bookworm`,
+run on `distroless/cc-debian12`, whose glibc and libssl3 are the same Debian
+release's. On arm64 it links with lld and `--fix-cortex-a53-843419`, since
+bookworm's ld leaves an erratum 843419 site even with its fix on, and checks
+the binary with `wslib-appliance-xtask erratum-843419`. It labels the image with the manifest that
+[examples/appliance-label.rs](../crates/opca-acme-broker/examples/appliance-label.rs)
+builds from `wslib-appliance-types`' `AppManifest` and checks with its
+validator (its tests run under `cargo test`), writes a docker-load tarball to
+`target/acme-app/`, and packs it with a signed index through ApplianceOS's
+`make-app-archive.sh`, with throwaway keys. With `OPCA_ACME_APP_IMAGE` naming
+the tarball, `broker_docker.rs` runs the image as the console would (its own
+uid in group 0, no capabilities, the `data` and socket volumes, a mapped API
+port): healthy and refusing with no host, then, with `host` in
+`options.json` and a restart, enrolled and serving ACME.
 
 ---
 

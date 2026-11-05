@@ -23,6 +23,9 @@ pub struct Config {
     /// Where the broker serves ACME.
     #[serde(default = "default_acme_listen")]
     pub acme_listen: SocketAddr,
+    /// The port opCA dials when it isn't `listen`'s, as behind a container's mapped port.
+    #[serde(skip)]
+    pub advertised_port: Option<u16>,
 }
 
 impl Config {
@@ -34,6 +37,11 @@ impl Config {
 
     pub fn parse(text: &str) -> Result<Self, Error> {
         Ok(toml::from_str(text)?)
+    }
+
+    /// The port the pairing URI names.
+    pub fn port(&self) -> u16 {
+        self.advertised_port.unwrap_or(self.listen.port())
     }
 }
 

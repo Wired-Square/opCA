@@ -158,7 +158,7 @@ fn issue(config: &Config) -> Result<PairingUri, Error> {
     Ok(PairingUri::new(
         SCHEME,
         &config.host,
-        config.listen.port(),
+        config.port(),
         SpkiSha256::from(*fingerprint.0.as_bytes()),
         code,
     )?)

@@ -3,7 +3,9 @@
 //! on a network of its own with an authoritative DNS server. Runs only
 //! with `OPCA_ACME_DOCKER_TEST=1`, `OPCA_ACME_DOCKER_PLATFORM`, and
 //! `OPCA_ACME_DOCKER_BIN` and `OPCA_ACME_DOCKER_DEB` naming that platform's
-//! binaries and `.deb`; see `docker.sh`.
+//! binaries and `.deb`; see `docker.sh`. The ApplianceOS app image runs as the
+//! console would run it, with `OPCA_ACME_APP_IMAGE` naming its docker-load
+//! tarball; see `scripts/build-acme-app.sh`.
 
 #![cfg(unix)]
 
@@ -18,6 +20,7 @@ use opca_acme_api::{
     Challenge, Enrolment, EnrolmentOffer, IssuanceConfig, IssuedPage, IssuerState, Status, path,
 };
 use opca_acme_broker::SCHEME;
+use opca_acme_broker::app::{AppState, Health};
 use support::{Api, TestCa, acme_connect};
 use wslib_crypto_x509::pem;
 use wslib_pairing::PairingUri;
@@ -34,6 +37,7 @@ struct Docker {
     /// The network's first three octets: hosts below .128 are ours to assign.
     subnet: String,
     containers: Vec<String>,
+    volumes: Vec<String>,
 }
 
 impl Docker {
@@ -61,6 +65,7 @@ impl Docker {
                     prefix,
                     subnet,
                     containers: Vec::new(),
+                    volumes: Vec::new(),
                 };
             }
             refusals += &text(&made.stderr);
@@ -77,12 +82,23 @@ impl Docker {
         self.containers.push(name.clone());
         name
     }
+
+    fn volume(&mut self, role: &str) -> String {
+        let name = format!("{}-{role}", self.prefix);
+        let made = docker(&["volume", "create", &name], 30);
+        assert!(made.status.success(), "{}", text(&made.stderr));
+        self.volumes.push(name.clone());
+        name
+    }
 }
 
 impl Drop for Docker {
     fn drop(&mut self) {
         for container in &self.containers {
             docker(&["rm", "-f", container], 30);
+        }
+        for volume in &self.volumes {
+            docker(&["volume", "rm", volume], 30);
         }
         docker(&["network", "rm", &self.prefix], 30);
     }
@@ -782,4 +798,176 @@ async fn the_deb_installs_enrols_and_serves_real_acme_clients_under_systemd() {
         .parse()
         .unwrap();
     assert!(seconds < 30, "{stopped}");
+}
+
+/// The console's uid for an app is its own, not the image's.
+const APP_USER: &str = "70000:0";
+const APP_API_PORT: &str = "19443";
+
+/// The app's health as the console probes it, through a container sharing its socket volume.
+fn app_health(socket: &str) -> Option<Health> {
+    let mount = format!("{socket}:/run/appliance");
+    let probed = docker(
+        &[
+            "run",
+            "--rm",
+            "-v",
+            &mount,
+            RUNTIME,
+            "curl",
+            "-sf",
+            "--unix-socket",
+            "/run/appliance/app.sock",
+            "http://localhost/apps/opca-acme/healthz",
+        ],
+        60,
+    );
+    serde_json::from_slice(&probed.stdout).ok()
+}
+
+fn wait_for_state(socket: &str, state: AppState) -> Health {
+    wait_for(&format!("the app to report {state:?}"), 120, || {
+        app_health(socket).filter(|health| health.state == state)
+    })
+}
+
+/// A plain HTTP GET of `path` at `address`: its status line and body.
+fn plain_get(address: std::net::SocketAddr, path: &str) -> (String, String) {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    (head.lines().next().unwrap().into(), body.into())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_image_needs_a_host_then_enrols() {
+    let Ok(tarball) = std::env::var("OPCA_ACME_APP_IMAGE") else {
+        eprintln!("skipped: set OPCA_ACME_APP_IMAGE to run the ApplianceOS app image");
+        return;
+    };
+    let loaded = docker(&["load", "-q", "-i", &tarball], 120);
+    assert!(loaded.status.success(), "{}", text(&loaded.stderr));
+    let loaded = text(&loaded.stdout);
+    let image = loaded
+        .lines()
+        .find_map(|line| line.strip_prefix("Loaded image: "))
+        .unwrap_or_else(|| panic!("{loaded}"))
+        .trim()
+        .to_owned();
+    let mut run = Docker::new();
+    let (data, socket) = (run.volume("data"), run.volume("socket"));
+    let app = run.name("app");
+    let (data_mount, socket_mount) = (format!("{data}:/data"), format!("{socket}:/run/appliance"));
+    let api_port = format!("APPLIANCE_LISTENER_API_PORT={APP_API_PORT}");
+    let started = docker(
+        &[
+            "run",
+            "-d",
+            "--init",
+            "--name",
+            &app,
+            "--network",
+            &run.prefix,
+            "--user",
+            APP_USER,
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "-v",
+            &data_mount,
+            "-v",
+            &socket_mount,
+            "-p",
+            "127.0.0.1::9443",
+            "-p",
+            "127.0.0.1::8443",
+            "-e",
+            &api_port,
+            &image,
+        ],
+        60,
+    );
+    assert!(started.status.success(), "{}", text(&started.stderr));
+
+    let health = wait_for_state(&socket, AppState::NeedsHost);
+    assert_eq!((health.api_port, health.acme_port), (19443, 8443));
+    for (port, path) in [
+        ("9443/tcp", path::ENROLMENT),
+        ("8443/tcp", "/acme/directory"),
+    ] {
+        let (status, body) = plain_get(published(&app, port), path);
+        assert!(status.ends_with("503 Service Unavailable"), "{status}");
+        assert!(body.contains("needs a host"), "{body}");
+    }
+
+    let options = format!(
+        "printf '%s' '{{\"host\": \"acme.home.example\", \"domains\": [\"home.example\"]}}' \
+         > /data/options.json && chown {APP_USER} /data/options.json"
+    );
+    let written = docker(
+        &[
+            "run",
+            "--rm",
+            "-v",
+            &data_mount,
+            RUNTIME,
+            "sh",
+            "-c",
+            &options,
+        ],
+        60,
+    );
+    assert!(written.status.success(), "{}", text(&written.stderr));
+    let restarted = docker(&["restart", "-t", "30", &app], 60);
+    assert!(restarted.status.success(), "{}", text(&restarted.stderr));
+    wait_for_state(&socket, AppState::Enrolling);
+
+    let logs = docker(&["logs", &app], 30);
+    let logs = text(&logs.stdout) + &text(&logs.stderr);
+    let uri = logs
+        .split_whitespace()
+        .find(|word| word.starts_with("opca-enrol://"))
+        .unwrap_or_else(|| panic!("no pairing URI logged:\n{logs}"));
+    let api = Api {
+        uri: PairingUri::parse(SCHEME, uri).unwrap(),
+        address: published(&app, "9443/tcp"),
+    };
+    assert_eq!(api.uri.port(), 19443);
+    let (_, body) = api.call(None, "GET", path::ENROLMENT, "").await.unwrap();
+    let offer: EnrolmentOffer = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        (offer.host.as_str(), offer.configured_domains.as_slice()),
+        ("acme.home.example", &["home.example".to_owned()][..])
+    );
+    let mut ca = TestCa::new();
+    let (chain, _, _) = ca.sign(&offer.csr_pem, DOMAINS);
+    let (code, body) = api.post(&api.enrolment(&chain, DOMAINS)).await;
+    assert_eq!(code, 200, "{body}");
+    let status: Status = serde_json::from_str(&body).unwrap();
+    assert_eq!(status.state, IssuerState::Issuing, "{body}");
+    wait_for_state(&socket, AppState::Enrolled);
+
+    let chain = pem::certificates(&chain).unwrap();
+    let (mut acme, presented) = acme_connect(published(&app, "8443/tcp"), chain.last().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(presented[1], chain[0]);
+    let (code, _) = acme.call("GET", "/acme/directory", "").await.unwrap();
+    assert_eq!(code, 200);
+
+    let stopped = docker(&["stop", "-t", "30", &app], 60);
+    assert!(stopped.status.success(), "{}", text(&stopped.stderr));
+    let exit = docker(&["inspect", "-f", "{{.State.ExitCode}}", &app], 30);
+    assert_eq!(text(&exit.stdout).trim(), "0", "{}", text(&exit.stderr));
 }

@@ -1,8 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use opca_acme_broker::app::{self, App, AppState};
 use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error, Mode, cli};
 use tokio::signal::unix::{SignalKind, signal};
 use wslib_http_server::{Bounds, Listener};
@@ -11,9 +12,16 @@ use wslib_pairing::{SpentBy, Status};
 /// Past the listeners' 10 s drain.
 const GRACE: Duration = Duration::from_secs(20);
 
+/// How the broker was asked to run.
+enum Run {
+    Config(PathBuf),
+    /// As an ApplianceOS app.
+    App,
+}
+
 fn main() -> ExitCode {
-    let path = match config_path() {
-        Ok(path) => path,
+    let run = match run() {
+        Ok(run) => run,
         Err(usage) => {
             eprintln!("{usage}");
             return ExitCode::from(2);
@@ -24,7 +32,23 @@ fn main() -> ExitCode {
         .run(|stop| async move {
             wslib_telemetry::Telemetry::new("info").init();
             let mut reopened = signal(SignalKind::hangup())?;
-            let config = Config::load(&path)?;
+            let (config, app) = match run {
+                Run::Config(path) => (Config::load(&path)?, None),
+                Run::App => {
+                    let app = App::load(Path::new(app::DATA), |name| std::env::var(name).ok())?;
+                    match app.config()? {
+                        Some(config) => (config, Some(app)),
+                        None => {
+                            let bind = |port| Listener::bind(app::any(port), Bounds::SERVING);
+                            let (api, acme) =
+                                (bind(app::API_PORT).await?, bind(app::ACME_PORT).await?);
+                            return app
+                                .serve_needing_host(app::SOCKET.into(), api, acme, stop.token())
+                                .await;
+                        }
+                    }
+                }
+            };
             let pid_file = cli::daemon_pid_file(&config.state_dir);
             let listen = config.listen;
             let (broker, uri) = Broker::start(&config).await?;
@@ -63,6 +87,14 @@ fn main() -> ExitCode {
                     }
                 }
             });
+            let health = app.map(|app| {
+                let broker = broker.clone();
+                tokio::spawn(app::serve_health(
+                    app::SOCKET.into(),
+                    move || app.health(AppState::from(&broker.mode())),
+                    stop.token().cancelled_owned(),
+                ))
+            });
             let token = stop.token();
             let acme = tokio::spawn(
                 broker
@@ -71,6 +103,9 @@ fn main() -> ExitCode {
             );
             let served = opca_acme_broker::serve(broker.clone(), listener, stop).await;
             let _ = acme.await;
+            if let Some(health) = health {
+                health.await??;
+            }
             let _ = std::fs::remove_file(&pid_file);
             served?;
             Ok::<_, Error>(())
@@ -78,11 +113,12 @@ fn main() -> ExitCode {
         .map_or_else(ExitCode::from, |()| ExitCode::SUCCESS)
 }
 
-fn config_path() -> Result<PathBuf, &'static str> {
+fn run() -> Result<Run, &'static str> {
     let mut args = std::env::args_os().skip(1);
     match (args.next(), args.next(), args.next()) {
-        (None, ..) => Ok(CONFIG_PATH.into()),
-        (Some(flag), Some(path), None) if flag == "--config" => Ok(path.into()),
-        _ => Err("usage: opca-acme-broker [--config <path>]"),
+        (None, ..) => Ok(Run::Config(CONFIG_PATH.into())),
+        (Some(flag), Some(path), None) if flag == "--config" => Ok(Run::Config(path.into())),
+        (Some(flag), None, _) if flag == "--app" => Ok(Run::App),
+        _ => Err("usage: opca-acme-broker [--config <path> | --app]"),
     }
 }

@@ -98,7 +98,7 @@ impl Broker {
             code: Arc::new(code),
             mode: RwLock::new(mode),
             host: config.host.clone(),
-            port: config.listen.port(),
+            port: config.port(),
             domains: config.domains.clone(),
             state: state.into(),
             acme_listener: AcmeListener::new(config.acme_listen, acme_server),

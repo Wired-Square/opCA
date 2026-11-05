@@ -2,6 +2,7 @@
 
 pub mod acme;
 mod api;
+pub mod app;
 mod broker;
 pub mod cli;
 mod config;
