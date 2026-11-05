@@ -17,7 +17,7 @@ use wslib_crypto_x509::{
 
 use super::store::{Certificate, NewCertificate, Order, Store};
 use super::{Problem, ProblemType};
-use crate::enrolment::host_within;
+use crate::enrolment::{decimal, host_within};
 
 const DAY: Duration = Duration::from_secs(86_400);
 /// As step-ca does, for clients whose clocks run a little behind.
@@ -28,6 +28,7 @@ pub struct Issuer {
     authority: Authority,
     /// The subordinate and any intermediates above it, without the root, as step-ca served them.
     chain_pem: String,
+    subordinate_serial: String,
     subordinate_not_after: SystemTime,
     config: IssuanceConfig,
 }
@@ -42,7 +43,7 @@ impl Issuer {
         let mut chain = pem::certificates(chain_pem)?;
         chain.pop();
         let subordinate = chain.first().ok_or("the chain holds no subordinate")?;
-        let subordinate_not_after = inspect(subordinate)?.not_after;
+        let view = inspect(subordinate)?;
         let chain_pem = chain
             .iter()
             .map(|der| pem::encode(CERTIFICATE, der))
@@ -51,7 +52,8 @@ impl Issuer {
         Ok(Self {
             authority,
             chain_pem,
-            subordinate_not_after,
+            subordinate_serial: decimal(&view.serial),
+            subordinate_not_after: view.not_after,
             config,
         })
     }
@@ -110,6 +112,7 @@ impl Issuer {
             not_before: validity.not_before,
             not_after: validity.not_after,
             chain_pem,
+            issuer_serial: self.subordinate_serial.clone(),
         })
     }
 

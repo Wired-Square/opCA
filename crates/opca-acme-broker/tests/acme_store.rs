@@ -4,9 +4,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use opca_acme_api::Challenge as ChallengeType;
+use opca_acme_api::{Challenge as ChallengeType, IssuedCounts};
 use opca_acme_broker::acme::store::{
-    AccountStatus, AuthorisationStatus, ChallengeStatus, Error, Expired, NewAuthorisation,
+    AccountStatus, AuthorisationStatus, ChallengeStatus, Changes, Error, Expired, NewAuthorisation,
     NewCertificate, NewOrder, Order, OrderStatus,
 };
 use opca_acme_broker::acme::{Problem, ProblemType, Store};
@@ -101,6 +101,7 @@ fn issued(serial: &str, name: &str) -> NewCertificate {
         not_before: now,
         not_after: now + 30 * 24 * HOUR,
         chain_pem: "-----BEGIN CERTIFICATE-----\n…".into(),
+        issuer_serial: "4096".into(),
     }
 }
 
@@ -146,7 +147,7 @@ async fn opening_makes_every_table_owner_only_and_reopening_migrates_nothing_twi
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(applied, [1]);
+    assert_eq!(applied, [1, 2]);
     let eab: i64 = sqlx::query_scalar("SELECT count(*) FROM eab_keys")
         .fetch_one(&pool)
         .await
@@ -541,44 +542,73 @@ async fn a_certificate_is_revoked_once() {
     ));
 }
 
+async fn record(store: &Store, account: i64, serials: &[&str]) {
+    for serial in serials {
+        let name = format!("c{serial}.home.example");
+        let order = ready_order(store, account, &name).await;
+        store
+            .record_certificate(order.id, &issued(serial, &name))
+            .await
+            .unwrap();
+    }
+}
+
+fn serials(changes: &Changes) -> Vec<&str> {
+    changes
+        .certificates
+        .iter()
+        .map(|c| c.serial.as_str())
+        .collect()
+}
+
 #[tokio::test]
-async fn the_cursor_returns_what_was_recorded_after_it_in_order() {
+async fn the_cursor_pages_through_what_changed_after_it_in_order() {
     let (_dir, store) = open().await;
     let id = account(&store, "thumb").await;
-    let mut recorded = Vec::new();
-    for (serial, name) in [("10", "a"), ("20", "b"), ("30", "c")] {
-        let name = format!("{name}.home.example");
-        let order = ready_order(&store, id, &name).await;
-        recorded.push(
-            store
-                .record_certificate(order.id, &issued(serial, &name))
-                .await
-                .unwrap(),
-        );
-    }
-    assert!(recorded.windows(2).all(|pair| pair[0].id < pair[1].id));
+    record(&store, id, &["10", "20", "30"]).await;
 
-    let serials = |certificates: Vec<opca_acme_broker::acme::store::Certificate>| {
-        certificates
-            .into_iter()
-            .map(|c| c.serial)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        serials(store.issued_after(0, 10).await.unwrap()),
-        ["10", "20", "30"]
-    );
-    assert_eq!(
-        serials(store.issued_after(recorded[0].id, 10).await.unwrap()),
-        ["20", "30"]
-    );
-    assert_eq!(serials(store.issued_after(0, 1).await.unwrap()), ["10"]);
+    let all = store.changed_after(0, 10).await.unwrap();
+    assert_eq!((serials(&all), all.more), (vec!["10", "20", "30"], false));
     assert!(
-        store
-            .issued_after(recorded[2].id, 10)
-            .await
-            .unwrap()
-            .is_empty()
+        all.certificates
+            .windows(2)
+            .all(|pair| pair[0].changed < pair[1].changed)
+    );
+    let first = store.changed_after(0, 2).await.unwrap();
+    assert_eq!((serials(&first), first.more), (vec!["10", "20"], true));
+    let rest = store
+        .changed_after(first.certificates[1].changed, 2)
+        .await
+        .unwrap();
+    assert_eq!((serials(&rest), rest.more), (vec!["30"], false));
+    let past = store
+        .changed_after(all.certificates[2].changed, 10)
+        .await
+        .unwrap();
+    assert!(past.certificates.is_empty() && !past.more);
+}
+
+#[tokio::test]
+async fn revoking_a_certificate_already_past_the_cursor_brings_it_back() {
+    let (_dir, store) = open().await;
+    let id = account(&store, "thumb").await;
+    record(&store, id, &["10", "20"]).await;
+    let synced = store.changed_after(0, 10).await.unwrap();
+    let cursor = synced.certificates[1].changed;
+
+    store.revoke("10", Some(4)).await.unwrap();
+    record(&store, id, &["30"]).await;
+
+    let changes = store.changed_after(cursor, 10).await.unwrap();
+    assert_eq!(serials(&changes), ["10", "30"]);
+    assert_eq!(changes.certificates[0].revocation_reason, Some(4));
+    assert!(changes.certificates[0].revoked_at.is_some());
+    assert_eq!(
+        store.counts().await.unwrap(),
+        IssuedCounts {
+            total: 3,
+            revoked: 1
+        }
     );
 }
 

@@ -1086,7 +1086,10 @@ Organised under [src/](../crates/opca-acme-broker/src):
     orders, authorisations, challenges, certificates and the empty `eab_keys`.
     Statuses are RFC 8555's and move only along its §7.1.6 diagrams; a
     challenge's outcome settles its authorisation, and that its order.
-    Certificates carry an `AUTOINCREMENT` id, the cursor of `issued_after`.
+    Each certificate records the serial of the subordinate that issued it and
+    a `changed` sequence, taken above every other on insert and again on
+    revoke, which is the cursor of `changed_after`: a revocation brings a row
+    already synced back past the cursor, which its insert id would not.
   - [issue.rs](../crates/opca-acme-broker/src/acme/issue.rs) — `Issuer`
     finalises an order from a CSR: it must verify, hold only a common name
     that is one of its DNS names, name exactly the order's identifiers, use
@@ -1138,8 +1141,14 @@ survives re-enrolment.
   `Tls::reload` swaps it in on the open listener. Each enrolled route also
   checks the presented certificate (`PeerCertificates`), which turns away a
   connection opened before the swap. Routes: `GET /v1/status`, `POST /v1/csr`,
-  `PUT /v1/chain`, `POST /v1/revoke`; the enrolment routes answer 404. A
-  revoked broker answers only status and revoke.
+  `PUT /v1/chain`, `POST /v1/revoke` and `GET /v1/issued`; the enrolment
+  routes answer 404. A revoked broker answers only status, revoke and the
+  issued list. Every `Status` carries the issued and revoked counts from
+  `acme.db`, or none when it can't be read.
+  `GET /v1/issued?after=<cursor>` answers up to `ISSUED_PAGE` (500)
+  certificates changed since the cursor, oldest first, without their PEM:
+  serial, common name, SANs, validity, issuer serial, revocation and the
+  `changed` sequence. It returns the `next` cursor and whether `more` wait.
 
 ### The ACME listener
 

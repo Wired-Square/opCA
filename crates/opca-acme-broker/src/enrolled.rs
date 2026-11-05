@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use opca_acme_api::{
-    API_VERSION, ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuerState, Status, Versions,
+    API_VERSION, ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuedCertificate, IssuedPage,
+    IssuerState, Status, Versions,
 };
 use rustls::ServerConfig;
 use rustls::crypto::CryptoProvider;
@@ -12,6 +13,7 @@ use wslib_http_server::PeerCertificates;
 use wslib_pairing::SpkiSha256;
 use wslib_tls::{KeyFingerprint, Location, Serving};
 
+use crate::acme::store::Certificate;
 use crate::enrolment::{Enrolled, Mode, bad_request, decimal, internal, rfc_3339};
 use crate::{Broker, Error};
 
@@ -80,7 +82,38 @@ impl Broker {
             subordinate_not_after: rfc_3339(subordinate.not_after),
             config: enrolled.config.clone(),
             versions: self.versions(),
+            issued: None,
         }
+    }
+
+    /// `status` with the issued counts, or without them when `acme.db` can't count.
+    pub(crate) async fn counted(
+        &self,
+        status: Result<Status, ErrorBody>,
+    ) -> Result<Status, ErrorBody> {
+        let mut status = status?;
+        status.issued = self
+            .acme()
+            .counts()
+            .await
+            .inspect_err(|error| tracing::error!(%error, "counting the issued certificates"))
+            .ok();
+        Ok(status)
+    }
+
+    pub(crate) async fn issued(&self, after: u64) -> Result<IssuedPage, ErrorBody> {
+        let cursor = i64::try_from(after).map_err(bad_request)?;
+        let changes = self
+            .acme()
+            .changed_after(cursor, self.issued_page)
+            .await
+            .map_err(internal)?;
+        let certificates: Vec<_> = changes.certificates.into_iter().map(issued).collect();
+        Ok(IssuedPage {
+            next: certificates.last().map_or(after, |last| last.changed),
+            more: changes.more,
+            certificates,
+        })
     }
 
     pub(crate) fn fresh_csr(&self, enrolled: &Enrolled) -> Result<FreshCsr, ErrorBody> {
@@ -167,6 +200,20 @@ impl Broker {
             api: API_VERSION,
             broker: env!("CARGO_PKG_VERSION").into(),
         }
+    }
+}
+
+fn issued(certificate: Certificate) -> IssuedCertificate {
+    IssuedCertificate {
+        serial: certificate.serial,
+        common_name: certificate.common_name,
+        sans: certificate.sans,
+        not_before: rfc_3339(certificate.not_before),
+        not_after: rfc_3339(certificate.not_after),
+        issuer_serial: certificate.issuer_serial,
+        revoked_at: certificate.revoked_at.map(rfc_3339),
+        revocation_reason: certificate.revocation_reason,
+        changed: certificate.changed as u64,
     }
 }
 

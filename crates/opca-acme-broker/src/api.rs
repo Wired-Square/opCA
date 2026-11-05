@@ -5,14 +5,15 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{FromRequestParts, State};
 use axum::http::request::Parts;
-use axum::http::{StatusCode, header};
+use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
-use opca_acme_api::{ErrorBody, ErrorKind, path};
+use opca_acme_api::{ErrorBody, path};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use wslib_http_server::{Listener, PeerCertificates};
 
+use crate::enrolment::bad_request;
 use crate::{Broker, Enrolled, Mode};
 
 type Shared = State<Arc<Broker>>;
@@ -34,6 +35,7 @@ fn router(broker: Arc<Broker>) -> Router {
         .route(path::CSR, post(fresh_csr))
         .route(path::CHAIN, put(chain))
         .route(path::REVOKE, post(revoke))
+        .route(path::ISSUED, get(issued))
         .with_state(broker)
 }
 
@@ -49,13 +51,16 @@ async fn enrol(State(broker): Shared, body: Bytes) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     }
     match parse(&body) {
-        Ok(enrolment) => reply(broker.enrol(enrolment).await),
+        Ok(enrolment) => {
+            let status = broker.clone().enrol(enrolment).await;
+            reply(broker.counted(status).await)
+        }
         Err(refusal) => reply::<()>(Err(refusal)),
     }
 }
 
 async fn status(State(broker): Shared, Operator(enrolled): Operator) -> Response {
-    reply(broker.status(&enrolled))
+    reply(broker.counted(broker.status(&enrolled)).await)
 }
 
 async fn fresh_csr(State(broker): Shared, Operator(enrolled): Operator) -> Response {
@@ -64,13 +69,37 @@ async fn fresh_csr(State(broker): Shared, Operator(enrolled): Operator) -> Respo
 
 async fn chain(State(broker): Shared, _: Operator, body: Bytes) -> Response {
     match parse(&body) {
-        Ok(update) => reply(broker.update_chain(update).await),
+        Ok(update) => {
+            let status = broker.clone().update_chain(update).await;
+            reply(broker.counted(status).await)
+        }
         Err(refusal) => reply::<()>(Err(refusal)),
     }
 }
 
 async fn revoke(State(broker): Shared, _: Operator) -> Response {
-    reply(broker.revoke().await)
+    let status = broker.clone().revoke().await;
+    reply(broker.counted(status).await)
+}
+
+async fn issued(State(broker): Shared, _: Operator, uri: Uri) -> Response {
+    match after(uri.query()) {
+        Ok(after) => reply(broker.issued(after).await),
+        Err(refusal) => reply::<()>(Err(refusal)),
+    }
+}
+
+/// The `after` of `?after=<cursor>`, 0 when there is none.
+fn after(query: Option<&str>) -> Result<u64, ErrorBody> {
+    query
+        .into_iter()
+        .flat_map(|query| query.split('&'))
+        .find_map(|pair| pair.strip_prefix("after="))
+        .map_or(Ok(0), |cursor| {
+            cursor
+                .parse()
+                .map_err(|e| bad_request(format!("after={cursor}: {e}")))
+        })
 }
 
 /// The enrolment, for a request on a connection that presented the operator's
@@ -92,10 +121,7 @@ impl FromRequestParts<Arc<Broker>> for Operator {
 }
 
 fn parse<T: DeserializeOwned>(body: &[u8]) -> Result<T, ErrorBody> {
-    serde_json::from_slice(body).map_err(|e| ErrorBody {
-        kind: ErrorKind::BadRequest,
-        message: e.to_string(),
-    })
+    serde_json::from_slice(body).map_err(bad_request)
 }
 
 fn reply<T: Serialize>(answer: Result<T, ErrorBody>) -> Response {

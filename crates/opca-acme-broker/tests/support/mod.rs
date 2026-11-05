@@ -6,8 +6,11 @@ use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use opca_acme_api::{Challenge, Enrolment, ErrorBody, ErrorKind, IssuanceConfig};
+use opca_acme_broker::acme::Store;
+use opca_acme_broker::acme::store::{ChallengeStatus, NewAuthorisation, NewCertificate, NewOrder};
 use opca_acme_broker::{Broker, Config};
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::services::ca::CertificateAuthority;
@@ -363,4 +366,56 @@ pub fn wrong(code: &str) -> String {
 
 pub fn error(body: &str) -> ErrorKind {
     serde_json::from_str::<ErrorBody>(body).unwrap().kind
+}
+
+/// Records a certificate for `name` as finalising its order would.
+pub async fn record(store: &Store, serial: &str, name: &str) {
+    let expires = SystemTime::now() + Duration::from_secs(3600);
+    let (account, _) = store
+        .create_account(r#"{"kty":"EC"}"#, &format!("thumb-{serial}"), &[])
+        .await
+        .unwrap();
+    let order = store
+        .create_order(&NewOrder {
+            account: account.id,
+            identifiers: vec![name.into()],
+            not_before: None,
+            not_after: None,
+            expires,
+            authorisations: vec![NewAuthorisation {
+                identifier: name.into(),
+                wildcard: false,
+                expires,
+                challenges: vec![Challenge::Http01],
+            }],
+        })
+        .await
+        .unwrap();
+    let authorisation = store
+        .authorisation(order.authorisations[0])
+        .await
+        .unwrap()
+        .unwrap();
+    for status in [ChallengeStatus::Processing, ChallengeStatus::Valid] {
+        store
+            .set_challenge_status(authorisation.challenges[0].id, status, None)
+            .await
+            .unwrap();
+    }
+    let now = SystemTime::now();
+    store
+        .record_certificate(
+            order.id,
+            &NewCertificate {
+                serial: serial.into(),
+                common_name: Some(name.into()),
+                sans: vec![name.into()],
+                not_before: now,
+                not_after: now + Duration::from_secs(30 * 86_400),
+                chain_pem: String::new(),
+                issuer_serial: "4096".into(),
+            },
+        )
+        .await
+        .unwrap();
 }

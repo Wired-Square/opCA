@@ -31,6 +31,9 @@ pub const ATTEMPTS: NonZeroU32 = NonZeroU32::new(5).unwrap();
 /// 10 s drain and a client's patience.
 pub const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The most certificates one `GET /v1/issued` answers with.
+pub const ISSUED_PAGE: u32 = 500;
+
 /// The broker's state: its subordinate key and CSR, its API identity, its
 /// pairing code, and whether it is enrolled.
 pub struct Broker {
@@ -47,6 +50,7 @@ pub struct Broker {
     pub(crate) acme_listener: AcmeListener,
     acme: Store,
     lock_timeout: Duration,
+    pub(crate) issued_page: u32,
     _held: Held,
 }
 
@@ -95,6 +99,7 @@ impl Broker {
             acme_listener: AcmeListener::new(config.acme_listen),
             acme,
             lock_timeout: LOCK_TIMEOUT,
+            issued_page: ISSUED_PAGE,
             _held: held,
         };
         if let Mode::Enrolled(enrolled) = broker.mode()
@@ -138,6 +143,12 @@ impl Broker {
     /// How long a change waits for the state lock; [`LOCK_TIMEOUT`] unless set.
     pub fn with_lock_timeout(mut self, timeout: Duration) -> Self {
         self.lock_timeout = timeout;
+        self
+    }
+
+    /// How many certificates a page of `GET /v1/issued` holds; [`ISSUED_PAGE`] unless set.
+    pub fn with_issued_page(mut self, size: u32) -> Self {
+        self.issued_page = size;
         self
     }
 

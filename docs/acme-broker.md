@@ -104,7 +104,7 @@ subordinate expiry and last contact, and flag one that needs attention:
 
 The dashboard's ACME Servers tile shows the same flags. **Status**, or `opca broker status <id>`,
 asks the broker for its mode, subordinate and whether it is serving ACME (`issuing`, or
-`acme down`).
+`acme down`), and how many certificates it has issued and revoked.
 
 **Renew.** Renew one broker from its row menu or with `opca broker renew <id>`, or every broker
 with **Renew All** or `opca broker renew --all`. Renewal is a deliberate action: do it at each
@@ -164,8 +164,8 @@ told, which is expected here.
 ## Revoke
 
 When opCA revokes the subordinate and tells the broker, the broker stops serving ACME and stays
-revoked across restarts. It then answers opCA's status and revoke calls and nothing else. To use
-the host again, re-open enrolment.
+revoked across restarts. It then answers opCA's status, revoke and issued-list calls and nothing
+else. To use the host again, re-open enrolment.
 
 Revoking with `opca subordinate revoke <id>`, or from the certificate list, puts the subordinate
 on the CRL but doesn't reach the broker. Revoke from the ACME Servers page or with

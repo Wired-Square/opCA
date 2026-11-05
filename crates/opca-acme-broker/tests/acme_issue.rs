@@ -402,7 +402,11 @@ async fn a_good_csr_is_issued_a_server_leaf_that_chains_to_the_subordinate_and_i
         (order.status, order.certificate),
         (OrderStatus::Valid, Some(recorded.id))
     );
-    assert_eq!(store.issued_after(0, 10).await.unwrap(), [recorded]);
+    assert_eq!(recorded.issuer_serial, "2", "the subordinate's serial");
+    assert_eq!(
+        store.changed_after(0, 10).await.unwrap().certificates,
+        [recorded]
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use opca_acme_api::Challenge as ChallengeType;
+use opca_acme_api::{Challenge as ChallengeType, IssuedCounts};
 use rustls::crypto::CryptoProvider;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -17,11 +17,18 @@ use wslib_db_sqlite::{Chain, Database, stamp};
 
 use super::{Named, Problem, base64url};
 
-const MIGRATIONS: [(i64, &str, &str); 1] = [(
-    1,
-    "acme store",
-    include_str!("../../migrations/0001_acme_store.sql"),
-)];
+const MIGRATIONS: [(i64, &str, &str); 2] = [
+    (
+        1,
+        "acme store",
+        include_str!("../../migrations/0001_acme_store.sql"),
+    ),
+    (
+        2,
+        "issued changes",
+        include_str!("../../migrations/0002_issued_changes.sql"),
+    ),
+];
 
 named! {
     pub enum AccountStatus {
@@ -236,11 +243,12 @@ pub struct NewCertificate {
     pub not_after: SystemTime,
     /// The leaf, then the chain up to and excluding the root.
     pub chain_pem: String,
+    /// The subordinate's, decimal.
+    pub issuer_serial: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Certificate {
-    /// Only grows, and is never reused: the cursor of [`Store::issued_after`].
     pub id: i64,
     pub serial: String,
     pub account: i64,
@@ -250,10 +258,20 @@ pub struct Certificate {
     pub not_before: SystemTime,
     pub not_after: SystemTime,
     pub chain_pem: String,
+    pub issuer_serial: String,
     pub revoked_at: Option<SystemTime>,
     /// An RFC 5280 CRLReason code; `None` is unspecified.
     pub revocation_reason: Option<u8>,
     pub created: SystemTime,
+    /// Taken afresh, above every other, on insert and on revoke: the cursor of [`Store::changed_after`].
+    pub changed: i64,
+}
+
+/// What [`Store::changed_after`] found: the certificates, and whether more wait past them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Changes {
+    pub certificates: Vec<Certificate>,
+    pub more: bool,
 }
 
 /// What [`Store::expire_stale`] moved.
@@ -271,8 +289,10 @@ const AUTHORISATION: &str =
 const CHALLENGE: &str =
     "SELECT id, authorisation, type, token, status, validated, error FROM challenges";
 const CERTIFICATE: &str = "SELECT id, serial, account, order_id, common_name, sans, not_before, \
-                           not_after, chain_pem, revoked_at, revocation_reason, created \
-                           FROM certificates";
+                           not_after, chain_pem, issuer_serial, revoked_at, revocation_reason, \
+                           created, changed FROM certificates";
+
+const NEXT_CHANGE: &str = "(SELECT COALESCE(MAX(changed), 0) + 1 FROM certificates)";
 
 /// An order cannot be ready once any of its authorisations has failed or gone.
 const FAIL_ORDERS: &str = "UPDATE orders SET status = 'invalid' \
@@ -547,17 +567,19 @@ impl Store {
             transition(&mut tx, order_id, OrderStatus::Processing).await?;
         }
         transition(&mut tx, order_id, OrderStatus::Valid).await?;
-        let id: i64 = sqlx::query_scalar(
+        let id: i64 = sqlx::query_scalar(&format!(
             "INSERT INTO certificates (serial, account, order_id, common_name, sans, not_before, \
-             not_after, chain_pem, created) \
-             SELECT ?, account, id, ?, ?, ?, ?, ?, ? FROM orders WHERE id = ? RETURNING id",
-        )
+             not_after, chain_pem, issuer_serial, created, changed) \
+             SELECT ?, account, id, ?, ?, ?, ?, ?, ?, ?, {NEXT_CHANGE} FROM orders WHERE id = ? \
+             RETURNING id"
+        ))
         .bind(&issued.serial)
         .bind(&issued.common_name)
         .bind(json(&issued.sans))
         .bind(format(issued.not_before))
         .bind(format(issued.not_after))
         .bind(&issued.chain_pem)
+        .bind(&issued.issuer_serial)
         .bind(now())
         .bind(order_id)
         .fetch_one(&mut *tx)
@@ -586,10 +608,10 @@ impl Store {
     /// Marks the certificate with `serial` revoked now, for `reason`.
     pub async fn revoke(&self, serial: &str, reason: Option<u8>) -> Result<Certificate, Error> {
         let mut tx = self.db.begin().await?;
-        let revoked = sqlx::query(
-            "UPDATE certificates SET revoked_at = ?, revocation_reason = ? \
-             WHERE serial = ? AND revoked_at IS NULL",
-        )
+        let revoked = sqlx::query(&format!(
+            "UPDATE certificates SET revoked_at = ?, revocation_reason = ?, changed = {NEXT_CHANGE} \
+             WHERE serial = ? AND revoked_at IS NULL"
+        ))
         .bind(now())
         .bind(reason)
         .bind(serial)
@@ -620,16 +642,32 @@ impl Store {
         Ok(certificate)
     }
 
-    /// Up to `limit` certificates recorded after the one with id `cursor`, oldest first; 0 starts at the beginning.
-    pub async fn issued_after(&self, cursor: i64, limit: u32) -> Result<Vec<Certificate>, Error> {
-        sqlx::query(&format!("{CERTIFICATE} WHERE id > ? ORDER BY id LIMIT ?"))
-            .bind(cursor)
-            .bind(limit)
-            .fetch_all(self.db.pool())
-            .await?
-            .iter()
-            .map(certificate)
-            .collect()
+    /// Up to `limit` certificates issued or revoked after change `cursor`, oldest change first; 0 starts at the beginning.
+    pub async fn changed_after(&self, cursor: i64, limit: u32) -> Result<Changes, Error> {
+        let mut certificates = sqlx::query(&format!(
+            "{CERTIFICATE} WHERE changed > ? ORDER BY changed LIMIT ?"
+        ))
+        .bind(cursor)
+        .bind(i64::from(limit) + 1)
+        .fetch_all(self.db.pool())
+        .await?
+        .iter()
+        .map(certificate)
+        .collect::<Result<Vec<_>, _>>()?;
+        let more = certificates.len() > limit as usize;
+        certificates.truncate(limit as usize);
+        Ok(Changes { certificates, more })
+    }
+
+    pub async fn counts(&self) -> Result<IssuedCounts, Error> {
+        let (total, revoked): (i64, i64) =
+            sqlx::query_as("SELECT COUNT(*), COUNT(revoked_at) FROM certificates")
+                .fetch_one(self.db.pool())
+                .await?;
+        Ok(IssuedCounts {
+            total: total as u64,
+            revoked: revoked as u64,
+        })
     }
 
     /// Pending or ready orders and pending or valid authorisations whose time is up at `now`.
@@ -809,9 +847,11 @@ fn certificate(row: &SqliteRow) -> Result<Certificate, Error> {
         not_before: time(row, "certificates", "not_before")?,
         not_after: time(row, "certificates", "not_after")?,
         chain_pem: row.try_get("chain_pem")?,
+        issuer_serial: row.try_get("issuer_serial")?,
         revoked_at: optional_time(row, "certificates", "revoked_at")?,
         revocation_reason: row.try_get("revocation_reason")?,
         created: time(row, "certificates", "created")?,
+        changed: row.try_get("changed")?,
     })
 }
 

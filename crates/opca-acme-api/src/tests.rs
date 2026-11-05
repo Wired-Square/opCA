@@ -46,6 +46,7 @@ fn paths_carry_the_api_version() {
         path::CSR,
         path::CHAIN,
         path::REVOKE,
+        path::ISSUED,
     ] {
         assert!(p.starts_with(&format!("/v{API_VERSION}/")), "{p}");
     }
@@ -112,6 +113,10 @@ fn status_wire_format() {
             subordinate_not_after: "2027-01-25T00:00:00Z".into(),
             config,
             versions,
+            issued: Some(IssuedCounts {
+                total: 3,
+                revoked: 1,
+            }),
         },
         json!({
             "state": "acme_down",
@@ -119,6 +124,61 @@ fn status_wire_format() {
             "subordinate_not_after": "2027-01-25T00:00:00Z",
             "config": config_wire,
             "versions": versions_wire,
+            "issued": {"total": 3, "revoked": 1},
+        }),
+    );
+}
+
+#[test]
+fn a_status_without_counts_reads_as_none() {
+    let (config, config_wire) = config();
+    let (versions, versions_wire) = versions();
+    let status: Status = serde_json::from_value(json!({
+        "state": "issuing",
+        "subordinate_serial": "4096",
+        "subordinate_not_after": "2027-01-25T00:00:00Z",
+        "config": config_wire,
+        "versions": versions_wire,
+    }))
+    .unwrap();
+    assert_eq!(
+        (status.config, status.versions, status.issued),
+        (config, versions, None)
+    );
+}
+
+#[test]
+fn issued_page_wire_format() {
+    pinned(
+        IssuedPage {
+            certificates: vec![IssuedCertificate {
+                serial: "12345".into(),
+                common_name: Some("www.home.arpa".into()),
+                sans: vec!["www.home.arpa".into()],
+                not_before: "2026-11-05T00:00:00Z".into(),
+                not_after: "2026-12-05T00:00:00Z".into(),
+                issuer_serial: "4096".into(),
+                revoked_at: Some("2026-11-06T00:00:00Z".into()),
+                revocation_reason: Some(1),
+                changed: 7,
+            }],
+            next: 7,
+            more: false,
+        },
+        json!({
+            "certificates": [{
+                "serial": "12345",
+                "common_name": "www.home.arpa",
+                "sans": ["www.home.arpa"],
+                "not_before": "2026-11-05T00:00:00Z",
+                "not_after": "2026-12-05T00:00:00Z",
+                "issuer_serial": "4096",
+                "revoked_at": "2026-11-06T00:00:00Z",
+                "revocation_reason": 1,
+                "changed": 7,
+            }],
+            "next": 7,
+            "more": false,
         }),
     );
 }
