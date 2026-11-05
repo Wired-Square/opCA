@@ -17,6 +17,7 @@ use wslib_pairing::{OneTimeCode, PairingCode, PairingUri, SpkiSha256, Status};
 use wslib_service::Held;
 use wslib_tls::{Location, Serving};
 
+use crate::acme::Store;
 use crate::enrolled::{operator_config, root_of};
 use crate::enrolment::{self, Mode, host_within, internal};
 use crate::step_ca::{Files, StepCa, check_version};
@@ -45,14 +46,16 @@ pub struct Broker {
     pub(crate) state: PathBuf,
     pub(crate) step_ca: Arc<StepCa>,
     pub(crate) acme_listen: SocketAddr,
+    acme: Store,
     lock_timeout: Duration,
     _held: Held,
 }
 
 impl Broker {
     /// Loads the state in `config.state_dir`, making only what is missing, and
-    /// blocks; the URI is `Some` when this start issued the pairing code.
-    pub fn start(config: &Config) -> Result<(Self, Option<PairingUri>), Error> {
+    /// opens `acme.db`; blocks while it loads. The URI is `Some` when this start
+    /// issued the pairing code.
+    pub async fn start(config: &Config) -> Result<(Self, Option<PairingUri>), Error> {
         let name = config.host.parse::<SubjectAltName>()?;
         if !name.is_host() {
             return Err(format!("{} is not a host name or address", config.host).into());
@@ -79,6 +82,7 @@ impl Broker {
         };
         let mode = enrolment::load(state)?;
         let tls = Tls::new(tls_config(&provider, &serving, &mode)?);
+        let acme = Store::open(&state.join("acme.db"), provider.clone()).await?;
         let broker = Self {
             provider,
             serving,
@@ -96,6 +100,7 @@ impl Broker {
                 version,
             ),
             acme_listen: config.acme_listen,
+            acme,
             lock_timeout: LOCK_TIMEOUT,
             _held: held,
         };
@@ -120,6 +125,10 @@ impl Broker {
         }
         let uri = issued.map(|plain| broker.uri(plain)).transpose()?;
         Ok((broker, uri))
+    }
+
+    pub fn acme(&self) -> &Store {
+        &self.acme
     }
 
     pub fn serving(&self) -> &Serving {

@@ -1078,6 +1078,14 @@ Organised under [src/](../crates/opca-acme-broker/src):
   `wslib-http-server`.
 - [step_ca.rs](../crates/opca-acme-broker/src/step_ca.rs) — step-ca's config,
   its version check and the child's supervisor.
+- [acme/](../crates/opca-acme-broker/src/acme) — the broker's own ACME server
+  (RFC 8555), replacing step-ca; its HTTP API waits on JWS in `wslib-crypto-jose`:
+  - [store.rs](../crates/opca-acme-broker/src/acme/store.rs) — `acme.db` on
+    `wslib-db-sqlite` (chain `acme`, opened by `Broker::start`): accounts,
+    orders, authorisations, challenges, certificates and the empty `eab_keys`.
+    Statuses are RFC 8555's and move only along its §7.1.6 diagrams; a
+    challenge's outcome settles its authorisation, and that its order.
+    Certificates carry an `AUTOINCREMENT` id, the cursor of `issued_after`.
 - [cli.rs](../crates/opca-acme-broker/src/cli.rs) and
   [bin/opca-acme.rs](../crates/opca-acme-broker/src/bin/opca-acme.rs) — the
   `opca-acme` command line.
@@ -1142,6 +1150,7 @@ child lives, `step_ca_down` otherwise, and `revoked` once revoked.
 - `step-ca.json`, `step-ca-root.crt`, `step-ca-intermediate.crt`,
   `step-ca-db/`;
 - `archive/<time>/` — what each reopen set aside;
+- `acme.db` (0600, with its `-wal` and `-shm`) — the ACME server's store;
 - `broker.pid`, `step-ca.pid`, `state.lock`, `pairing-code.lock`.
 
 The file is the authority throughout: the daemon re-reads the code and the

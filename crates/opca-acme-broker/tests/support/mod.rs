@@ -214,7 +214,7 @@ pub fn fake_step_ca() -> PathBuf {
 
 /// Starts a broker in `state` and serves it on a loopback port of its own.
 pub async fn start(state: TempDir, domains: &[&str], uri: Option<PairingUri>) -> Running {
-    let (broker, issued) = Broker::start(&config(state.path(), domains)).unwrap();
+    let (broker, issued) = Broker::start(&config(state.path(), domains)).await.unwrap();
     run(state, broker, issued.or(uri)).await
 }
 

@@ -1,5 +1,6 @@
 //! The ACME broker: it holds an opCA subordinate CA's key and pairs with opCA.
 
+pub mod acme;
 mod api;
 mod broker;
 pub mod cli;

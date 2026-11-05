@@ -284,7 +284,9 @@ async fn opca_that_lost_the_enrolment_answer_finds_it_through_status() {
 #[tokio::test]
 async fn a_held_state_lock_times_out_a_change_while_status_still_answers() {
     let state = private_tempdir();
-    let (broker, uri) = opca_acme_broker::Broker::start(&config(state.path(), &[])).unwrap();
+    let (broker, uri) = opca_acme_broker::Broker::start(&config(state.path(), &[]))
+        .await
+        .unwrap();
     let patience = std::time::Duration::from_millis(300);
     let running = run(state, broker.with_lock_timeout(patience), uri).await;
     let mut ca = TestCa::new();

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The ACME broker keeps its own issuance store, `acme.db` in its state
+  directory: ACME accounts, orders, authorisations, challenges and the
+  certificates it issues, each with a cursor for opCA to sync from. Statuses
+  move only as RFC 8555 draws them.
+
 ### Fixed
 
 - The macOS Intel build is produced again; 0.102.4 shipped without one.

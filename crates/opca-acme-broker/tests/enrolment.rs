@@ -172,7 +172,7 @@ async fn a_restart_after_enrolment_reads_back_enrolled() {
         fs::metadata(&stored).unwrap().permissions().mode() & 0o777,
         0o600
     );
-    let (restarted, uri) = Broker::start(&config(state.path(), &[])).unwrap();
+    let (restarted, uri) = Broker::start(&config(state.path(), &[])).await.unwrap();
     assert!(uri.is_none());
     let Mode::Enrolled(enrolled) = restarted.mode() else {
         panic!("not enrolled after a restart");

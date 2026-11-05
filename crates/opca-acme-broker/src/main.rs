@@ -28,8 +28,7 @@ fn main() -> ExitCode {
             let config = Config::load(&path)?;
             let pid_file = cli::daemon_pid_file(&config.state_dir);
             let listen = config.listen;
-            let (broker, uri) =
-                tokio::task::spawn_blocking(move || Broker::start(&config)).await??;
+            let (broker, uri) = Broker::start(&config).await?;
             match (uri, broker.mode(), broker.code_status()?) {
                 (Some(uri), ..) => tracing::info!("pairing URI: {}", uri.expose()),
                 (None, Mode::Enrolled(enrolled), _) if enrolled.revoked => {
