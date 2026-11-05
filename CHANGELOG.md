@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The ACME broker answers ACME (RFC 8555) itself at `/acme/directory`:
+  accounts, key changes and deactivation, orders validated in the background
+  over http-01, dns-01 or tls-alpn-01, finalising, certificate download, and
+  revocation by the account or the certificate's own key, which opCA sees on
+  its next sync. Wildcards need dns-01, IP addresses are refused, and names
+  outside the permitted domains are refused at the order.
 - The ACME broker keeps its own issuance store, `acme.db` in its state
   directory: ACME accounts, orders, authorisations, challenges and the
   certificates it issues, each with a cursor for opCA to sync from. Statuses

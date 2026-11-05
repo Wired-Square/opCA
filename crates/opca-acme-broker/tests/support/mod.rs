@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use opca_acme_api::{Challenge, Enrolment, ErrorBody, ErrorKind, IssuanceConfig};
+use opca_acme_api::{Challenge, Enrolment, ErrorBody, ErrorKind, IssuanceConfig, Status};
 use opca_acme_broker::acme::Store;
 use opca_acme_broker::acme::store::{ChallengeStatus, NewAuthorisation, NewCertificate, NewOrder};
 use opca_acme_broker::{Broker, Config};
@@ -34,6 +34,7 @@ use wslib_tls::{KeyFingerprint, Outbound, Trust};
 pub const HOST: &str = "acme.home.example";
 pub const LOOPBACK: &str = "127.0.0.1";
 pub const OPERATOR_PIN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+pub const DOMAINS: &[&str] = &["home.example"];
 
 /// An in-memory opCA root over a scripted `op`.
 pub struct TestCa {
@@ -356,6 +357,52 @@ impl Connection {
             head[9..12].parse().unwrap(),
             String::from_utf8(body).unwrap(),
         ))
+    }
+}
+
+/// A broker enrolled by its own opCA, with an operator, within [`DOMAINS`].
+pub struct Enrolled {
+    pub running: Running,
+    pub ca: TestCa,
+    pub operator: Identity,
+    pub id: i64,
+    pub chain: Vec<CertificateDer<'static>>,
+    pub status: Status,
+}
+
+pub async fn enrol(running: Running) -> Enrolled {
+    let mut ca = TestCa::new();
+    let operator = ca.client("opCA operator");
+    let (chain, _, id) = ca.sign(running.broker.subordinate().csr_pem(), DOMAINS);
+    let enrolment = Enrolment {
+        operator_pin: operator.key_pin(),
+        ..running.enrolment(&chain, DOMAINS)
+    };
+    let (code, body) = running.post(&enrolment).await;
+    assert_eq!(code, 200, "{body}");
+    Enrolled {
+        running,
+        ca,
+        operator,
+        id,
+        chain: pem::certificates(&chain).unwrap(),
+        status: serde_json::from_str(&body).unwrap(),
+    }
+}
+
+impl Enrolled {
+    pub fn root(&self) -> &CertificateDer<'static> {
+        self.chain.last().unwrap()
+    }
+
+    pub async fn as_operator(&self, method: &str, route: &str, body: &str) -> String {
+        let (code, answer) = self
+            .running
+            .call(Some(&self.operator), method, route, body)
+            .await
+            .unwrap();
+        assert_eq!(code, 200, "{route}: {answer}");
+        answer
     }
 }
 

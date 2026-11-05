@@ -134,6 +134,9 @@ pub enum Error {
     AlreadyRevoked {
         serial: String,
     },
+    KeyInUse {
+        account: i64,
+    },
 }
 
 impl fmt::Display for Error {
@@ -146,6 +149,7 @@ impl fmt::Display for Error {
                 write!(f, "{table}: {from} cannot become {to}")
             }
             Self::AlreadyRevoked { serial } => write!(f, "certificate {serial} is already revoked"),
+            Self::KeyInUse { account } => write!(f, "account {account} holds that key"),
         }
     }
 }
@@ -274,6 +278,16 @@ pub struct Changes {
     pub more: bool,
 }
 
+/// A challenge to validate, with what its validation needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Validation {
+    pub challenge: i64,
+    pub kind: ChallengeType,
+    /// The name validated: a wildcard's base.
+    pub identifier: String,
+    pub key_authorisation: String,
+}
+
 /// What [`Store::expire_stale`] moved.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Expired {
@@ -400,6 +414,45 @@ impl Store {
             account,
         )
         .await
+    }
+
+    pub async fn set_contacts(&self, id: i64, contacts: &[String]) -> Result<(), Error> {
+        sqlx::query("UPDATE accounts SET contacts = ? WHERE id = ?")
+            .bind(json(contacts))
+            .bind(id)
+            .execute(self.db.pool())
+            .await?;
+        Ok(())
+    }
+
+    /// Gives account `id` the key `jwk`, unless another account holds it.
+    pub async fn change_key(&self, id: i64, jwk: &str, thumbprint: &str) -> Result<(), Error> {
+        let mut tx = self.db.begin().await?;
+        let holder: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM accounts WHERE thumbprint = ?")
+                .bind(thumbprint)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if let Some(account) = holder.filter(|&holder| holder != id) {
+            return Err(Error::KeyInUse { account });
+        }
+        sqlx::query("UPDATE accounts SET jwk = ?, thumbprint = ? WHERE id = ?")
+            .bind(jwk)
+            .bind(thumbprint)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn orders_of(&self, account: i64) -> Result<Vec<i64>, Error> {
+        Ok(
+            sqlx::query_scalar("SELECT id FROM orders WHERE account = ? ORDER BY id")
+                .bind(account)
+                .fetch_all(self.db.pool())
+                .await?,
+        )
     }
 
     pub async fn set_account_status(&self, id: i64, to: AccountStatus) -> Result<(), Error> {
@@ -605,6 +658,17 @@ impl Store {
         .await
     }
 
+    pub async fn certificate_by_serial(&self, serial: &str) -> Result<Option<Certificate>, Error> {
+        one(
+            &mut *self.db.pool().acquire().await?,
+            CERTIFICATE,
+            "serial = ?",
+            serial.to_owned(),
+            certificate,
+        )
+        .await
+    }
+
     /// Marks the certificate with `serial` revoked now, for `reason`.
     pub async fn revoke(&self, serial: &str, reason: Option<u8>) -> Result<Certificate, Error> {
         let mut tx = self.db.begin().await?;
@@ -668,6 +732,30 @@ impl Store {
             total: total as u64,
             revoked: revoked as u64,
         })
+    }
+
+    /// The challenges being validated, as a restart left them.
+    pub async fn processing(&self) -> Result<Vec<Validation>, Error> {
+        sqlx::query(
+            "SELECT c.id, c.type, c.token, a.identifier, k.thumbprint FROM challenges c \
+             JOIN authorisations a ON a.id = c.authorisation \
+             JOIN orders o ON o.id = a.order_id JOIN accounts k ON k.id = o.account \
+             WHERE c.status = 'processing'",
+        )
+        .fetch_all(self.db.pool())
+        .await?
+        .iter()
+        .map(|row| {
+            let token: &str = row.try_get("token")?;
+            let thumbprint: &str = row.try_get("thumbprint")?;
+            Ok(Validation {
+                challenge: row.try_get("id")?,
+                kind: challenge_type(row)?,
+                identifier: row.try_get("identifier")?,
+                key_authorisation: format!("{token}.{thumbprint}"),
+            })
+        })
+        .collect()
     }
 
     /// Pending or ready orders and pending or valid authorisations whose time is up at `now`.
@@ -821,14 +909,18 @@ fn account(row: &SqliteRow) -> Result<Account, Error> {
     })
 }
 
-fn challenge(row: &SqliteRow) -> Result<Challenge, Error> {
+fn challenge_type(row: &SqliteRow) -> Result<ChallengeType, Error> {
     let kind: &str = row.try_get("type")?;
+    parse_challenge(kind).ok_or_else(|| {
+        wslib_db_sqlite::Error::unreadable("challenges", "type", format!("{kind:?}")).into()
+    })
+}
+
+fn challenge(row: &SqliteRow) -> Result<Challenge, Error> {
     Ok(Challenge {
         id: row.try_get("id")?,
         authorisation: row.try_get("authorisation")?,
-        kind: parse_challenge(kind).ok_or_else(|| {
-            wslib_db_sqlite::Error::unreadable("challenges", "type", format!("{kind:?}"))
-        })?,
+        kind: challenge_type(row)?,
         token: row.try_get("token")?,
         status: status(row, "challenges")?,
         validated: optional_time(row, "challenges", "validated")?,
@@ -884,7 +976,7 @@ fn now() -> String {
     stamp::format(stamp::now())
 }
 
-fn format(at: SystemTime) -> String {
+pub(crate) fn format(at: SystemTime) -> String {
     stamp::format(at.into())
 }
 

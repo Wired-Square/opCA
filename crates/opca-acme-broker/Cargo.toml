@@ -40,7 +40,7 @@ wslib-db-sqlite = { version = "0.2.4", registry = "wired-square" }
 axum = { version = "0.8", default-features = false }
 serde_json = "1"
 libc = "0.2"
-wslib-dns = { version = "0.2.1", registry = "wired-square" }
+wslib-dns = { version = "0.2.1", registry = "wired-square", features = ["hickory"] }
 opca-acme-api = { path = "../opca-acme-api" }
 wslib-http-server = { version = "0.1.2", registry = "wired-square" }
 wslib-file-atomic = { version = "0.1.5", registry = "wired-square" }
@@ -53,6 +53,7 @@ hyper = { version = "1", default-features = false, features = ["client", "http1"
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 tokio-rustls = { version = "0.26", default-features = false }
 x509-parser = { version = "0.18", default-features = false }
+wslib-crypto-jose = { version = "0.1.0", registry = "wired-square" }
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false }
@@ -60,3 +61,7 @@ opca-core = { path = "../opca-core", features = ["test-support"] }
 tempfile = "3"
 wslib-dns = { version = "0.2.1", registry = "wired-square", features = ["testing"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread"] }
+instant-acme = { version = "0.8.5", default-features = false, features = ["ring"] }
+ring = "0.17"
+axum = "0.8"
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }

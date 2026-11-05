@@ -7,10 +7,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
-use axum::Router;
-use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
 use rustls::ServerConfig;
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::PrivateKeyDer;
@@ -24,7 +20,8 @@ use wslib_crypto_x509::{SubjectAltName, inspect};
 use wslib_http_server::{Bounds, Listener, Tls, server_config_from_pem_files};
 
 use super::issue::{BACKDATE, Issuer};
-use super::{Problem, ProblemType};
+use super::server::{Server, router};
+use super::validate::Validate;
 use crate::enrolment::{Enrolled, Mode};
 use crate::{Broker, Error};
 
@@ -36,6 +33,7 @@ const RETRY_AFTER: Duration = Duration::from_secs(10);
 
 pub(crate) struct AcmeListener {
     address: SocketAddr,
+    server: Arc<Server>,
     running: Mutex<Option<Running>>,
 }
 
@@ -47,9 +45,10 @@ struct Running {
 }
 
 impl AcmeListener {
-    pub(crate) fn new(address: SocketAddr) -> Self {
+    pub(crate) fn new(address: SocketAddr, server: Server) -> Self {
         Self {
             address,
+            server: Arc::new(server),
             running: Mutex::default(),
         }
     }
@@ -73,14 +72,16 @@ impl AcmeListener {
         let address = listener.local_addr();
         let tls = Tls::new(config);
         let (stop, stopped) = oneshot::channel();
+        self.server.resume();
         let served = tokio::spawn({
             let tls = tls.clone();
+            let router = router(self.server.clone());
             async move {
                 let stopped = async {
                     let _ = stopped.await;
                 };
                 if let Err(error) =
-                    wslib_http_server::serve_https(listener, router(), tls, stopped).await
+                    wslib_http_server::serve_https(listener, router, tls, stopped).await
                 {
                     tracing::error!(%error, "the ACME listener failed");
                 }
@@ -120,25 +121,26 @@ fn bind(address: SocketAddr) -> io::Result<Listener> {
         .map_err(|e| io::Error::new(e.kind(), format!("listening on {address}: {e}")))
 }
 
-/// A placeholder until the ACME API replaces it.
-fn router() -> Router {
-    Router::new().route("/acme/directory", get(not_built))
-}
-
-async fn not_built() -> Response {
-    let problem = Problem::new(ProblemType::ServerInternal, "ACME API not built yet");
-    (
-        StatusCode::SERVICE_UNAVAILABLE,
-        [(header::CONTENT_TYPE, "application/problem+json")],
-        serde_json::to_vec(&problem).expect("a problem serialises"),
-    )
-        .into_response()
-}
-
 impl Broker {
     /// The ACME listener's address, while it serves.
     pub fn acme_address(&self) -> Option<SocketAddr> {
         self.acme_listener.serving()
+    }
+
+    /// What validates challenges; a [`Validator`](super::validate::Validator) over the system's resolvers unless set.
+    pub fn with_validator(mut self, validator: impl Validate) -> Self {
+        self.acme_server().validator = Arc::new(validator);
+        self
+    }
+
+    /// How long an order and its authorisations live; [`ORDER_LIFETIME`](super::ORDER_LIFETIME) unless set.
+    pub fn with_order_lifetime(mut self, lifetime: Duration) -> Self {
+        self.acme_server().lifetime = lifetime;
+        self
+    }
+
+    fn acme_server(&mut self) -> &mut Server {
+        Arc::get_mut(&mut self.acme_listener.server).expect("configured before it serves")
     }
 
     /// Keeps the ACME listener and its certificate current until `stop`
@@ -193,19 +195,20 @@ impl Broker {
             &self.host,
             now,
         );
-        if current && self.acme_listener.serving().is_some() {
-            return Ok(());
-        }
+        let issuer = Issuer::new(
+            self.subordinate().signer()?,
+            &enrolled.chain_pem,
+            enrolled.config.clone(),
+        )?;
         if !current {
-            let issuer = Issuer::new(
-                self.subordinate().signer()?,
-                &enrolled.chain_pem,
-                enrolled.config.clone(),
-            )?;
             let (cert_pem, key_pem) = issue_pair(&self.provider, &issuer, &self.host, now)?;
             wslib_file_atomic::replace_private(&key, key_pem.as_bytes())?;
             wslib_file_atomic::replace_readable(&cert, cert_pem.as_bytes())?;
             tracing::info!(host = %self.host, "issued the ACME listener's certificate");
+        }
+        self.acme_listener.server.set_issuer(issuer);
+        if current && self.acme_listener.serving().is_some() {
+            return Ok(());
         }
         let config = server_config_from_pem_files(self.provider.clone(), &cert, &key)?;
         self.acme_listener.serve(config)?;

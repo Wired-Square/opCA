@@ -6,62 +6,17 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
-use opca_acme_api::{ChainUpdate, Enrolment, IssuerState, Status, path};
+use opca_acme_api::{ChainUpdate, IssuerState, Status, path};
 use opca_acme_broker::Broker;
 use support::*;
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use wslib_crypto_x509::pem;
 use wslib_crypto_x509::{ExtendedKeyUsage, SubjectAltName, inspect};
 
-const DOMAINS: &[&str] = &["home.example"];
-
-struct Enrolled {
-    running: Running,
-    ca: TestCa,
-    operator: Identity,
-    id: i64,
-    chain: Vec<CertificateDer<'static>>,
-    status: Status,
-}
-
-async fn enrol(running: Running) -> Enrolled {
-    let mut ca = TestCa::new();
-    let operator = ca.client("opCA operator");
-    let (chain, _, id) = ca.sign(running.broker.subordinate().csr_pem(), DOMAINS);
-    let enrolment = Enrolment {
-        operator_pin: operator.key_pin(),
-        ..running.enrolment(&chain, DOMAINS)
-    };
-    let (code, body) = running.post(&enrolment).await;
-    assert_eq!(code, 200, "{body}");
-    Enrolled {
-        running,
-        ca,
-        operator,
-        id,
-        chain: pem::certificates(&chain).unwrap(),
-        status: serde_json::from_str(&body).unwrap(),
-    }
-}
-
 impl Enrolled {
-    fn root(&self) -> &CertificateDer<'static> {
-        self.chain.last().unwrap()
-    }
-
     async fn presented(&self) -> Vec<CertificateDer<'static>> {
         let address = self.running.broker.acme_address().expect("serving ACME");
         acme_connect(address, self.root()).await.unwrap().1
-    }
-
-    async fn as_operator(&self, method: &str, route: &str, body: &str) -> String {
-        let (code, answer) = self
-            .running
-            .call(Some(&self.operator), method, route, body)
-            .await
-            .unwrap();
-        assert_eq!(code, 200, "{route}: {answer}");
-        answer
     }
 }
 
@@ -98,9 +53,12 @@ async fn enrolment_serves_acme_with_a_certificate_for_the_host_from_the_subordin
     let address = enrolled.running.broker.acme_address().unwrap();
     let (mut acme, _) = acme_connect(address, enrolled.root()).await.unwrap();
     let (code, body) = acme.call("GET", "/acme/directory", "").await.unwrap();
-    assert_eq!(code, 503);
-    let problem: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(problem["type"], "urn:ietf:params:acme:error:serverInternal");
+    assert_eq!(code, 200, "{body}");
+    let directory: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        directory["newNonce"],
+        format!("https://{HOST}/acme/new-nonce")
+    );
 }
 
 #[tokio::test]
@@ -128,7 +86,7 @@ async fn a_renewed_chain_is_served_live_on_the_same_address() {
         .call("GET", "/acme/directory", "")
         .await
         .unwrap();
-    assert_eq!(code, 503);
+    assert_eq!(code, 200);
 }
 
 #[tokio::test]

@@ -133,6 +133,10 @@ impl Issuer {
         self.subordinate_not_after
     }
 
+    pub(crate) fn config(&self) -> &IssuanceConfig {
+        &self.config
+    }
+
     /// The CSR's DNS names, lower-case, each one the broker may issue for.
     fn requested_names(&self, csr: &Csr) -> Result<BTreeSet<String>, Problem> {
         let mut names = BTreeSet::new();

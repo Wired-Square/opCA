@@ -19,6 +19,8 @@ use wslib_tls::{Location, Serving};
 
 use crate::acme::Store;
 use crate::acme::listener::AcmeListener;
+use crate::acme::server::Server;
+use crate::acme::validate::Validator;
 use crate::enrolled::{operator_config, root_of};
 use crate::enrolment::{self, Mode, host_within, internal};
 use crate::{Config, Error};
@@ -85,6 +87,9 @@ impl Broker {
         let mode = enrolment::load(state)?;
         let tls = Tls::new(tls_config(&provider, &serving, &mode)?);
         let acme = Store::open(&state.join("acme.db"), provider.clone()).await?;
+        let resolver = wslib_dns::HickoryResolver::from_system(Default::default())?;
+        let validator = Arc::new(Validator::new(resolver, provider.clone())?);
+        let acme_server = Server::new(acme.clone(), provider.clone(), validator);
         let broker = Self {
             provider,
             serving,
@@ -96,7 +101,7 @@ impl Broker {
             port: config.listen.port(),
             domains: config.domains.clone(),
             state: state.into(),
-            acme_listener: AcmeListener::new(config.acme_listen),
+            acme_listener: AcmeListener::new(config.acme_listen, acme_server),
             acme,
             lock_timeout: LOCK_TIMEOUT,
             issued_page: ISSUED_PAGE,

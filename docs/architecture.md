@@ -1090,10 +1090,18 @@ Organised under [src/](../crates/opca-acme-broker/src):
 - [api.rs](../crates/opca-acme-broker/src/api.rs) — the axum routes, served by
   `wslib-http-server`.
 - [acme/](../crates/opca-acme-broker/src/acme) — the broker's own ACME server
-  (RFC 8555); its HTTP API waits on JWS in `wslib-crypto-jose`:
+  (RFC 8555):
   - [listener.rs](../crates/opca-acme-broker/src/acme/listener.rs) — the ACME
     listener on `acme_listen` and its own certificate; see
     [The ACME listener](#the-acme-listener).
+  - [server.rs](../crates/opca-acme-broker/src/acme/server.rs) — the ACME API
+    the listener serves; see [The ACME API](#the-acme-api).
+  - [request.rs](../crates/opca-acme-broker/src/acme/request.rs) — a request's
+    flattened JWS, checked through `wslib-crypto-jose` on the broker's rustls
+    provider: its `url`, its nonce, `jwk` or `kid` as the endpoint asks, the
+    account (which must be valid) and the signature; the nonce is redeemed only
+    once the signature verifies. Also the §7.3.5 key change, and `Nonces`, an
+    in-memory pool of single-use nonces, the oldest forgotten past 4096.
   - [store.rs](../crates/opca-acme-broker/src/acme/store.rs) — `acme.db` on
     `wslib-db-sqlite` (chain `acme`, opened by `Broker::start`): accounts,
     orders, authorisations, challenges, certificates and the empty `eab_keys`.
@@ -1118,7 +1126,9 @@ Organised under [src/](../crates/opca-acme-broker/src):
     1 KiB body), dns-01 (any TXT at `_acme-challenge.<base>` equal to the
     digest) and tls-alpn-01 (RFC 8737; any certificate is taken, and the
     handshake is checked against its key, since webpki refuses the critical
-    acmeIdentifier). 10 s per validation.
+    acmeIdentifier). 10 s per validation. The broker's resolver is
+    `wslib-dns`'s hickory over the system's; `Broker::with_validator` swaps
+    the whole `Validate` for tests.
 - [cli.rs](../crates/opca-acme-broker/src/cli.rs) and
   [bin/opca-acme.rs](../crates/opca-acme-broker/src/bin/opca-acme.rs) — the
   `opca-acme` command line.
@@ -1179,10 +1189,49 @@ through its life. The leaf is `serverAuth` for `host` over a new P-256 key, from
 capped at the subordinate's end. A running listener takes the new pair through
 `Tls::reload`; the socket is bound synchronously (`TcpSocket`, `SO_REUSEADDR`)
 so that it fits under the lock. The key is written before the certificate, so a
-crash between leaves a mismatch that the next refresh reissues. Until the ACME
-API lands, the router answers `/acme/directory` with a 503 `serverInternal`
-problem. The status's `state` is `issuing` while the listener serves,
-`acme_down` otherwise, and `revoked` once revoked.
+crash between leaves a mismatch that the next refresh reissues. Each refresh
+also hands the ACME API a fresh `Issuer`, so a new chain or `IssuanceConfig`
+reaches new orders at once. The status's `state` is `issuing` while the
+listener serves, `acme_down` otherwise, and `revoked` once revoked.
+
+### The ACME API
+
+[server.rs](../crates/opca-acme-broker/src/acme/server.rs) routes, under
+`/acme/`: `directory`, `new-nonce` (HEAD 200, GET 204), `new-account`,
+`account/{id}` (update and deactivate) and `account/{id}/orders`, `key-change`,
+`new-order`, `order/{id}` and `order/{id}/finalize`, `authz/{id}` (and its
+deactivation), `challenge/{id}`, `cert/{id}` and `revoke-cert`. Every URL is
+built from the authority the request was sent to, so it holds behind a mapped
+port. Every response carries a fresh `Replay-Nonce` and `Link: rel="index"`;
+a challenge adds `rel="up"`, and an order, authorisation or challenge still
+processing adds `Retry-After`. Everything but the directory and new-nonce is a
+JWS POST (`application/jose+json`, else 415), and reads are POST-as-GET with an
+empty payload. Refusals are `application/problem+json` with RFC 8555's types:
+403 for `unauthorized`, `orderNotReady` and the like, 429 for `rateLimited`,
+500 for `serverInternal`, 404 (`malformed`) for an unknown resource, 409 with
+the holder's `Location` for a key change to a key in use, and 400 otherwise.
+
+- **Accounts** are keyed by the JWK's RFC 7638 thumbprint; contacts must be
+  single `mailto:` addresses. A deactivated account is refused everything.
+- **Orders** take DNS identifiers only (an `ip` one is `rejectedIdentifier`),
+  each through `check_identifier`. Every identifier gets an authorisation with
+  one challenge of each type the `IssuanceConfig` offers, except that a
+  wildcard gets dns-01 alone and is refused without it. An order and its
+  authorisations expire 24 hours after they are made (`ORDER_LIFETIME`;
+  `Broker::with_order_lifetime` for tests); each order, authorisation or
+  challenge read expires what is stale first.
+- **Challenges** move to `processing` on the client's POST and are validated
+  in a background task against `token.thumbprint`; the outcome settles the
+  challenge, its authorisation and the order, and a failure keeps its
+  problem. Challenges a restart left `processing` are validated again when the
+  listener first serves.
+- **Finalising** a ready order goes through `Issuer::finalise` with the
+  account key's SPKI (`Jwk::subject_public_key_info`), so the CSR can't reuse
+  it. The certificate is the chain as `application/pem-certificate-chain`.
+- **Revocation** is by the ordering account (`kid`) or by the certificate's
+  own key (`jwk`), for a certificate whose DER matches the one issued. Reasons
+  0–6, 9 and 10 are taken (0 is stored as none); `Store::revoke` bumps the
+  `changed` sequence, so opCA's next sync sees it.
 
 ### State directory
 

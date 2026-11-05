@@ -130,8 +130,11 @@ in the CA database. A broker that can't send it doesn't stop the call: opCA logs
 can reach the ACME port can register, and still gets only names inside the permitted domains whose
 challenges it passes. Limit who can reach port 443 at the network.
 
-**The ACME API isn't built yet.** This version serves the ACME listener and its certificate, but
-`/acme/directory` answers 503 (`serverInternal`) until the ACME API lands.
+**What ACME clients get.** Accounts, orders over http-01, dns-01 and tls-alpn-01 (whichever opCA
+set at pairing), account key changes and deactivation, and revocation by the ordering account or
+by the certificate's own key. A wildcard is validated only by dns-01, IP addresses are refused, and
+names outside the permitted domains are refused when the order is placed. An order lasts 24
+hours. A certificate revoked through ACME shows as revoked in opCA after its next sync.
 
 ## Status
 
@@ -183,6 +186,7 @@ on the CRL but doesn't reach the broker. Revoke from the ACME Servers page or wi
 | 9443 | opCA to broker | The broker's API. After pairing it admits only opCA's operator certificate |
 | 443 | appliances to broker | ACME |
 | 80 / 443 | broker to appliances | Checking http-01 and tls-alpn-01 challenges |
+| 53 | broker to its resolvers | Checking dns-01 challenges, through the system's resolvers |
 
 Point each appliance at the ACME directory:
 

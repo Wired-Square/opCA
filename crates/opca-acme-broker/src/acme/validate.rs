@@ -1,6 +1,7 @@
 //! Challenge validation: http-01 and dns-01 (RFC 8555 §8.3, §8.4) and
 //! tls-alpn-01 (RFC 8737), each given the name and the key authorisation.
 
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -287,6 +288,27 @@ impl<R: Resolver> Validator<R> {
                 refused.map_or_else(|| "no address".into(), |e| e.to_string())
             ),
         ))
+    }
+}
+
+/// What the ACME server validates challenges with: a [`Validator`], or a test's stand-in.
+pub trait Validate: Send + Sync + 'static {
+    fn validate<'a>(
+        &'a self,
+        kind: ChallengeType,
+        name: &'a str,
+        key_authorisation: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Problem>> + Send + 'a>>;
+}
+
+impl<R: Resolver + 'static> Validate for Validator<R> {
+    fn validate<'a>(
+        &'a self,
+        kind: ChallengeType,
+        name: &'a str,
+        key_authorisation: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Problem>> + Send + 'a>> {
+        Box::pin(Validator::validate(self, kind, name, key_authorisation))
     }
 }
 
