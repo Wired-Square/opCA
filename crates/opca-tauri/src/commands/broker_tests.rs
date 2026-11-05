@@ -1,6 +1,5 @@
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use opca_acme_broker::{Broker, Config};
 use opca_core::testutil::{created, not_found};
@@ -28,29 +27,6 @@ fn handler() -> impl Handler {
     ]
 }
 
-/// A step-ca stand-in that idles until killed.
-fn fake_step_ca() -> PathBuf {
-    static FAKE: OnceLock<PathBuf> = OnceLock::new();
-    FAKE.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("opca-tauri-tests-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("fake-step-ca");
-        let staged = path.with_extension("staged");
-        std::fs::write(
-            &staged,
-            "#!/bin/sh\n\
-             [ \"$1\" = version ] && { echo 'Smallstep CA/0.28.1 (fake)'; exit 0; }\n\
-             trap 'exit 0' TERM\n\
-             while :; do sleep 1 & wait $!; done\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::rename(&staged, &path).unwrap();
-        path
-    })
-    .clone()
-}
-
 /// A broker serving on loopback, with the pairing string it printed.
 struct Running {
     _state: TempDir,
@@ -73,19 +49,17 @@ fn serve(domains: &[&str]) -> Running {
         listen: listener.local_addr(),
         domains: domains.iter().map(|d| d.to_string()).collect(),
         state_dir: state.path().into(),
-        step_ca: fake_step_ca(),
+        acme_listen: format!("{LOOPBACK}:0").parse().unwrap(),
         ..Config::parse(r#"host = "unused.example""#).unwrap()
     };
-    let (broker, uri) = Broker::start(&config).unwrap();
+    let (broker, uri) = runtime.block_on(Broker::start(&config)).unwrap();
     let broker = Arc::new(broker);
-    let _entered = runtime.enter();
-    broker.start_issuing();
+    runtime.spawn(broker.clone().serve_acme(std::future::pending()));
     runtime.spawn(opca_acme_broker::serve(
         broker,
         listener,
         std::future::pending(),
     ));
-    drop(_entered);
     Running {
         _state: state,
         runtime,

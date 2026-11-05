@@ -16,9 +16,8 @@ fn versions() -> (Versions, Value) {
         Versions {
             api: API_VERSION,
             broker: "0.103.0".into(),
-            step_ca: "0.28.1".into(),
         },
-        json!({"api": 1, "broker": "0.103.0", "step_ca": "0.28.1"}),
+        json!({"api": 1, "broker": "0.103.0"}),
     )
 }
 
@@ -108,14 +107,14 @@ fn status_wire_format() {
     let (versions, versions_wire) = versions();
     pinned(
         Status {
-            state: IssuerState::StepCaDown,
+            state: IssuerState::AcmeDown,
             subordinate_serial: "4096".into(),
             subordinate_not_after: "2027-01-25T00:00:00Z".into(),
             config,
             versions,
         },
         json!({
-            "state": "step_ca_down",
+            "state": "acme_down",
             "subordinate_serial": "4096",
             "subordinate_not_after": "2027-01-25T00:00:00Z",
             "config": config_wire,
@@ -127,7 +126,7 @@ fn status_wire_format() {
 #[test]
 fn issuer_state_wire_format() {
     pinned(IssuerState::Issuing, json!("issuing"));
-    pinned(IssuerState::StepCaDown, json!("step_ca_down"));
+    pinned(IssuerState::AcmeDown, json!("acme_down"));
     pinned(IssuerState::Revoked, json!("revoked"));
 }
 

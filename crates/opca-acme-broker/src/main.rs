@@ -8,8 +8,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{SpentBy, Status};
 
-/// The listener's 10 s drain, then step-ca's stop.
-const STEP_CA_PATIENCE: Duration = Duration::from_secs(5);
+/// Past the listeners' 10 s drain.
 const GRACE: Duration = Duration::from_secs(20);
 
 fn main() -> ExitCode {
@@ -64,9 +63,14 @@ fn main() -> ExitCode {
                     }
                 }
             });
-            broker.start_issuing();
+            let token = stop.token();
+            let acme = tokio::spawn(
+                broker
+                    .clone()
+                    .serve_acme(async move { token.cancelled().await }),
+            );
             let served = opca_acme_broker::serve(broker.clone(), listener, stop).await;
-            broker.stop_issuing(STEP_CA_PATIENCE).await;
+            let _ = acme.await;
             let _ = std::fs::remove_file(&pid_file);
             served?;
             Ok::<_, Error>(())

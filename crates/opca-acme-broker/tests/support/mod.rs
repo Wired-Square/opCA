@@ -4,8 +4,8 @@ use std::fs;
 use std::io;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::path::Path;
+use std::sync::Arc;
 
 use opca_acme_api::{Challenge, Enrolment, ErrorBody, ErrorKind, IssuanceConfig};
 use opca_acme_broker::{Broker, Config};
@@ -21,6 +21,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use wslib_crypto_x509::pem;
 use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{PairingUri, SpkiSha256};
@@ -183,33 +184,9 @@ pub fn config(state: &Path, domains: &[&str]) -> Config {
         host: HOST.into(),
         domains: domains.iter().map(|d| d.to_string()).collect(),
         state_dir: state.into(),
-        step_ca: fake_step_ca(),
+        acme_listen: format!("{LOOPBACK}:0").parse().unwrap(),
         ..Config::parse(r#"host = "unused.example""#).unwrap()
     }
-}
-
-/// A stand-in step-ca that logs its starts and reloads beside its config.
-pub fn fake_step_ca() -> PathBuf {
-    static FAKE: OnceLock<PathBuf> = OnceLock::new();
-    FAKE.get_or_init(|| {
-        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake-step-ca");
-        let staged = path.with_extension(std::process::id().to_string());
-        fs::write(
-            &staged,
-            "#!/bin/sh\n\
-             [ \"$1\" = version ] && { echo 'Smallstep CA/0.28.1 (fake)'; exit 0; }\n\
-             log=\"$(dirname \"$1\")/fake-step-ca.log\"\n\
-             trap 'echo hup >> \"$log\"' HUP\n\
-             trap 'exit 0' TERM\n\
-             echo start >> \"$log\"\n\
-             while :; do sleep 1 & wait $!; done\n",
-        )
-        .unwrap();
-        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::rename(&staged, &path).unwrap();
-        path
-    })
-    .clone()
 }
 
 /// Starts a broker in `state` and serves it on a loopback port of its own.
@@ -225,7 +202,7 @@ pub async fn run(state: TempDir, broker: Broker, uri: Option<PairingUri>) -> Run
         .await
         .unwrap();
     let address = listener.local_addr();
-    broker.start_issuing();
+    tokio::spawn(broker.clone().serve_acme(std::future::pending()));
     tokio::spawn(opca_acme_broker::serve(
         broker.clone(),
         listener,
@@ -300,6 +277,27 @@ impl Api {
     }
 }
 
+/// A connection to the ACME listener at `address`, by [`HOST`], from a client
+/// trusting only `root`; and the chain the listener presented.
+pub async fn acme_connect(
+    address: SocketAddr,
+    root: &CertificateDer<'static>,
+) -> io::Result<(Connection, Vec<CertificateDer<'static>>)> {
+    let mut roots = RootCertStore::empty();
+    roots.add(root.clone()).unwrap();
+    let client = ClientConfig::builder_with_provider(Arc::new(rustls_openssl::default_provider()))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let tcp = TcpStream::connect(address).await?;
+    let tls = TlsConnector::from(Arc::new(client))
+        .connect(ServerName::try_from(HOST).unwrap(), tcp)
+        .await?;
+    let presented = tls.get_ref().1.peer_certificates().unwrap().to_vec();
+    Ok((Connection(tls), presented))
+}
+
 impl Running {
     pub fn remaining(&self) -> u32 {
         match self.broker.code_status().unwrap() {
@@ -356,20 +354,6 @@ impl Connection {
             String::from_utf8(body).unwrap(),
         ))
     }
-}
-
-/// What the fake step-ca has logged, waiting a little for it to catch up with `expected`.
-pub async fn step_ca_log(state: &Path, expected: &[&str]) -> Vec<String> {
-    let mut lines = Vec::new();
-    for _ in 0..100 {
-        let text = fs::read_to_string(state.join("fake-step-ca.log")).unwrap_or_default();
-        lines = text.lines().map(str::to_owned).collect();
-        if lines == expected {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    lines
 }
 
 pub fn wrong(code: &str) -> String {

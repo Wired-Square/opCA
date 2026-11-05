@@ -29,7 +29,6 @@ pub struct EnrolmentOffer {
 pub struct Versions {
     pub api: u32,
     pub broker: String,
-    pub step_ca: String,
 }
 
 /// The `POST /v1/enrolment` body, answered with a [`Status`].
@@ -76,7 +75,7 @@ pub struct Status {
 #[serde(rename_all = "snake_case")]
 pub enum IssuerState {
     Issuing,
-    StepCaDown,
+    AcmeDown,
     Revoked,
 }
 

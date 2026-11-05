@@ -56,7 +56,7 @@ export default function AcmeServers() {
       (s) => {
         setReport({
           tone: s.state === "issuing" ? "good" : "warn",
-          text: `${nameOf(id)}: ${s.state.replace(/_/g, " ")}, serial ${s.subordinate_serial}, broker ${s.versions.broker}, step-ca ${s.versions.step_ca}`,
+          text: `${nameOf(id)}: ${s.state.replace(/_/g, " ")}, serial ${s.subordinate_serial}, broker ${s.versions.broker}`,
         });
         void refetch();
       },

@@ -11,11 +11,11 @@ maintainer = "Wired Square <apps@wiredsquare.com>"
 copyright = "2026, Wired Square"
 license-file = ["../../LICENSE", "0"]
 extended-description = """\
-Holds an opCA name-constrained subordinate CA, pairs with opCA once, and runs \
-step-ca as its child to issue ACME certificates inside the permitted domains."""
+Holds an opCA name-constrained subordinate CA, pairs with opCA once, and serves \
+ACME itself, issuing certificates inside the permitted domains."""
 section = "net"
 priority = "optional"
-depends = "$auto, systemd, step-ca (>= 0.28.1)"
+depends = "$auto, systemd"
 conf-files = ["/etc/opca-acme/broker.toml"]
 maintainer-scripts = "debian/"
 systemd-units = { enable = false, start = false }
@@ -30,7 +30,7 @@ assets = [
 rustls = { version = "0.23", default-features = false }
 rustls-openssl = { version = "0.4", default-features = false }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", default-features = false, features = ["net", "process", "rt", "signal", "time"] }
+tokio = { version = "1", default-features = false, features = ["net", "rt", "signal", "time"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 tracing = "0.1"
 wslib-crypto = { version = "0.1.2", registry = "wired-square" }

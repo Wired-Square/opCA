@@ -415,7 +415,6 @@ export interface BrokerRow extends Broker {
 export interface BrokerVersions {
   api: number;
   broker: string;
-  step_ca: string;
 }
 
 /** What a broker asks opCA to sign; sent back unchanged to enrol. */
@@ -433,7 +432,7 @@ export interface BrokerOffer {
 }
 
 export interface BrokerStatus {
-  state: "issuing" | "step_ca_down" | "revoked";
+  state: "issuing" | "acme_down" | "revoked";
   subordinate_serial: string;
   subordinate_not_after: string;
   config: {

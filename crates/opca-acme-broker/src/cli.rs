@@ -11,18 +11,10 @@ use wslib_tls::KeyFingerprint;
 
 use crate::broker::{Subordinate, code_path, lock_state};
 use crate::enrolment::{self, Mode, decimal, rfc_3339};
-use crate::step_ca::{self, Files, signal};
 use crate::{ATTEMPTS, Config, Error, SCHEME};
 
 /// What a reopen moves aside; the subordinate key is deleted instead.
-const ARCHIVED: &[&str] = &[
-    "enrolment.json",
-    "subordinate.csr",
-    "step-ca.json",
-    "step-ca-root.crt",
-    "step-ca-intermediate.crt",
-    "step-ca-db",
-];
+const ARCHIVED: &[&str] = &["enrolment.json", "subordinate.csr"];
 
 /// Runs as the owner of `state`: drops to it from root with setgid and
 /// setuid, carries on as it, and refuses anyone else; `root_only` refuses the
@@ -79,7 +71,7 @@ pub fn pairing(config: &Config) -> Result<PairingUri, Error> {
     issue(config)
 }
 
-/// Archives the enrolment and step-ca's state, deletes the subordinate key,
+/// Archives the enrolment, deletes the subordinate key,
 /// makes a new one and its CSR, and issues a new pairing code.
 pub fn reopen(config: &Config) -> Result<PairingUri, Error> {
     let state = &config.state_dir;
@@ -148,15 +140,10 @@ pub fn status(config: &Config) -> Result<String, Error> {
             enrolled.config.permitted_domains.join(", ")
         ));
     }
-    for (name, pid_file) in [
-        ("broker", daemon_pid_file(state)),
-        ("step-ca", step_ca::pid_file(&Files::in_state(state).config)),
-    ] {
-        lines.push(match running(&pid_file) {
-            Some(pid) => format!("{name}: running (pid {pid})"),
-            None => format!("{name}: not running"),
-        });
-    }
+    lines.push(match running(&daemon_pid_file(state)) {
+        Some(pid) => format!("broker: running (pid {pid})"),
+        None => "broker: not running".into(),
+    });
     Ok(lines.join("\n"))
 }
 
@@ -180,4 +167,10 @@ fn issue(config: &Config) -> Result<PairingUri, Error> {
 fn running(pid_file: &Path) -> Option<u32> {
     let pid = fs::read_to_string(pid_file).ok()?.trim().parse().ok()?;
     signal(pid, 0).then_some(pid)
+}
+
+/// Whether `signal` reached `pid`; signal 0 asks only whether it is alive.
+fn signal(pid: u32, signal: libc::c_int) -> bool {
+    // SAFETY: kill takes plain integers; a stale pid is at worst refused.
+    libc::pid_t::try_from(pid).is_ok_and(|pid| unsafe { libc::kill(pid, signal) } == 0)
 }

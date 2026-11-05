@@ -13,7 +13,6 @@ use wslib_pairing::SpkiSha256;
 use wslib_tls::{KeyFingerprint, Location, Serving};
 
 use crate::enrolment::{Enrolled, Mode, bad_request, decimal, internal, rfc_3339};
-use crate::step_ca::Files;
 use crate::{Broker, Error};
 
 /// The API's TLS once enrolled: a client must chain to `root` and present the operator's key.
@@ -116,7 +115,7 @@ impl Broker {
             ..current
         };
         self.store(renewed.clone())?;
-        self.on_new_chain();
+        self.refresh_acme();
         Ok(self.status_from(&subordinate, &renewed))
     }
 
@@ -136,7 +135,7 @@ impl Broker {
         };
         self.store(revoked.clone())?;
         tracing::warn!("revoked by opCA");
-        self.on_revoked();
+        self.refresh_acme();
         self.status(&revoked)
     }
 
@@ -156,52 +155,17 @@ impl Broker {
     }
 
     fn issuer_state(&self) -> IssuerState {
-        if self.step_ca.is_running() {
+        if self.acme_listener.serving().is_some() {
             IssuerState::Issuing
         } else {
-            IssuerState::StepCaDown
+            IssuerState::AcmeDown
         }
-    }
-
-    /// Writes step-ca's config from the stored enrolment, then starts it or has it reload.
-    pub(crate) fn on_new_chain(&self) {
-        let Mode::Enrolled(enrolled) = self.mode() else {
-            return;
-        };
-        if enrolled.revoked {
-            return;
-        }
-        let written = Files::in_state(&self.state).write(
-            &enrolled.chain_pem,
-            &self.host,
-            self.acme_listen,
-            &enrolled.config,
-        );
-        match written {
-            Ok(()) => self.step_ca.start_or_reload(),
-            Err(error) => tracing::error!(%error, "could not write step-ca's config"),
-        }
-    }
-
-    fn on_revoked(&self) {
-        self.step_ca.stop();
-    }
-
-    /// Starts step-ca when enrolled and not revoked; needs a Tokio runtime.
-    pub fn start_issuing(&self) {
-        self.on_new_chain();
-    }
-
-    /// Stops step-ca, killing it if it hasn't gone within `patience`.
-    pub async fn stop_issuing(&self, patience: std::time::Duration) {
-        self.step_ca.stop_and_wait(patience).await;
     }
 
     pub(crate) fn versions(&self) -> Versions {
         Versions {
             api: API_VERSION,
             broker: env!("CARGO_PKG_VERSION").into(),
-            step_ca: self.step_ca.version.to_string(),
         }
     }
 }

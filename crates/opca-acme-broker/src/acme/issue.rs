@@ -21,7 +21,7 @@ use crate::enrolment::host_within;
 
 const DAY: Duration = Duration::from_secs(86_400);
 /// As step-ca does, for clients whose clocks run a little behind.
-const BACKDATE: Duration = Duration::from_secs(60);
+pub(crate) const BACKDATE: Duration = Duration::from_secs(60);
 const COMMON_NAME: &str = "2.5.4.3";
 
 pub struct Issuer {
@@ -102,19 +102,32 @@ impl Issuer {
         }
 
         let validity = self.validity(order, now)?;
-        let serial = Serial::random(provider).map_err(internal)?;
-        let leaf = self
-            .authority
-            .issue(&csr, &leaf_profile(&csr), &serial, validity)
-            .map_err(internal)?;
+        let (serial, chain_pem) = self.sign(&csr, validity).map_err(internal)?;
         Ok(NewCertificate {
             serial: serial.to_string(),
             common_name: csr.common_name().map(str::to_string),
             sans: names.into_iter().collect(),
             not_before: validity.not_before,
             not_after: validity.not_after,
-            chain_pem: pem::encode(CERTIFICATE, &leaf) + &self.chain_pem,
+            chain_pem,
         })
+    }
+
+    /// A serverAuth leaf for `csr`, unchecked, followed by the chain to serve it with.
+    pub(crate) fn sign(
+        &self,
+        csr: &Csr,
+        validity: Validity,
+    ) -> Result<(Serial, String), wslib_crypto_ca::Error> {
+        let serial = Serial::random(self.authority.signer().provider())?;
+        let leaf = self
+            .authority
+            .issue(csr, &leaf_profile(csr), &serial, validity)?;
+        Ok((serial, pem::encode(CERTIFICATE, &leaf) + &self.chain_pem))
+    }
+
+    pub(crate) fn subordinate_not_after(&self) -> SystemTime {
+        self.subordinate_not_after
     }
 
     /// The CSR's DNS names, lower-case, each one the broker may issue for.

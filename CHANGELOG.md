@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The ACME broker can validate http-01, dns-01 and tls-alpn-01 challenges
   itself. http-01 follows up to 10 redirects, only to ports 80 and 443, and
   reads at most 1 KiB.
+- The ACME broker serves its own ACME listener on `acme_listen`, with a
+  certificate for `host` that it issues from the subordinate: on each new
+  chain, at start, and two-thirds through its 30 days. A renewal reaches the
+  open listener at once, and revocation or a reopen stops it.
+
+### Changed
+
+- The ACME broker no longer needs step-ca, and the `.deb` no longer depends on
+  it. `step_ca` in `broker.toml` is now refused, the status reports
+  `acme_down` in place of `step_ca_down`, and the versions no longer name
+  step-ca. The ACME directory moves to `/acme/directory`.
 
 ### Fixed
 

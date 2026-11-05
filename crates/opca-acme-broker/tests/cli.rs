@@ -29,18 +29,6 @@ fn config_of(running: &Running) -> opca_acme_broker::Config {
     config(running.state.path(), &[])
 }
 
-async fn status_until(running: &Running, wanted: &str) -> String {
-    let mut text = String::new();
-    for _ in 0..100 {
-        text = cli::status(&config_of(running)).unwrap();
-        if text.contains(wanted) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    text
-}
-
 #[tokio::test]
 async fn pairing_issues_a_code_the_running_broker_accepts() {
     let running = serve(private_tempdir(), &[]).await;
@@ -88,20 +76,18 @@ async fn status_reads_each_mode_from_the_files() {
         "mode: enrolling",
         "pairing code: pending, 5 of 5 attempts left",
         "broker: not running",
-        "step-ca: not running",
     ] {
         assert!(enrolling.contains(line), "{enrolling}");
     }
     assert!(!enrolling.contains("subordinate:"));
 
     let (running, _, operator, serial) = enrolled().await;
-    let enrolled = status_until(&running, "step-ca: running").await;
+    let enrolled = cli::status(&config_of(&running)).unwrap();
     for line in [
         "mode: enrolled",
         "pairing code: spent by enrolment",
         &format!("subordinate: serial {serial}, expires 20"),
         "permitted domains: home.example",
-        "step-ca: running (pid ",
     ] {
         assert!(enrolled.contains(line), "{enrolled}");
     }
@@ -110,10 +96,8 @@ async fn status_reads_each_mode_from_the_files() {
         .call(Some(&operator), "POST", path::REVOKE, "")
         .await
         .unwrap();
-    let revoked = status_until(&running, "step-ca: not running").await;
-    for line in ["mode: revoked", "step-ca: not running"] {
-        assert!(revoked.contains(line), "{revoked}");
-    }
+    let revoked = cli::status(&config_of(&running)).unwrap();
+    assert!(revoked.contains("mode: revoked"), "{revoked}");
 }
 
 #[tokio::test]
@@ -134,8 +118,9 @@ async fn reopening_pairs_again_with_a_new_key_and_the_same_pin() {
     assert!(archive.join("enrolment.json").is_file());
     assert!(!archive.join("subordinate.key").exists());
     assert!(!state.join("enrolment.json").exists());
-    let after = status_until(&running, "step-ca: not running").await;
+    let after = cli::status(&config_of(&running)).unwrap();
     assert!(after.contains("mode: enrolling"), "{after}");
+    assert_eq!(running.broker.acme_address(), None);
 
     let paired = Api {
         uri,

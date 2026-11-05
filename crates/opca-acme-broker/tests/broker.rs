@@ -15,7 +15,6 @@ use wslib_pairing::{OneTimeCode, PairingUri, Redemption, Status};
 fn config(state: &Path) -> Config {
     Config {
         state_dir: state.into(),
-        step_ca: support::fake_step_ca(),
         ..Config::parse(r#"host = "acme.home.example""#).unwrap()
     }
 }
@@ -179,7 +178,6 @@ fn the_config_needs_only_a_host() {
     assert_eq!(config.listen, "[::]:9443".parse().unwrap());
     assert!(config.domains.is_empty());
     assert_eq!(config.state_dir, Path::new("/var/lib/opca-acme"));
-    assert_eq!(config.step_ca, Path::new("/usr/bin/step-ca"));
     assert_eq!(config.acme_listen, "[::]:443".parse().unwrap());
 
     let full = Config::parse(
@@ -199,4 +197,12 @@ fn the_config_needs_only_a_host() {
 fn a_config_with_no_host_or_an_unknown_key_is_refused() {
     assert!(Config::parse("").is_err());
     assert!(Config::parse("host = \"a.example\"\ndomain = [\"a.example\"]").is_err());
+}
+
+#[test]
+fn a_config_naming_step_ca_is_refused_by_name() {
+    let refused = Config::parse("host = \"a.example\"\nstep_ca = \"/usr/bin/step-ca\"")
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("step_ca"), "{refused}");
 }

@@ -42,6 +42,7 @@ trait Named: Copy {
 }
 
 mod issue;
+pub(crate) mod listener;
 mod problem;
 pub mod store;
 pub mod validate;

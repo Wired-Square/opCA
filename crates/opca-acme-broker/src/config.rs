@@ -20,9 +20,7 @@ pub struct Config {
     pub domains: Vec<String>,
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
-    #[serde(default = "default_step_ca")]
-    pub step_ca: PathBuf,
-    /// Where step-ca serves ACME.
+    /// Where the broker serves ACME.
     #[serde(default = "default_acme_listen")]
     pub acme_listen: SocketAddr,
 }
@@ -45,10 +43,6 @@ fn default_listen() -> SocketAddr {
 
 fn default_state_dir() -> PathBuf {
     "/var/lib/opca-acme".into()
-}
-
-fn default_step_ca() -> PathBuf {
-    "/usr/bin/step-ca".into()
 }
 
 fn default_acme_listen() -> SocketAddr {

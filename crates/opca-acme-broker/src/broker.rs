@@ -1,5 +1,4 @@
 use std::io;
-use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -7,6 +6,7 @@ use std::time::Duration;
 
 use opca_acme_api::ErrorBody;
 use rustls::crypto::CryptoProvider;
+use rustls::pki_types::PrivateKeyDer;
 use rustls_openssl::default_provider;
 use wslib_crypto::{KeyAlgorithm, Signer};
 use wslib_crypto_ca::{CERTIFICATE_REQUEST, CsrView, Subject, build_csr};
@@ -18,9 +18,9 @@ use wslib_service::Held;
 use wslib_tls::{Location, Serving};
 
 use crate::acme::Store;
+use crate::acme::listener::AcmeListener;
 use crate::enrolled::{operator_config, root_of};
 use crate::enrolment::{self, Mode, host_within, internal};
-use crate::step_ca::{Files, StepCa, check_version};
 use crate::{Config, Error};
 
 pub use opca_acme_api::PAIRING_SCHEME as SCHEME;
@@ -44,8 +44,7 @@ pub struct Broker {
     port: u16,
     pub(crate) domains: Vec<String>,
     pub(crate) state: PathBuf,
-    pub(crate) step_ca: Arc<StepCa>,
-    pub(crate) acme_listen: SocketAddr,
+    pub(crate) acme_listener: AcmeListener,
     acme: Store,
     lock_timeout: Duration,
     _held: Held,
@@ -60,7 +59,6 @@ impl Broker {
         if !name.is_host() {
             return Err(format!("{} is not a host name or address", config.host).into());
         }
-        let version = check_version(&config.step_ca)?;
         let state = config.state_dir.as_path();
         let held = wslib_service::private_directory(state)?;
         let provider = Arc::new(default_provider());
@@ -94,12 +92,7 @@ impl Broker {
             port: config.listen.port(),
             domains: config.domains.clone(),
             state: state.into(),
-            step_ca: StepCa::new(
-                config.step_ca.clone(),
-                Files::in_state(state).config,
-                version,
-            ),
-            acme_listen: config.acme_listen,
+            acme_listener: AcmeListener::new(config.acme_listen),
             acme,
             lock_timeout: LOCK_TIMEOUT,
             _held: held,
@@ -120,7 +113,7 @@ impl Broker {
             tracing::warn!(
                 host = %config.host,
                 "the host is not a name within the configured domains, so enrolment will be \
-                 refused: step-ca's own TLS certificate is issued for it"
+                 refused: the ACME listener's certificate is issued for it"
             );
         }
         let uri = issued.map(|plain| broker.uri(plain)).transpose()?;
@@ -168,7 +161,7 @@ impl Broker {
     }
 
     /// Takes up what `opca-acme enrol --reopen` changed on disk: the
-    /// subordinate, the mode, the TLS it implies, and step-ca.
+    /// subordinate, the mode, the TLS it implies, and the ACME listener.
     pub async fn reload(self: &Arc<Self>) -> Result<(), ErrorBody> {
         self.locked(|broker| broker.reload_locked().map_err(internal))
             .await
@@ -181,13 +174,8 @@ impl Broker {
         self.tls
             .reload(tls_config(&self.provider, &self.serving, &mode)?);
         *self.subordinate.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(subordinate);
-        let issuing = matches!(&mode, Mode::Enrolled(enrolled) if !enrolled.revoked);
         *self.mode.write().unwrap_or_else(|e| e.into_inner()) = mode;
-        if issuing {
-            self.on_new_chain();
-        } else {
-            self.step_ca.stop();
-        }
+        self.refresh_acme();
         tracing::info!("reloaded the state from disk");
         Ok(())
     }
@@ -250,6 +238,7 @@ fn tls_config(
 
 /// The subordinate CA's key, unencrypted and owner-only, and its CSR.
 pub struct Subordinate {
+    key: PrivateKeyDer<'static>,
     signer: Signer,
     subject: Subject,
     csr_pem: String,
@@ -287,10 +276,15 @@ impl Subordinate {
             }
         };
         Ok(Self {
+            key,
             signer,
             subject,
             csr_pem,
         })
+    }
+
+    pub(crate) fn signer(&self) -> Result<Signer, Error> {
+        Ok(Signer::new(self.signer.provider().clone(), &self.key)?)
     }
 
     /// A new CSR over the same key, for a renewal.

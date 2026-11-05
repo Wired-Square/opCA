@@ -75,8 +75,8 @@ fn run(path: &Path, command: Command) -> Result<(), Error> {
 
 fn confirm() -> Result<bool, Error> {
     print!(
-        "This archives the enrolment, deletes the subordinate key and stops step-ca until \
-         opCA pairs again.\nType 'reopen' to continue: "
+        "This archives the enrolment, deletes the subordinate key and stops serving ACME \
+         until opCA pairs again.\nType 'reopen' to continue: "
     );
     std::io::stdout().flush()?;
     let mut answer = String::new();
