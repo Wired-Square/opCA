@@ -25,4 +25,4 @@ frontend/dist/
 *.pem
 *.key
 environment.sh
-.env.local
+.env

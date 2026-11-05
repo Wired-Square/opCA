@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/../.env.local"
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Missing $ENV_FILE — copy from .env.local.example and fill in your values" >&2
-  exit 1
+cd "$(dirname "$0")/.."
+# .env may be a 1Password-mounted FIFO: test with -e, and read it once.
+# Values are literal, not shell: the signing identity has spaces and brackets.
+if [[ -e .env ]]; then
+  while IFS='=' read -r key value; do
+    [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$key=$value"
+  done < .env
 fi
 
-# shellcheck source=/dev/null
-source "$ENV_FILE"
-
-APPLE_ID=$(op read --account "$OP_ACCOUNT" "$APPLE_ID_REF")
-APPLE_TEAM_ID=$(op read --account "$OP_ACCOUNT" "$APPLE_TEAM_ID_REF")
-APPLE_NOTARY_PASSWORD=$(op read --account "$OP_ACCOUNT" "$APPLE_NOTARY_PASSWORD_REF")
-
-NOTARY_ARGS=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_NOTARY_PASSWORD")
+NOTARY_ARGS=(
+  --apple-id "${APPLE_ID:?set in .env}"
+  --team-id "${APPLE_TEAM_ID:?set in .env}"
+  --password "${APPLE_PASSWORD:?set in .env}"
+)
 
 case "${1:-}" in
   history)
