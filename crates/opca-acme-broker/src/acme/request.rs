@@ -119,9 +119,10 @@ impl Requests<'_> {
         };
         jws.verify(signer.key(), self.provider).map_err(refused)?;
         if !self.nonces.redeem(nonce) {
+            // Boulder's wording: acme.sh retries a badNonce only when the detail says this.
             return Err(Problem::new(
                 ProblemType::BadNonce,
-                "the nonce is unknown or used",
+                "JWS has an invalid anti-replay nonce: it is unknown or used",
             ));
         }
         Ok((jws, signer))

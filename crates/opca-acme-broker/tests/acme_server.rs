@@ -575,6 +575,23 @@ async fn a_bad_nonce_is_refused_with_a_fresh_one() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_stale_nonce_is_refused_in_the_words_acme_sh_retries_on() {
+    let acme = acme(None).await;
+    let key = key();
+    let url = format!("{}/acme/new-account", acme.base());
+    let header = json!({"nonce": "bm9uY2U", "url": url, "jwk": key.jwk()});
+    let (_, _, body) = acme.https.post(&url, key.jws(header, b"{}")).await;
+    assert_eq!(body["type"], urn("badNonce"));
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("JWS has an invalid anti-replay nonce"),
+        "{body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn names_outside_the_permitted_domains_and_addresses_are_rejected() {
     let acme = acme(None).await;
     tokio::time::timeout(WAIT, async {

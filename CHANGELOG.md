@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   over http-01, dns-01 or tls-alpn-01, finalising, certificate download, and
   revocation by the account or the certificate's own key, which opCA sees on
   its next sync. Wildcards need dns-01, IP addresses are refused, and names
-  outside the permitted domains are refused at the order.
+  outside the permitted domains are refused at the order. A stale nonce is
+  refused in Let's Encrypt's words, so acme.sh retries it after a restart.
 - The ACME broker keeps its own issuance store, `acme.db` in its state
   directory: ACME accounts, orders, authorisations, challenges and the
   certificates it issues, each with a cursor for opCA to sync from. Statuses
