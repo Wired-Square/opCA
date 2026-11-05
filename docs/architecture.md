@@ -1086,6 +1086,15 @@ Organised under [src/](../crates/opca-acme-broker/src):
     Statuses are RFC 8555's and move only along its §7.1.6 diagrams; a
     challenge's outcome settles its authorisation, and that its order.
     Certificates carry an `AUTOINCREMENT` id, the cursor of `issued_after`.
+  - [issue.rs](../crates/opca-acme-broker/src/acme/issue.rs) — `Issuer`
+    finalises an order from a CSR: it must verify, hold only a common name
+    that is one of its DNS names, name exactly the order's identifiers, use
+    RSA 2048–8192, P-256 or P-384 and not the account key; `check_identifier`
+    refuses IPs, non-A-label names, wildcards other than the whole leftmost
+    label and names outside the permitted domains. The leaf is `serverAuth`
+    only, backdated a minute, for `leaf_days` (or the order's `notAfter`)
+    capped at `leaf_max_days` and the subordinate's end, and served with the
+    chain minus the root. Refusals are `Problem`s with RFC 8555's types.
 - [cli.rs](../crates/opca-acme-broker/src/cli.rs) and
   [bin/opca-acme.rs](../crates/opca-acme-broker/src/bin/opca-acme.rs) — the
   `opca-acme` command line.

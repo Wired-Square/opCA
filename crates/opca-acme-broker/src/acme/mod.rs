@@ -41,9 +41,11 @@ trait Named: Copy {
     fn parse(text: &str) -> Option<Self>;
 }
 
+mod issue;
 mod problem;
 pub mod store;
 
+pub use issue::{Issuer, check_identifier};
 pub use problem::{Problem, ProblemType};
 pub use store::Store;
 

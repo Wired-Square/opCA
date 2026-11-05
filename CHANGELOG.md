@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   directory: ACME accounts, orders, authorisations, challenges and the
   certificates it issues, each with a cursor for opCA to sync from. Statuses
   move only as RFC 8555 draws them.
+- The ACME broker can issue from a CSR for an order. The CSR must verify,
+  name exactly the order's DNS names, all within the permitted domains, and
+  not reuse the account key. The leaf is `serverAuth` only, lasts the
+  configured days (never past the cap or the subordinate), and is served with
+  the subordinate.
 
 ### Fixed
 
