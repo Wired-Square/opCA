@@ -1299,7 +1299,10 @@ against the system libssl3 and attaches the `.deb` to `v*` releases.
 
 [scripts/stage-broker-src.sh](../scripts/stage-broker-src.sh) stages the two
 crates without their dev-dependencies, with every dependency vendored, for
-builds that can't reach the registries.
+builds that can't reach the registries. Its config links arm64 with lld and
+`--fix-cortex-a53-843419`, since bookworm's ld leaves an erratum 843419 site
+even with its fix on; both arm64 builds check their binaries with
+`wslib-appliance-xtask erratum-843419`.
 [scripts/build-broker-deb.sh](../scripts/build-broker-deb.sh) `--platform
 linux/arm64|linux/amd64` builds the Linux binaries and the `.deb` from it in a
 throwaway `rust:1.99-bookworm` container of that platform (emulated when it
@@ -1317,9 +1320,7 @@ serving the ACME listener's certificate for `host` under systemd in
 [appliance/Dockerfile](../crates/opca-acme-broker/appliance/Dockerfile) on the
 `appliance-image` buildx builder: the broker compiled in `rust:1.99-bookworm`,
 run on `distroless/cc-debian12`, whose glibc and libssl3 are the same Debian
-release's. On arm64 it links with lld and `--fix-cortex-a53-843419`, since
-bookworm's ld leaves an erratum 843419 site even with its fix on, and checks
-the binary with `wslib-appliance-xtask erratum-843419`. It labels the image with the manifest that
+release's. It labels the image with the manifest that
 [examples/appliance-label.rs](../crates/opca-acme-broker/examples/appliance-label.rs)
 builds from `wslib-appliance-types`' `AppManifest` and checks with its
 validator (its tests run under `cargo test`), writes a docker-load tarball to

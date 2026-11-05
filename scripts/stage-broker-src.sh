@@ -27,3 +27,11 @@ rust-version = "1.99"
 TOML
 cp "$root/.cargo/config.toml" "$work/src/.cargo/config.toml"
 (cd "$work/src" && cargo vendor --versioned-dirs vendor >> .cargo/config.toml)
+# A Cortex-A53 (the Pi 3, the Zero 2 W) can miscompute an address at an
+# unpatched erratum 843419 site. bookworm's ld leaves one even with its fix on;
+# lld's fix patches it, so an arm64 build needs lld.
+cat >> "$work/src/.cargo/config.toml" <<'TOML'
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld", "-C", "link-arg=-Wl,--fix-cortex-a53-843419"]
+TOML

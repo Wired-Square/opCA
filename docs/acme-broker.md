@@ -271,7 +271,7 @@ To build it and pack it into an archive the console's **Apps › Install** takes
 scripts/build-acme-app.sh --keys <dir> --platform linux/arm64
 ```
 
-It needs Docker with buildx, OpenSSL 3, `jq` and an ApplianceOS checkout (`APPLIANCEOS`, by
+It needs Docker with buildx, OpenSSL 3, `jq`, `wslib-appliance-xtask` for arm64, and an ApplianceOS checkout (`APPLIANCEOS`, by
 default `../ApplianceOS`). It signs with the throwaway keys in `<dir>`, made there if it holds
 none, as source `opca-test` (`--source` changes it); add `<dir>/root.pem` under **Apps › Sources**
 with that name before installing. The image and the archive land in `target/acme-app/`. To run
@@ -289,7 +289,9 @@ scripts/build-broker-deb.sh --platform linux/amd64   # or linux/arm64, the defau
 ```
 
 It builds in a `rust:1.99-bookworm` container of that platform, through Docker's emulation when
-it isn't the host's, and leaves the `.deb` in `target/acme-docker/<arch>/deb/`.
+it isn't the host's, and leaves the `.deb` in `target/acme-docker/<arch>/deb/`. An arm64 build
+links with lld for the Cortex-A53 erratum 843419 fix and checks its binaries with
+`wslib-appliance-xtask erratum-843419`, which must be on the `PATH`.
 `crates/opca-acme-broker/tests/docker.sh` takes the same `--platform`, builds, then installs and
 enrols the `.deb` under systemd in `debian:bookworm` of that platform. On a Docker network of its
 own, with a Knot DNS server authoritative for the test domain, it then has real clients issue from

@@ -29,9 +29,13 @@ mkdir -p "$out/bin"
 docker run --rm --platform "$platform" --name "opca-deb-$arch-$$" -v "$work:/work" \
     -w /work/src -e "CARGO_TARGET_DIR=/work/$arch/target" -e "ARCH=$arch" \
     rust:1.99-bookworm sh -ec '
+        [ "$ARCH" != arm64 ] || { apt-get update -qq && apt-get install -y -qq lld > /dev/null; }
         cargo build --offline --release -p opca-acme-broker
         [ -x "/work/$ARCH/tools/bin/cargo-deb" ] ||
             (cd / && cargo install cargo-deb --version 3.8.0 --locked --root "/work/$ARCH/tools")
         CARGO_NET_OFFLINE=true "/work/$ARCH/tools/bin/cargo-deb" -p opca-acme-broker \
             --no-build --output "/work/$ARCH/deb/"'
 cp "$out/target/release/opca-acme-broker" "$out/target/release/opca-acme" "$out/bin/"
+if [ "$arch" = arm64 ]; then
+    for bin in "$out"/bin/*; do wslib-appliance-xtask erratum-843419 "$bin"; done
+fi
