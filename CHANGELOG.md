@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   certificate for `host` that it issues from the subordinate: on each new
   chain, at start, and two-thirds through its 30 days. A renewal reaches the
   open listener at once, and revocation or a reopen stops it.
+- `scripts/build-broker-deb.sh --platform linux/arm64|linux/amd64` builds the
+  ACME broker's `.deb` for either architecture.
 
 ### Changed
 
