@@ -248,4 +248,8 @@ scripts/build-broker-deb.sh --platform linux/amd64   # or linux/arm64, the defau
 It builds in a `rust:1.99-bookworm` container of that platform, through Docker's emulation when
 it isn't the host's, and leaves the `.deb` in `target/acme-docker/<arch>/deb/`.
 `crates/opca-acme-broker/tests/docker.sh` takes the same `--platform`, builds, then installs and
-enrols the `.deb` under systemd in `debian:bookworm` of that platform.
+enrols the `.deb` under systemd in `debian:bookworm` of that platform. On a Docker network of its
+own, with a Knot DNS server authoritative for the test domain, it then has real clients issue from
+the broker: lego over http-01 and tls-alpn-01 (with a renewal, a revocation through ACME and an
+out-of-domain refusal), certbot over http-01, and acme.sh over dns-01 for a wildcard and again
+across a restart of the broker mid-order. Every image is pinned by tag.

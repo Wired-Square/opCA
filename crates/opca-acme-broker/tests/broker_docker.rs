@@ -1,5 +1,6 @@
 //! The broker's Linux build in Docker: the command line's privilege drop, and
-//! the `.deb` installed, enrolled and serving ACME under systemd. Runs only
+//! the `.deb` installed, enrolled and serving real ACME clients under systemd,
+//! on a network of its own with an authoritative DNS server. Runs only
 //! with `OPCA_ACME_DOCKER_TEST=1`, `OPCA_ACME_DOCKER_PLATFORM`, and
 //! `OPCA_ACME_DOCKER_BIN` and `OPCA_ACME_DOCKER_DEB` naming that platform's
 //! binaries and `.deb`; see `docker.sh`.
@@ -8,12 +9,14 @@
 
 mod support;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use opca_acme_api::{Enrolment, EnrolmentOffer, IssuerState, Status, path};
+use opca_acme_api::{
+    Challenge, Enrolment, EnrolmentOffer, IssuanceConfig, IssuedPage, IssuerState, Status, path,
+};
 use opca_acme_broker::SCHEME;
 use support::{Api, TestCa, acme_connect};
 use wslib_crypto_x509::pem;
@@ -28,6 +31,8 @@ const SLOW: u64 = 900;
 /// Every container and the network this run made, removed when it drops.
 struct Docker {
     prefix: String,
+    /// The network's first three octets: hosts below .128 are ours to assign.
+    subnet: String,
     containers: Vec<String>,
 }
 
@@ -36,12 +41,35 @@ impl Docker {
         static RUNS: AtomicUsize = AtomicUsize::new(0);
         let run = RUNS.fetch_add(1, Ordering::Relaxed);
         let prefix = format!("opca-e-{}-{run}", std::process::id());
-        let made = docker(&["network", "create", &prefix], 30);
-        assert!(made.status.success(), "{}", text(&made.stderr));
-        Self {
-            prefix,
-            containers: Vec::new(),
+        let first = std::process::id() as usize + run;
+        let mut refusals = String::new();
+        for subnet in (first..first + 8).map(|n| format!("10.231.{}", n % 256)) {
+            let made = docker(
+                &[
+                    "network",
+                    "create",
+                    "--subnet",
+                    &format!("{subnet}.0/24"),
+                    "--ip-range",
+                    &format!("{subnet}.128/25"),
+                    &prefix,
+                ],
+                30,
+            );
+            if made.status.success() {
+                return Self {
+                    prefix,
+                    subnet,
+                    containers: Vec::new(),
+                };
+            }
+            refusals += &text(&made.stderr);
         }
+        panic!("no free subnet:\n{refusals}");
+    }
+
+    fn ip(&self, host: u8) -> String {
+        format!("{}.{host}", self.subnet)
     }
 
     fn name(&mut self, role: &str) -> String {
@@ -200,14 +228,362 @@ fn published(container: &str, port: &str) -> std::net::SocketAddr {
     port.lines().next().unwrap().trim().parse().unwrap()
 }
 
+const LEGO: &str = "goacme/lego:v4.25.2";
+const CERTBOT: &str = "certbot/certbot:v4.2.0";
+const ACME_SH: &str = "neilpang/acme.sh:3.1.1";
+const KNOT: &str = "cznic/knot:3.4";
+const DIRECTORY: &str = "https://acme.home.example/acme/directory";
+/// One real client's whole run.
+const CLIENT: u64 = 240;
+
+const BROKER: u8 = 10;
+const DNS: u8 = 53;
+const LEGO_HTTP: u8 = 20;
+const LEGO_ALPN: u8 = 21;
+const CERTBOT_HTTP: u8 = 22;
+/// The test zone's address records, as hosts on the test network.
+const HOSTS: &[(&str, u8)] = &[
+    ("acme", BROKER),
+    ("ns", DNS),
+    ("lego", LEGO_HTTP),
+    ("alpn", LEGO_ALPN),
+    ("certbot", CERTBOT_HTTP),
+];
+
+const TSIG_SECRET: &str = "b3BjYS1hY21lLWNvbmZvcm1hbmNlLXRlc3QtdHNpZy1rZXk=";
+
+const KNOT_CONF: &str = r#"server:
+    rundir: "/rundir"
+    user: knot:knot
+    listen: 0.0.0.0@53
+log:
+  - target: stdout
+    any: info
+key:
+  - id: acme
+    algorithm: hmac-sha256
+    secret: TSIG_SECRET
+acl:
+  - id: update
+    key: acme
+    action: update
+database:
+    storage: "/storage"
+zone:
+  - domain: home.example
+    file: /storage/home.example.zone
+    acl: update
+"#;
+
+/// acme.sh's dns-01 hook for the restart: it publishes the TXT, then holds
+/// the order open until the test has restarted the broker.
+const PAUSE_HOOK: &str = r#"dns_pause_add() {
+    printf 'server %s\nzone home.example.\nupdate add %s. 60 txt "%s"\nsend\n' \
+        "$NSUPDATE_SERVER" "$1" "$2" | nsupdate -k "$NSUPDATE_KEY" || return 1
+    touch /work/paused
+    for _ in $(seq 120); do [ -f /work/resume ] && return 0; sleep 1; done
+    return 1
+}
+dns_pause_rm() { :; }
+"#;
+
+/// The authoritative zone, TSIG key and hook the clients and the broker share at `/work`.
+fn write_shared_files(run: &Docker, work: &Path) {
+    let mut zone =
+        "$ORIGIN home.example.\n$TTL 60\n@ SOA ns hostmaster 1 60 60 3600 60\n@ NS ns\n".to_owned();
+    for (name, host) in HOSTS {
+        zone += &format!("{name} A {}\n", run.ip(*host));
+    }
+    let files = [
+        ("home.example.zone", zone),
+        ("knot.conf", KNOT_CONF.replace("TSIG_SECRET", TSIG_SECRET)),
+        (
+            "tsig.key",
+            format!("key \"acme\" {{\n algorithm hmac-sha256;\n secret \"{TSIG_SECRET}\";\n}};\n"),
+        ),
+        ("dns_pause.sh", PAUSE_HOOK.into()),
+    ];
+    for (name, contents) in files {
+        std::fs::write(work.join(name), contents).unwrap();
+    }
+}
+
+fn start_dns(run: &mut Docker, built: &Built, work: &str) {
+    let dns = run.name("dns");
+    let ip = run.ip(DNS);
+    let started = docker(
+        &[
+            "run",
+            "-d",
+            "--rm",
+            "--platform",
+            &built.platform,
+            "--name",
+            &dns,
+            "--network",
+            &run.prefix,
+            "--ip",
+            &ip,
+            "-v",
+            work,
+            KNOT,
+            "sh",
+            "-c",
+            "cp /work/home.example.zone /storage/ && chown knot:knot /storage/* \
+             && exec knotd -c /work/knot.conf",
+        ],
+        SLOW,
+    );
+    assert!(started.status.success(), "{}", text(&started.stderr));
+    let broker = run.ip(BROKER);
+    wait_for("the test zone to be served", 60, || {
+        let answer = docker(
+            &[
+                "exec",
+                &dns,
+                "kdig",
+                "+short",
+                "@127.0.0.1",
+                "acme.home.example",
+            ],
+            30,
+        );
+        (text(&answer.stdout).trim() == broker).then_some(())
+    });
+}
+
+/// Real ACME clients on the test network, resolving through its DNS.
+struct Clients<'a> {
+    docker: &'a mut Docker,
+    platform: &'a str,
+    work: &'a str,
+}
+
+impl Clients<'_> {
+    fn command(&mut self, role: &str, options: &[&str], image: &str, args: &[&str]) -> Vec<String> {
+        let name = self.docker.name(role);
+        let dns = self.docker.ip(DNS);
+        let head = [
+            "run",
+            "--rm",
+            "--platform",
+            self.platform,
+            "--name",
+            &name,
+            "--network",
+            &self.docker.prefix,
+            "--dns",
+            &dns,
+            "-v",
+            self.work,
+        ];
+        [&head[..], options, &[image], args]
+            .concat()
+            .into_iter()
+            .map(String::from)
+            .collect()
+    }
+
+    fn run(&mut self, role: &str, options: &[&str], image: &str, args: &[&str]) -> Output {
+        run_client(&self.command(role, options, image, args))
+    }
+
+    fn lego(&mut self, role: &str, host: u8, args: &[&str]) -> Output {
+        let ip = self.docker.ip(host);
+        let common = [
+            "--server",
+            DIRECTORY,
+            "--accept-tos",
+            "--email",
+            "ops@home.example",
+            "--path",
+            "/work/lego",
+        ];
+        let options = ["--ip", &ip, "-e", "LEGO_CA_CERTIFICATES=/work/root.pem"];
+        self.run(role, &options, LEGO, &[&common[..], args].concat())
+    }
+
+    /// acme.sh issuing `names` over dns-01 through `hook`, updating the test zone.
+    fn acme_sh(&mut self, role: &str, hook: &str, names: &[&str], options: &[&str]) -> Vec<String> {
+        let server = format!("NSUPDATE_SERVER={}", self.docker.ip(DNS));
+        let env = [
+            "-e",
+            &server,
+            "-e",
+            "NSUPDATE_KEY=/work/tsig.key",
+            "-e",
+            "NSUPDATE_ZONE=home.example",
+        ];
+        let mut args = vec![
+            "acme.sh",
+            "--issue",
+            "--server",
+            DIRECTORY,
+            "--ca-bundle",
+            "/work/root.pem",
+            "--dns",
+            hook,
+            "--dnssleep",
+            "1",
+        ];
+        for name in names {
+            args.extend(["-d", name]);
+        }
+        self.command(role, &[&env[..], options].concat(), ACME_SH, &args)
+    }
+}
+
+fn run_client(command: &[String]) -> Output {
+    docker(
+        &command.iter().map(String::as_str).collect::<Vec<_>>(),
+        CLIENT,
+    )
+}
+
+fn said(ran: &Output) -> String {
+    format!("{}{}", text(&ran.stdout), text(&ran.stderr))
+}
+
+fn succeeded(what: &str, ran: &Output) {
+    assert!(ran.status.success(), "{what} failed:\n{}", said(ran));
+}
+
+/// lego over http-01 and tls-alpn-01, with a renewal, a revocation and a refusal;
+/// certbot over http-01; acme.sh over dns-01 for a wildcard, and again across a
+/// restart of the broker mid-order.
+fn run_real_clients(run: &mut Docker, built: &Built, host: &str, work: &Path) {
+    let mount = format!("{}:/work", work.display());
+    let mut clients = Clients {
+        docker: run,
+        platform: &built.platform,
+        work: &mount,
+    };
+    let http = ["--domains", "lego.home.example", "--http"];
+    succeeded(
+        "lego http-01",
+        &clients.lego("lego-http", LEGO_HTTP, &[&http[..], &["run"]].concat()),
+    );
+    succeeded(
+        "lego tls-alpn-01",
+        &clients.lego(
+            "lego-alpn",
+            LEGO_ALPN,
+            &["--domains", "alpn.home.example", "--tls", "run"],
+        ),
+    );
+    succeeded(
+        "lego renewal",
+        &clients.lego(
+            "lego-renew",
+            LEGO_HTTP,
+            &[&http[..], &["renew", "--days", "45", "--no-random-sleep"]].concat(),
+        ),
+    );
+    succeeded(
+        "lego revocation",
+        &clients.lego(
+            "lego-revoke",
+            LEGO_HTTP,
+            &["--domains", "lego.home.example", "revoke", "--reason", "4"],
+        ),
+    );
+    let outside = clients.lego(
+        "lego-outside",
+        LEGO_HTTP,
+        &["--domains", "outside.example.net", "--http", "run"],
+    );
+    let refused = said(&outside);
+    assert!(
+        !outside.status.success() && refused.contains("rejectedIdentifier"),
+        "{refused}"
+    );
+
+    let certbot_ip = clients.docker.ip(CERTBOT_HTTP);
+    succeeded(
+        "certbot http-01",
+        &clients.run(
+            "certbot",
+            &[
+                "--ip",
+                &certbot_ip,
+                "-e",
+                "REQUESTS_CA_BUNDLE=/work/root.pem",
+            ],
+            CERTBOT,
+            &[
+                "certonly",
+                "--standalone",
+                "--non-interactive",
+                "--agree-tos",
+                "--register-unsafely-without-email",
+                "--server",
+                DIRECTORY,
+                "-d",
+                "certbot.home.example",
+                "--config-dir",
+                "/work/certbot",
+                "--work-dir",
+                "/tmp/certbot",
+                "--logs-dir",
+                "/tmp/certbot",
+            ],
+        ),
+    );
+
+    let wildcard = clients.acme_sh(
+        "acme-sh-dns",
+        "dns_nsupdate",
+        &["dns.home.example", "*.dns.home.example"],
+        &[],
+    );
+    succeeded("acme.sh dns-01", &run_client(&wildcard));
+
+    let hook = format!(
+        "{}/dns_pause.sh:/root/.acme.sh/dnsapi/dns_pause.sh:ro",
+        work.display()
+    );
+    let paused = clients.acme_sh(
+        "acme-sh-restart",
+        "dns_pause",
+        &["pause.home.example"],
+        &["-v", &hook],
+    );
+    let client = std::thread::spawn(move || run_client(&paused));
+    wait_for("acme.sh to hold its order open", CLIENT, || {
+        work.join("paused").exists().then_some(())
+    });
+    shell(
+        host,
+        "systemctl restart opca-acme-broker
+         for _ in $(seq 150); do
+             curl -sfk -o /dev/null https://localhost/acme/directory && exit 0
+             sleep 0.2
+         done
+         exit 1",
+        120,
+    );
+    std::fs::write(work.join("resume"), "").unwrap();
+    succeeded("acme.sh across a restart", &client.join().unwrap());
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn the_deb_installs_enrols_and_serves_acme_under_systemd() {
+async fn the_deb_installs_enrols_and_serves_real_acme_clients_under_systemd() {
     let Some(built) = enabled() else {
         return;
     };
+    for image in [KNOT, LEGO, CERTBOT, ACME_SH] {
+        let pulled = docker(&["pull", "-q", "--platform", &built.platform, image], SLOW);
+        assert!(pulled.status.success(), "{}", text(&pulled.stderr));
+    }
     let mut run = Docker::new();
+    let work = tempfile::tempdir().unwrap();
+    let work_mount = format!("{}:/work", work.path().display());
+    write_shared_files(&run, work.path());
+    start_dns(&mut run, &built, &work_mount);
+
     let host = run.name("systemd");
     let mount = format!("{}:/deb:ro", built.deb.display());
+    let broker_ip = run.ip(BROKER);
     let boot = "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
                 systemd systemd-sysv dbus curl ca-certificates procps > /dev/null && exec /sbin/init";
     let started = docker(
@@ -219,6 +595,10 @@ async fn the_deb_installs_enrols_and_serves_acme_under_systemd() {
             &built.platform,
             "--name",
             &host,
+            "--network",
+            &run.prefix,
+            "--ip",
+            &broker_ip,
             "--privileged",
             "--cgroupns=private",
             "--tmpfs",
@@ -266,9 +646,13 @@ async fn the_deb_installs_enrols_and_serves_acme_under_systemd() {
 
     shell(
         &host,
-        "sed -i 's/^#host = .*/host = \"acme.home.example\"/' /etc/opca-acme/broker.toml
-         systemctl enable --now opca-acme-broker
-         [ \"$(systemctl is-active opca-acme-broker)\" = active ]",
+        &format!(
+            "printf 'nameserver {}\\n' > /etc/resolv.conf
+             sed -i 's/^#host = .*/host = \"acme.home.example\"/' /etc/opca-acme/broker.toml
+             systemctl enable --now opca-acme-broker
+             [ \"$(systemctl is-active opca-acme-broker)\" = active ]",
+            run.ip(DNS)
+        ),
         120,
     );
     let uri = shell(&host, "opca-acme pairing", 60);
@@ -301,9 +685,14 @@ async fn the_deb_installs_enrols_and_serves_acme_under_systemd() {
         "{body}"
     );
     let (chain, _, _) = ca.sign(&offer.csr_pem, DOMAINS);
+    let offered = api.enrolment(&chain, DOMAINS);
     let enrolment = Enrolment {
         operator_pin: operator.key_pin(),
-        ..api.enrolment(&chain, DOMAINS)
+        config: IssuanceConfig {
+            challenges: vec![Challenge::Http01, Challenge::Dns01, Challenge::TlsAlpn01],
+            ..offered.config.clone()
+        },
+        ..offered
     };
     let (code, body) = api.post(&enrolment).await;
     assert_eq!(code, 200, "{body}");
@@ -316,7 +705,7 @@ async fn the_deb_installs_enrols_and_serves_acme_under_systemd() {
         .unwrap();
     assert_eq!(presented[1], chain[0]);
     let (code, _) = acme.call("GET", "/acme/directory", "").await.unwrap();
-    assert_eq!(code, 503);
+    assert_eq!(code, 200);
     let serving = shell(
         &host,
         "echo directory=$(curl -sk -o /dev/null -w '%{http_code}' https://localhost/acme/directory)
@@ -326,13 +715,56 @@ async fn the_deb_installs_enrols_and_serves_acme_under_systemd() {
         60,
     );
     for expected in [
-        "directory=503",
+        "directory=200",
         "acme-key=600:opca-acme",
         "root-owned=0",
         "mode: enrolled",
     ] {
         assert!(serving.contains(expected), "{expected}:\n{serving}");
     }
+
+    let root = pem::encode("CERTIFICATE", chain.last().unwrap());
+    std::fs::write(work.path().join("root.pem"), root).unwrap();
+    run_real_clients(&mut run, &built, &host, work.path());
+    let (code, body) = api
+        .call(Some(&operator), "GET", path::ISSUED, "")
+        .await
+        .unwrap();
+    assert_eq!(code, 200, "{body}");
+    let page: IssuedPage = serde_json::from_str(&body).unwrap();
+    let mut issued: Vec<String> = page
+        .certificates
+        .iter()
+        .map(|certificate| {
+            let mut sans = certificate.sans.clone();
+            sans.sort();
+            sans.join(" ")
+        })
+        .collect();
+    issued.sort();
+    assert_eq!(
+        issued,
+        [
+            "*.dns.home.example dns.home.example",
+            "alpn.home.example",
+            "certbot.home.example",
+            "lego.home.example",
+            "lego.home.example",
+            "pause.home.example",
+        ],
+        "{body}"
+    );
+    let revoked: Vec<_> = page
+        .certificates
+        .iter()
+        .filter(|certificate| certificate.revoked_at.is_some())
+        .map(|certificate| (certificate.sans.clone(), certificate.revocation_reason))
+        .collect();
+    assert_eq!(
+        revoked,
+        [(vec!["lego.home.example".to_owned()], Some(4))],
+        "{body}"
+    );
 
     let stopped = shell(
         &host,
