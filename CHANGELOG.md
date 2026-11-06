@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a page at a time, and its status counts the certificates issued and
   revoked. The cursor moves on revocation too, so a revoked certificate comes
   back to a client that has already synced it.
+- The `opca-acme` app's page and status show the opCA API's URL and the ACME
+  directory, on the host ports the console mapped, once `host` is set.
 - The `opca-acme` app answers `GET /apps/opca-acme/api/status` and
   `GET /apps/opca-acme/api/issued?before=<cursor>&revoked=<bool>` (newest
   first, a page at a time) on its console socket, for any caller the console

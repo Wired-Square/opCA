@@ -855,6 +855,14 @@ fn the_page_answers_a_viewer(socket: &str) {
         (AppState::Enrolled, Some("acme.home.example"))
     );
     assert!(status.subordinate.is_some(), "{body}");
+    assert_eq!(
+        (status.api_url.as_deref(), status.acme_directory.as_deref()),
+        (
+            Some("https://acme.home.example:19443"),
+            Some("https://acme.home.example:8443/acme/directory")
+        ),
+        "the ports the console mapped"
+    );
     let (code, _, body) = console_get(socket, "/apps/opca-acme/api/issued", &[VIEWER]);
     assert_eq!(code, 200, "{body}");
     let issued: IssuedNewest = serde_json::from_str(&body).unwrap();
@@ -986,7 +994,8 @@ async fn the_app_image_needs_a_host_then_enrols() {
     );
     assert!(started.status.success(), "{}", text(&started.stderr));
 
-    wait_for_state(&socket, AppState::NeedsHost);
+    let status = wait_for_state(&socket, AppState::NeedsHost);
+    assert_eq!((status.api_url, status.acme_directory), (None, None));
     let (code, _, body) = console_get(&socket, "/apps/opca-acme/healthz", &[]);
     assert_eq!(code, 200, "{body}");
     let foreign = app_sock(&socket, "4242:0", "/apps/opca-acme/api/status", &[VIEWER]);

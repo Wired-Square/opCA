@@ -261,7 +261,8 @@ the option restarts the app, which then starts as the broker does on Debian and 
 URI. On ApplianceOS after 0.1.10 the URI names the API's host port as the console mapped it,
 which may not be 9443. An
 appliance's ACME directory is `https://<host>:<acme port>/acme/directory`, with the `acme`
-listener's host port.
+listener's host port. The app's page shows both, the API's URL and the ACME directory, once
+`host` is set.
 
 Options come first; `/data/broker.toml`, with the same `host` and `domains` keys, second. A
 blank option gives way to it.

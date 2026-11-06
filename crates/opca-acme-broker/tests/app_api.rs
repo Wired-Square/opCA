@@ -68,6 +68,8 @@ async fn needing_a_host_it_has_the_configured_domains_and_nothing_issued() {
         AppStatus {
             state: AppState::NeedsHost,
             host: None,
+            api_url: None,
+            acme_directory: None,
             domains: vec!["home.example".into()],
             subordinate: None,
         }
@@ -93,6 +95,35 @@ async fn awaiting_enrolment_it_has_its_host_and_no_subordinate() {
         (AppState::Enrolling, Some(HOST), None)
     );
     assert_eq!(status.domains, DOMAINS);
+    assert_eq!(
+        (status.api_url.unwrap(), status.acme_directory.unwrap()),
+        (
+            format!("https://{HOST}:9443"),
+            format!("https://{HOST}:8443/acme/directory")
+        )
+    );
+}
+
+#[tokio::test]
+async fn the_urls_name_the_ports_the_console_mapped() {
+    let state = private_tempdir();
+    let (broker, uri) = Broker::start(&config(state.path(), DOMAINS)).await.unwrap();
+    let running = run(state, broker, uri).await;
+    let mapped = [
+        ("APPLIANCE_LISTENER_API_PORT", "19443"),
+        ("APPLIANCE_LISTENER_ACME_PORT", "443"),
+    ];
+    let app = console_app(private_tempdir().path(), &mapped);
+    let sockets = serve_console(app, Hooked::Running(running.broker.clone())).await;
+
+    let status: AppStatus = read(sockets.path(), STATUS).await;
+    assert_eq!(
+        (status.api_url.unwrap(), status.acme_directory.unwrap()),
+        (
+            format!("https://{HOST}:19443"),
+            format!("https://{HOST}:443/acme/directory")
+        )
+    );
 }
 
 #[tokio::test]
@@ -117,6 +148,8 @@ async fn enrolled_it_names_its_subordinate_and_pages_the_issued_newest_first() {
         AppStatus {
             state: AppState::Enrolled,
             host: Some(HOST.into()),
+            api_url: Some(format!("https://{HOST}:9443")),
+            acme_directory: Some(format!("https://{HOST}:8443/acme/directory")),
             domains: DOMAINS.iter().map(|d| d.to_string()).collect(),
             subordinate: Some(Issuer {
                 serial: enrolled.status.subordinate_serial.clone(),

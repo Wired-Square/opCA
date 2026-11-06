@@ -60,6 +60,8 @@ function Status(props: { status: AppStatus }) {
         </dd>
         <dt>Host</dt>
         <dd>{props.status.host ?? "—"}</dd>
+        <Url label="API" url={props.status.api_url} />
+        <Url label="ACME directory" url={props.status.acme_directory} />
         <dt>Domains</dt>
         <dd>{props.status.domains.join(", ") || "chosen in opCA"}</dd>
         <Show when={props.status.subordinate}>
@@ -85,6 +87,19 @@ function Status(props: { status: AppStatus }) {
         </Match>
       </Switch>
     </>
+  );
+}
+
+function Url(props: { label: string; url: string | null }) {
+  return (
+    <Show when={props.url}>
+      {(url) => (
+        <>
+          <dt>{props.label}</dt>
+          <dd class="facts__url">{url()}</dd>
+        </>
+      )}
+    </Show>
   );
 }
 

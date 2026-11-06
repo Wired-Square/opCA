@@ -1336,7 +1336,10 @@ page calls on `app.sock`, for every role (26-2: read-only, since revocation is
 opCA's), under the chassis's `/api`. Each route takes its `Viewer`, which reads
 the console's `appliance-identity`: with a malformed one it is a 400; without one,
 it is a 401. `GET /apps/opca-acme/api/status` is an `AppStatus`: the state, the
-host, the permitted domains once enrolled (the configured ones before), and the
+host, `api_url` (`https://<host>:<api port>`) and `acme_directory`
+(`https://<host>:<acme port>/acme/directory`) on the ports `App::load` read,
+the mapped ones as the pairing URI names them (both `None` until a host is
+set), the permitted domains once enrolled (the configured ones before), and the
 subordinate's serial and expiry. `GET /apps/opca-acme/api/issued` is an
 `IssuedNewest`, `IssuedCertificate` rows read from `acme.db` by
 `Store::newest`, newest issue first (by row id, which a revocation doesn't

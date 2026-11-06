@@ -23,6 +23,10 @@ use crate::{Broker, Mode};
 pub struct AppStatus {
     pub state: AppState,
     pub host: Option<String>,
+    /// `https://<host>:<api port>`, the host port opCA dials; `None` until a host is set.
+    pub api_url: Option<String>,
+    /// `https://<host>:<acme port>/acme/directory`, for ACME clients; `None` until a host is set.
+    pub acme_directory: Option<String>,
     /// The permitted domains once enrolled; before, the configured ones, empty when opCA chooses them.
     pub domains: Vec<String>,
     /// Once enrolled.
@@ -50,6 +54,8 @@ struct Read {
     appliance: ApplianceState,
     hooked: Hooked,
     domains: Vec<String>,
+    api_port: u16,
+    acme_port: u16,
 }
 
 impl FromRef<Read> for ApplianceState {
@@ -68,19 +74,13 @@ pub(super) fn routes(app: &App, hooked: &Hooked) -> Mount {
         appliance,
         hooked: hooked.clone(),
         domains: app.domains.clone(),
+        api_port: app.api_port,
+        acme_port: app.acme_port,
     })
 }
 
 async fn status(State(read): State<Read>, _: Viewer) -> Response {
-    reply(match read.hooked {
-        Hooked::Running(broker) => broker.app_status(),
-        Hooked::NeedsHost(_) => Ok(AppStatus {
-            state: AppState::NeedsHost,
-            host: None,
-            domains: read.domains,
-            subordinate: None,
-        }),
-    })
+    reply(read.status())
 }
 
 async fn issued_newest(State(read): State<Read>, _: Viewer, uri: Uri) -> Response {
@@ -88,6 +88,26 @@ async fn issued_newest(State(read): State<Read>, _: Viewer, uri: Uri) -> Respons
 }
 
 impl Read {
+    fn status(&self) -> Result<AppStatus, ErrorBody> {
+        let mut status = match &self.hooked {
+            Hooked::Running(broker) => broker.app_status()?,
+            Hooked::NeedsHost(_) => AppStatus {
+                state: AppState::NeedsHost,
+                host: None,
+                api_url: None,
+                acme_directory: None,
+                domains: self.domains.clone(),
+                subordinate: None,
+            },
+        };
+        let at = |port| status.host.as_deref().map(|host| origin(host, port));
+        (status.api_url, status.acme_directory) = (
+            at(self.api_port),
+            at(self.acme_port).map(|acme| format!("{acme}/acme/directory")),
+        );
+        Ok(status)
+    }
+
     async fn issued_newest(&self, uri: &Uri) -> Result<IssuedNewest, ErrorBody> {
         let (before, revoked) = (parsed(uri, "before")?, parsed(uri, "revoked")?);
         match &self.hooked {
@@ -97,6 +117,14 @@ impl Read {
                 before: None,
             }),
         }
+    }
+}
+
+fn origin(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        format!("https://[{host}]:{port}")
+    } else {
+        format!("https://{host}:{port}")
     }
 }
 
@@ -127,6 +155,8 @@ impl Broker {
         Ok(AppStatus {
             state: AppState::from(&mode),
             host: Some(self.host.clone()),
+            api_url: None,
+            acme_directory: None,
             domains,
             subordinate,
         })

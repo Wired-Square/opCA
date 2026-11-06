@@ -14,7 +14,8 @@
   overflow-wrap: anywhere;
 }
 
-.facts__serial {
+.facts__serial,
+.facts__url {
   font-family: var(--app-font-mono);
 }
 
