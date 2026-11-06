@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The broker rewrites this from X-Forwarded-Prefix, so the page works wherever the console mounts it. -->
+    <base href="/apps/opca-acme/" />
+    <title>opCA ACME broker</title>
+    <script>
+      {
+        let scheme;
+        try {
+          scheme = localStorage.getItem("app-scheme");
+        } catch {}
+        document.documentElement.setAttribute(
+          "data-app-scheme",
+          scheme === "light" || scheme === "dark" ? scheme : "light dark",
+        );
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>

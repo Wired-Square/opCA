@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   console's backup hook: `acme.db` and the enrolment, never the subordinate
   key, restored all or nothing. `scripts/build-acme-app.sh` builds the image
   and packs it with a signed index for a test install.
+- The `opca-acme` app has a page, opened from the console's Apps list, for
+  every role: the broker's state, host, domains and subordinate, then what it
+  has issued, newest first, with each certificate's names, serial, validity
+  and status (valid, expiring in its last third, expired, or revoked with the
+  reason), filtered by revocation. It is read-only: revoke in opCA. Light,
+  dark or the system's scheme.
 - The ACME broker answers ACME (RFC 8555) itself at `/acme/directory`:
   accounts, key changes and deactivation, orders validated in the background
   over http-01, dns-01 or tls-alpn-01, finalising, certificate download, and

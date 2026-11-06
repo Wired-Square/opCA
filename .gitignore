@@ -19,6 +19,8 @@ crates/opca-tauri/gen/
 /node_modules/
 frontend/node_modules/
 frontend/dist/
+crates/opca-acme-broker/ui/node_modules/
+crates/opca-acme-broker/ui/dist/
 
 # Secrets / certificates
 *.crt

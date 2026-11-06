@@ -1,0 +1,51 @@
+body {
+  margin: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: var(--app-font);
+}
+
+.page {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.page__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page__head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.375rem 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.facts dt {
+  color: var(--app-text-muted);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.facts__serial {
+  font-family: var(--app-font-mono);
+}
+
+.reason {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--app-text-muted);
+  font-size: 0.85em;
+}
