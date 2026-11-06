@@ -92,14 +92,10 @@ function Status(props: { status: AppStatus }) {
 
 function Url(props: { label: string; url: string | null }) {
   return (
-    <Show when={props.url}>
-      {(url) => (
-        <>
-          <dt>{props.label}</dt>
-          <dd class="facts__url">{url()}</dd>
-        </>
-      )}
-    </Show>
+    <>
+      <dt>{props.label}</dt>
+      <dd class="facts__url">{props.url ?? "—"}</dd>
+    </>
   );
 }
 
