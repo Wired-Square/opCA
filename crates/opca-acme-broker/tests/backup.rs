@@ -77,7 +77,7 @@ async fn enrolled() -> (Enrolled, TempDir) {
 }
 
 async fn total(running: &Running) -> u64 {
-    running.broker.acme().counts().await.unwrap().total
+    running.broker.acme().counts(None).await.unwrap().total
 }
 
 fn inflated_db(capture: &str) -> Vec<u8> {
@@ -116,7 +116,7 @@ async fn a_restore_puts_back_the_capture_and_moves_the_sync_cursor_past_every_ch
     let captured = capture(sockets.path()).await;
     record(store, "12", "b.home.example").await;
     store.revoke("11", Some(1)).await.unwrap();
-    let synced = store.changed_after(0, 10).await.unwrap();
+    let synced = store.changed_after(0, None, 10).await.unwrap();
     let cursor = synced.certificates.last().unwrap().changed;
 
     let (code, body) = restore(sockets.path(), &captured).await;
@@ -128,7 +128,11 @@ async fn a_restore_puts_back_the_capture_and_moves_the_sync_cursor_past_every_ch
     );
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 
-    let after = store.changed_after(cursor, 10).await.unwrap().certificates;
+    let after = store
+        .changed_after(cursor, None, 10)
+        .await
+        .unwrap()
+        .certificates;
     assert_eq!(
         after.len(),
         1,
@@ -140,7 +144,10 @@ async fn a_restore_puts_back_the_capture_and_moves_the_sync_cursor_past_every_ch
     );
     assert!(matches!(enrolled.running.broker.mode(), Mode::Enrolled(e) if !e.revoked));
     record(store, "13", "c.home.example").await;
-    let next = store.changed_after(after[0].changed, 10).await.unwrap();
+    let next = store
+        .changed_after(after[0].changed, None, 10)
+        .await
+        .unwrap();
     assert_eq!(next.certificates[0].serial, "13");
     assert!(!enrolled.running.state.path().join("restore.db").exists());
 }
@@ -425,6 +432,7 @@ async fn a_capture_costs_little_per_certificate_and_less_once_one_expires() {
     for (n, chain) in leaves.iter().enumerate() {
         record_chain(
             store,
+            "4096",
             &format!("{}", 1000 + n),
             &format!("host-{n}.home.example"),
             chain,
@@ -436,7 +444,15 @@ async fn a_capture_costs_little_per_certificate_and_less_once_one_expires() {
     let expired = SystemTime::now() - Duration::from_secs(86_400);
     for (n, chain) in leaves.iter().enumerate() {
         let name = format!("old-{n}.home.example");
-        record_chain(store, &format!("{}", 5000 + n), &name, chain, expired).await;
+        record_chain(
+            store,
+            "4096",
+            &format!("{}", 5000 + n),
+            &name,
+            chain,
+            expired,
+        )
+        .await;
     }
     let both_size = capture(sockets.path()).await.len();
 

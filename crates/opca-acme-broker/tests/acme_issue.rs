@@ -404,7 +404,7 @@ async fn a_good_csr_is_issued_a_server_leaf_that_chains_to_the_subordinate_and_i
     );
     assert_eq!(recorded.issuer_serial, "2", "the subordinate's serial");
     assert_eq!(
-        store.changed_after(0, 10).await.unwrap().certificates,
+        store.changed_after(0, None, 10).await.unwrap().certificates,
         [recorded]
     );
 }

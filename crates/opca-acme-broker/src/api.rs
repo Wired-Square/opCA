@@ -82,9 +82,9 @@ async fn revoke(State(broker): Shared, _: Operator) -> Response {
     reply(broker.counted(status).await)
 }
 
-async fn issued(State(broker): Shared, _: Operator, uri: Uri) -> Response {
+async fn issued(State(broker): Shared, Operator(enrolled): Operator, uri: Uri) -> Response {
     match after(uri.query()) {
-        Ok(after) => reply(broker.issued(after).await),
+        Ok(after) => reply(broker.issued(&enrolled, after).await),
         Err(refusal) => reply::<()>(Err(refusal)),
     }
 }

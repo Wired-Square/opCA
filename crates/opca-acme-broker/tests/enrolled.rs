@@ -6,7 +6,7 @@ use opca_acme_api::{
     ChainUpdate, ErrorKind, FreshCsr, IssuanceConfig, IssuedCounts, IssuedPage, IssuerState,
     Status, path,
 };
-use opca_acme_broker::Mode;
+use opca_acme_broker::{Mode, cli};
 use support::*;
 use wslib_crypto_ca::CsrView;
 
@@ -28,6 +28,10 @@ async fn enrolled() -> Enrolled {
 async fn enrolled_on(running: Running) -> Enrolled {
     let mut ca = TestCa::new();
     let operator = ca.client("opCA operator");
+    enrolled_by(running, ca, operator).await
+}
+
+async fn enrolled_by(running: Running, mut ca: TestCa, operator: Identity) -> Enrolled {
     let (chain, serial, id) = ca.sign(running.broker.subordinate().csr_pem(), DOMAINS);
     let enrolment = opca_acme_api::Enrolment {
         operator_pin: operator.key_pin(),
@@ -365,7 +369,13 @@ async fn the_issued_list_pages_and_brings_back_a_revocation_of_a_synced_certific
     let enrolled = enrolled_on(run(state, broker.with_issued_page(2), uri).await).await;
     let store = enrolled.running.broker.acme();
     for (serial, name) in [("11", "a"), ("22", "b"), ("33", "c")] {
-        record(store, serial, &format!("{name}.home.example")).await;
+        record_by(
+            store,
+            &enrolled.serial,
+            serial,
+            &format!("{name}.home.example"),
+        )
+        .await;
     }
 
     let first = enrolled.issued(0).await;
@@ -379,7 +389,7 @@ async fn the_issued_list_pages_and_brings_back_a_revocation_of_a_synced_certific
     );
     assert_eq!(
         (issued.issuer_serial.as_str(), issued.revoked_at.as_deref()),
-        ("4096", None)
+        (enrolled.serial.as_str(), None)
     );
     assert!(issued.not_after.ends_with('Z'), "{}", issued.not_after);
     let synced = enrolled.issued(rest.next).await;
@@ -399,6 +409,43 @@ async fn the_issued_list_pages_and_brings_back_a_revocation_of_a_synced_certific
         Some(IssuedCounts {
             total: 3,
             revoked: 1
+        })
+    );
+}
+
+#[tokio::test]
+async fn the_issued_list_holds_this_enrolments_subordinates_and_not_an_earlier_ones() {
+    let mut first = enrolled().await;
+    let store = first.running.broker.acme().clone();
+    record_by(&store, &first.serial, "11", "a.home.example").await;
+    let (code, body) = first.as_operator("POST", path::CSR, "").await;
+    assert_eq!(code, 200, "{body}");
+    let fresh: FreshCsr = serde_json::from_str(&body).unwrap();
+    let (renewed, renewed_serial) = first.ca.renew(first.id, &fresh.csr_pem);
+    let (code, body) = first
+        .as_operator("PUT", path::CHAIN, &first.update(renewed))
+        .await;
+    assert_eq!(code, 200, "{body}");
+    record_by(&store, &renewed_serial, "22", "b.home.example").await;
+    assert_eq!(serials(&first.issued(0).await), ["11", "22"]);
+
+    let Enrolled {
+        mut running,
+        ca,
+        operator,
+        ..
+    } = first;
+    running.api.uri = cli::reopen(&config(running.state.path(), &[])).unwrap();
+    running.broker.reload().await.unwrap();
+    let second = enrolled_by(running, ca, operator).await;
+    assert_eq!(second.issued(0).await.next, 0);
+    record_by(&store, &second.serial, "33", "c.home.example").await;
+    assert_eq!(serials(&second.issued(0).await), ["33"]);
+    assert_eq!(
+        second.status().await.issued,
+        Some(IssuedCounts {
+            total: 1,
+            revoked: 0
         })
     );
 }

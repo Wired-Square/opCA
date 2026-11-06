@@ -11,7 +11,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use wslib_db_sqlite::sqlx::error::BoxDynError;
 use wslib_db_sqlite::sqlx::migrate::{Migration, MigrationSource, MigrationType, Migrator};
-use wslib_db_sqlite::sqlx::sqlite::{SqliteConnectOptions, SqliteRow};
+use wslib_db_sqlite::sqlx::query::Query;
+use wslib_db_sqlite::sqlx::sqlite::{SqliteArguments, SqliteConnectOptions, SqliteRow};
 use wslib_db_sqlite::sqlx::{
     self, ConnectOptions, Connection, Row, Sqlite, SqliteConnection, Transaction,
 };
@@ -312,6 +313,9 @@ const CHALLENGE: &str =
 const CERTIFICATE: &str = "SELECT id, serial, account, order_id, common_name, sans, not_before, \
                            not_after, chain_pem, issuer_serial, revoked_at, revocation_reason, \
                            created, changed FROM certificates";
+
+/// Bound twice to a JSON array of issuer serials, or to NULL for every issuer.
+const ISSUED_BY: &str = "(? IS NULL OR issuer_serial IN (SELECT value FROM json_each(?)))";
 
 const DANGLING: &str = "a row in it refers to one that is not there";
 
@@ -716,9 +720,18 @@ impl Store {
     }
 
     /// Up to `limit` certificates issued or revoked after change `cursor`, oldest change first; 0 starts at the beginning.
-    pub async fn changed_after(&self, cursor: i64, limit: u32) -> Result<Changes, Error> {
-        self.page("changed > ? ORDER BY changed", cursor, limit)
-            .await
+    /// Only those the subordinates with serials `issuers` issued, when given.
+    pub async fn changed_after(
+        &self,
+        cursor: i64,
+        issuers: Option<&[String]>,
+        limit: u32,
+    ) -> Result<Changes, Error> {
+        let issuers = issuers.map(json);
+        let sql =
+            format!("{CERTIFICATE} WHERE changed > ? AND {ISSUED_BY} ORDER BY changed LIMIT ?");
+        let query = sqlx::query(&sql).bind(cursor).bind(&issuers).bind(&issuers);
+        self.page(query, limit).await
     }
 
     /// Up to `limit` certificates issued before the one with id `before`,
@@ -735,13 +748,18 @@ impl Store {
             Some(true) => "AND revoked_at IS NOT NULL",
             Some(false) => "AND revoked_at IS NULL",
         };
-        let filter = format!("id < ? {only} ORDER BY id DESC");
-        self.page(&filter, before.unwrap_or(i64::MAX), limit).await
+        let sql = format!("{CERTIFICATE} WHERE id < ? {only} ORDER BY id DESC LIMIT ?");
+        let query = sqlx::query(&sql).bind(before.unwrap_or(i64::MAX));
+        self.page(query, limit).await
     }
 
-    async fn page(&self, filter: &str, key: i64, limit: u32) -> Result<Changes, Error> {
-        let mut certificates = sqlx::query(&format!("{CERTIFICATE} WHERE {filter} LIMIT ?"))
-            .bind(key)
+    /// `query` with its `LIMIT ?` left to bind.
+    async fn page<'q>(
+        &self,
+        query: Query<'q, Sqlite, SqliteArguments<'q>>,
+        limit: u32,
+    ) -> Result<Changes, Error> {
+        let mut certificates = query
             .bind(i64::from(limit) + 1)
             .fetch_all(self.db.pool())
             .await?
@@ -753,11 +771,15 @@ impl Store {
         Ok(Changes { certificates, more })
     }
 
-    pub async fn counts(&self) -> Result<IssuedCounts, Error> {
-        let (total, revoked): (i64, i64) =
-            sqlx::query_as("SELECT COUNT(*), COUNT(revoked_at) FROM certificates")
-                .fetch_one(self.db.pool())
-                .await?;
+    /// Of only the certificates the subordinates with serials `issuers` issued, when given.
+    pub async fn counts(&self, issuers: Option<&[String]>) -> Result<IssuedCounts, Error> {
+        let issuers = issuers.map(json);
+        let sql = format!("SELECT COUNT(*), COUNT(revoked_at) FROM certificates WHERE {ISSUED_BY}");
+        let (total, revoked): (i64, i64) = sqlx::query_as(&sql)
+            .bind(&issuers)
+            .bind(&issuers)
+            .fetch_one(self.db.pool())
+            .await?;
         Ok(IssuedCounts {
             total: total as u64,
             revoked: revoked as u64,
@@ -865,7 +887,7 @@ impl Store {
         if schema(self).await? != schema(live).await? {
             return Err(Error::Unrestorable("its tables are not this broker's"));
         }
-        Ok(self.counts().await?.total)
+        Ok(self.counts(None).await?.total)
     }
 
     /// Every row replaced by those of the copy at `path`, which [`Store::open_restorable`]

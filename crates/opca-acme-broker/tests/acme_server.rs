@@ -371,7 +371,7 @@ async fn an_account_orders_validates_finalises_and_downloads() {
             .running
             .broker
             .acme()
-            .changed_after(0, 10)
+            .changed_after(0, None, 10)
             .await
             .unwrap();
         assert_eq!(changes.certificates.len(), 1);
@@ -429,7 +429,7 @@ async fn revocation_by_the_account_key_or_the_certificates_key() {
         let (by_account, _) = acme.issue(&account, NAME).await;
         let (by_key, cert_key) = acme.issue(&account, OTHER).await;
         let store = acme.enrolled.running.broker.acme();
-        let before = store.changed_after(0, 10).await.unwrap().certificates;
+        let before = store.changed_after(0, None, 10).await.unwrap().certificates;
 
         let certificate = leaf(&by_account);
         let request = RevocationRequest {
@@ -457,7 +457,7 @@ async fn revocation_by_the_account_key_or_the_certificates_key() {
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
 
-        let after = store.changed_after(0, 10).await.unwrap().certificates;
+        let after = store.changed_after(0, None, 10).await.unwrap().certificates;
         assert!(
             after
                 .iter()

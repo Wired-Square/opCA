@@ -88,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - The macOS Intel build is produced again; 0.102.4 shipped without one.
+- A broker re-enrolled after `enrol --reopen` no longer sends opCA the certificates its earlier
+  subordinate issued, in the issued list or the status counts.
 
 ## [0.102.4] - 2026-10-28
 
