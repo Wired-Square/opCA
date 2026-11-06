@@ -1,163 +1,23 @@
 #!/usr/bin/env node
-// Create a release: bump version, commit, tag, and push
+// Prepare a release on a feature branch, or rebuild the current one.
 //
 // Usage:
-//   node release.js           # patch release: 0.1.0 → 0.1.1
-//   node release.js patch     # patch release: 0.1.0 → 0.1.1
-//   node release.js minor     # minor release: 0.1.0 → 0.2.0
-//   node release.js major     # major release: 0.1.0 → 1.0.0
-//   node release.js rebuild   # re-release current version (fix build errors)
+//   node release.js prepare patch   # commit the bump 0.1.0 → 0.1.1 to this branch
+//   node release.js prepare minor   # commit the bump 0.1.0 → 0.2.0 to this branch
+//   node release.js prepare major   # commit the bump 0.1.0 → 1.0.0 to this branch
+//   node release.js rebuild         # move the current version's tag to main's HEAD
+//
+// Merging a prepared bump to main makes release.yml tag and build it.
 
 import { execSync } from 'child_process';
-import { readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { createInterface } from 'readline';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = join(__dirname, '..');
+const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
+const changelogPath = join(rootDir, 'CHANGELOG.md');
 
-// Parse bump type from args (default: patch)
-// Special mode: "rebuild" re-releases the current version without bumping
-const bumpType = process.argv[2] || 'patch';
-const isRebuild = bumpType === 'rebuild';
-if (!isRebuild && !['major', 'minor', 'patch'].includes(bumpType)) {
-  console.error(`Invalid bump type: ${bumpType}`);
-  console.error('Usage: node release.js [major|minor|patch|rebuild]');
-  console.error('  rebuild  Re-release current version (no version bump)');
-  process.exit(1);
-}
-
-function run(cmd, options = {}) {
-  console.log(`$ ${cmd}`);
-  try {
-    execSync(cmd, { cwd: rootDir, stdio: 'inherit', ...options });
-  } catch (error) {
-    console.error(`Command failed: ${cmd}`);
-    process.exit(1);
-  }
-}
-
-function runSilent(cmd) {
-  return execSync(cmd, { cwd: rootDir, encoding: 'utf8' }).trim();
-}
-
-async function askUser(question) {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase().trim());
-    });
-  });
-}
-
-/**
- * Calculate the new version based on current version and bump type
- */
-function calculateNewVersion(currentVersion, bumpType) {
-  const [major, minor, patch] = currentVersion.split('.').map(Number);
-  switch (bumpType) {
-    case 'major':
-      return `${major + 1}.0.0`;
-    case 'minor':
-      return `${major}.${minor + 1}.0`;
-    case 'patch':
-    default:
-      return `${major}.${minor}.${patch + 1}`;
-  }
-}
-
-/**
- * Check and update changelog for the release
- * Returns true if changelog is valid, false otherwise
- */
-function checkAndUpdateChangelog(newVersion) {
-  const changelogPath = join(rootDir, 'CHANGELOG.md');
-  let changelog = readFileSync(changelogPath, 'utf8');
-
-  // Check for version-specific section (e.g., ## [0.2.34] or ## [0.2.34] - 2024-01-15)
-  const versionSectionRegex = new RegExp(`^## \\[${newVersion.replace(/\./g, '\\.')}\\]`, 'm');
-  const hasVersionSection = versionSectionRegex.test(changelog);
-
-  // Check for [Unreleased] section
-  const unreleasedRegex = /^## \[Unreleased\]/m;
-  const hasUnreleasedSection = unreleasedRegex.test(changelog);
-
-  if (hasVersionSection) {
-    console.log(`✓ Found changelog section for version ${newVersion}`);
-    return { valid: true, updated: false };
-  }
-
-  if (hasUnreleasedSection) {
-    // Check if there's actual content under [Unreleased]
-    // Split on version headers and get content after [Unreleased]
-    const sections = changelog.split(/^## \[/m);
-    const unreleasedIdx = sections.findIndex(s => s.startsWith('Unreleased]'));
-    if (unreleasedIdx !== -1) {
-      // Get content after the header line
-      const sectionContent = sections[unreleasedIdx].replace(/^Unreleased\][^\n]*\n/, '');
-      const unreleasedContent = sectionContent.trim();
-
-      // Check if there's more than just empty headers (### Added, ### Fixed, etc.)
-      const hasContent = unreleasedContent
-        .split('\n')
-        .some(line => line.trim() && !line.startsWith('###'));
-
-      if (!hasContent) {
-        console.error('Error: [Unreleased] section exists but has no content.');
-        console.error('Please add release notes before releasing.');
-        return { valid: false, updated: false };
-      }
-    }
-
-    // Get today's date in YYYY-MM-DD format
-    const today = new Date().toISOString().split('T')[0];
-
-    // Replace [Unreleased] with the new version and date
-    const newHeader = `## [${newVersion}] - ${today}`;
-    changelog = changelog.replace(unreleasedRegex, newHeader);
-
-    // Write the updated changelog
-    writeFileSync(changelogPath, changelog, 'utf8');
-    console.log(`✓ Updated [Unreleased] → [${newVersion}] - ${today}`);
-    return { valid: true, updated: true };
-  }
-
-  // Neither version section nor unreleased section found
-  console.error(`Error: CHANGELOG.md has no section for version ${newVersion} and no [Unreleased] section.`);
-  console.error('Please add release notes before releasing.');
-  console.error('Expected one of:');
-  console.error(`  ## [${newVersion}]`);
-  console.error(`  ## [Unreleased]`);
-  return { valid: false, updated: false };
-}
-
-/**
- * Extract changelog content for the release version
- */
-function extractVersionChangelog(version) {
-  const changelogPath = join(rootDir, 'CHANGELOG.md');
-  const changelog = readFileSync(changelogPath, 'utf8');
-
-  // Split on version headers and find the matching section
-  const sections = changelog.split(/^## \[/m);
-  const versionPrefix = `${version}]`;
-  const sectionIdx = sections.findIndex(s => s.startsWith(versionPrefix));
-
-  if (sectionIdx !== -1) {
-    // Get content after the header line
-    const sectionContent = sections[sectionIdx].replace(/^[^\n]*\n/, '');
-    return sectionContent.trim();
-  }
-  return null;
-}
-
-// Version files to stage for git commit
 const VERSION_FILES = [
   'Cargo.toml',
   'package.json',
@@ -170,157 +30,166 @@ const VERSION_FILES = [
   'CHANGELOG.md',
 ];
 
-// Optional iOS files (may not exist yet)
+// iOS files, which exist only once the iOS project is generated.
 const OPTIONAL_FILES = [
   'crates/opca-tauri/gen/apple/project.yml',
   'crates/opca-tauri/gen/apple/opca_iOS/Info.plist',
 ];
 
-async function main() {
-  // Check for uncommitted changes (allow CHANGELOG.md to be uncommitted)
-  const status = runSilent('git status --porcelain');
-  const uncommittedFiles = status.split('\n').filter(line => line.trim());
-  const nonChangelogChanges = uncommittedFiles.filter(line => !line.endsWith('CHANGELOG.md'));
-  const hasUncommittedChangelog = uncommittedFiles.some(line => line.endsWith('CHANGELOG.md'));
+function usage() {
+  console.error('Usage: node release.js prepare <patch|minor|major>');
+  console.error('       node release.js rebuild');
+  process.exit(1);
+}
 
-  if (nonChangelogChanges.length > 0 && !isRebuild) {
-    console.error('Error: Working directory has uncommitted changes (other than CHANGELOG.md).');
-    console.error('Please commit or stash your changes before releasing.');
-    console.error('Uncommitted files:');
-    nonChangelogChanges.forEach(line => console.error(`  ${line}`));
-    process.exit(1);
+function fail(...lines) {
+  lines.forEach(line => console.error(line));
+  process.exit(1);
+}
+
+function run(cmd) {
+  console.log(`$ ${cmd}`);
+  try {
+    execSync(cmd, { cwd: rootDir, stdio: 'inherit' });
+  } catch {
+    fail(`Command failed: ${cmd}`);
+  }
+}
+
+function runSilent(cmd) {
+  return execSync(cmd, { cwd: rootDir, encoding: 'utf8' }).trim();
+}
+
+function ask(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise(resolve => rl.question(question, answer => {
+    rl.close();
+    resolve(answer.toLowerCase().trim());
+  }));
+}
+
+function uncommittedFiles() {
+  return runSilent('git status --porcelain').split('\n').filter(line => line.trim());
+}
+
+function refuseDirtyTree(files) {
+  if (files.length > 0) {
+    fail('Error: Working directory has uncommitted changes:', ...files.map(line => `  ${line}`));
+  }
+}
+
+function currentVersion() {
+  return JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8')).version;
+}
+
+function nextVersion(version, bumpType) {
+  const [major, minor, patch] = version.split('.').map(Number);
+  return {
+    major: `${major + 1}.0.0`,
+    minor: `${major}.${minor + 1}.0`,
+    patch: `${major}.${minor}.${patch + 1}`,
+  }[bumpType];
+}
+
+function sectionBody(prefix) {
+  const section = readFileSync(changelogPath, 'utf8').split(/^## \[/m).find(s => s.startsWith(prefix));
+  return section?.replace(/^[^\n]*\n/, '').trim();
+}
+
+function releaseChangelog(version) {
+  const versionHeader = new RegExp(`^## \\[${version.replace(/\./g, '\\.')}\\]`, 'm');
+  const unreleasedHeader = /^## \[Unreleased\]/m;
+  const changelog = readFileSync(changelogPath, 'utf8');
+
+  if (versionHeader.test(changelog)) {
+    console.log(`✓ Found changelog section for version ${version}`);
+    return;
+  }
+  if (!unreleasedHeader.test(changelog)) {
+    fail(
+      `Error: CHANGELOG.md has no section for version ${version} and no [Unreleased] section.`,
+      'Please add release notes before releasing.',
+    );
+  }
+  const hasNotes = sectionBody('Unreleased]')
+    .split('\n')
+    .some(line => line.trim() && !line.startsWith('###'));
+  if (!hasNotes) {
+    fail('Error: [Unreleased] section exists but has no content.', 'Please add release notes before releasing.');
   }
 
-  const hasUncommittedChanges = uncommittedFiles.length > 0;
+  const today = new Date().toLocaleDateString('sv');
+  writeFileSync(changelogPath, changelog.replace(unreleasedHeader, `## [${version}] - ${today}`), 'utf8');
+  console.log(`✓ Updated [Unreleased] → [${version}] - ${today}`);
+}
 
-  // Check we're on main branch
+function printChangelog(version) {
+  const notes = sectionBody(`${version}]`);
+  if (notes) {
+    console.log(`\n--- Changelog for ${version} ---\n${notes}\n--- End of changelog ---\n`);
+  }
+}
+
+function prepare(bumpType) {
+  if (!['major', 'minor', 'patch'].includes(bumpType)) usage();
+
   const branch = runSilent('git branch --show-current');
-  if (branch !== 'main') {
-    console.error(`Error: Releases should be made from 'main' branch (currently on '${branch}').`);
-    process.exit(1);
+  if (branch === 'main' || !branch) {
+    fail(`Error: Prepare a release on a feature branch, not '${branch || 'a detached HEAD'}'.`);
   }
+  refuseDirtyTree(uncommittedFiles().filter(line => !line.endsWith('CHANGELOG.md')));
 
-  // Calculate what the new version will be
-  const packageJson = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8'));
-  const currentVersion = packageJson.version;
-  const newVersion = isRebuild ? currentVersion : calculateNewVersion(currentVersion, bumpType);
-  const tag = `v${newVersion}`;
+  const current = currentVersion();
+  const version = nextVersion(current, bumpType);
+  console.log(`\nPreparing ${bumpType} release: ${current} → ${version}\n`);
+  releaseChangelog(version);
+  printChangelog(version);
 
-  if (isRebuild) {
-    console.log(`\nPreparing rebuild release: v${currentVersion} (no version bump)\n`);
+  run(`node scripts/bump-version.js ${bumpType}`);
+  run('cargo check --manifest-path crates/opca-tauri/Cargo.toml');
 
-    // Check that the tag already exists (we're replacing it)
-    const existingTags = runSilent('git tag --list');
-    if (!existingTags.split('\n').includes(tag)) {
-      console.error(`Error: Tag ${tag} does not exist. Use a normal release for new versions.`);
-      process.exit(1);
-    }
-  } else {
-    console.log(`\nPreparing ${bumpType} release: ${currentVersion} → ${newVersion}\n`);
-  }
-
-  // Check and update changelog (skip for rebuilds — version section already exists)
-  let changelogResult = { valid: true, updated: false };
-  if (!isRebuild) {
-    changelogResult = checkAndUpdateChangelog(newVersion);
-    if (!changelogResult.valid) {
-      process.exit(1);
-    }
-  }
-
-  // Extract and display the changelog for this version
-  const versionChangelog = extractVersionChangelog(newVersion);
-  if (versionChangelog) {
-    console.log('\n--- Changelog for this release ---');
-    console.log(versionChangelog);
-    console.log('--- End of changelog ---\n');
-  }
-
-  // Ask for user confirmation
-  const confirmMsg = isRebuild
-    ? `Proceed with rebuild release v${newVersion}? This will delete and recreate the tag. [y/N] `
-    : `Proceed with release v${newVersion}? [y/N] `;
-  const answer = await askUser(confirmMsg);
-  if (answer !== 'y' && answer !== 'yes') {
-    console.log('Release cancelled.');
-    // If we updated the changelog, revert it
-    if (changelogResult.updated) {
-      run('git checkout -- CHANGELOG.md');
-      console.log('Reverted changelog changes.');
-    }
-    process.exit(0);
-  }
-
-  // Pull latest changes (stash CHANGELOG.md if uncommitted or updated)
-  const needsStash = hasUncommittedChangelog || changelogResult.updated;
-  console.log('\nPulling latest changes...');
-  if (needsStash) {
-    run('git stash push -m "release-script: CHANGELOG.md" -- CHANGELOG.md');
-  }
-  run('git pull --rebase');
-  if (needsStash) {
-    run('git stash pop');
-  }
-
-  if (isRebuild) {
-    // Rebuild: commit fixes if any, move existing tag, force-push
-    if (hasUncommittedChanges) {
-      console.log('\nCommitting fixes...');
-      run('git add -A');
-      run(`git commit -m "Fix build for v${newVersion}"`);
-    } else {
-      console.log('\nNo uncommitted changes — moving tag only.');
-    }
-
-    // Delete the old tag locally and remotely, then recreate
-    console.log(`\nMoving tag ${tag} to current commit...`);
-    run(`git tag -d ${tag}`);
-    run(`git push origin :refs/tags/${tag}`);
-    run(`git tag ${tag}`);
-  } else {
-    // Normal release: bump version, commit, create tag
-    console.log(`\nBumping ${bumpType} version...`);
-    run(`node scripts/bump-version.js ${bumpType}`);
-
-    // Update Cargo.lock by running cargo check
-    console.log('\nUpdating Cargo.lock...');
-    run('cargo check --manifest-path crates/opca-tauri/Cargo.toml');
-
-    console.log('\nCommitting version bump...');
-    // Stage version files (skip missing optional files)
-    const filesToStage = VERSION_FILES.join(' ');
-    const optionalStage = OPTIONAL_FILES
-      .map(f => `git add ${f} 2>/dev/null || true`)
-      .join('; ');
-    run(`git add ${filesToStage}`);
-    run(optionalStage, { shell: true });
-    run(`git commit -m "Bump version to ${newVersion}"`);
-
-    // Create tag
-    console.log(`\nCreating tag ${tag}...`);
-    run(`git tag ${tag}`);
-  }
-
-  // Push commit and tag
-  console.log('\nPushing to remote...');
-  run('git push origin main --tags');
+  const optional = OPTIONAL_FILES.filter(file => existsSync(join(rootDir, file)));
+  run(`git add ${[...VERSION_FILES, ...optional].join(' ')}`);
+  run(`git commit -m "Bump version to ${version}"`);
 
   console.log(`
-✅ Release ${tag} created successfully!
+✅ Committed the bump to ${version} on '${branch}'.
 
-GitHub Actions will now:
-1. Build for all platforms (macOS, Linux, Windows)
-2. Create a draft release with all installers
-
-Next steps:
-1. Go to https://github.com/Wired-Square/opca/releases
-2. Review the draft release
-3. Edit release notes if needed
-4. Publish the release
+Next: push the branch and open a PR. Merging it to main makes release.yml
+tag v${version} and build a draft release at
+https://github.com/Wired-Square/opca/releases to review and publish.
 `);
 }
 
-main().catch((error) => {
-  console.error('Release failed:', error);
-  process.exit(1);
-});
+async function rebuild() {
+  const branch = runSilent('git branch --show-current');
+  if (branch !== 'main') fail(`Error: Rebuild from 'main' (currently on '${branch}').`);
+  refuseDirtyTree(uncommittedFiles());
+
+  const version = currentVersion();
+  const tag = `v${version}`;
+  if (!runSilent('git tag --list').split('\n').includes(tag)) {
+    fail(`Error: Tag ${tag} does not exist. Prepare a release for a new version.`);
+  }
+  printChangelog(version);
+
+  const answer = await ask(`Move ${tag} to main's HEAD and push it to rebuild? [y/N] `);
+  if (answer !== 'y' && answer !== 'yes') {
+    console.log('Rebuild cancelled.');
+    return;
+  }
+
+  run(`git tag -f ${tag}`);
+  run(`git push origin :refs/tags/${tag}`);
+  run(`git push origin ${tag}`);
+
+  console.log(`
+✅ Pushed ${tag} at main's HEAD; build.yml rebuilds the draft release at
+https://github.com/Wired-Square/opca/releases
+`);
+}
+
+const [mode, bumpType] = process.argv.slice(2);
+if (mode === 'prepare') prepare(bumpType);
+else if (mode === 'rebuild') await rebuild();
+else usage();
