@@ -34,6 +34,7 @@ use crate::enrolment::bad_request;
 use crate::{Broker, Config, Error, Mode};
 
 mod api;
+mod files;
 
 pub use api::{AppStatus, IssuedNewest, Issuer};
 
@@ -46,6 +47,8 @@ pub const HOOKS_SOCKET: &str = "hooks.sock";
 /// The listeners' ports inside the container, as the manifest declares them.
 pub const API_PORT: u16 = 9443;
 pub const ACME_PORT: u16 = 8443;
+/// Where the image holds the page's files.
+pub const UI: &str = "/usr/share/opca-acme/ui";
 /// The console's uid inside the container: Docker runs rootful, with no userns-remap (ApplianceOS D63).
 pub const CONSOLE_UID: u32 = 0;
 /// What every uid outside a user namespace appears as inside it, so it can't tell the console apart.
@@ -73,6 +76,8 @@ pub struct App {
     pub acme_port: u16,
     /// The only peer either socket answers.
     pub console_uid: u32,
+    /// The page's files.
+    pub ui: PathBuf,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +138,7 @@ impl App {
             api_port: variable(&env, "APPLIANCE_LISTENER_API_PORT", API_PORT)?,
             acme_port: variable(&env, "APPLIANCE_LISTENER_ACME_PORT", ACME_PORT)?,
             console_uid,
+            ui: UI.into(),
         })
     }
 
@@ -201,7 +207,7 @@ impl App {
     ) -> io::Result<JoinHandle<io::Result<()>>> {
         let hooks = ConsoleOnly::bind(&sockets.join(HOOKS_SOCKET), self.console_uid)?;
         let app = ConsoleOnly::bind(&sockets.join(APP_SOCKET), self.console_uid)?;
-        let router = self.app_routes(&hooked);
+        let router = self.app_routes(&hooked)?;
         let hooks = tokio::spawn(serve_hooks(hooks, hooked, stop.clone().cancelled_owned()));
         let app = tokio::spawn(async move {
             axum::serve(app, router)
@@ -214,17 +220,18 @@ impl App {
         }))
     }
 
-    /// What `app.sock` answers under `/apps/opca-acme/`: `healthz` and the page's API.
-    fn app_routes(&self, hooked: &Hooked) -> Router {
+    /// What `app.sock` answers under `/apps/opca-acme/`: `healthz`, the page's API, and its files.
+    fn app_routes(&self, hooked: &Hooked) -> io::Result<Router> {
         let (app, answering) = (self.clone(), hooked.clone());
         let healthz = move || {
             let body =
                 serde_json::to_vec(&app.health(answering.state())).expect("the health serialises");
             async move { ([(header::CONTENT_TYPE, "application/json")], body).into_response() }
         };
-        Router::new()
+        Ok(Router::new()
             .route(&format!("/apps/{NAME}/healthz"), get(healthz))
             .merge(api::routes(self, hooked))
+            .merge(files::routes(&self.ui)?))
     }
 }
 

@@ -11,7 +11,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 
 rm -rf "$work/src"
 mkdir -p "$work/src/crates" "$work/src/.cargo"
-rsync -a --exclude target "$root/crates/opca-acme-api" "$root/crates/opca-acme-broker" "$work/src/crates/"
+rsync -a --exclude target --exclude node_modules "$root/crates/opca-acme-api" "$root/crates/opca-acme-broker" "$work/src/crates/"
 sed -i.orig '/^\[dev-dependencies\]/,$d' "$work/src/crates/opca-acme-broker/Cargo.toml"
 cp "$root/Cargo.lock" "$root/LICENSE" "$work/src/"
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -1)

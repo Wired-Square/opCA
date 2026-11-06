@@ -11,7 +11,8 @@
 #
 # APPLIANCEOS names an ApplianceOS checkout (default: ../ApplianceOS beside
 # this repository). An arm64 build needs wslib-appliance-xtask for its
-# erratum check. Output lands in target/acme-app.
+# erratum check, and the page needs npm and the Wired Square mirror. Output
+# lands in target/acme-app.
 set -eu
 usage="usage: $0 [--keys <dir>] [--platform linux/arm64|linux/amd64] [--source <name>]"
 platform=linux/arm64
@@ -57,6 +58,7 @@ image=$out/opca-acme-$version-$arch.tar
 archive=$out/opca-acme-$version-$arch-$source.tar
 
 label=$(cargo run -q -p opca-acme-broker --example appliance-label -- "$arch")
+(cd "$root/crates/opca-acme-broker/ui" && npm ci --no-audit --no-fund && npm run build)
 "$root/scripts/stage-broker-src.sh" "$out"
 
 builder=appliance-image

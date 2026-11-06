@@ -251,6 +251,8 @@ declares:
 | Volume | `data`, at `/data`: the state lives in `/data/state` |
 | Options | `host` (required) and `domains` (optional), as in `broker.toml` |
 
+Only the console reaches its page, health and hooks: the app's sockets hang up on any other uid.
+
 **Set `host` after installing.** Until it's set the app is healthy but does nothing else: it
 reports that it needs a host, answers both ports with a 503 saying so, and makes no keys. Setting
 the option restarts the app, which then starts as the broker does on Debian and logs the pairing
@@ -261,6 +263,12 @@ listener's host port.
 
 Options come first; `/data/broker.toml`, with the same `host` and `domains` keys, second. A
 blank option gives way to it.
+
+**Open it from Apps** to see its page, as any role: the broker's state, host, domains and
+subordinate, then the certificates it has issued, newest first, each with its names, serial,
+validity and status: valid, expiring (in the last third of its lifetime, when ACME clients
+renew), expired, or revoked with the reason. A filter shows only the revoked or the rest. The
+page is read-only; revoke in opCA.
 
 The app takes its own backups while it runs, so the box's backup holds `acme.db` (accounts and
 issued certificates), the enrolment, its chain and its config, and **never the subordinate key**.
@@ -278,13 +286,14 @@ To build it and pack it into an archive the console's **Apps › Install** takes
 scripts/build-acme-app.sh [--keys <dir>] --platform linux/arm64
 ```
 
-It needs Docker with buildx, OpenSSL 3, `jq`, `wslib-appliance-xtask` for arm64, and an ApplianceOS checkout (`APPLIANCEOS`, by
+It needs Docker with buildx, OpenSSL 3, `jq`, npm, `wslib-appliance-xtask` for arm64, and an ApplianceOS checkout (`APPLIANCEOS`, by
 default `../ApplianceOS`). It signs as source `opca-test` (`--source` changes it) with the
 throwaway keys in `<dir>`, made there if it holds none, or without `--keys`, with
 `OPCA_TEST_SIGNING_CERT` and `OPCA_TEST_SIGNING_KEY` from `.env` (base64 of `leaf.pem` and
 `leaf.key`). Keep signing with the same leaf: a box's source verifies only the root it was given,
 so new keys mean removing and reinstalling the app. Add the keys' `root.pem` under **Apps ›
-Sources** with that name before installing. The image and the archive land in `target/acme-app/`. To run
+Sources** with that name before installing. The page is built first, with npm from the Wired
+Square mirror (`ui/.npmrc`). The image and the archive land in `target/acme-app/`. To run
 the image locally as the console would:
 
 ```sh

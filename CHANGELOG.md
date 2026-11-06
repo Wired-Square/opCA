@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   open listener at once, and revocation or a reopen stops it.
 - `scripts/build-broker-deb.sh --platform linux/arm64|linux/amd64` builds the
   ACME broker's `.deb` for either architecture.
+- `scripts/build-acme-app.sh` builds the app's page first, so it needs npm
+  and the Wired Square mirror; the image serves it gzipped, its base taken
+  from the console's `X-Forwarded-Prefix`.
 - opCA keeps the list of certificates each ACME broker has issued, synced
   whenever it talks to the broker, and the ACME Servers page shows it per
   broker with each certificate's names, expiry and state. A failed sync is
