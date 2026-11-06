@@ -23,7 +23,6 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use wslib_appliance_config::{ApplianceArgs, Bootstrap, Resolver};
-use wslib_appliance_core::backend::backup_hooks;
 use wslib_appliance_server::{AppSocket, ApplianceState, BackupHooks, Logs, Server};
 use wslib_appliance_store::Store;
 use wslib_appliance_types::Branding;
@@ -240,7 +239,7 @@ fn hooks(hooked: Hooked) -> BackupHooks {
         .route("/inspect", post(inspect))
         .route("/restore", post(restore))
         .layer(DefaultBodyLimit::max(MAX_BUNDLE_LEN));
-    backup_hooks(routes, move |appliance| Hooks {
+    BackupHooks::routes(routes, move |appliance| Hooks {
         appliance,
         hooked: hooked.clone(),
         one_at_a_time: Arc::clone(&one_at_a_time),
