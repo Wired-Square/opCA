@@ -214,34 +214,90 @@ fn a_csr_must_name_exactly_the_orders_identifiers() {
     );
 }
 
-#[test]
-fn a_common_name_is_optional_but_must_be_one_of_the_names() {
-    let pki = pki(365 * DAY);
-    let names = ["a.home.example"];
-    assert_eq!(
-        refusal(&pki, &names, &request("c.home.example", &names)),
-        Some(ProblemType::BadCsr)
-    );
+/// The common name recorded for issuing `csr_der` for `ordered`, the leaf's
+/// subject, and whether its SAN extension is critical.
+fn issued_subject(pki: &Pki, ordered: &[&str], csr_der: &[u8]) -> (Option<String>, String, bool) {
+    let issued = pki
+        .issuer
+        .issue(&order_for(ordered), csr_der, ACCOUNT_KEY, SystemTime::now())
+        .unwrap();
+    let leaf = &pem::certificates(&issued.chain_pem).unwrap()[0];
+    let (_, parsed) = x509_parser::parse_x509_certificate(leaf).unwrap();
+    let san_critical = parsed.subject_alternative_name().unwrap().unwrap().critical;
+    (
+        issued.common_name,
+        inspect(leaf).unwrap().subject,
+        san_critical,
+    )
+}
 
+fn nameless_request(names: &[&str]) -> Vec<u8> {
     let key = signer(KeyAlgorithm::EcP256);
-    let mut params = rcgen::CertificateParams::new(vec!["a.home.example".to_string()]).unwrap();
+    let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+    let mut params = rcgen::CertificateParams::new(names).unwrap();
     params.distinguished_name = rcgen::DistinguishedName::new();
-    let nameless = params.serialize_request(&key).unwrap();
-    assert_eq!(refusal(&pki, &names, nameless.der()), None);
+    params.serialize_request(&key).unwrap().der().to_vec()
 }
 
 #[test]
-fn a_subject_with_more_than_a_common_name_is_refused() {
+fn a_csrs_subject_is_replaced_by_its_common_name_alone() {
     let pki = pki(365 * DAY);
     let key = signer(KeyAlgorithm::EcP256);
     let subject = Subject {
+        country: Some("AU".into()),
+        state: Some("Victoria".into()),
         organisation: Some("Not Verified Ltd".into()),
-        ..Subject::new("a.home.example")
+        ..Subject::new("A.home.example")
     };
-    let der = build_csr(&key, &subject, &dns(&["a.home.example"])).unwrap();
+    let names = ["b.home.example", "a.home.example"];
+    let der = build_csr(&key, &subject, &dns(&names)).unwrap();
     assert_eq!(
-        refusal(&pki, &["a.home.example"], &der),
-        Some(ProblemType::BadCsr)
+        issued_subject(&pki, &names, &der),
+        (
+            Some("a.home.example".into()),
+            "CN=a.home.example".into(),
+            false
+        )
+    );
+}
+
+#[test]
+fn a_common_name_not_among_the_names_gives_way_to_the_first_name() {
+    let pki = pki(365 * DAY);
+    let names = ["b.home.example", "a.home.example"];
+    assert_eq!(
+        issued_subject(&pki, &names, &request("c.home.example", &names)),
+        (
+            Some("b.home.example".into()),
+            "CN=b.home.example".into(),
+            false
+        )
+    );
+}
+
+#[test]
+fn a_csr_without_a_subject_gets_the_first_name() {
+    let pki = pki(365 * DAY);
+    let names = ["b.home.example", "a.home.example"];
+    assert_eq!(
+        issued_subject(&pki, &names, &nameless_request(&names)),
+        (
+            Some("b.home.example".into()),
+            "CN=b.home.example".into(),
+            false
+        )
+    );
+}
+
+#[test]
+fn names_too_long_for_a_common_name_leave_the_subject_empty_and_the_san_critical() {
+    let pki = pki(365 * DAY);
+    let long = format!("{}.{DOMAIN}", "a".repeat(63));
+    let longer = format!("{}.{long}", "b".repeat(10));
+    let names = [long.as_str(), longer.as_str()];
+    assert_eq!(
+        issued_subject(&pki, &names, &request(&long, &names)),
+        (None, String::new(), true)
     );
 }
 

@@ -100,6 +100,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   365. The CA database moves to schema v20, which sets an existing CA's Web
   Server lifetime to 90 days (or its `days` if lower) and leaves the other
   types on `days`.
+- The ACME broker ignores a CSR's subject, as Let's Encrypt does, so CSRs
+  carrying O, C or ST (TrueNAS's) are no longer refused. The leaf's subject
+  is a lone CN: the CSR's if it is one of its names, else the first name of at
+  most 64 octets, else empty with the SAN critical.
 
 ### Fixed
 
