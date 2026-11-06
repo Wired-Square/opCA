@@ -53,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The `opca-acme` app's `app.sock` and `hooks.sock` answer only the console's
+  uid (`APPLIANCE_CONSOLE_UID`, root by default), hanging up on any other
+  peer.
 - The ACME broker no longer needs step-ca, and the `.deb` no longer depends on
   it. `step_ca` in `broker.toml` is now refused, the status reports
   `acme_down` in place of `step_ca_down`, and the versions no longer name

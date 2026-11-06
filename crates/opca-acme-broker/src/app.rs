@@ -1,12 +1,14 @@
 //! The broker as an ApplianceOS app: its host and domains from the data
 //! volume, the host ports the console maps, its health on `app.sock`, and its
-//! hooks, the backup among them, on `hooks.sock`.
+//! hooks, the backup among them, on `hooks.sock`, both to the console's uid alone.
 
+use std::fmt::Display;
 use std::fs::DirBuilder;
 use std::io;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::Router;
@@ -18,7 +20,7 @@ use axum::routing::{get, post};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::net::UnixListener;
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -40,6 +42,10 @@ pub const HOOKS_SOCKET: &str = "hooks.sock";
 /// The listeners' ports inside the container, as the manifest declares them.
 pub const API_PORT: u16 = 9443;
 pub const ACME_PORT: u16 = 8443;
+/// The console's uid inside the container: Docker runs rootful, with no userns-remap (ApplianceOS D63).
+pub const CONSOLE_UID: u32 = 0;
+/// What every uid outside a user namespace appears as inside it, so it can't tell the console apart.
+const OVERFLOW_UID: u32 = 65534;
 
 const NEEDS_HOST: &str = "the broker needs a host: set the app's host option";
 const NEEDS_HOST_TO_RESTORE: &str = "the broker needs a host first: set host (and domains) in \
@@ -61,6 +67,8 @@ pub struct App {
     /// The host ports opCA and ACME clients dial.
     pub api_port: u16,
     pub acme_port: u16,
+    /// The only peer either socket answers.
+    pub console_uid: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,18 +100,21 @@ impl From<&Mode> for AppState {
 
 impl App {
     /// `data`'s `options.json` first and its `broker.toml` second, a blank
-    /// value giving way to the next; `env` gives `APPLIANCE_LISTENER_*_PORT`.
+    /// value giving way to the next; `env` gives `APPLIANCE_LISTENER_*_PORT`
+    /// and `APPLIANCE_CONSOLE_UID`.
     pub fn load(data: &Path, env: impl Fn(&str) -> Option<String>) -> Result<Self, Error> {
         let options: Chosen = read(&data.join("options.json"), |text| {
             serde_json::from_str(text)
         })?;
         let own: Chosen = read(&data.join("broker.toml"), |text| toml::from_str(text))?;
-        let port = |name: &str, default: u16| -> Result<u16, Error> {
-            env(name).map_or(Ok(default), |port| {
-                port.parse()
-                    .map_err(|e| format!("{name}={port}: {e}").into())
-            })
-        };
+        let console_uid = variable(&env, "APPLIANCE_CONSOLE_UID", CONSOLE_UID)?;
+        if console_uid == OVERFLOW_UID {
+            return Err(format!(
+                "APPLIANCE_CONSOLE_UID={console_uid} is the overflow uid, which every process \
+                 outside a user namespace appears as"
+            )
+            .into());
+        }
         Ok(Self {
             host: [options.host, own.host]
                 .into_iter()
@@ -115,8 +126,9 @@ impl App {
                 .find(|domains| !domains.is_empty())
                 .unwrap_or_default(),
             data: data.into(),
-            api_port: port("APPLIANCE_LISTENER_API_PORT", API_PORT)?,
-            acme_port: port("APPLIANCE_LISTENER_ACME_PORT", ACME_PORT)?,
+            api_port: variable(&env, "APPLIANCE_LISTENER_API_PORT", API_PORT)?,
+            acme_port: variable(&env, "APPLIANCE_LISTENER_ACME_PORT", ACME_PORT)?,
+            console_uid,
         })
     }
 
@@ -159,11 +171,9 @@ impl App {
         tracing::warn!("{NEEDS_HOST}; answering only health and the hooks until then");
         let refuse =
             Router::new().fallback(|| async { (StatusCode::SERVICE_UNAVAILABLE, NEEDS_HOST) });
-        let health = self.health(AppState::NeedsHost);
-        let console = serve_console(
+        let console = self.serve_console(
             sockets,
             Hooked::NeedsHost(self.data.join("state")),
-            move || health.clone(),
             stop.clone(),
         )?;
         let acme = tokio::spawn(serve_http(
@@ -176,6 +186,40 @@ impl App {
         console.await??;
         Ok(())
     }
+
+    /// The console's two sockets in `sockets`, until `stop`; both are bound
+    /// before this returns, so the hooks answer by the time health first says healthy.
+    pub fn serve_console(
+        &self,
+        sockets: &Path,
+        hooked: Hooked,
+        stop: CancellationToken,
+    ) -> io::Result<JoinHandle<io::Result<()>>> {
+        let hooks = ConsoleOnly::bind(&sockets.join(HOOKS_SOCKET), self.console_uid)?;
+        let app = ConsoleOnly::bind(&sockets.join(APP_SOCKET), self.console_uid)?;
+        let router = self.app_routes(&hooked);
+        let hooks = tokio::spawn(serve_hooks(hooks, hooked, stop.clone().cancelled_owned()));
+        let app = tokio::spawn(async move {
+            axum::serve(app, router)
+                .with_graceful_shutdown(stop.cancelled_owned())
+                .await
+        });
+        Ok(tokio::spawn(async move {
+            hooks.await??;
+            app.await?
+        }))
+    }
+
+    /// What `app.sock` answers under `/apps/opca-acme/`: `healthz`.
+    fn app_routes(&self, hooked: &Hooked) -> Router {
+        let (app, answering) = (self.clone(), hooked.clone());
+        let healthz = move || {
+            let body =
+                serde_json::to_vec(&app.health(answering.state())).expect("the health serialises");
+            async move { ([(header::CONTENT_TYPE, "application/json")], body).into_response() }
+        };
+        Router::new().route(&format!("/apps/{NAME}/healthz"), get(healthz))
+    }
 }
 
 /// What the hooks answer for: a running broker, or the state directory of one that needs a host.
@@ -185,53 +229,59 @@ pub enum Hooked {
     NeedsHost(PathBuf),
 }
 
-/// The console's two sockets in `sockets`, until `stop`; the hooks are bound
-/// before this returns, so they answer by the time health first says healthy.
-pub fn serve_console(
-    sockets: &Path,
-    hooked: Hooked,
-    health: impl Fn() -> Health + Clone + Send + Sync + 'static,
-    stop: CancellationToken,
-) -> io::Result<JoinHandle<io::Result<()>>> {
-    let hooks = bind_for_console(&sockets.join(HOOKS_SOCKET))?;
-    let hooks = tokio::spawn(serve_hooks(hooks, hooked, stop.clone().cancelled_owned()));
-    let health = tokio::spawn(serve_health(
-        sockets.join(APP_SOCKET),
-        health,
-        stop.cancelled_owned(),
-    ));
-    Ok(tokio::spawn(async move {
-        hooks.await??;
-        health.await?
-    }))
-}
-
-fn bind_for_console(socket: &Path) -> io::Result<UnixListener> {
-    match std::fs::remove_file(socket) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        removed => removed?,
+impl Hooked {
+    fn state(&self) -> AppState {
+        match self {
+            Self::Running(broker) => AppState::from(&broker.mode()),
+            Self::NeedsHost(_) => AppState::NeedsHost,
+        }
     }
-    let listener = UnixListener::bind(socket)?;
-    // The console connects as group root without DAC override, so it needs the group's write bit.
-    std::fs::set_permissions(socket, PermissionsExt::from_mode(0o660))?;
-    Ok(listener)
 }
 
-/// Answers `GET /apps/opca-acme/healthz` on `socket` with what `health` says, until `stop`.
-pub async fn serve_health(
-    socket: PathBuf,
-    health: impl Fn() -> Health + Clone + Send + Sync + 'static,
-    stop: impl Future<Output = ()> + Send + 'static,
-) -> io::Result<()> {
-    let listener = bind_for_console(&socket)?;
-    let healthz = move || {
-        let body = serde_json::to_vec(&health()).expect("the health serialises");
-        async move { ([(header::CONTENT_TYPE, "application/json")], body).into_response() }
-    };
-    let router = Router::new().route(&format!("/apps/{NAME}/healthz"), get(healthz));
-    axum::serve(listener, router)
-        .with_graceful_shutdown(stop)
-        .await
+/// `app.sock` or `hooks.sock`: a connection from any uid but the console's is
+/// closed unanswered (ApplianceOS D62).
+struct ConsoleOnly {
+    listener: UnixListener,
+    console_uid: u32,
+}
+
+impl ConsoleOnly {
+    /// Binds `socket`, replacing a stale one.
+    fn bind(socket: &Path, console_uid: u32) -> io::Result<Self> {
+        match std::fs::remove_file(socket) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            removed => removed?,
+        }
+        let listener = UnixListener::bind(socket)?;
+        // The console connects as group root without DAC override, so it needs the group's write bit.
+        std::fs::set_permissions(socket, PermissionsExt::from_mode(0o660))?;
+        Ok(Self {
+            listener,
+            console_uid,
+        })
+    }
+}
+
+impl axum::serve::Listener for ConsoleOnly {
+    type Io = UnixStream;
+    type Addr = tokio::net::unix::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            let (stream, address) = axum::serve::Listener::accept(&mut self.listener).await;
+            match stream.peer_cred() {
+                Ok(peer) if peer.uid() == self.console_uid => return (stream, address),
+                Ok(peer) => {
+                    tracing::warn!(uid = peer.uid(), "refused a peer that isn't the console")
+                }
+                Err(error) => tracing::warn!(%error, "refused a peer whose uid can't be read"),
+            }
+        }
+    }
+
+    fn local_addr(&self) -> io::Result<Self::Addr> {
+        self.listener.local_addr()
+    }
 }
 
 #[derive(Clone)]
@@ -241,8 +291,8 @@ struct Hooks {
 }
 
 /// The console's hooks (ApplianceOS D62) on `listener`, until `stop`: the index, About, and the backup.
-pub async fn serve_hooks(
-    listener: UnixListener,
+async fn serve_hooks(
+    listener: ConsoleOnly,
     hooked: Hooked,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
@@ -334,6 +384,19 @@ fn inspected_needing_host(blob: Value) -> AppInspection {
 /// `port` on every address.
 pub fn any(port: u16) -> SocketAddr {
     (Ipv6Addr::UNSPECIFIED, port).into()
+}
+
+/// The environment variable `name` parsed, or `default` when it isn't set.
+fn variable<T: FromStr<Err: Display>>(
+    env: impl Fn(&str) -> Option<String>,
+    name: &str,
+    default: T,
+) -> Result<T, Error> {
+    env(name).map_or(Ok(default), |value| {
+        value
+            .parse()
+            .map_err(|e| format!("{name}={value}: {e}").into())
+    })
 }
 
 /// `path` parsed, or the default when it isn't there.

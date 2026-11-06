@@ -13,9 +13,11 @@ use std::time::{Duration, SystemTime};
 use opca_acme_api::path;
 use opca_acme_broker::Mode;
 use opca_acme_broker::acme::from_base64url;
-use opca_acme_broker::app::{AppState, HOOKS_SOCKET, Health, Hooked, serve_console};
+use opca_acme_broker::app::{HOOKS_SOCKET, Hooked};
 use serde_json::{Value, json};
-use support::{DOMAINS, Enrolled, Running, enrol, private_tempdir, record, record_chain, serve};
+use support::{
+    DOMAINS, Enrolled, Running, console_app, enrol, private_tempdir, record, record_chain, serve,
+};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -27,18 +29,9 @@ use wslib_crypto_x509::pem;
 /// The console's sockets for `hooked`, in a directory of their own.
 fn console(hooked: Hooked) -> TempDir {
     let sockets = private_tempdir();
-    let health = Health {
-        state: AppState::Enrolled,
-        api_port: 1,
-        acme_port: 2,
-    };
-    let served = serve_console(
-        sockets.path(),
-        hooked,
-        move || health.clone(),
-        CancellationToken::new(),
-    )
-    .unwrap();
+    let served = console_app(private_tempdir().path(), &[])
+        .serve_console(sockets.path(), hooked, CancellationToken::new())
+        .unwrap();
     tokio::spawn(served);
     sockets
 }
