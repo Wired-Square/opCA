@@ -13,8 +13,3 @@ opt-level = 3
 
 [profile.dev.package.rsa]
 opt-level = 3
-
-[patch.wired-square]
-wslib-crypto-ca = { path = "/Users/alex/src/wired/wslib-rs/crates/wslib-crypto-ca" }
-wslib-crypto = { path = "/Users/alex/src/wired/wslib-rs/crates/wslib-crypto" }
-wslib-crypto-x509 = { path = "/Users/alex/src/wired/wslib-rs/crates/wslib-crypto-x509" }

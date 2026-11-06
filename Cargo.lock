@@ -8814,7 +8814,9 @@ dependencies = [
 
 [[package]]
 name = "wslib-crypto"
-version = "0.1.4"
+version = "0.1.2"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "b5efe7111cc4f3e0469134326581482124ae6c2fe5c34a7276a7d42471afe50e"
 dependencies = [
  "p256 0.13.2",
  "p384",
@@ -8824,13 +8826,14 @@ dependencies = [
  "rsa",
  "rustls 0.23.37",
  "rustls-pki-types",
- "sec1 0.7.3",
  "sha2",
 ]
 
 [[package]]
 name = "wslib-crypto-ca"
 version = "0.2.1"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "db0b011e91a572c9bbacef171776daec7ee7770419718a8ce6e830c28901c19b"
 dependencies = [
  "const-oid",
  "rcgen",
@@ -8860,6 +8863,8 @@ dependencies = [
 [[package]]
 name = "wslib-crypto-x509"
 version = "0.1.7"
+source = "sparse+https://forge.wiredsquare.com/api/packages/wired-square/cargo/"
+checksum = "ad7b483e14c155e488e945dd5a66e05040fceacba2e9edc102bdde3abffc722c"
 dependencies = [
  "const-oid",
  "rcgen",
