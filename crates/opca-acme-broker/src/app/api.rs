@@ -4,16 +4,15 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use axum::Router;
-use axum::extract::{FromRequestParts, State};
-use axum::http::request::Parts;
-use axum::http::{StatusCode, Uri};
+use axum::extract::{FromRef, State};
+use axum::http::Uri;
 use axum::response::Response;
 use axum::routing::get;
 use opca_acme_api::{ErrorBody, IssuedCertificate};
 use serde::{Deserialize, Serialize};
-use wslib_appliance_types::console::{ConsoleIdentity, IDENTITY_HEADER};
+use wslib_appliance_server::{ApplianceState, Mount, Viewer};
 
-use super::{App, AppState, Hooked, NAME};
+use super::{App, AppState, Hooked};
 use crate::api::{param, reply};
 use crate::enrolled::issued;
 use crate::enrolment::{bad_request, internal};
@@ -48,18 +47,28 @@ pub struct IssuedNewest {
 
 #[derive(Clone)]
 struct Read {
+    appliance: ApplianceState,
     hooked: Hooked,
     domains: Vec<String>,
 }
 
-pub(super) fn routes(app: &App, hooked: &Hooked) -> Router {
-    Router::new()
-        .route(&format!("/apps/{NAME}/api/status"), get(status))
-        .route(&format!("/apps/{NAME}/api/issued"), get(issued_newest))
-        .with_state(Read {
-            hooked: hooked.clone(),
-            domains: app.domains.clone(),
-        })
+impl FromRef<Read> for ApplianceState {
+    fn from_ref(read: &Read) -> Self {
+        read.appliance.clone()
+    }
+}
+
+/// Under the chassis's `/api`, for every console role (opCA phase 26-2).
+pub(super) fn routes(app: &App, hooked: &Hooked) -> Mount {
+    let (hooked, app) = (hooked.clone(), app.clone());
+    let routes = Router::new()
+        .route("/status", get(status))
+        .route("/issued", get(issued_newest));
+    Mount::new(routes, move |appliance| Read {
+        appliance,
+        hooked: hooked.clone(),
+        domains: app.domains.clone(),
+    })
 }
 
 async fn status(State(read): State<Read>, _: Viewer) -> Response {
@@ -139,25 +148,5 @@ impl Broker {
                 .map(|last| last.id as u64),
             certificates: page.certificates.into_iter().map(issued).collect(),
         })
-    }
-}
-
-/// That the console vouched for the caller in `appliance-identity`, every role
-/// being a viewer; without one, or with one malformed, 401.
-pub(super) struct Viewer;
-
-impl<S: Send + Sync> FromRequestParts<S> for Viewer {
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        parts
-            .headers
-            .get(IDENTITY_HEADER)
-            .and_then(|value| value.to_str().ok()?.parse::<ConsoleIdentity>().ok())
-            .map(|_| Viewer)
-            .ok_or((
-                StatusCode::UNAUTHORIZED,
-                "no console identity, or a malformed one",
-            ))
     }
 }

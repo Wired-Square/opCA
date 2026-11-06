@@ -251,7 +251,9 @@ declares:
 | Volume | `data`, at `/data`: the state lives in `/data/state` |
 | Options | `host` (required) and `domains` (optional), as in `broker.toml` |
 
-Only the console reaches its page, health and hooks: the app's sockets hang up on any other uid.
+Only the console reaches its hooks, and only what the console vouches for reaches its page's
+data: the app serves its sockets through the appliance chassis, which answers any other uid as
+nobody and hangs up on it at the hooks.
 
 **Set `host` after installing.** Until it's set the app is healthy but does nothing else: it
 reports that it needs a host, answers both ports with a 503 saying so, and makes no keys. Setting

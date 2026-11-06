@@ -17,23 +17,17 @@ use opca_acme_broker::app::{HOOKS_SOCKET, Hooked};
 use serde_json::{Value, json};
 use support::{
     DOMAINS, Enrolled, Running, console_app, enrol, private_tempdir, record, record_chain, serve,
+    serve_console,
 };
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio_util::sync::CancellationToken;
 use wslib_appliance_types::backup::RestoreReport;
-use wslib_appliance_types::hooks::{AppInspection, HookIndex};
+use wslib_appliance_types::hooks::{AppAbout, AppInspection, HookIndex};
 use wslib_crypto_x509::pem;
 
-/// The console's sockets for `hooked`, in a directory of their own.
-fn console(hooked: Hooked) -> TempDir {
-    let sockets = private_tempdir();
-    let served = console_app(private_tempdir().path(), &[])
-        .serve_console(sockets.path(), hooked, CancellationToken::new())
-        .unwrap();
-    tokio::spawn(served);
-    sockets
+async fn console(hooked: Hooked) -> TempDir {
+    serve_console(console_app(private_tempdir().path(), &[]), hooked).await
 }
 
 async fn hook(sockets: &Path, method: &str, route: &str, body: &str) -> (u16, String) {
@@ -78,7 +72,7 @@ async fn restore(sockets: &Path, capture: &str) -> (u16, String) {
 
 async fn enrolled() -> (Enrolled, TempDir) {
     let enrolled = enrol(serve(private_tempdir(), DOMAINS).await).await;
-    let sockets = console(Hooked::Running(enrolled.running.broker.clone()));
+    let sockets = console(Hooked::Running(enrolled.running.broker.clone())).await;
     (enrolled, sockets)
 }
 
@@ -107,6 +101,11 @@ async fn the_hooks_say_the_app_takes_its_own_backups_on_a_socket_the_console_can
     assert!(serde_json::from_str::<HookIndex>(&body).unwrap().backup);
     let (code, body) = hook(sockets.path(), "GET", "/v1/about", "").await;
     assert_eq!(code, 200, "{body}");
+    let about: AppAbout = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        (about.product.as_str(), about.version.as_str()),
+        ("opCA ACME broker", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[tokio::test]
@@ -214,7 +213,7 @@ async fn a_fresh_broker_takes_the_certificates_and_wants_enrolling_again() {
     let old_serial = &enrolled.status.subordinate_serial;
 
     let fresh = serve(private_tempdir(), DOMAINS).await;
-    let fresh_sockets = console(Hooked::Running(fresh.broker.clone()));
+    let fresh_sockets = console(Hooked::Running(fresh.broker.clone())).await;
     let (code, body) = restore(fresh_sockets.path(), &captured).await;
     assert_eq!(code, 200, "{body}");
     let report: RestoreReport = serde_json::from_str(&body).unwrap();
@@ -335,7 +334,7 @@ async fn an_enrolment_for_another_key_or_one_undoing_a_revocation_is_blocked() {
 #[tokio::test]
 async fn without_a_host_or_a_database_the_capture_is_empty_and_only_an_empty_one_restores() {
     let data = private_tempdir();
-    let sockets = console(Hooked::NeedsHost(data.path().join("state")));
+    let sockets = console(Hooked::NeedsHost(data.path().join("state"))).await;
     let empty = capture(sockets.path()).await;
     let parsed: Value = serde_json::from_str(&empty).unwrap();
     assert_eq!(
@@ -378,7 +377,7 @@ async fn with_its_host_unset_the_broker_still_captures_what_it_left_and_restores
     let (enrolled, sockets) = enrolled().await;
     let (running, state) = (&enrolled.running, enrolled.running.state.path());
     record(running.broker.acme(), "11", "a.home.example").await;
-    let unset = console(Hooked::NeedsHost(state.to_owned()));
+    let unset = console(Hooked::NeedsHost(state.to_owned())).await;
 
     let captured = capture(unset.path()).await;
     assert_holds_no_key(state, &captured);

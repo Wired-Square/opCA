@@ -30,7 +30,12 @@ fn main() -> ExitCode {
     wslib_service::Daemon::new("opca-acme-broker")
         .grace(GRACE)
         .run(|stop| async move {
-            wslib_telemetry::Telemetry::new("info").init();
+            let logs = wslib_appliance_server::logs(&["opca_acme_broker"]);
+            let telemetry = wslib_telemetry::Telemetry::new("info");
+            match run {
+                Run::App => logs.feed(telemetry).init(),
+                Run::Config(_) => telemetry.init(),
+            }
             let mut reopened = signal(SignalKind::hangup())?;
             let (config, app) = match run {
                 Run::Config(path) => (Config::load(&path)?, None),
@@ -45,6 +50,7 @@ fn main() -> ExitCode {
                             return app
                                 .serve_needing_host(
                                     Path::new(app::SOCKETS),
+                                    logs,
                                     api,
                                     acme,
                                     stop.token(),
@@ -92,25 +98,23 @@ fn main() -> ExitCode {
                     }
                 }
             });
-            let console = app
-                .map(|app| {
-                    app.serve_console(
-                        Path::new(app::SOCKETS),
-                        Hooked::Running(broker.clone()),
-                        stop.token(),
-                    )
-                })
-                .transpose()?;
             let token = stop.token();
             let acme = tokio::spawn(
                 broker
                     .clone()
                     .serve_acme(async move { token.cancelled().await }),
             );
-            let served = opca_acme_broker::serve(broker.clone(), listener, stop).await;
-            let _ = acme.await;
-            if let Some(console) = console {
-                console.await??;
+            let console_stop = stop.token().cancelled_owned();
+            let console = async {
+                let Some(app) = app else { return Ok(()) };
+                let hooked = Hooked::Running(broker.clone());
+                app.serve_console(Path::new(app::SOCKETS), hooked, logs, console_stop)
+                    .await
+            };
+            let api = async { Ok(opca_acme_broker::serve(broker.clone(), listener, stop).await?) };
+            let served = tokio::try_join!(api, console);
+            if served.is_ok() {
+                let _ = acme.await;
             }
             let _ = std::fs::remove_file(&pid_file);
             served?;

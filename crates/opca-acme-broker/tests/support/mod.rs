@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 use opca_acme_api::{Challenge, Enrolment, ErrorBody, ErrorKind, IssuanceConfig, Status};
 use opca_acme_broker::acme::Store;
 use opca_acme_broker::acme::store::{ChallengeStatus, NewAuthorisation, NewCertificate, NewOrder};
-use opca_acme_broker::app::App;
+use opca_acme_broker::app::{APP_SOCKET, App, HOOKS_SOCKET, Hooked};
 use opca_acme_broker::{Broker, Config};
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::services::ca::CertificateAuthority;
@@ -21,7 +21,7 @@ use opca_core::services::database::models::CaConfig;
 use opca_core::testutil::{FakeRunner, Output, created, fake_vault};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UnixStream};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
@@ -187,6 +187,28 @@ pub fn private_tempdir() -> TempDir {
 /// The uid this test runs as.
 pub fn own_uid() -> u32 {
     fs::metadata(private_tempdir().path()).unwrap().uid()
+}
+
+/// `app`'s two sockets for `hooked`, in a directory of their own, once both answer.
+pub async fn serve_console(app: App, hooked: Hooked) -> TempDir {
+    let sockets = private_tempdir();
+    let path = sockets.path().to_owned();
+    let logs = wslib_appliance_server::logs(&[]);
+    tokio::spawn(async move {
+        let stop = std::future::pending();
+        app.serve_console(&path, hooked, logs, stop).await.unwrap()
+    });
+    for socket in [APP_SOCKET, HOOKS_SOCKET] {
+        let socket = sockets.path().join(socket);
+        for tried in 1.. {
+            match UnixStream::connect(&socket).await {
+                Ok(_) => break,
+                Err(e) if tried == 200 => panic!("{}: {e}", socket.display()),
+                Err(_) => tokio::time::sleep(Duration::from_millis(25)).await,
+            }
+        }
+    }
+    sockets
 }
 
 /// The app on `data`, its console this test's own uid, with `env` besides.
