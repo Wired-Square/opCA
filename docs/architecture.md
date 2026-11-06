@@ -307,6 +307,12 @@ update stores 0 to clear one, which reads back as unset. The v20 migration sets
 `web_server_days` to `min(days, 90)` and leaves the others unset, so existing
 CAs keep issuing every other type as before.
 
+The CA init and Configuration tabs carry a Default Lifetimes group (pre-filled
+90 / 365 / 365 on init, Device blank; a blanked field sends 0), the Database
+page lists the four, and `defaultCertDays` in `api/types.ts` mirrors the
+lookup for `CertDaysField`'s prefill. The dashboard's Apple-limit item judges
+the server types' defaults.
+
 ### Deleted certificates
 
 Delete is a soft delete. `delete_certificate` refuses the CA and any cert that

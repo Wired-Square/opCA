@@ -299,6 +299,10 @@ pub(crate) fn ca_config_to_dto(config: &CaConfig) -> CaConfigDto {
         ca_backup_store: config.ca_backup_store.clone(),
         ca_aws_region: config.ca_aws_region.clone(),
         crl_batch_enabled: config.crl_batch_enabled,
+        web_server_days: config.web_server_days,
+        vpn_server_days: config.vpn_server_days,
+        vpn_client_days: config.vpn_client_days,
+        device_days: config.device_days,
         key_algorithm: None,
         cn: None,
         ca_days: None,
@@ -328,5 +332,9 @@ fn dto_to_ca_config(dto: &CaConfigDto) -> CaConfig {
         ca_backup_store: dto.ca_backup_store.clone(),
         ca_aws_region: dto.ca_aws_region.clone(),
         crl_batch_enabled: dto.crl_batch_enabled,
+        web_server_days: dto.web_server_days,
+        vpn_server_days: dto.vpn_server_days,
+        vpn_client_days: dto.vpn_client_days,
+        device_days: dto.device_days,
     }
 }

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The CA's init and Configuration tabs set a default lifetime per
+  certificate type (Web Server, VPN Server, VPN Client, Device), blank
+  meaning Certificate Days, and the Database page lists them. New certificates
+  are pre-filled with their type's lifetime.
 - The ACME broker ships as the `opca-acme` ApplianceOS app (arm64): a
   signed image with the `api` (9443) and `acme` (8443) listeners and a `data`
   volume, its `host` and `domains` set as app options. Until `host` is set it

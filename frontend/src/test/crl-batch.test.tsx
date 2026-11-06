@@ -93,6 +93,10 @@ const config = (overrides: Partial<CaConfig> = {}): CaConfig => ({
   ca_backup_store: null,
   ca_aws_region: null,
   crl_batch_enabled: false,
+  web_server_days: null,
+  vpn_server_days: null,
+  vpn_client_days: null,
+  device_days: null,
   ...overrides,
 });
 

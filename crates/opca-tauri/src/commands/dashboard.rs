@@ -3,7 +3,7 @@ use log::warn;
 use tauri::State;
 
 use opca_core::services::ca::{CaExpiryWarning, CrlExpiryWarning, assess_crl_expiry};
-use opca_core::services::cert::APPLE_TLS_MAX_DAYS;
+use opca_core::services::cert::{APPLE_TLS_MAX_DAYS, CertType};
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
 use opca_core::services::database::BrokerState;
@@ -63,7 +63,12 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
     let crl_batch_enabled = config
         .as_ref()
         .is_some_and(|c| c.crl_batch_enabled == Some(true));
-    let cert_days = config.and_then(|c| c.days);
+    let server_cert_days = config.and_then(|c| {
+        [CertType::WebServer, CertType::VpnServer]
+            .iter()
+            .filter_map(|t| c.type_days(t))
+            .max()
+    });
     let crl_batch = crl_batch_dto(db_ref, crl_batch_enabled)?;
 
     let crl_next_update = crl_metadata.as_ref().and_then(|m| m.next_update.clone());
@@ -137,7 +142,7 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         &ca_warning_raw,
         crl_expiry_warning.as_ref(),
         has_public_store,
-        cert_days,
+        server_cert_days,
         expired_certs,
         pending_csrs,
     );
@@ -204,7 +209,7 @@ fn build_action_items(
     ca_warning: &CaExpiryWarning,
     crl_warning: Option<&CrlExpiryWarningDto>,
     has_public_store: bool,
-    cert_days: Option<i64>,
+    server_cert_days: Option<i64>,
     expired_certs: usize,
     pending_csrs: usize,
 ) -> Vec<ActionItemDto> {
@@ -241,12 +246,12 @@ fn build_action_items(
         });
     }
 
-    if let Some(days) = cert_days.filter(|&d| d > i64::from(APPLE_TLS_MAX_DAYS)) {
+    if let Some(days) = server_cert_days.filter(|&d| d > i64::from(APPLE_TLS_MAX_DAYS)) {
         items.push(ActionItemDto {
             id: "cert_days_over_apple_limit".to_string(),
             severity: "info".to_string(),
             message: format!(
-                "Default certificate lifetime is {days} days; server certificates are capped at \
+                "Default server certificate lifetime is {days} days; it is capped at \
                  {APPLE_TLS_MAX_DAYS} for Apple devices"
             ),
             button_label: "Review CA".to_string(),

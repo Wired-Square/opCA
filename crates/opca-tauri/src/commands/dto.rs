@@ -117,6 +117,10 @@ pub struct CaConfigDto {
     pub ca_backup_store: Option<String>,
     pub ca_aws_region: Option<String>,
     pub crl_batch_enabled: Option<bool>,
+    pub web_server_days: Option<i64>,
+    pub vpn_server_days: Option<i64>,
+    pub vpn_client_days: Option<i64>,
+    pub device_days: Option<i64>,
     /// Init only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_algorithm: Option<KeyAlgorithm>,
