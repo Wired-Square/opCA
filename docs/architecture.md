@@ -1350,8 +1350,8 @@ line's privilege drop and reopen, and the `.deb` installed, enrolled and
 serving the ACME listener's certificate for `host` under systemd in
 `debian:bookworm`. Without the variable those tests skip.
 
-[scripts/build-acme-app.sh](../scripts/build-acme-app.sh) `--keys <dir>
---platform linux/arm64` builds the app image from the staged crates with
+[scripts/build-acme-app.sh](../scripts/build-acme-app.sh) `[--keys <dir>]
+--platform linux/arm64` (keys from `.env` without `--keys`) builds the app image from the staged crates with
 [appliance/Dockerfile](../crates/opca-acme-broker/appliance/Dockerfile) on the
 `appliance-image` buildx builder: the broker compiled in `rust:1.99-bookworm`,
 run on `distroless/cc-debian12`, whose glibc and libssl3 are the same Debian

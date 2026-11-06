@@ -275,13 +275,16 @@ broker left.
 To build it and pack it into an archive the console's **Apps › Install** takes:
 
 ```sh
-scripts/build-acme-app.sh --keys <dir> --platform linux/arm64
+scripts/build-acme-app.sh [--keys <dir>] --platform linux/arm64
 ```
 
 It needs Docker with buildx, OpenSSL 3, `jq`, `wslib-appliance-xtask` for arm64, and an ApplianceOS checkout (`APPLIANCEOS`, by
-default `../ApplianceOS`). It signs with the throwaway keys in `<dir>`, made there if it holds
-none, as source `opca-test` (`--source` changes it); add `<dir>/root.pem` under **Apps › Sources**
-with that name before installing. The image and the archive land in `target/acme-app/`. To run
+default `../ApplianceOS`). It signs as source `opca-test` (`--source` changes it) with the
+throwaway keys in `<dir>`, made there if it holds none, or without `--keys`, with
+`OPCA_TEST_SIGNING_CERT` and `OPCA_TEST_SIGNING_KEY` from `.env` (base64 of `leaf.pem` and
+`leaf.key`). Keep signing with the same leaf: a box's source verifies only the root it was given,
+so new keys mean removing and reinstalling the app. Add the keys' `root.pem` under **Apps ›
+Sources** with that name before installing. The image and the archive land in `target/acme-app/`. To run
 the image locally as the console would:
 
 ```sh
