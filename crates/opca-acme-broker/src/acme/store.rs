@@ -278,7 +278,7 @@ pub struct Certificate {
     pub changed: i64,
 }
 
-/// What [`Store::changed_after`] found: the certificates, and whether more wait past them.
+/// What [`Store::changed_after`] or [`Store::newest`] found: the certificates, and whether more wait past them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Changes {
     pub certificates: Vec<Certificate>,
@@ -717,16 +717,37 @@ impl Store {
 
     /// Up to `limit` certificates issued or revoked after change `cursor`, oldest change first; 0 starts at the beginning.
     pub async fn changed_after(&self, cursor: i64, limit: u32) -> Result<Changes, Error> {
-        let mut certificates = sqlx::query(&format!(
-            "{CERTIFICATE} WHERE changed > ? ORDER BY changed LIMIT ?"
-        ))
-        .bind(cursor)
-        .bind(i64::from(limit) + 1)
-        .fetch_all(self.db.pool())
-        .await?
-        .iter()
-        .map(certificate)
-        .collect::<Result<Vec<_>, _>>()?;
+        self.page("changed > ? ORDER BY changed", cursor, limit)
+            .await
+    }
+
+    /// Up to `limit` certificates issued before the one with id `before`,
+    /// newest first, and only the revoked or the unrevoked when `revoked` says
+    /// which; `None` starts at the newest.
+    pub async fn newest(
+        &self,
+        before: Option<i64>,
+        revoked: Option<bool>,
+        limit: u32,
+    ) -> Result<Changes, Error> {
+        let only = match revoked {
+            None => "",
+            Some(true) => "AND revoked_at IS NOT NULL",
+            Some(false) => "AND revoked_at IS NULL",
+        };
+        let filter = format!("id < ? {only} ORDER BY id DESC");
+        self.page(&filter, before.unwrap_or(i64::MAX), limit).await
+    }
+
+    async fn page(&self, filter: &str, key: i64, limit: u32) -> Result<Changes, Error> {
+        let mut certificates = sqlx::query(&format!("{CERTIFICATE} WHERE {filter} LIMIT ?"))
+            .bind(key)
+            .bind(i64::from(limit) + 1)
+            .fetch_all(self.db.pool())
+            .await?
+            .iter()
+            .map(certificate)
+            .collect::<Result<Vec<_>, _>>()?;
         let more = certificates.len() > limit as usize;
         certificates.truncate(limit as usize);
         Ok(Changes { certificates, more })

@@ -91,15 +91,18 @@ async fn issued(State(broker): Shared, _: Operator, uri: Uri) -> Response {
 
 /// The `after` of `?after=<cursor>`, 0 when there is none.
 fn after(query: Option<&str>) -> Result<u64, ErrorBody> {
-    query
-        .into_iter()
-        .flat_map(|query| query.split('&'))
-        .find_map(|pair| pair.strip_prefix("after="))
-        .map_or(Ok(0), |cursor| {
-            cursor
-                .parse()
-                .map_err(|e| bad_request(format!("after={cursor}: {e}")))
-        })
+    param(query, "after").map_or(Ok(0), |cursor| {
+        cursor
+            .parse()
+            .map_err(|e| bad_request(format!("after={cursor}: {e}")))
+    })
+}
+
+/// The first value of `name` in `query`, taken as it is: every value read is a number or a word.
+pub(crate) fn param<'q>(query: Option<&'q str>, name: &str) -> Option<&'q str> {
+    query?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
 }
 
 /// The enrolment, for a request on a connection that presented the operator's

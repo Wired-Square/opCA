@@ -33,6 +33,10 @@ use crate::backup::{Capture, both_blocked, capture_left, failed, warned_of_block
 use crate::enrolment::bad_request;
 use crate::{Broker, Config, Error, Mode};
 
+mod api;
+
+pub use api::{AppStatus, IssuedNewest, Issuer};
+
 pub const NAME: &str = "opca-acme";
 pub const DATA: &str = "/data";
 /// Where the console reaches the app, at `app.sock` and `hooks.sock`.
@@ -210,7 +214,7 @@ impl App {
         }))
     }
 
-    /// What `app.sock` answers under `/apps/opca-acme/`: `healthz`.
+    /// What `app.sock` answers under `/apps/opca-acme/`: `healthz` and the page's API.
     fn app_routes(&self, hooked: &Hooked) -> Router {
         let (app, answering) = (self.clone(), hooked.clone());
         let healthz = move || {
@@ -218,11 +222,13 @@ impl App {
                 serde_json::to_vec(&app.health(answering.state())).expect("the health serialises");
             async move { ([(header::CONTENT_TYPE, "application/json")], body).into_response() }
         };
-        Router::new().route(&format!("/apps/{NAME}/healthz"), get(healthz))
+        Router::new()
+            .route(&format!("/apps/{NAME}/healthz"), get(healthz))
+            .merge(api::routes(self, hooked))
     }
 }
 
-/// What the hooks answer for: a running broker, or the state directory of one that needs a host.
+/// What the hooks and the page answer for: a running broker, or the state directory of one that needs a host.
 #[derive(Clone)]
 pub enum Hooked {
     Running(Arc<Broker>),

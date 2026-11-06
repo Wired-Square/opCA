@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a page at a time, and its status counts the certificates issued and
   revoked. The cursor moves on revocation too, so a revoked certificate comes
   back to a client that has already synced it.
+- The `opca-acme` app answers `GET /apps/opca-acme/api/status` and
+  `GET /apps/opca-acme/api/issued?before=<cursor>&revoked=<bool>` (newest
+  first, a page at a time) on its console socket, for any caller the console
+  vouches for in `appliance-identity`; without one, 401.
 - The ACME broker can issue from a CSR for an order. The CSR must verify,
   name exactly the order's DNS names, all within the permitted domains, and
   not reuse the account key. The leaf is `serverAuth` only, lasts the
