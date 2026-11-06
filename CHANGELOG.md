@@ -104,6 +104,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   carrying O, C or ST (TrueNAS's) are no longer refused. The leaf's subject
   is a lone CN: the CSR's if it is one of its names, else the first name of at
   most 64 octets, else empty with the SAN critical.
+- Releases land on `main` only through a PR. `npm run release:patch` (or
+  `:minor`, `:major`) runs `release.js prepare` on a feature branch: it bumps
+  the version, dates the `[Unreleased]` notes and commits the bump to the
+  branch, with no tag, push or prompt. Merging the PR makes `release.yml` tag
+  the new version and build its draft release. `release:rebuild` runs on a
+  clean `main` and only moves the current tag and pushes it.
 
 ### Fixed
 
