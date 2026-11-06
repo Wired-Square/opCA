@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The ACME broker ships as the `opca-acme` ApplianceOS app (arm64): a
   signed image with the `api` (9443) and `acme` (8443) listeners and a `data`
   volume, its `host` and `domains` set as app options. Until `host` is set it
-  stays healthy and says it needs one. `scripts/build-acme-app.sh` builds the
-  image and packs it with a signed index for a test install.
+  stays healthy and says it needs one. Its box backups are hot, through the
+  console's backup hook: `acme.db` and the enrolment, never the subordinate
+  key, restored all or nothing. `scripts/build-acme-app.sh` builds the image
+  and packs it with a signed index for a test install.
 - The ACME broker answers ACME (RFC 8555) itself at `/acme/directory`:
   accounts, key changes and deactivation, orders validated in the background
   over http-01, dns-01 or tls-alpn-01, finalising, certificate download, and
