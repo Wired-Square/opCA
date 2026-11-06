@@ -15,7 +15,7 @@ use crate::error::OpcaError;
 use crate::utils::datetime::{self, DateTimeFormat};
 
 /// Critical expiry warning window in days.
-const EXPIRY_WARNING_DAYS: i64 = 30;
+pub const EXPIRY_WARNING_DAYS: i64 = 30;
 
 /// Caution expiry warning window in days (6 months).
 const EXPIRY_CAUTION_DAYS: i64 = 183;

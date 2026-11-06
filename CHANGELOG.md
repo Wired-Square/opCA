@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   directory: ACME accounts, orders, authorisations, challenges and the
   certificates it issues, each with a cursor for opCA to sync from. Statuses
   move only as RFC 8555 draws them.
+- The dashboard asks for renewal of certificates that expire within 30 days,
+  opening the Expiring Soon list.
 - The ACME broker lists what it has issued at `GET /v1/issued?after=<cursor>`,
   a page at a time, and its status counts the certificates issued and
   revoked. The cursor moves on revocation too, so a revoked certificate comes

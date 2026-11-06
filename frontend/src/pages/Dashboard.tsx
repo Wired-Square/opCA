@@ -55,6 +55,7 @@ export default function Dashboard() {
   async function runAction(item: ActionItem) {
     const routeMap: Partial<Record<ActionKind, string>> = {
       view_expired_certs: "/certs?filter=expired",
+      view_expiring_certs: "/certs?filter=expiring",
       view_pending_csrs: "/csr",
       view_ca: "/ca",
     };

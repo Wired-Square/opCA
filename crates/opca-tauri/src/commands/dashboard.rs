@@ -6,7 +6,7 @@ use opca_core::services::ca::{CaExpiryWarning, CrlExpiryWarning, assess_crl_expi
 use opca_core::services::cert::{APPLE_TLS_MAX_DAYS, CertType};
 use opca_core::utils::datetime::{self, DateTimeFormat};
 
-use opca_core::services::database::BrokerState;
+use opca_core::services::database::{BrokerState, EXPIRY_WARNING_DAYS};
 
 use crate::commands::broker::broker_rows;
 use crate::commands::crl::crl_batch_dto;
@@ -144,6 +144,7 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         has_public_store,
         server_cert_days,
         expired_certs,
+        expiring_certs,
         pending_csrs,
     );
 
@@ -211,6 +212,7 @@ fn build_action_items(
     has_public_store: bool,
     server_cert_days: Option<i64>,
     expired_certs: usize,
+    expiring_certs: usize,
     pending_csrs: usize,
 ) -> Vec<ActionItemDto> {
     let mut items = Vec::new();
@@ -274,6 +276,21 @@ fn build_action_items(
         });
     }
 
+    if expiring_certs > 0 {
+        let noun = if expiring_certs == 1 {
+            "certificate expires"
+        } else {
+            "certificates expire"
+        };
+        items.push(ActionItemDto {
+            id: "expiring_certs".to_string(),
+            severity: "warning".to_string(),
+            message: format!("{expiring_certs} {noun} within {EXPIRY_WARNING_DAYS} days"),
+            button_label: "View".to_string(),
+            action: "view_expiring_certs".to_string(),
+        });
+    }
+
     if pending_csrs > 0 {
         let noun = if pending_csrs == 1 { "CSR" } else { "CSRs" };
         items.push(ActionItemDto {
@@ -292,11 +309,20 @@ fn build_action_items(
 mod tests {
     use super::*;
 
+    fn items(cert_days: Option<i64>, expiring_certs: usize) -> Vec<ActionItemDto> {
+        build_action_items(
+            &CaExpiryWarning::None,
+            None,
+            false,
+            cert_days,
+            0,
+            expiring_certs,
+            0,
+        )
+    }
+
     fn item_ids(cert_days: Option<i64>) -> Vec<String> {
-        build_action_items(&CaExpiryWarning::None, None, false, cert_days, 0, 0)
-            .into_iter()
-            .map(|i| i.id)
-            .collect()
+        items(cert_days, 0).into_iter().map(|i| i.id).collect()
     }
 
     #[test]
@@ -304,5 +330,18 @@ mod tests {
         assert_eq!(item_ids(Some(3650)), ["cert_days_over_apple_limit"]);
         assert!(item_ids(Some(825)).is_empty());
         assert!(item_ids(None).is_empty());
+    }
+
+    #[test]
+    fn nudges_renewal_of_certificates_inside_the_expiry_window() {
+        assert!(items(None, 0).is_empty());
+        let nudge = items(None, 2);
+        assert_eq!(nudge.len(), 1);
+        assert_eq!(nudge[0].message, "2 certificates expire within 30 days");
+        assert_eq!(nudge[0].action, "view_expiring_certs");
+        assert_eq!(
+            items(None, 1)[0].message,
+            "1 certificate expires within 30 days"
+        );
     }
 }

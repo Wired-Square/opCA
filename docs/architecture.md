@@ -785,7 +785,9 @@ the active broker count and the flagged `brokers_flagged` rows, and an
 `action_items: Vec<ActionItemDto>` list. Action items carry a stable `id`,
 severity, human-readable message, button label, and an `action` token that
 the frontend dispatches on (`regenerate_and_upload_crl`, `regenerate_crl`,
-`view_expired_certs`, `view_pending_csrs`, `view_ca`). Threshold logic lives
+`view_expired_certs`, `view_expiring_certs`, `view_pending_csrs`, `view_ca`).
+Certificates inside the 30-day expiry window, less ignored ones, raise an
+`expiring_certs` item that opens the Expiring Soon filter. Threshold logic lives
 entirely in the Rust layer to avoid duplication in TypeScript.
 
 ### Bulk command group

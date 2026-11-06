@@ -9,6 +9,7 @@ export type ActionKind =
   | "regenerate_and_upload_crl"
   | "regenerate_crl"
   | "view_expired_certs"
+  | "view_expiring_certs"
   | "view_pending_csrs"
   | "view_ca";
 
