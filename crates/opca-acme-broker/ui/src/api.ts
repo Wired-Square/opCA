@@ -5,6 +5,8 @@ export type AppState = "needs_host" | "enrolling" | "enrolled" | "revoked";
 export interface AppStatus {
   state: AppState;
   host: string | null;
+  api_url: string | null;
+  acme_directory: string | null;
   domains: string[];
   subordinate: { serial: string; not_after: string } | null;
 }

@@ -9,11 +9,12 @@ use std::path::Path;
 
 use opca_acme_broker::Broker;
 use opca_acme_broker::app::{APP_SOCKET, AppState, AppStatus, Hooked, IssuedNewest, Issuer};
-use support::{DOMAINS, HOST, config, console_app, enrol, private_tempdir, record, run};
+use support::{
+    DOMAINS, HOST, config, console_app, enrol, private_tempdir, record, run, serve_console,
+};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio_util::sync::CancellationToken;
 
 const VIEWER: &str = "v1; id=a1; user=someone; role=viewer";
 const STATUS: &str = "/apps/opca-acme/api/status";
@@ -40,13 +41,8 @@ async fn read<T: serde::de::DeserializeOwned>(sockets: &Path, path: &str) -> T {
     serde_json::from_str(&body).unwrap()
 }
 
-fn console(data: &Path, hooked: Hooked) -> TempDir {
-    let sockets = private_tempdir();
-    let served = console_app(data, &[])
-        .serve_console(sockets.path(), hooked, CancellationToken::new())
-        .unwrap();
-    tokio::spawn(served);
-    sockets
+async fn console(data: &Path, hooked: Hooked) -> TempDir {
+    serve_console(console_app(data, &[]), hooked).await
 }
 
 fn serials(page: &IssuedNewest) -> Vec<&str> {
@@ -64,7 +60,7 @@ async fn needing_a_host_it_has_the_configured_domains_and_nothing_issued() {
         r#"{"domains": ["home.example"]}"#,
     )
     .unwrap();
-    let sockets = console(data.path(), Hooked::NeedsHost(data.path().join("state")));
+    let sockets = console(data.path(), Hooked::NeedsHost(data.path().join("state"))).await;
 
     let status: AppStatus = read(sockets.path(), STATUS).await;
     assert_eq!(
@@ -72,6 +68,8 @@ async fn needing_a_host_it_has_the_configured_domains_and_nothing_issued() {
         AppStatus {
             state: AppState::NeedsHost,
             host: None,
+            api_url: None,
+            acme_directory: None,
             domains: vec!["home.example".into()],
             subordinate: None,
         }
@@ -88,7 +86,8 @@ async fn awaiting_enrolment_it_has_its_host_and_no_subordinate() {
     let sockets = console(
         private_tempdir().path(),
         Hooked::Running(running.broker.clone()),
-    );
+    )
+    .await;
 
     let status: AppStatus = read(sockets.path(), STATUS).await;
     assert_eq!(
@@ -96,6 +95,35 @@ async fn awaiting_enrolment_it_has_its_host_and_no_subordinate() {
         (AppState::Enrolling, Some(HOST), None)
     );
     assert_eq!(status.domains, DOMAINS);
+    assert_eq!(
+        (status.api_url.unwrap(), status.acme_directory.unwrap()),
+        (
+            format!("https://{HOST}:9443"),
+            format!("https://{HOST}:8443/acme/directory")
+        )
+    );
+}
+
+#[tokio::test]
+async fn the_urls_name_the_ports_the_console_mapped() {
+    let state = private_tempdir();
+    let (broker, uri) = Broker::start(&config(state.path(), DOMAINS)).await.unwrap();
+    let running = run(state, broker, uri).await;
+    let mapped = [
+        ("APPLIANCE_LISTENER_API_PORT", "19443"),
+        ("APPLIANCE_LISTENER_ACME_PORT", "443"),
+    ];
+    let app = console_app(private_tempdir().path(), &mapped);
+    let sockets = serve_console(app, Hooked::Running(running.broker.clone())).await;
+
+    let status: AppStatus = read(sockets.path(), STATUS).await;
+    assert_eq!(
+        (status.api_url.unwrap(), status.acme_directory.unwrap()),
+        (
+            format!("https://{HOST}:19443"),
+            format!("https://{HOST}:443/acme/directory")
+        )
+    );
 }
 
 #[tokio::test]
@@ -111,7 +139,8 @@ async fn enrolled_it_names_its_subordinate_and_pages_the_issued_newest_first() {
     let sockets = console(
         private_tempdir().path(),
         Hooked::Running(enrolled.running.broker.clone()),
-    );
+    )
+    .await;
 
     let status: AppStatus = read(sockets.path(), STATUS).await;
     assert_eq!(
@@ -119,6 +148,8 @@ async fn enrolled_it_names_its_subordinate_and_pages_the_issued_newest_first() {
         AppStatus {
             state: AppState::Enrolled,
             host: Some(HOST.into()),
+            api_url: Some(format!("https://{HOST}:9443")),
+            acme_directory: Some(format!("https://{HOST}:8443/acme/directory")),
             domains: DOMAINS.iter().map(|d| d.to_string()).collect(),
             subordinate: Some(Issuer {
                 serial: enrolled.status.subordinate_serial.clone(),
@@ -149,20 +180,37 @@ async fn enrolled_it_names_its_subordinate_and_pages_the_issued_newest_first() {
 }
 
 #[tokio::test]
-async fn without_the_consoles_identity_the_api_is_401_and_health_still_answers() {
+async fn without_the_consoles_identity_the_api_refuses_and_health_still_answers() {
     let data = private_tempdir();
-    let sockets = console(data.path(), Hooked::NeedsHost(data.path().join("state")));
+    let sockets = console(data.path(), Hooked::NeedsHost(data.path().join("state"))).await;
 
     for path in [STATUS, ISSUED] {
-        for identity in [
-            None,
-            Some("v2; id=a1; user=someone; role=viewer"),
-            Some("v1; id=a1"),
+        for (identity, refused) in [
+            (None, 401),
+            (Some("v2; id=a1; user=someone; role=viewer"), 400),
+            (Some("v1; id=a1"), 400),
         ] {
             let (code, _) = get(sockets.path(), path, identity).await;
-            assert_eq!(code, 401, "{path} as {identity:?}");
+            assert_eq!(code, refused, "{path} as {identity:?}");
         }
     }
     let (code, _) = get(sockets.path(), "/apps/opca-acme/healthz", None).await;
     assert_eq!(code, 200);
+}
+
+#[tokio::test]
+async fn the_chassis_answers_the_session_and_branding_under_the_base() {
+    let data = private_tempdir();
+    let sockets = console(data.path(), Hooked::NeedsHost(data.path().join("state"))).await;
+
+    let (code, body) = get(sockets.path(), "/apps/opca-acme/api/session", Some(VIEWER)).await;
+    assert_eq!(code, 200, "{body}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+        serde_json::json!({"id": "a1", "username": "someone", "role": "viewer"})
+    );
+    let (code, body) = get(sockets.path(), "/apps/opca-acme/api/branding", None).await;
+    assert_eq!(code, 200, "{body}");
+    let branding: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(branding["app_name"], "opCA ACME broker");
 }

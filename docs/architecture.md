@@ -1275,27 +1275,32 @@ manifest's options before each start, and then from the app's own
 The listeners are fixed at the manifest's ports, `api` 9443 and `acme` 8443,
 and the state lives in `/data/state` (0700). `APPLIANCE_LISTENER_API_PORT`, the
 host port the console mapped, becomes `advertised_port`, so the pairing URI
-names the port opCA dials; both variables are reported, and absent ones fall
-back to the manifest's ports.
+names the port opCA dials; absent variables fall back to the manifest's ports.
 
 With no host, `serve_needing_host` touches no state: it binds both listeners,
 answers every request on them with a plain-HTTP 503 saying the broker needs a
 host, and is healthy. Setting the option restarts the container, which then
-starts the broker as usual. `/run/appliance/app.sock` answers
-`GET /apps/opca-acme/healthz`, with no identity, with the state (`needs_host`,
-`enrolling`, `enrolled` or `revoked`) and both ports. The pairing URI is in
-the container's log.
+starts the broker as usual. The pairing URI is in the container's log.
 
-`App::serve_console` binds `/run/appliance/hooks.sock` and `app.sock` before
-it returns, so the console finds the hooks before it reads the app as healthy,
-and a console that finds none takes a cold tar of `/data`, key included. Both
-sockets are 0660: the console connects through group root. Both answer the
-console alone (ApplianceOS D62): `ConsoleOnly` reads each connection's peer uid
-at accept and hangs up on any other than `APPLIANCE_CONSOLE_UID`, 0 when unset
-since Docker runs rootful (D63); `App::load` refuses the overflow uid 65534,
-which every outside process appears as under userns-remap. `serve_hooks` answers `GET /v1`
-(`HookIndex`, `backup: true`), `GET /v1/about`, and the hot backup in
-[backup.rs](../crates/opca-acme-broker/src/backup.rs), one call at a time:
+`App::serve_console` serves both console sockets through
+`wslib-appliance-server`'s app-socket mode (27-1), with
+`/apps/opca-acme/` as the base, the chassis's `Bootstrap` resolved with only
+that set (`OPCA_ACME_*` variables aside, the broker resolves its own config),
+and an in-memory chassis store, since nothing the page reads or the chassis
+keeps for a proxied app needs to outlast a restart. `/run/appliance/app.sock`
+answers the chassis's `GET /apps/opca-acme/healthz` with no identity, and
+`hooks.sock` is bound in the same poll, so the console finds the hooks before
+it reads the app as healthy; a console that finds none takes a cold tar of
+`/data`, key included. Both sockets are 0660: the console connects through
+group root. The chassis reads `appliance-identity` only on a connection from
+`APPLIANCE_CONSOLE_UID` (0 when unset, since Docker runs rootful, D63) and
+serves any other uid as nobody, at most four connections at once; `hooks.sock`
+hangs up on any other (ApplianceOS D62); the overflow uid 65534, which every
+outside process appears as under userns-remap, is refused at start. The
+chassis answers `GET /v1` (`HookIndex`, `backup: true`) and `GET /v1/about`
+(product `opCA ACME broker`, the crate's version), and the broker's hot backup
+in [backup.rs](../crates/opca-acme-broker/src/backup.rs) is mounted with
+`backup_hooks`, one call at a time:
 
 - `POST /v1/backup/capture`: a `Capture` (format `opca-acme-broker`, version 1)
   holding the enrolment as `enrolment.json` has it and `acme.db` as
@@ -1328,37 +1333,39 @@ capture restores until the host is set.
 
 [app/api.rs](../crates/opca-acme-broker/src/app/api.rs) is the read API the
 page calls on `app.sock`, for every role (26-2: read-only, since revocation is
-opCA's). Each route needs the console's `appliance-identity`, parsed as
-`wslib_appliance_types::ConsoleIdentity`; without one, or with one malformed,
+opCA's), under the chassis's `/api`. Each route takes its `Viewer`, which reads
+the console's `appliance-identity`: with a malformed one it is a 400; without one,
 it is a 401. `GET /apps/opca-acme/api/status` is an `AppStatus`: the state, the
-host, the permitted domains once enrolled (the configured ones before), and the
+host, `api_url` (`https://<host>:<api port>`) and `acme_directory`
+(`https://<host>:<acme port>/acme/directory`) on the ports `App::load` read,
+the mapped ones as the pairing URI names them (both `None` until a host is
+set), the permitted domains once enrolled (the configured ones before), and the
 subordinate's serial and expiry. `GET /apps/opca-acme/api/issued` is an
 `IssuedNewest`, `IssuedCertificate` rows read from `acme.db` by
 `Store::newest`, newest issue first (by row id, which a revocation doesn't
 move), `issued_page` at a time; `?before=<cursor>` takes the next page and
 `?revoked=true|false` filters. With no host both answer from the options
-alone: nothing issued.
+alone: nothing issued. The chassis adds `GET /apps/opca-acme/api/session` and
+`/api/branding`, which the page's shell reads.
 
-[app/files.rs](../crates/opca-acme-broker/src/app/files.rs) serves the page
-from `/usr/share/opca-acme/ui` (`App::ui`), every file read into memory when
-the sockets bind, so a request only looks a path up. Each needs the identity
-too. A file missing beside its `.gz` is sent gzipped as it is to a client that
-takes gzip and inflated for one that doesn't; `assets/` is cached for good and
-the rest is `no-cache`. `index.html` is sent with its `<base href>` rewritten
-from `X-Forwarded-Prefix` (ApplianceOS D122) when that is a plain absolute
-path, else `/apps/opca-acme/`; `/apps/opca-acme` redirects to it. A path with
-no extension in its last segment is the page's own and gets the index; a
-missing asset and anything under `api/` are 404. With no page installed the
-index is a 404 and health is unchanged.
+The chassis serves the page from `/usr/share/opca-acme/ui` (`App::ui`) to any
+caller, `index.html` with its `<base href>` naming `/apps/opca-acme/`, and a
+`.gz` beside a file to a client that takes gzip. A path the page doesn't hold
+gets the index, but a missing asset and anything under `api/` are 404. With no
+page installed the index is a 404 and health is unchanged.
 
 [ui/](../crates/opca-acme-broker/ui) is the page: SolidJS and
-`@wired-square/kit` alone, as `@wired-square/appliance-ui`'s `Shell` needs the
-chassis server's session and branding routes (26-1). Vite builds it with
-relative asset paths, which the base resolves. It shows the status, then
+`@wired-square/kit`, in `@wired-square/appliance-ui`'s `Shell` and `Chrome`
+(27-1), which read the chassis's `api/session` and `api/branding` under the
+base and bring the masthead, the brand and the console's app switcher, read
+from `/api/switcher` at the origin. `applianceVite` builds it with relative
+asset paths, which the base resolves, and a `.gz` beside each file gzip
+shrinks. It shows the status, then
 `createPagedList` over `api/issued` with a revocation filter;
 `standing.ts` decides each row's status (valid, expiring in its last third,
 expired, revoked with the RFC 5280 reason), and its vitest tests pin that. The
-kit's light and dark schemes come with its `SchemePicker`, and opCA's accent.
+page has no scheme picker: `index.html` takes the scheme the console stored for
+the origin, and the theme is the kit's with opCA's accent.
 
 ### Packaging and verification
 
@@ -1394,8 +1401,8 @@ serving the ACME listener's certificate for `host` under systemd in
 `appliance-image` buildx builder: the broker compiled in `rust:1.99-bookworm`,
 run on `distroless/cc-debian12`, whose glibc and libssl3 are the same Debian
 release's. It builds the page first (`npm ci`, `vite build` into `ui/dist`), and
-the Dockerfile's `ui` stage copies that `dist` and gzips its scripts, styles and
-SVGs into `/usr/share/opca-acme/ui`, with no node in the image (26-4). It labels the image with the manifest that
+the Dockerfile copies that `dist`, its `.gz` files included, into
+`/usr/share/opca-acme/ui`, with no node in the image (26-4). It labels the image with the manifest that
 [examples/appliance-label.rs](../crates/opca-acme-broker/examples/appliance-label.rs)
 builds from `wslib-appliance-types`' `AppManifest` and checks with its
 validator (its tests run under `cargo test`), writes a docker-load tarball to
@@ -1413,10 +1420,10 @@ checkout (`APPLIANCEOS_READ_TOKEN`) and a 1Password service account
 (`OP_SERVICE_ACCOUNT_TOKEN`). With `OPCA_ACME_APP_IMAGE` naming
 the tarball, `broker_docker.rs` runs the image as the console would (its own
 uid in group 0, no capabilities, the `data` and socket volumes, a mapped API
-port): healthy and refusing with no host, hanging up on a uid that isn't the
-console's, then, with `host` in `options.json` and a restart, enrolled and
-serving ACME, with the page, a gzipped asset and both API routes answering a
-viewer through `app.sock`.
+port): healthy and refusing with no host, a uid that isn't the console's
+served as nobody, then, with `host` in `options.json` and a restart, enrolled
+and serving ACME, with the page, a gzipped asset, both API routes and the
+chassis's session and branding answering a viewer through `app.sock`.
 
 ---
 

@@ -1,40 +1,42 @@
 //! The broker as an ApplianceOS app: its host and domains from the data
-//! volume, the host ports the console maps, its health on `app.sock`, and its
-//! hooks, the backup among them, on `hooks.sock`, both to the console's uid alone.
+//! volume, the host ports the console maps, and its page and hooks, the backup
+//! among them, on the chassis's `app.sock` and `hooks.sock`.
 
 use std::fmt::Display;
 use std::fs::DirBuilder;
 use std::io;
 use std::net::{Ipv6Addr, SocketAddr};
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::extract::{DefaultBodyLimit, FromRef, State};
+use axum::http::StatusCode;
+use axum::response::Response;
+use axum::routing::post;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use wslib_appliance_config::{ApplianceArgs, Bootstrap, Resolver};
+use wslib_appliance_core::backend::backup_hooks;
+use wslib_appliance_server::{AppSocket, ApplianceState, BackupHooks, Logs, Server};
+use wslib_appliance_store::Store;
+use wslib_appliance_types::Branding;
 use wslib_appliance_types::backup::{MAX_BUNDLE_LEN, RestoreReport};
-use wslib_appliance_types::hooks::{AppAbout, AppInspection, AppRestore, HookIndex};
+use wslib_appliance_types::hooks::{AppInspection, AppRestore};
 use wslib_http_server::{Listener, serve_http};
 
-use crate::api::{json, reply};
+use crate::api::reply;
 use crate::backup::{Capture, both_blocked, capture_left, failed, warned_of_blocked};
 use crate::enrolment::bad_request;
 use crate::{Broker, Config, Error, Mode};
 
 mod api;
-mod files;
 
 pub use api::{AppStatus, IssuedNewest, Issuer};
 
@@ -51,8 +53,8 @@ pub const ACME_PORT: u16 = 8443;
 pub const UI: &str = "/usr/share/opca-acme/ui";
 /// The console's uid inside the container: Docker runs rootful, with no userns-remap (ApplianceOS D63).
 pub const CONSOLE_UID: u32 = 0;
-/// What every uid outside a user namespace appears as inside it, so it can't tell the console apart.
-const OVERFLOW_UID: u32 = 65534;
+/// What the about hook and the page's masthead name.
+const PRODUCT: &str = "opCA ACME broker";
 
 const NEEDS_HOST: &str = "the broker needs a host: set the app's host option";
 const NEEDS_HOST_TO_RESTORE: &str = "the broker needs a host first: set host (and domains) in \
@@ -74,7 +76,7 @@ pub struct App {
     /// The host ports opCA and ACME clients dial.
     pub api_port: u16,
     pub acme_port: u16,
-    /// The only peer either socket answers.
+    /// The uid the chassis hears as the console.
     pub console_uid: u32,
     /// The page's files.
     pub ui: PathBuf,
@@ -87,14 +89,6 @@ pub enum AppState {
     Enrolling,
     Enrolled,
     Revoked,
-}
-
-/// The healthz body.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Health {
-    pub state: AppState,
-    pub api_port: u16,
-    pub acme_port: u16,
 }
 
 impl From<&Mode> for AppState {
@@ -116,14 +110,6 @@ impl App {
             serde_json::from_str(text)
         })?;
         let own: Chosen = read(&data.join("broker.toml"), |text| toml::from_str(text))?;
-        let console_uid = variable(&env, "APPLIANCE_CONSOLE_UID", CONSOLE_UID)?;
-        if console_uid == OVERFLOW_UID {
-            return Err(format!(
-                "APPLIANCE_CONSOLE_UID={console_uid} is the overflow uid, which every process \
-                 outside a user namespace appears as"
-            )
-            .into());
-        }
         Ok(Self {
             host: [options.host, own.host]
                 .into_iter()
@@ -137,7 +123,7 @@ impl App {
             data: data.into(),
             api_port: variable(&env, "APPLIANCE_LISTENER_API_PORT", API_PORT)?,
             acme_port: variable(&env, "APPLIANCE_LISTENER_ACME_PORT", ACME_PORT)?,
-            console_uid,
+            console_uid: variable(&env, "APPLIANCE_CONSOLE_UID", CONSOLE_UID)?,
             ui: UI.into(),
         })
     }
@@ -162,77 +148,68 @@ impl App {
         }))
     }
 
-    pub fn health(&self, state: AppState) -> Health {
-        Health {
-            state,
-            api_port: self.api_port,
-            acme_port: self.acme_port,
-        }
-    }
-
     /// Healthy in `sockets` with no host set, refusing every request on either listener, until `stop`.
     pub async fn serve_needing_host(
         &self,
         sockets: &Path,
+        logs: Logs,
         api: Listener,
         acme: Listener,
         stop: CancellationToken,
     ) -> Result<(), Error> {
-        tracing::warn!("{NEEDS_HOST}; answering only health and the hooks until then");
+        tracing::warn!("{NEEDS_HOST}; answering only the page and the hooks until then");
         let refuse =
             Router::new().fallback(|| async { (StatusCode::SERVICE_UNAVAILABLE, NEEDS_HOST) });
-        let console = self.serve_console(
-            sockets,
-            Hooked::NeedsHost(self.data.join("state")),
-            stop.clone(),
+        let hooked = Hooked::NeedsHost(self.data.join("state"));
+        let refusing = |listener, stop: CancellationToken| {
+            let refuse = refuse.clone();
+            async move { Ok(serve_http(listener, refuse, stop.cancelled_owned()).await?) }
+        };
+        tokio::try_join!(
+            self.serve_console(sockets, hooked, logs, stop.clone().cancelled_owned()),
+            refusing(acme, stop.clone()),
+            refusing(api, stop),
         )?;
-        let acme = tokio::spawn(serve_http(
-            acme,
-            refuse.clone(),
-            stop.clone().cancelled_owned(),
-        ));
-        serve_http(api, refuse, stop.cancelled_owned()).await?;
-        acme.await??;
-        console.await??;
         Ok(())
     }
 
-    /// The console's two sockets in `sockets`, until `stop`; both are bound
-    /// before this returns, so the hooks answer by the time health first says healthy.
-    pub fn serve_console(
+    /// The page and its API on `sockets`' `app.sock`, and the hooks on its
+    /// `hooks.sock`, both bound before `stop` is first polled, until `stop`.
+    pub async fn serve_console(
         &self,
         sockets: &Path,
         hooked: Hooked,
-        stop: CancellationToken,
-    ) -> io::Result<JoinHandle<io::Result<()>>> {
-        let hooks = ConsoleOnly::bind(&sockets.join(HOOKS_SOCKET), self.console_uid)?;
-        let app = ConsoleOnly::bind(&sockets.join(APP_SOCKET), self.console_uid)?;
-        let router = self.app_routes(&hooked)?;
-        let hooks = tokio::spawn(serve_hooks(hooks, hooked, stop.clone().cancelled_owned()));
-        let app = tokio::spawn(async move {
-            axum::serve(app, router)
-                .with_graceful_shutdown(stop.cancelled_owned())
-                .await
-        });
-        Ok(tokio::spawn(async move {
-            hooks.await??;
-            app.await?
-        }))
+        logs: Logs,
+        stop: impl Future<Output = ()>,
+    ) -> Result<(), Error> {
+        let _ = rustls_openssl::default_provider().install_default();
+        let mut branding = Branding::unbranded();
+        branding.app_name = PRODUCT.into();
+        let server = Server::new(
+            Store::open_in_memory(None).await?,
+            branding,
+            env!("CARGO_PKG_VERSION"),
+            logs,
+        );
+        let socket = AppSocket::new(sockets.join(APP_SOCKET), self.console_uid)
+            .hooks(sockets.join(HOOKS_SOCKET));
+        server
+            .ui(Some(self.ui.clone()))
+            .api(api::routes(self, &hooked))
+            .backup_hooks(hooks(hooked))
+            .serve(&bootstrap()?, socket, stop)
+            .await?;
+        Ok(())
     }
+}
 
-    /// What `app.sock` answers under `/apps/opca-acme/`: `healthz`, the page's API, and its files.
-    fn app_routes(&self, hooked: &Hooked) -> io::Result<Router> {
-        let (app, answering) = (self.clone(), hooked.clone());
-        let healthz = move || {
-            let body =
-                serde_json::to_vec(&app.health(answering.state())).expect("the health serialises");
-            async move { ([(header::CONTENT_TYPE, "application/json")], body).into_response() }
-        };
-        Ok(Router::new()
-            .route(&format!("/apps/{NAME}/healthz"), get(healthz))
-            .merge(api::routes(self, hooked))
-            .merge(files::routes(&self.ui)?))
-    }
+/// The chassis's settings: only the base path matters behind the console, and the broker resolves the rest itself.
+fn bootstrap() -> Result<Bootstrap, Error> {
+    let args = ApplianceArgs {
+        base_path: Some(format!("/apps/{NAME}/").parse()?),
+        ..ApplianceArgs::default()
+    };
+    Ok(Resolver::new(NAME, "OPCA_ACME").resolve(&args)?)
 }
 
 /// What the hooks and the page answer for: a running broker, or the state directory of one that needs a host.
@@ -242,99 +219,32 @@ pub enum Hooked {
     NeedsHost(PathBuf),
 }
 
-impl Hooked {
-    fn state(&self) -> AppState {
-        match self {
-            Self::Running(broker) => AppState::from(&broker.mode()),
-            Self::NeedsHost(_) => AppState::NeedsHost,
-        }
-    }
-}
-
-/// `app.sock` or `hooks.sock`: a connection from any uid but the console's is
-/// closed unanswered (ApplianceOS D62).
-struct ConsoleOnly {
-    listener: UnixListener,
-    console_uid: u32,
-}
-
-impl ConsoleOnly {
-    /// Binds `socket`, replacing a stale one.
-    fn bind(socket: &Path, console_uid: u32) -> io::Result<Self> {
-        match std::fs::remove_file(socket) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            removed => removed?,
-        }
-        let listener = UnixListener::bind(socket)?;
-        // The console connects as group root without DAC override, so it needs the group's write bit.
-        std::fs::set_permissions(socket, PermissionsExt::from_mode(0o660))?;
-        Ok(Self {
-            listener,
-            console_uid,
-        })
-    }
-}
-
-impl axum::serve::Listener for ConsoleOnly {
-    type Io = UnixStream;
-    type Addr = tokio::net::unix::SocketAddr;
-
-    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        loop {
-            let (stream, address) = axum::serve::Listener::accept(&mut self.listener).await;
-            match stream.peer_cred() {
-                Ok(peer) if peer.uid() == self.console_uid => return (stream, address),
-                Ok(peer) => {
-                    tracing::warn!(uid = peer.uid(), "refused a peer that isn't the console")
-                }
-                Err(error) => tracing::warn!(%error, "refused a peer whose uid can't be read"),
-            }
-        }
-    }
-
-    fn local_addr(&self) -> io::Result<Self::Addr> {
-        self.listener.local_addr()
-    }
-}
-
 #[derive(Clone)]
 struct Hooks {
+    appliance: ApplianceState,
     hooked: Hooked,
     one_at_a_time: Arc<Mutex<()>>,
 }
 
-/// The console's hooks (ApplianceOS D62) on `listener`, until `stop`: the index, About, and the backup.
-async fn serve_hooks(
-    listener: ConsoleOnly,
-    hooked: Hooked,
-    stop: impl Future<Output = ()> + Send + 'static,
-) -> io::Result<()> {
-    let index = || async {
-        let mut index = HookIndex::default();
-        index.backup = true;
-        json(StatusCode::OK, &index)
-    };
-    let about = || async {
-        let mut about = AppAbout::default();
-        about.product = "opCA ACME broker".into();
-        about.version = env!("CARGO_PKG_VERSION").into();
-        json(StatusCode::OK, &about)
-    };
-    let hooks = Hooks {
-        hooked,
-        one_at_a_time: Arc::default(),
-    };
-    let router = Router::new()
-        .route("/v1", get(index))
-        .route("/v1/about", get(about))
-        .route("/v1/backup/capture", post(capture))
-        .route("/v1/backup/inspect", post(inspect))
-        .route("/v1/backup/restore", post(restore))
-        .layer(DefaultBodyLimit::max(MAX_BUNDLE_LEN))
-        .with_state(hooks);
-    axum::serve(listener, router)
-        .with_graceful_shutdown(stop)
-        .await
+impl FromRef<Hooks> for ApplianceState {
+    fn from_ref(hooks: &Hooks) -> Self {
+        hooks.appliance.clone()
+    }
+}
+
+/// The backup hooks (ApplianceOS D62), one call at a time.
+fn hooks(hooked: Hooked) -> BackupHooks {
+    let one_at_a_time = Arc::default();
+    let routes = Router::new()
+        .route("/capture", post(capture))
+        .route("/inspect", post(inspect))
+        .route("/restore", post(restore))
+        .layer(DefaultBodyLimit::max(MAX_BUNDLE_LEN));
+    backup_hooks(routes, move |appliance| Hooks {
+        appliance,
+        hooked: hooked.clone(),
+        one_at_a_time: Arc::clone(&one_at_a_time),
+    })
 }
 
 async fn capture(State(hooks): State<Hooks>) -> Response {

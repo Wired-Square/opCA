@@ -5,7 +5,6 @@ import {
   Loaded,
   Notice,
   NothingYet,
-  SchemePicker,
   Section,
   Select,
   Table,
@@ -41,16 +40,12 @@ const FILTERS: Record<string, RevokedFilter> = { all: null, unrevoked: false, re
 export function App() {
   const [broker, { refetch }] = createResource(status);
   return (
-    <main class="page">
-      <header class="page__head">
-        <h1>ACME broker</h1>
-        <SchemePicker />
-      </header>
+    <>
       <Loaded of={broker} refetch={refetch} reading="the broker's status">
         {(broker) => <Status status={broker()} />}
       </Loaded>
       <Issued />
-    </main>
+    </>
   );
 }
 
@@ -65,6 +60,8 @@ function Status(props: { status: AppStatus }) {
         </dd>
         <dt>Host</dt>
         <dd>{props.status.host ?? "—"}</dd>
+        <Url label="API" url={props.status.api_url} />
+        <Url label="ACME directory" url={props.status.acme_directory} />
         <dt>Domains</dt>
         <dd>{props.status.domains.join(", ") || "chosen in opCA"}</dd>
         <Show when={props.status.subordinate}>
@@ -89,6 +86,15 @@ function Status(props: { status: AppStatus }) {
           <Notice tone="bad">opCA revoked the broker's subordinate, so it issues nothing more.</Notice>
         </Match>
       </Switch>
+    </>
+  );
+}
+
+function Url(props: { label: string; url: string | null }) {
+  return (
+    <>
+      <dt>{props.label}</dt>
+      <dd class="facts__url">{props.url ?? "—"}</dd>
     </>
   );
 }

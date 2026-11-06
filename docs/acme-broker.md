@@ -251,7 +251,9 @@ declares:
 | Volume | `data`, at `/data`: the state lives in `/data/state` |
 | Options | `host` (required) and `domains` (optional), as in `broker.toml` |
 
-Only the console reaches its page, health and hooks: the app's sockets hang up on any other uid.
+Only the console reaches its hooks, and only what the console vouches for reaches its page's
+data: the app serves its sockets through the appliance chassis, which answers any other uid as
+nobody and hangs up on it at the hooks.
 
 **Set `host` after installing.** Until it's set the app is healthy but does nothing else: it
 reports that it needs a host, answers both ports with a 503 saying so, and makes no keys. Setting
@@ -259,16 +261,17 @@ the option restarts the app, which then starts as the broker does on Debian and 
 URI. On ApplianceOS after 0.1.10 the URI names the API's host port as the console mapped it,
 which may not be 9443. An
 appliance's ACME directory is `https://<host>:<acme port>/acme/directory`, with the `acme`
-listener's host port.
+listener's host port. The app's page shows both, the API's URL and the ACME directory, once
+`host` is set.
 
 Options come first; `/data/broker.toml`, with the same `host` and `domains` keys, second. A
 blank option gives way to it.
 
-**Open it from Apps** to see its page, as any role: the broker's state, host, domains and
-subordinate, then the certificates it has issued, newest first, each with its names, serial,
-validity and status: valid, expiring (in the last third of its lifetime, when ACME clients
-renew), expired, or revoked with the reason. A filter shows only the revoked or the rest. The
-page is read-only; revoke in opCA.
+**Open it from Apps** to see its page, as any role, under the console's masthead with its app
+switcher: the broker's state, host, domains and subordinate, then the certificates it has
+issued, newest first, each with its names, serial, validity and status: valid, expiring (in the
+last third of its lifetime, when ACME clients renew), expired, or revoked with the reason. A
+filter shows only the revoked or the rest. The page is read-only; revoke in opCA.
 
 The app takes its own backups while it runs, so the box's backup holds `acme.db` (accounts and
 issued certificates), the enrolment, its chain and its config, and **never the subordinate key**.
