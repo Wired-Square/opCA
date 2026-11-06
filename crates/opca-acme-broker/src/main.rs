@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use opca_acme_broker::app::{self, App, AppState, Hooked};
+use opca_acme_broker::app::{self, App, Hooked};
 use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error, Mode, cli};
 use tokio::signal::unix::{SignalKind, signal};
 use wslib_http_server::{Bounds, Listener};
@@ -94,11 +94,9 @@ fn main() -> ExitCode {
             });
             let console = app
                 .map(|app| {
-                    let running = broker.clone();
-                    app::serve_console(
+                    app.serve_console(
                         Path::new(app::SOCKETS),
                         Hooked::Running(broker.clone()),
-                        move || app.health(AppState::from(&running.mode())),
                         stop.token(),
                     )
                 })

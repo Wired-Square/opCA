@@ -1,5 +1,5 @@
 //! The broker as an ApplianceOS app: where its host comes from, the ports it
-//! names, and health and refusal while it has no host.
+//! names, its sockets to the console alone, and health and refusal while it has no host.
 
 #![cfg(unix)]
 
@@ -12,8 +12,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use opca_acme_broker::Broker;
-use opca_acme_broker::app::{ACME_PORT, API_PORT, App, AppState, Health, serve_health};
-use support::{LOOPBACK, private_tempdir};
+use opca_acme_broker::app::{
+    ACME_PORT, API_PORT, APP_SOCKET, App, AppState, CONSOLE_UID, HOOKS_SOCKET, Health, Hooked,
+};
+use support::{LOOPBACK, console_app, private_tempdir};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UnixStream};
 use tokio_util::sync::CancellationToken;
@@ -102,6 +104,26 @@ fn the_console_ports_are_named_when_given_else_the_manifests() {
 }
 
 #[test]
+fn the_console_is_root_unless_named_and_never_the_overflow_uid() {
+    let data = private_tempdir();
+    assert_eq!(load(data.path(), &[]).console_uid, CONSOLE_UID);
+    let named = load(data.path(), &[("APPLIANCE_CONSOLE_UID", "4242")]);
+    assert_eq!(named.console_uid, 4242);
+    for uid in ["65534", "root", "-1"] {
+        let refused = App::load(data.path(), |name| {
+            (name == "APPLIANCE_CONSOLE_UID").then(|| uid.into())
+        });
+        assert!(
+            refused
+                .unwrap_err()
+                .to_string()
+                .contains("APPLIANCE_CONSOLE_UID"),
+            "{uid}"
+        );
+    }
+}
+
+#[test]
 fn an_unreadable_option_file_is_refused() {
     let data = private_tempdir();
     fs::write(data.path().join("options.json"), r#"{"host": 5}"#).unwrap();
@@ -159,30 +181,36 @@ async fn socket_answer(socket: &Path, path: &str) -> (String, String) {
 }
 
 #[tokio::test]
-async fn health_answers_only_healthz_under_the_apps_base() {
-    let dir = private_tempdir();
-    let socket = dir.path().join("app.sock");
+async fn app_sock_answers_healthz_only_under_the_apps_base() {
+    let (data, sockets) = (private_tempdir(), private_tempdir());
+    let socket = sockets.path().join(APP_SOCKET);
     fs::write(&socket, "a stale socket").unwrap();
     let stop = CancellationToken::new();
-    let health = Health {
-        state: AppState::Enrolled,
-        api_port: 1,
-        acme_port: 2,
-    };
-    let served = tokio::spawn(serve_health(
-        socket.clone(),
-        move || health.clone(),
-        stop.clone().cancelled_owned(),
-    ));
+    let served = console_app(data.path(), &[])
+        .serve_console(
+            sockets.path(),
+            Hooked::NeedsHost(data.path().join("state")),
+            stop.clone(),
+        )
+        .unwrap();
 
     let (status, body) = socket_answer(&socket, "/apps/opca-acme/healthz").await;
     assert!(status.ends_with("200 OK"), "{status}");
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&body).unwrap(),
-        serde_json::json!({"state": "enrolled", "api_port": 1, "acme_port": 2})
+        serde_json::json!({"state": "needs_host", "api_port": API_PORT, "acme_port": ACME_PORT})
     );
-    let mode = fs::metadata(&socket).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode, 0o660, "the console connects through the group");
+    for socket in [APP_SOCKET, HOOKS_SOCKET] {
+        let mode = fs::metadata(sockets.path().join(socket))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o660,
+            "the console connects through the group"
+        );
+    }
     let (status, _) = socket_answer(&socket, "/healthz").await;
     assert!(status.ends_with("404 Not Found"), "{status}");
 
@@ -191,10 +219,43 @@ async fn health_answers_only_healthz_under_the_apps_base() {
 }
 
 #[tokio::test]
+async fn both_sockets_hang_up_on_a_peer_that_isnt_the_console() {
+    let (data, sockets) = (private_tempdir(), private_tempdir());
+    let mut app = console_app(data.path(), &[]);
+    app.console_uid += 1;
+    let stop = CancellationToken::new();
+    let served = app
+        .serve_console(
+            sockets.path(),
+            Hooked::NeedsHost(data.path().join("state")),
+            stop.clone(),
+        )
+        .unwrap();
+
+    for (socket, path) in [
+        (APP_SOCKET, "/apps/opca-acme/healthz"),
+        (HOOKS_SOCKET, "/v1"),
+    ] {
+        let mut stream = UnixStream::connect(sockets.path().join(socket))
+            .await
+            .unwrap();
+        let request = format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        let _ = stream.write_all(request.as_bytes()).await;
+        let mut answer = Vec::new();
+        let read = tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut answer));
+        let _ = read.await.expect("hung up, not left waiting");
+        assert!(answer.is_empty(), "{socket} answered a foreign uid");
+    }
+
+    stop.cancel();
+    served.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn without_a_host_it_is_healthy_and_refuses_on_both_listeners() {
     let (data, sockets) = (private_tempdir(), private_tempdir());
-    let socket = sockets.path().join("app.sock");
-    let app = load(data.path(), &[("APPLIANCE_LISTENER_ACME_PORT", "443")]);
+    let socket = sockets.path().join(APP_SOCKET);
+    let app = console_app(data.path(), &[("APPLIANCE_LISTENER_ACME_PORT", "443")]);
     let bind = || Listener::bind(format!("{LOOPBACK}:0").parse().unwrap(), Bounds::SERVING);
     let (api, acme) = (bind().await.unwrap(), bind().await.unwrap());
     let addresses = [api.local_addr(), acme.local_addr()];
@@ -224,7 +285,7 @@ async fn without_a_host_it_is_healthy_and_refuses_on_both_listeners() {
         assert!(body.contains("needs a host"), "{body}");
     }
     assert_eq!(fs::read_dir(data.path()).unwrap().count(), 0, "no state");
-    assert!(sockets.path().join("hooks.sock").exists());
+    assert!(sockets.path().join(HOOKS_SOCKET).exists());
 
     stop.cancel();
     tokio::time::timeout(Duration::from_secs(15), served)

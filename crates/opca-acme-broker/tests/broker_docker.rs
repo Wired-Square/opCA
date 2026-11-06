@@ -20,7 +20,7 @@ use opca_acme_api::{
     Challenge, Enrolment, EnrolmentOffer, IssuanceConfig, IssuedPage, IssuerState, Status, path,
 };
 use opca_acme_broker::SCHEME;
-use opca_acme_broker::app::{AppState, Health};
+use opca_acme_broker::app::{AppState, AppStatus, Health, IssuedNewest};
 use support::{Api, TestCa, acme_connect};
 use wslib_crypto_x509::pem;
 use wslib_pairing::PairingUri;
@@ -825,6 +825,69 @@ fn app_health(socket: &str) -> Option<Health> {
     serde_json::from_slice(&probed.stdout).ok()
 }
 
+/// `GET path` on the app's socket from a container running as `user`, with `headers`: curl's output, the head included.
+fn app_sock(socket: &str, user: &str, path: &str, headers: &[&str]) -> Output {
+    let mount = format!("{socket}:/run/appliance");
+    let url = format!("http://localhost{path}");
+    let mut args = vec![
+        "run", "--rm", "--user", user, "-v", &mount, RUNTIME, "curl", "-s", "-i",
+    ];
+    for header in headers {
+        args.extend(["-H", header]);
+    }
+    args.extend(["--unix-socket", "/run/appliance/app.sock", &url]);
+    docker(&args, 60)
+}
+
+const VIEWER: &str = "Appliance-Identity: v1; id=a1; user=someone; role=viewer";
+
+/// As the console asks it, as root with `headers`: the status, the head and the body.
+fn console_get(socket: &str, path: &str, headers: &[&str]) -> (u16, String, String) {
+    let ran = app_sock(socket, "0:0", path, headers);
+    let answer = text(&ran.stdout);
+    let (head, body) = answer
+        .split_once("\r\n\r\n")
+        .unwrap_or_else(|| panic!("{answer}"));
+    (head[9..12].parse().unwrap(), head.into(), body.into())
+}
+
+/// The page and its API through `app.sock`, as the console proxies them for a viewer.
+fn the_page_answers_a_viewer(socket: &str) {
+    let (code, _, page) = console_get(socket, "/apps/opca-acme/", &[VIEWER]);
+    assert_eq!(code, 200, "{page}");
+    assert!(page.contains(r#"<base href="/apps/opca-acme/""#), "{page}");
+    let moved = [VIEWER, "X-Forwarded-Prefix: /apps/elsewhere"];
+    let (_, _, page) = console_get(socket, "/apps/opca-acme/", &moved);
+    assert!(page.contains(r#"<base href="/apps/elsewhere/""#), "{page}");
+    let script = page
+        .split('"')
+        .find(|part| part.starts_with("./assets/") && part.ends_with(".js"))
+        .unwrap_or_else(|| panic!("no script in {page}"));
+    let asset = format!("/apps/opca-acme/{}", &script[2..]);
+    let (code, head, _) = console_get(socket, &asset, &[VIEWER, "Accept-Encoding: gzip"]);
+    assert_eq!(code, 200, "{head}");
+    assert!(
+        head.to_lowercase().contains("content-encoding: gzip"),
+        "{head}"
+    );
+
+    let (code, _, body) = console_get(socket, "/apps/opca-acme/api/status", &[VIEWER]);
+    assert_eq!(code, 200, "{body}");
+    let status: AppStatus = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        (status.state, status.host.as_deref()),
+        (AppState::Enrolled, Some("acme.home.example"))
+    );
+    assert!(status.subordinate.is_some(), "{body}");
+    let (code, _, body) = console_get(socket, "/apps/opca-acme/api/issued", &[VIEWER]);
+    assert_eq!(code, 200, "{body}");
+    let issued: IssuedNewest = serde_json::from_str(&body).unwrap();
+    assert_eq!(issued.before, None, "{body}");
+
+    let (code, _, _) = console_get(socket, "/apps/opca-acme/api/status", &[]);
+    assert_eq!(code, 401);
+}
+
 fn wait_for_state(socket: &str, state: AppState) -> Health {
     wait_for(&format!("the app to report {state:?}"), 120, || {
         app_health(socket).filter(|health| health.state == state)
@@ -936,6 +999,12 @@ async fn the_app_image_needs_a_host_then_enrols() {
 
     let health = wait_for_state(&socket, AppState::NeedsHost);
     assert_eq!((health.api_port, health.acme_port), (19443, 8443));
+    let foreign = app_sock(&socket, "4242:0", "/apps/opca-acme/healthz", &[]);
+    assert!(
+        !foreign.status.success() && foreign.stdout.is_empty(),
+        "a uid that isn't the console's was answered: {}",
+        text(&foreign.stdout)
+    );
     for (port, path) in [
         ("9443/tcp", path::ENROLMENT),
         ("8443/tcp", "/acme/directory"),
@@ -991,6 +1060,7 @@ async fn the_app_image_needs_a_host_then_enrols() {
     let status: Status = serde_json::from_str(&body).unwrap();
     assert_eq!(status.state, IssuerState::Issuing, "{body}");
     wait_for_state(&socket, AppState::Enrolled);
+    the_page_answers_a_viewer(&socket);
 
     let chain = pem::certificates(&chain).unwrap();
     let (mut acme, presented) = acme_connect(published(&app, "8443/tcp"), chain.last().unwrap())

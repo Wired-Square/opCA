@@ -3,7 +3,7 @@
 use std::fs;
 use std::io;
 use std::net::SocketAddr;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 use opca_acme_api::{Challenge, Enrolment, ErrorBody, ErrorKind, IssuanceConfig, Status};
 use opca_acme_broker::acme::Store;
 use opca_acme_broker::acme::store::{ChallengeStatus, NewAuthorisation, NewCertificate, NewOrder};
+use opca_acme_broker::app::App;
 use opca_acme_broker::{Broker, Config};
 use opca_core::constants::DEFAULT_OP_CONF;
 use opca_core::services::ca::CertificateAuthority;
@@ -181,6 +182,23 @@ pub fn private_tempdir() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
     dir
+}
+
+/// The uid this test runs as.
+pub fn own_uid() -> u32 {
+    fs::metadata(private_tempdir().path()).unwrap().uid()
+}
+
+/// The app on `data`, its console this test's own uid, with `env` besides.
+pub fn console_app(data: &Path, env: &[(&str, &str)]) -> App {
+    let uid = own_uid().to_string();
+    App::load(data, |name| {
+        env.iter()
+            .chain(&[("APPLIANCE_CONSOLE_UID", uid.as_str())])
+            .find(|(set, _)| *set == name)
+            .map(|(_, value)| value.to_string())
+    })
+    .unwrap()
 }
 
 pub fn config(state: &Path, domains: &[&str]) -> Config {

@@ -203,7 +203,7 @@ impl Broker {
     }
 }
 
-fn issued(certificate: Certificate) -> IssuedCertificate {
+pub(crate) fn issued(certificate: Certificate) -> IssuedCertificate {
     IssuedCertificate {
         serial: certificate.serial,
         common_name: certificate.common_name,

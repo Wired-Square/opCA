@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   console's backup hook: `acme.db` and the enrolment, never the subordinate
   key, restored all or nothing. `scripts/build-acme-app.sh` builds the image
   and packs it with a signed index for a test install.
+- The `opca-acme` app has a page, opened from the console's Apps list, for
+  every role: the broker's state, host, domains and subordinate, then what it
+  has issued, newest first, with each certificate's names, serial, validity
+  and status (valid, expiring in its last third, expired, or revoked with the
+  reason), filtered by revocation. It is read-only: revoke in opCA. Light,
+  dark or the system's scheme.
+- Each release carries the `opca-acme` app for arm64 and amd64, signed as the
+  `wired-square` source every ApplianceOS image ships, so it installs from
+  Apps › Install with no source to add. `scripts/build-acme-app.sh --source
+  wired-square` signs with the leaf in 1Password, never writing its key out,
+  and refuses a leaf that isn't a code-signing leaf of the shipped root.
 - The ACME broker answers ACME (RFC 8555) itself at `/acme/directory`:
   accounts, key changes and deactivation, orders validated in the background
   over http-01, dns-01 or tls-alpn-01, finalising, certificate download, and
@@ -31,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a page at a time, and its status counts the certificates issued and
   revoked. The cursor moves on revocation too, so a revoked certificate comes
   back to a client that has already synced it.
+- The `opca-acme` app answers `GET /apps/opca-acme/api/status` and
+  `GET /apps/opca-acme/api/issued?before=<cursor>&revoked=<bool>` (newest
+  first, a page at a time) on its console socket, for any caller the console
+  vouches for in `appliance-identity`; without one, 401.
 - The ACME broker can issue from a CSR for an order. The CSR must verify,
   name exactly the order's DNS names, all within the permitted domains, and
   not reuse the account key. The leaf is `serverAuth` only, lasts the
@@ -45,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   open listener at once, and revocation or a reopen stops it.
 - `scripts/build-broker-deb.sh --platform linux/arm64|linux/amd64` builds the
   ACME broker's `.deb` for either architecture.
+- `scripts/build-acme-app.sh` builds the app's page first, so it needs npm
+  and the Wired Square mirror; the image serves it gzipped, its base taken
+  from the console's `X-Forwarded-Prefix`.
 - opCA keeps the list of certificates each ACME broker has issued, synced
   whenever it talks to the broker, and the ACME Servers page shows it per
   broker with each certificate's names, expiry and state. A failed sync is
@@ -53,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The `opca-acme` app's `app.sock` and `hooks.sock` answer only the console's
+  uid (`APPLIANCE_CONSOLE_UID`, root by default), hanging up on any other
+  peer.
 - The ACME broker no longer needs step-ca, and the `.deb` no longer depends on
   it. `step_ca` in `broker.toml` is now refused, the status reports
   `acme_down` in place of `step_ca_down`, and the versions no longer name
