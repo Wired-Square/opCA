@@ -15,7 +15,6 @@ use wslib_pairing::{OneTimeCode, PairingUri, Redemption, Status};
 fn config(state: &Path) -> Config {
     Config {
         state_dir: state.into(),
-        step_ca: support::fake_step_ca(),
         ..Config::parse(r#"host = "acme.home.example""#).unwrap()
     }
 }
@@ -26,9 +25,9 @@ fn private_tempdir() -> TempDir {
     dir
 }
 
-fn first_start() -> (TempDir, Broker, PairingUri) {
+async fn first_start() -> (TempDir, Broker, PairingUri) {
     let state = private_tempdir();
-    let (broker, uri) = Broker::start(&config(state.path())).unwrap();
+    let (broker, uri) = Broker::start(&config(state.path())).await.unwrap();
     (state, broker, uri.expect("a first start issues a code"))
 }
 
@@ -36,10 +35,10 @@ fn mode(path: &Path) -> u32 {
     fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
 
-#[test]
-fn a_first_start_makes_every_secret_owner_only() {
-    let (state, _, _) = first_start();
-    for secret in ["subordinate.key", "api.key", "pairing-code"] {
+#[tokio::test]
+async fn a_first_start_makes_every_secret_owner_only() {
+    let (state, _, _) = first_start().await;
+    for secret in ["subordinate.key", "api.key", "pairing-code", "acme.db"] {
         assert_eq!(mode(&state.path().join(secret)), 0o600, "{secret}");
     }
     for public in ["subordinate.csr", "api.crt"] {
@@ -47,9 +46,9 @@ fn a_first_start_makes_every_secret_owner_only() {
     }
 }
 
-#[test]
-fn a_restart_issues_nothing_new() {
-    let (state, broker, uri) = first_start();
+#[tokio::test]
+async fn a_restart_issues_nothing_new() {
+    let (state, broker, uri) = first_start().await;
     let files = [
         "subordinate.key",
         "subordinate.csr",
@@ -61,7 +60,7 @@ fn a_restart_issues_nothing_new() {
     let (pin, spki) = (broker.pin(), broker.subordinate().spki().to_vec());
     drop(broker);
 
-    let (restarted, again) = Broker::start(&config(state.path())).unwrap();
+    let (restarted, again) = Broker::start(&config(state.path())).await.unwrap();
     assert!(again.is_none());
     assert_eq!(
         files.map(|file| fs::read(state.path().join(file)).unwrap()),
@@ -84,9 +83,9 @@ fn a_restart_issues_nothing_new() {
     assert_eq!(code.redeem(uri.code()).unwrap(), Redemption::Accepted);
 }
 
-#[test]
-fn the_uri_names_the_host_and_port_and_pins_the_api_key() {
-    let (_state, broker, uri) = first_start();
+#[tokio::test]
+async fn the_uri_names_the_host_and_port_and_pins_the_api_key() {
+    let (_state, broker, uri) = first_start().await;
     let printed = uri.expose();
     assert!(printed.starts_with("opca-enrol://acme.home.example:9443#pin="));
 
@@ -98,9 +97,9 @@ fn the_uri_names_the_host_and_port_and_pins_the_api_key() {
     );
 }
 
-#[test]
-fn the_csr_verifies_and_carries_the_subordinate_key_on_p256() {
-    let (_state, broker, _) = first_start();
+#[tokio::test]
+async fn the_csr_verifies_and_carries_the_subordinate_key_on_p256() {
+    let (_state, broker, _) = first_start().await;
     let provider = rustls_openssl::default_provider();
     let csr = Csr::from_pem(
         broker.subordinate().csr_pem(),
@@ -117,15 +116,15 @@ fn the_csr_verifies_and_carries_the_subordinate_key_on_p256() {
     assert!(csr.names().is_empty());
 }
 
-#[test]
-fn a_lost_or_stale_csr_is_remade_over_the_same_key() {
-    let (state, broker, _) = first_start();
+#[tokio::test]
+async fn a_lost_or_stale_csr_is_remade_over_the_same_key() {
+    let (state, broker, _) = first_start().await;
     let key = fs::read(state.path().join("subordinate.key")).unwrap();
     let spki = broker.subordinate().spki().to_vec();
     drop(broker);
 
     fs::remove_file(state.path().join("subordinate.csr")).unwrap();
-    let (remade, _) = Broker::start(&config(state.path())).unwrap();
+    let (remade, _) = Broker::start(&config(state.path())).await.unwrap();
     assert_eq!(remade.subordinate().spki(), spki);
     drop(remade);
 
@@ -133,7 +132,7 @@ fn a_lost_or_stale_csr_is_remade_over_the_same_key() {
         host: "broker.home.example".into(),
         ..config(state.path())
     };
-    let (rehosted, _) = Broker::start(&moved).unwrap();
+    let (rehosted, _) = Broker::start(&moved).await.unwrap();
     let csr = wslib_crypto_ca::CsrView::from_pem(rehosted.subordinate().csr_pem()).unwrap();
     assert_eq!(
         csr.common_name(),
@@ -143,33 +142,33 @@ fn a_lost_or_stale_csr_is_remade_over_the_same_key() {
     assert_eq!(fs::read(state.path().join("subordinate.key")).unwrap(), key);
 }
 
-#[test]
-fn an_unreadable_key_stops_the_start_and_is_never_replaced() {
+#[tokio::test]
+async fn an_unreadable_key_stops_the_start_and_is_never_replaced() {
     let state = private_tempdir();
     let key = state.path().join("subordinate.key");
     fs::write(&key, "not a key").unwrap();
 
-    assert!(Broker::start(&config(state.path())).is_err());
+    assert!(Broker::start(&config(state.path())).await.is_err());
     assert_eq!(fs::read_to_string(&key).unwrap(), "not a key");
 }
 
-#[test]
-fn a_state_dir_others_can_read_is_refused_before_anything_is_written() {
+#[tokio::test]
+async fn a_state_dir_others_can_read_is_refused_before_anything_is_written() {
     let state = private_tempdir();
     fs::set_permissions(state.path(), fs::Permissions::from_mode(0o755)).unwrap();
 
-    assert!(Broker::start(&config(state.path())).is_err());
+    assert!(Broker::start(&config(state.path())).await.is_err());
     assert_eq!(fs::read_dir(state.path()).unwrap().count(), 0);
 }
 
-#[test]
-fn a_host_that_is_not_a_name_or_address_is_refused() {
+#[tokio::test]
+async fn a_host_that_is_not_a_name_or_address_is_refused() {
     let state = private_tempdir();
     let config = Config {
         host: "ops@home.example".into(),
         ..config(state.path())
     };
-    assert!(Broker::start(&config).is_err());
+    assert!(Broker::start(&config).await.is_err());
     assert_eq!(fs::read_dir(state.path()).unwrap().count(), 0);
 }
 
@@ -179,7 +178,6 @@ fn the_config_needs_only_a_host() {
     assert_eq!(config.listen, "[::]:9443".parse().unwrap());
     assert!(config.domains.is_empty());
     assert_eq!(config.state_dir, Path::new("/var/lib/opca-acme"));
-    assert_eq!(config.step_ca, Path::new("/usr/bin/step-ca"));
     assert_eq!(config.acme_listen, "[::]:443".parse().unwrap());
 
     let full = Config::parse(
@@ -199,4 +197,12 @@ fn the_config_needs_only_a_host() {
 fn a_config_with_no_host_or_an_unknown_key_is_refused() {
     assert!(Config::parse("").is_err());
     assert!(Config::parse("host = \"a.example\"\ndomain = [\"a.example\"]").is_err());
+}
+
+#[test]
+fn a_config_naming_step_ca_is_refused_by_name() {
+    let refused = Config::parse("host = \"a.example\"\nstep_ca = \"/usr/bin/step-ca\"")
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("step_ca"), "{refused}");
 }

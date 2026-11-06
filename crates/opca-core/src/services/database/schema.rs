@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 18;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 19;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v18 — current)
+// Table DDL (v19 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -166,6 +166,22 @@ pub const CREATE_BROKERS_TABLE: &str = "
         last_contact TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+    )
+";
+
+pub const CREATE_BROKER_CERTS_TABLE: &str = "
+    CREATE TABLE IF NOT EXISTS broker_certs (
+        broker_id INTEGER NOT NULL,
+        serial TEXT NOT NULL,
+        common_name TEXT,
+        sans TEXT NOT NULL,
+        not_before TEXT NOT NULL,
+        not_after TEXT NOT NULL,
+        issuer_serial TEXT NOT NULL,
+        revoked_at TEXT,
+        revocation_reason INTEGER,
+        changed INTEGER NOT NULL,
+        PRIMARY KEY (broker_id, serial)
     )
 ";
 
@@ -501,8 +517,19 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v17→v18: {e}")))?;
 
         version = 18;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 18, ok: true });
+    }
+
+    // v18 → v19: the certificates each ACME broker issued, synced from it.
+    if version == 18 {
+        conn.execute_batch(CREATE_BROKER_CERTS_TABLE)
+            .map_err(|e| OpcaError::SchemaMigration(format!("v18→v19 broker_certs: {e}")))?;
+        conn.execute_batch("UPDATE config SET schema_version = 19 WHERE id = 1;")
+            .map_err(|e| OpcaError::SchemaMigration(format!("v18→v19: {e}")))?;
+
+        version = 19;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 19, ok: true });
     }
 
     info.migrated = true;

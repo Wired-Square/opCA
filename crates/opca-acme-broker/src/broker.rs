@@ -1,5 +1,4 @@
 use std::io;
-use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -7,6 +6,7 @@ use std::time::Duration;
 
 use opca_acme_api::ErrorBody;
 use rustls::crypto::CryptoProvider;
+use rustls::pki_types::PrivateKeyDer;
 use rustls_openssl::default_provider;
 use wslib_crypto::{KeyAlgorithm, Signer};
 use wslib_crypto_ca::{CERTIFICATE_REQUEST, CsrView, Subject, build_csr};
@@ -17,9 +17,12 @@ use wslib_pairing::{OneTimeCode, PairingCode, PairingUri, SpkiSha256, Status};
 use wslib_service::Held;
 use wslib_tls::{Location, Serving};
 
+use crate::acme::Store;
+use crate::acme::listener::AcmeListener;
+use crate::acme::server::Server;
+use crate::acme::validate::Validator;
 use crate::enrolled::{operator_config, root_of};
 use crate::enrolment::{self, Mode, host_within, internal};
-use crate::step_ca::{Files, StepCa, check_version};
 use crate::{Config, Error};
 
 pub use opca_acme_api::PAIRING_SCHEME as SCHEME;
@@ -29,6 +32,9 @@ pub const ATTEMPTS: NonZeroU32 = NonZeroU32::new(5).unwrap();
 /// uncontended they take milliseconds. This sits well inside the listener's
 /// 10 s drain and a client's patience.
 pub const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The most certificates one `GET /v1/issued` answers with.
+pub const ISSUED_PAGE: u32 = 500;
 
 /// The broker's state: its subordinate key and CSR, its API identity, its
 /// pairing code, and whether it is enrolled.
@@ -43,21 +49,22 @@ pub struct Broker {
     port: u16,
     pub(crate) domains: Vec<String>,
     pub(crate) state: PathBuf,
-    pub(crate) step_ca: Arc<StepCa>,
-    pub(crate) acme_listen: SocketAddr,
+    pub(crate) acme_listener: AcmeListener,
+    acme: Store,
     lock_timeout: Duration,
+    pub(crate) issued_page: u32,
     _held: Held,
 }
 
 impl Broker {
     /// Loads the state in `config.state_dir`, making only what is missing, and
-    /// blocks; the URI is `Some` when this start issued the pairing code.
-    pub fn start(config: &Config) -> Result<(Self, Option<PairingUri>), Error> {
+    /// opens `acme.db`; blocks while it loads. The URI is `Some` when this start
+    /// issued the pairing code.
+    pub async fn start(config: &Config) -> Result<(Self, Option<PairingUri>), Error> {
         let name = config.host.parse::<SubjectAltName>()?;
         if !name.is_host() {
             return Err(format!("{} is not a host name or address", config.host).into());
         }
-        let version = check_version(&config.step_ca)?;
         let state = config.state_dir.as_path();
         let held = wslib_service::private_directory(state)?;
         let provider = Arc::new(default_provider());
@@ -79,6 +86,10 @@ impl Broker {
         };
         let mode = enrolment::load(state)?;
         let tls = Tls::new(tls_config(&provider, &serving, &mode)?);
+        let acme = Store::open(&state.join("acme.db"), provider.clone()).await?;
+        let resolver = wslib_dns::HickoryResolver::from_system(Default::default())?;
+        let validator = Arc::new(Validator::new(resolver, provider.clone())?);
+        let acme_server = Server::new(acme.clone(), provider.clone(), validator);
         let broker = Self {
             provider,
             serving,
@@ -87,16 +98,13 @@ impl Broker {
             code: Arc::new(code),
             mode: RwLock::new(mode),
             host: config.host.clone(),
-            port: config.listen.port(),
+            port: config.port(),
             domains: config.domains.clone(),
             state: state.into(),
-            step_ca: StepCa::new(
-                config.step_ca.clone(),
-                Files::in_state(state).config,
-                version,
-            ),
-            acme_listen: config.acme_listen,
+            acme_listener: AcmeListener::new(config.acme_listen, acme_server),
+            acme,
             lock_timeout: LOCK_TIMEOUT,
+            issued_page: ISSUED_PAGE,
             _held: held,
         };
         if let Mode::Enrolled(enrolled) = broker.mode()
@@ -115,11 +123,15 @@ impl Broker {
             tracing::warn!(
                 host = %config.host,
                 "the host is not a name within the configured domains, so enrolment will be \
-                 refused: step-ca's own TLS certificate is issued for it"
+                 refused: the ACME listener's certificate is issued for it"
             );
         }
         let uri = issued.map(|plain| broker.uri(plain)).transpose()?;
         Ok((broker, uri))
+    }
+
+    pub fn acme(&self) -> &Store {
+        &self.acme
     }
 
     pub fn serving(&self) -> &Serving {
@@ -136,6 +148,12 @@ impl Broker {
     /// How long a change waits for the state lock; [`LOCK_TIMEOUT`] unless set.
     pub fn with_lock_timeout(mut self, timeout: Duration) -> Self {
         self.lock_timeout = timeout;
+        self
+    }
+
+    /// How many certificates a page of `GET /v1/issued` holds; [`ISSUED_PAGE`] unless set.
+    pub fn with_issued_page(mut self, size: u32) -> Self {
+        self.issued_page = size;
         self
     }
 
@@ -158,27 +176,32 @@ impl Broker {
         }
     }
 
+    /// The state lock, held across awaits by whoever keeps the file.
+    pub(crate) async fn lock(&self) -> Result<std::fs::File, Error> {
+        let state = self.state.clone();
+        let locking = tokio::task::spawn_blocking(move || lock_state(&state));
+        let locked = tokio::time::timeout(self.lock_timeout, locking)
+            .await
+            .map_err(|_| "timed out waiting for the state's lock")?;
+        Ok(locked??)
+    }
+
     /// Takes up what `opca-acme enrol --reopen` changed on disk: the
-    /// subordinate, the mode, the TLS it implies, and step-ca.
+    /// subordinate, the mode, the TLS it implies, and the ACME listener.
     pub async fn reload(self: &Arc<Self>) -> Result<(), ErrorBody> {
         self.locked(|broker| broker.reload_locked().map_err(internal))
             .await
     }
 
-    fn reload_locked(&self) -> Result<(), Error> {
+    pub(crate) fn reload_locked(&self) -> Result<(), Error> {
         let subordinate =
             Subordinate::load_or_generate(self.provider.clone(), &self.state, &self.host)?;
         let mode = enrolment::load(&self.state)?;
         self.tls
             .reload(tls_config(&self.provider, &self.serving, &mode)?);
         *self.subordinate.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(subordinate);
-        let issuing = matches!(&mode, Mode::Enrolled(enrolled) if !enrolled.revoked);
         *self.mode.write().unwrap_or_else(|e| e.into_inner()) = mode;
-        if issuing {
-            self.on_new_chain();
-        } else {
-            self.step_ca.stop();
-        }
+        self.refresh_acme();
         tracing::info!("reloaded the state from disk");
         Ok(())
     }
@@ -241,6 +264,7 @@ fn tls_config(
 
 /// The subordinate CA's key, unencrypted and owner-only, and its CSR.
 pub struct Subordinate {
+    key: PrivateKeyDer<'static>,
     signer: Signer,
     subject: Subject,
     csr_pem: String,
@@ -278,10 +302,15 @@ impl Subordinate {
             }
         };
         Ok(Self {
+            key,
             signer,
             subject,
             csr_pem,
         })
+    }
+
+    pub(crate) fn signer(&self) -> Result<Signer, Error> {
+        Ok(Signer::new(self.signer.provider().clone(), &self.key)?)
     }
 
     /// A new CSR over the same key, for a renewal.

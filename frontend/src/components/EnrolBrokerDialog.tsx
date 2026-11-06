@@ -86,9 +86,7 @@ function EnrolBroker(props: Omit<EnrolBrokerDialogProps, "open">) {
               </div>
               <div class="detail-row">
                 <span class="detail-label">Broker</span>
-                <span class="detail-value">
-                  {o().offer.versions.broker}, step-ca {o().offer.versions.step_ca}
-                </span>
+                <span class="detail-value">{o().offer.versions.broker}</span>
               </div>
             </div>
             <Show

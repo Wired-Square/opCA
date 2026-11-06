@@ -415,7 +415,6 @@ export interface BrokerRow extends Broker {
 export interface BrokerVersions {
   api: number;
   broker: string;
-  step_ca: string;
 }
 
 /** What a broker asks opCA to sign; sent back unchanged to enrol. */
@@ -433,7 +432,7 @@ export interface BrokerOffer {
 }
 
 export interface BrokerStatus {
-  state: "issuing" | "step_ca_down" | "revoked";
+  state: "issuing" | "acme_down" | "revoked";
   subordinate_serial: string;
   subordinate_not_after: string;
   config: {
@@ -443,6 +442,22 @@ export interface BrokerStatus {
     challenges: string[];
   };
   versions: BrokerVersions;
+  /** `null` from a broker that could not count them, or one older than the count. */
+  issued: { total: number; revoked: number } | null;
+}
+
+/** A certificate a broker issued, as last synced; times are ASN.1 `YYYYMMDDHHMMSSZ`. */
+export interface BrokerCert {
+  broker_id: number;
+  serial: string;
+  common_name: string | null;
+  sans: string[];
+  not_before: string;
+  not_after: string;
+  issuer_serial: string;
+  revoked_at: string | null;
+  revocation_reason: number | null;
+  changed: number;
 }
 
 export type BrokerError =

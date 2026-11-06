@@ -21,7 +21,7 @@ const offer = (configured_domains: string[] = []): BrokerOffer => ({
     csr_pem: "-----BEGIN CERTIFICATE REQUEST-----",
     host: "acme.home.arpa",
     configured_domains,
-    versions: { api: 1, broker: "0.103.0", step_ca: "0.28.1" },
+    versions: { api: 1, broker: "0.103.0" },
   },
 });
 

@@ -129,6 +129,7 @@ impl CertificateAuthorityDB {
         conn.execute_batch(schema::CREATE_OPENVPN_PROFILE_TABLE)?;
         conn.execute_batch(schema::CREATE_DKIM_TABLE)?;
         conn.execute_batch(schema::CREATE_BROKERS_TABLE)?;
+        conn.execute_batch(schema::CREATE_BROKER_CERTS_TABLE)?;
         Self::create_indexes(&conn)?;
 
         Ok(Self {
@@ -1236,6 +1237,74 @@ impl CertificateAuthorityDB {
             cn: row.get(9)?,
             expiry_date: row.get(10)?,
         })
+    }
+}
+
+impl CertificateAuthorityDB {
+    /// Where broker `id`'s next sync starts: the last change recorded from it, or 0.
+    pub fn broker_cursor(&self, id: i64) -> Result<i64, OpcaError> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(MAX(changed), 0) FROM broker_certs WHERE broker_id = ?1",
+            [id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Records `certs` from one broker, each replacing what was synced for its serial; all or none.
+    pub fn record_broker_certs(&self, certs: &[BrokerCert]) -> Result<(), OpcaError> {
+        let tx = self.conn.unchecked_transaction()?;
+        for cert in certs {
+            tx.execute(
+                "INSERT OR REPLACE INTO broker_certs (broker_id, serial, common_name, sans,
+                    not_before, not_after, issuer_serial, revoked_at, revocation_reason, changed)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![
+                    cert.broker_id,
+                    cert.serial,
+                    cert.common_name,
+                    domains_json(&cert.sans)?,
+                    cert.not_before,
+                    cert.not_after,
+                    cert.issuer_serial,
+                    cert.revoked_at,
+                    cert.revocation_reason,
+                    cert.changed,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Every broker's certificates, by broker, latest expiry first.
+    pub fn query_broker_certs(&self) -> Result<Vec<BrokerCert>, OpcaError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT broker_id, serial, common_name, sans, not_before, not_after, issuer_serial,
+                revoked_at, revocation_reason, changed
+             FROM broker_certs ORDER BY broker_id, not_after DESC, serial",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let sans: String = row.get(3)?;
+            Ok(BrokerCert {
+                broker_id: row.get(0)?,
+                serial: row.get(1)?,
+                common_name: row.get(2)?,
+                sans: serde_json::from_str(&sans).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        e.into(),
+                    )
+                })?,
+                not_before: row.get(4)?,
+                not_after: row.get(5)?,
+                issuer_serial: row.get(6)?,
+                revoked_at: row.get(7)?,
+                revocation_reason: row.get(8)?,
+                changed: row.get(9)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 }
 

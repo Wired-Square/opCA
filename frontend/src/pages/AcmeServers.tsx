@@ -4,32 +4,64 @@ import {
   brokerErrorText,
   brokerStatus,
   concernText,
+  listBrokerCerts,
   listBrokers,
   renewAllBrokers,
   renewBroker,
   renewalText,
   revokeBroker,
 } from "../api/brokers";
-import type { BrokerRenewal, BrokerRow } from "../api/types";
+import type { BrokerCert, BrokerRenewal, BrokerRow, BrokerStatus } from "../api/types";
 import ActionMenu from "../components/ActionMenu";
 import EnrolBrokerDialog from "../components/EnrolBrokerDialog";
 import { ActionOutcome } from "../components/ResultBanner";
 import Spinner from "../components/Spinner";
 import StoredDate from "../components/StoredDate";
 import { createActing, failureOf } from "../utils/acting";
+import { asn1Date } from "../utils/dates";
 import "../styles/pages/acme.css";
 
 const brokerName = (b: BrokerRow) => b.cn ?? b.url ?? `Broker ${b.id}`;
 
 const notDelivered = (b: BrokerRow) => b.concerns.some((c) => c.concern === "not_delivered");
 
+const issuedText = (total: number, revoked: number) =>
+  revoked > 0 ? `${total} issued, ${revoked} revoked` : `${total} issued`;
+
+const statusText = (s: BrokerStatus) =>
+  [
+    s.state.replace(/_/g, " "),
+    `serial ${s.subordinate_serial}`,
+    `broker ${s.versions.broker}`,
+    ...(s.issued ? [issuedText(s.issued.total, s.issued.revoked)] : []),
+  ].join(", ");
+
+const certState = (c: BrokerCert) => {
+  if (c.revoked_at) return "revoked";
+  const expiry = asn1Date(c.not_after);
+  return expiry && expiry.getTime() < Date.now() ? "expired" : "valid";
+};
+
+const certName = (c: BrokerCert) => c.common_name ?? c.sans[0];
+
+const otherSans = (c: BrokerCert) => c.sans.filter((name) => name !== certName(c));
+
 export default function AcmeServers() {
-  const [brokers, { refetch }] = createResource(listBrokers);
+  const [brokers, { refetch: refetchBrokers }] = createResource(listBrokers);
+  const [certs, { refetch: refetchCerts }] = createResource(listBrokerCerts);
+  const [expanded, setExpanded] = createSignal<number | null>(null);
   const [enrolling, setEnrolling] = createSignal(false);
   const [revoking, setRevoking] = createSignal<BrokerRow | null>(null);
   const [outcomes, setOutcomes] = createSignal<BrokerRenewal[]>([]);
   const [report, setReport] = createSignal<{ tone: Tone; text: string } | null>(null);
   const action = createAction();
+
+  const refetch = () => {
+    void refetchBrokers();
+    void refetchCerts();
+  };
+
+  const certsOf = (id: number) => (certs() ?? []).filter((c) => c.broker_id === id);
 
   const nameOf = (id: number) => {
     const row = brokers()?.find((b) => b.id === id);
@@ -39,7 +71,7 @@ export default function AcmeServers() {
   const showOutcomes = (renewals: BrokerRenewal[]) => {
     setOutcomes(renewals);
     setReport(null);
-    void refetch();
+    refetch();
   };
 
   const renewOne = (id: number, changeDomains = false) =>
@@ -56,9 +88,9 @@ export default function AcmeServers() {
       (s) => {
         setReport({
           tone: s.state === "issuing" ? "good" : "warn",
-          text: `${nameOf(id)}: ${s.state.replace(/_/g, " ")}, serial ${s.subordinate_serial}, broker ${s.versions.broker}, step-ca ${s.versions.step_ca}`,
+          text: `${nameOf(id)}: ${statusText(s)}`,
         });
-        void refetch();
+        refetch();
       },
     );
 
@@ -131,49 +163,70 @@ export default function AcmeServers() {
                     <th>State</th>
                     <th>Subordinate Expires <DateModeToggle /></th>
                     <th>Last Contact</th>
+                    <th>Issued</th>
                     <th class="kebab-col"></th>
                   </tr>
                 </thead>
                 <tbody>
                   <For each={rows()}>
                     {(b) => (
-                      <tr class="data-table-row" classList={{ "data-table-row-ignored": b.state === "revoked" }}>
-                        <td>
-                          {brokerName(b)}
-                          <Show when={b.cn && b.url}>
-                            <span class="broker-url mono">{b.url}</span>
-                          </Show>
-                        </td>
-                        <td>{b.permitted_domains.join(", ")}</td>
-                        <td>
-                          <Badges>
-                            <span class={`status-badge status-${b.state}`}>{b.state}</span>
-                            <Show when={notDelivered(b)}>
-                              <span
-                                class="status-badge status-not-delivered"
-                                title="Signed, but the broker has not taken it; enrol again with the same pairing string"
-                              >
-                                not delivered
-                              </span>
+                      <>
+                        <tr class="data-table-row" classList={{ "data-table-row-ignored": b.state === "revoked" }}>
+                          <td>
+                            {brokerName(b)}
+                            <Show when={b.cn && b.url}>
+                              <span class="broker-url mono">{b.url}</span>
                             </Show>
-                            <For each={b.concerns.filter((c) => c.concern !== "not_delivered")}>
-                              {(c) => <span class={`status-badge status-${c.concern}`}>{concernText(c)}</span>}
-                            </For>
-                          </Badges>
-                        </td>
-                        <td class="mono"><StoredDate value={b.expiry_date} /></td>
-                        <td class="mono"><StoredDate value={b.last_contact} /></td>
-                        <td class="kebab-col">
-                          <ActionMenu
-                            aria-label={`Actions for ${brokerName(b)}`}
-                            items={[
-                              { label: "Status", onSelect: () => checkStatus(b.id), disabled: notDelivered(b) },
-                              { label: "Renew", onSelect: () => renewOne(b.id), disabled: b.state !== "active" },
-                              { label: "Revoke", onSelect: () => setRevoking(b), danger: true },
-                            ]}
-                          />
-                        </td>
-                      </tr>
+                          </td>
+                          <td>{b.permitted_domains.join(", ")}</td>
+                          <td>
+                            <Badges>
+                              <span class={`status-badge status-${b.state}`}>{b.state}</span>
+                              <Show when={notDelivered(b)}>
+                                <span
+                                  class="status-badge status-not-delivered"
+                                  title="Signed, but the broker has not taken it; enrol again with the same pairing string"
+                                >
+                                  not delivered
+                                </span>
+                              </Show>
+                              <For each={b.concerns.filter((c) => c.concern !== "not_delivered")}>
+                                {(c) => <span class={`status-badge status-${c.concern}`}>{concernText(c)}</span>}
+                              </For>
+                            </Badges>
+                          </td>
+                          <td class="mono"><StoredDate value={b.expiry_date} /></td>
+                          <td class="mono"><StoredDate value={b.last_contact} /></td>
+                          <td>
+                            <Show when={certsOf(b.id).length > 0} fallback="—">
+                              <button
+                                class="btn-ghost btn-sm"
+                                aria-expanded={expanded() === b.id}
+                                onClick={() => setExpanded(expanded() === b.id ? null : b.id)}
+                              >
+                                {issuedText(certsOf(b.id).length, certsOf(b.id).filter((c) => c.revoked_at).length)}
+                              </button>
+                            </Show>
+                          </td>
+                          <td class="kebab-col">
+                            <ActionMenu
+                              aria-label={`Actions for ${brokerName(b)}`}
+                              items={[
+                                { label: "Status", onSelect: () => checkStatus(b.id), disabled: notDelivered(b) },
+                                { label: "Renew", onSelect: () => renewOne(b.id), disabled: b.state !== "active" },
+                                { label: "Revoke", onSelect: () => setRevoking(b), danger: true },
+                              ]}
+                            />
+                          </td>
+                        </tr>
+                        <Show when={expanded() === b.id}>
+                          <tr class="broker-issued-row">
+                            <td colSpan={7}>
+                              <IssuedTable name={brokerName(b)} certs={certsOf(b.id)} />
+                            </td>
+                          </tr>
+                        </Show>
+                      </>
                     )}
                   </For>
                 </tbody>
@@ -190,7 +243,7 @@ export default function AcmeServers() {
           action.succeed(
             `Enrolled ${enrolled.broker.cn ?? enrolled.broker.url} for ${enrolled.broker.permitted_domains.join(", ")}`,
           );
-          void refetch();
+          refetch();
         }}
       />
 
@@ -199,10 +252,42 @@ export default function AcmeServers() {
         onClose={() => setRevoking(null)}
         onDone={(tone, text) => {
           setReport({ tone, text });
-          void refetch();
+          refetch();
         }}
       />
     </div>
+  );
+}
+
+function IssuedTable(props: { name: string; certs: BrokerCert[] }) {
+  return (
+    <table class="broker-issued" aria-label={`Certificates issued by ${props.name}`}>
+      <thead>
+        <tr>
+          <th>Certificate</th>
+          <th>Expires</th>
+          <th>State</th>
+        </tr>
+      </thead>
+      <tbody>
+        <For each={props.certs}>
+          {(c) => (
+            <tr>
+              <td>
+                {certName(c)}
+                <Show when={otherSans(c).length > 0}>
+                  <span class="broker-sans mono">{otherSans(c).join(", ")}</span>
+                </Show>
+              </td>
+              <td class="mono"><StoredDate value={c.not_after} /></td>
+              <td>
+                <span class={`status-badge status-${certState(c)}`}>{certState(c)}</span>
+              </td>
+            </tr>
+          )}
+        </For>
+      </tbody>
+    </table>
   );
 }
 

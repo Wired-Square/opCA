@@ -13,6 +13,7 @@ pub mod path {
     pub const CSR: &str = "/v1/csr";
     pub const CHAIN: &str = "/v1/chain";
     pub const REVOKE: &str = "/v1/revoke";
+    pub const ISSUED: &str = "/v1/issued";
 }
 
 /// The `GET /v1/enrolment` response: what the broker asks opCA to sign.
@@ -29,7 +30,6 @@ pub struct EnrolmentOffer {
 pub struct Versions {
     pub api: u32,
     pub broker: String,
-    pub step_ca: String,
 }
 
 /// The `POST /v1/enrolment` body, answered with a [`Status`].
@@ -70,13 +70,21 @@ pub struct Status {
     pub subordinate_not_after: String,
     pub config: IssuanceConfig,
     pub versions: Versions,
+    /// `None` from a broker that could not count them, or one older than the count.
+    pub issued: Option<IssuedCounts>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssuedCounts {
+    pub total: u64,
+    pub revoked: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IssuerState {
     Issuing,
-    StepCaDown,
+    AcmeDown,
     Revoked,
 }
 
@@ -92,6 +100,37 @@ pub struct FreshCsr {
 pub struct ChainUpdate {
     pub chain_pem: String,
     pub config: IssuanceConfig,
+}
+
+/// The `GET /v1/issued?after=<cursor>` response: the certificates issued or
+/// revoked since `cursor`, oldest change first; a missing cursor is 0, the start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssuedPage {
+    pub certificates: Vec<IssuedCertificate>,
+    /// The cursor for the next call: the last change here, or the one asked for when there is none.
+    pub next: u64,
+    /// Whether more changes wait past `next`.
+    pub more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssuedCertificate {
+    /// Decimal.
+    pub serial: String,
+    pub common_name: Option<String>,
+    pub sans: Vec<String>,
+    /// RFC 3339.
+    pub not_before: String,
+    /// RFC 3339.
+    pub not_after: String,
+    /// The serial of the subordinate that issued it, decimal: after a reopen the list spans subordinates.
+    pub issuer_serial: String,
+    /// RFC 3339.
+    pub revoked_at: Option<String>,
+    /// An RFC 5280 CRLReason code; `None` is unspecified.
+    pub revocation_reason: Option<u8>,
+    /// The change that last touched it, its issue or its revocation: a cursor.
+    pub changed: u64,
 }
 
 /// The body of every refusal the broker itself makes.

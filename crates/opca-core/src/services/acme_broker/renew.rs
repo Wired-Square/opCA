@@ -153,6 +153,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let current = client.status()?;
         let fresh = client.fresh_csr()?;
         self.contacted(broker.id)?;
+        self.sync_issued(&client, broker.id);
 
         let domains = changed_domains(&broker.permitted_domains, &fresh.configured_domains)?;
         if let (Some(configured), false) = (&domains, change_domains) {
@@ -202,6 +203,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let notice = match client.revoke() {
             Ok(status) => {
                 self.contacted(id)?;
+                self.sync_issued(&client, id);
                 self.store_ca_database()?;
                 BrokerNotice::Told { status }
             }

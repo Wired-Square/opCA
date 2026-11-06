@@ -14,12 +14,15 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::DateTime;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Method, Request, StatusCode, header};
 use hyper_util::rt::TokioIo;
+use log::warn;
 use opca_acme_api::{
-    ChainUpdate, Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, FreshCsr, Status, path,
+    ChainUpdate, Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, FreshCsr, IssuedCertificate,
+    IssuedPage, Status, path,
 };
 use rustls_pki_types::ServerName;
 use serde::Serialize;
@@ -34,8 +37,9 @@ use crate::op::Runner;
 use crate::services::ca::CertificateAuthority;
 use crate::services::ca::operator::Operator;
 use crate::services::cert::crypto_provider;
-use crate::services::database::models::Broker;
+use crate::services::database::models::{Broker, BrokerCert};
 use crate::utils::block_on;
+use crate::utils::datetime::{DateTimeFormat, format_datetime};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -162,6 +166,11 @@ impl BrokerClient {
         self.call(Method::POST, path::REVOKE, Vec::new())
     }
 
+    pub fn issued(&self, after: u64) -> Result<IssuedPage, BrokerError> {
+        let path = format!("{}?after={after}", path::ISSUED);
+        self.call(Method::GET, &path, Vec::new())
+    }
+
     fn call<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -247,6 +256,29 @@ impl BrokerClient {
     }
 }
 
+fn broker_cert(broker_id: i64, cert: IssuedCertificate) -> Result<BrokerCert, OpcaError> {
+    Ok(BrokerCert {
+        broker_id,
+        serial: cert.serial,
+        common_name: cert.common_name,
+        sans: cert.sans,
+        not_before: openssl_time(&cert.not_before)?,
+        not_after: openssl_time(&cert.not_after)?,
+        issuer_serial: cert.issuer_serial,
+        revoked_at: cert.revoked_at.as_deref().map(openssl_time).transpose()?,
+        revocation_reason: cert.revocation_reason,
+        changed: i64::try_from(cert.changed)
+            .map_err(|_| OpcaError::Other(format!("change {} is out of range", cert.changed)))?,
+    })
+}
+
+/// An RFC 3339 time from the broker, as the database keeps times.
+fn openssl_time(rfc_3339: &str) -> Result<String, OpcaError> {
+    let at = DateTime::parse_from_rfc3339(rfc_3339)
+        .map_err(|e| OpcaError::Other(format!("the broker's time {rfc_3339}: {e}")))?;
+    Ok(format_datetime(at.to_utc(), DateTimeFormat::Openssl))
+}
+
 fn json(body: &impl Serialize) -> Vec<u8> {
     serde_json::to_vec(body).expect("the API's types serialise")
 }
@@ -255,10 +287,43 @@ impl<R: Runner> CertificateAuthority<R> {
     /// The broker's status, as the operator asks for it.
     pub fn broker_status(&mut self, operator: &Operator, id: i64) -> Result<Status, OpcaError> {
         let endpoint = Endpoint::of_broker(&self.broker(id)?)?;
-        let status = BrokerClient::new(endpoint, Some(operator))?.status()?;
+        let client = BrokerClient::new(endpoint, Some(operator))?;
+        let status = client.status()?;
         self.contacted(id)?;
+        self.sync_issued(&client, id);
         self.store_ca_database()?;
         Ok(status)
+    }
+
+    /// What every broker issued, as last synced.
+    pub fn list_broker_certs(&self) -> Result<Vec<BrokerCert>, OpcaError> {
+        self.db()?.query_broker_certs()
+    }
+
+    /// Pulls what broker `id` issued or revoked since the last sync, for the next store to
+    /// persist; a failure is only logged, since the call it rides on has succeeded.
+    fn sync_issued(&self, client: &BrokerClient, id: i64) {
+        if let Err(e) = self.try_sync_issued(client, id) {
+            warn!("[broker] syncing broker {id}'s issued certificates: {e}");
+        }
+    }
+
+    fn try_sync_issued(&self, client: &BrokerClient, id: i64) -> Result<(), OpcaError> {
+        let db = self.db()?;
+        let mut after = db.broker_cursor(id)? as u64;
+        loop {
+            let page = client.issued(after)?;
+            let certs = page
+                .certificates
+                .into_iter()
+                .map(|cert| broker_cert(id, cert))
+                .collect::<Result<Vec<_>, _>>()?;
+            db.record_broker_certs(&certs)?;
+            if !page.more || page.next <= after {
+                return Ok(());
+            }
+            after = page.next;
+        }
     }
 
     /// Stamps `last_contact`, which the next database store persists.

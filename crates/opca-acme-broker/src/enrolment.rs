@@ -162,8 +162,8 @@ impl Broker {
         } else if permitted != constrained {
             "the config's domains are not those the subordinate's name constraints permit"
         } else if !host_within(&self.host, &config.permitted_domains) {
-            "the broker's host is not a name within the permitted domains, and step-ca's own \
-             TLS certificate is issued for it"
+            "the broker's host is not a name within the permitted domains, and the ACME \
+             listener's certificate is issued for it"
         } else if !self.domains.is_empty() && permitted != lowercase(&self.domains) {
             "the config's domains are not those configured on the broker"
         } else if config.leaf_days == 0 || config.leaf_days > config.leaf_max_days {
@@ -198,7 +198,7 @@ impl Broker {
         *self.mode.write().unwrap_or_else(|e| e.into_inner()) = Mode::Enrolled(checked.enrolled);
         self.tls.reload(operator);
         tracing::info!("enrolled; the API now requires the operator's client certificate");
-        self.on_new_chain();
+        self.refresh_acme();
         Ok(())
     }
 }

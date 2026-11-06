@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The ACME broker ships as the `opca-acme` ApplianceOS app (arm64): a
+  signed image with the `api` (9443) and `acme` (8443) listeners and a `data`
+  volume, its `host` and `domains` set as app options. Until `host` is set it
+  stays healthy and says it needs one. Its box backups are hot, through the
+  console's backup hook: `acme.db` and the enrolment, never the subordinate
+  key, restored all or nothing. `scripts/build-acme-app.sh` builds the image
+  and packs it with a signed index for a test install.
+- The ACME broker answers ACME (RFC 8555) itself at `/acme/directory`:
+  accounts, key changes and deactivation, orders validated in the background
+  over http-01, dns-01 or tls-alpn-01, finalising, certificate download, and
+  revocation by the account or the certificate's own key, which opCA sees on
+  its next sync. Wildcards need dns-01, IP addresses are refused, and names
+  outside the permitted domains are refused at the order. A stale nonce is
+  refused in Let's Encrypt's words, so acme.sh retries it after a restart.
+- The ACME broker keeps its own issuance store, `acme.db` in its state
+  directory: ACME accounts, orders, authorisations, challenges and the
+  certificates it issues, each with a cursor for opCA to sync from. Statuses
+  move only as RFC 8555 draws them.
+- The ACME broker lists what it has issued at `GET /v1/issued?after=<cursor>`,
+  a page at a time, and its status counts the certificates issued and
+  revoked. The cursor moves on revocation too, so a revoked certificate comes
+  back to a client that has already synced it.
+- The ACME broker can issue from a CSR for an order. The CSR must verify,
+  name exactly the order's DNS names, all within the permitted domains, and
+  not reuse the account key. The leaf is `serverAuth` only, lasts the
+  configured days (never past the cap or the subordinate), and is served with
+  the subordinate.
+- The ACME broker can validate http-01, dns-01 and tls-alpn-01 challenges
+  itself. http-01 follows up to 10 redirects, only to ports 80 and 443, and
+  reads at most 1 KiB.
+- The ACME broker serves its own ACME listener on `acme_listen`, with a
+  certificate for `host` that it issues from the subordinate: on each new
+  chain, at start, and two-thirds through its 30 days. A renewal reaches the
+  open listener at once, and revocation or a reopen stops it.
+- `scripts/build-broker-deb.sh --platform linux/arm64|linux/amd64` builds the
+  ACME broker's `.deb` for either architecture.
+- opCA keeps the list of certificates each ACME broker has issued, synced
+  whenever it talks to the broker, and the ACME Servers page shows it per
+  broker with each certificate's names, expiry and state. A failed sync is
+  logged and never fails the call. The CA database moves to schema v19;
+  older dumps import unchanged.
+
+### Changed
+
+- The ACME broker no longer needs step-ca, and the `.deb` no longer depends on
+  it. `step_ca` in `broker.toml` is now refused, the status reports
+  `acme_down` in place of `step_ca_down`, and the versions no longer name
+  step-ca. The ACME directory moves to `/acme/directory`.
+
 ### Fixed
 
 - The macOS Intel build is produced again; 0.102.4 shipped without one.

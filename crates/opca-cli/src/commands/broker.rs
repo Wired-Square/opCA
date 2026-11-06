@@ -54,13 +54,7 @@ fn handle_enrol<R: Runner>(
     output::info("Host", &offer.host);
     output::info("Address", &endpoint.url());
     output::info("Key (SHA-256)", &endpoint.pin().to_string());
-    output::info(
-        "Broker",
-        &format!(
-            "{}, step-ca {}",
-            offer.versions.broker, offer.versions.step_ca
-        ),
-    );
+    output::info("Broker", &offer.versions.broker);
     if offer.configured_domains.is_empty() {
         if domains.is_empty() {
             return Err(OpcaError::Other(
@@ -151,7 +145,7 @@ fn handle_status<R: Runner>(app: &mut AppContext<R>, id: i64) -> Result<(), Opca
         let status = ca.broker_status(&operator, id)?;
         let state = match status.state {
             IssuerState::Issuing => "issuing",
-            IssuerState::StepCaDown => "step-ca down",
+            IssuerState::AcmeDown => "ACME down",
             IssuerState::Revoked => "revoked",
         };
         output::info("State", state);
@@ -168,8 +162,8 @@ fn handle_status<R: Runner>(app: &mut AppContext<R>, id: i64) -> Result<(), Opca
         output::info(
             "Versions",
             &format!(
-                "broker {}, step-ca {}, API {}",
-                status.versions.broker, status.versions.step_ca, status.versions.api
+                "broker {}, API {}",
+                status.versions.broker, status.versions.api
             ),
         );
         Ok(())

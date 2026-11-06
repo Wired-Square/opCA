@@ -2,7 +2,10 @@
 
 mod support;
 
-use opca_acme_api::{ChainUpdate, ErrorKind, FreshCsr, IssuanceConfig, IssuerState, Status, path};
+use opca_acme_api::{
+    ChainUpdate, ErrorKind, FreshCsr, IssuanceConfig, IssuedCounts, IssuedPage, IssuerState,
+    Status, path,
+};
 use opca_acme_broker::Mode;
 use support::*;
 use wslib_crypto_ca::CsrView;
@@ -19,7 +22,10 @@ struct Enrolled {
 }
 
 async fn enrolled() -> Enrolled {
-    let running = serve(private_tempdir(), &[]).await;
+    enrolled_on(serve(private_tempdir(), &[]).await).await
+}
+
+async fn enrolled_on(running: Running) -> Enrolled {
     let mut ca = TestCa::new();
     let operator = ca.client("opCA operator");
     let (chain, serial, id) = ca.sign(running.broker.subordinate().csr_pem(), DOMAINS);
@@ -118,14 +124,6 @@ async fn the_operator_reaches_every_route_and_the_enrolment_routes_are_gone() {
     let mut enrolled = enrolled().await;
     let status = enrolled.status().await;
     assert_eq!(status.state, IssuerState::Issuing);
-    let state = enrolled.running.state.path();
-    assert_eq!(step_ca_log(state, &["start"]).await, ["start"]);
-    let written: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(state.join("step-ca.json")).unwrap()).unwrap();
-    assert_eq!(
-        written["authority"]["policy"]["x509"]["allow"]["dns"][0],
-        "home.example"
-    );
     assert_eq!(status.config, enrolled.config);
 
     let (code, body) = enrolled.as_operator("POST", path::CSR, "").await;
@@ -151,12 +149,6 @@ async fn the_operator_reaches_every_route_and_the_enrolment_routes_are_gone() {
     };
     assert_eq!(stored.chain_pem, renewed);
     assert_eq!(answered.state, IssuerState::Issuing);
-    assert_eq!(
-        step_ca_log(state, &["start", "hup"]).await,
-        ["start", "hup"]
-    );
-    let intermediate = std::fs::read_to_string(state.join("step-ca-intermediate.crt")).unwrap();
-    assert!(renewed.starts_with(intermediate.trim_end()));
 
     let (code, body) = enrolled.as_operator("POST", path::REVOKE, "").await;
     assert_eq!(code, 200, "{body}");
@@ -213,10 +205,7 @@ async fn a_revoked_broker_answers_only_status_and_revoke_and_stays_revoked() {
     let restarted = start(running.state, &[], Some(running.api.uri)).await;
     assert!(matches!(restarted.broker.mode(), Mode::Enrolled(e) if e.revoked));
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert_eq!(
-        step_ca_log(restarted.state.path(), &["start"]).await,
-        ["start"]
-    );
+    assert_eq!(restarted.broker.acme_address(), None);
 }
 
 #[tokio::test]
@@ -284,7 +273,9 @@ async fn opca_that_lost_the_enrolment_answer_finds_it_through_status() {
 #[tokio::test]
 async fn a_held_state_lock_times_out_a_change_while_status_still_answers() {
     let state = private_tempdir();
-    let (broker, uri) = opca_acme_broker::Broker::start(&config(state.path(), &[])).unwrap();
+    let (broker, uri) = opca_acme_broker::Broker::start(&config(state.path(), &[]))
+        .await
+        .unwrap();
     let patience = std::time::Duration::from_millis(300);
     let running = run(state, broker.with_lock_timeout(patience), uri).await;
     let mut ca = TestCa::new();
@@ -346,4 +337,85 @@ async fn a_held_state_lock_times_out_a_change_while_status_still_answers() {
         finished, renewed_serial,
         "the change finished once the lock was free"
     );
+}
+
+impl Enrolled {
+    async fn issued(&self, after: u64) -> IssuedPage {
+        let (code, body) = self
+            .as_operator("GET", &format!("{}?after={after}", path::ISSUED), "")
+            .await;
+        assert_eq!(code, 200, "{body}");
+        serde_json::from_str(&body).unwrap()
+    }
+}
+
+fn serials(page: &IssuedPage) -> Vec<&str> {
+    page.certificates
+        .iter()
+        .map(|c| c.serial.as_str())
+        .collect()
+}
+
+#[tokio::test]
+async fn the_issued_list_pages_and_brings_back_a_revocation_of_a_synced_certificate() {
+    let state = private_tempdir();
+    let (broker, uri) = opca_acme_broker::Broker::start(&config(state.path(), &[]))
+        .await
+        .unwrap();
+    let enrolled = enrolled_on(run(state, broker.with_issued_page(2), uri).await).await;
+    let store = enrolled.running.broker.acme();
+    for (serial, name) in [("11", "a"), ("22", "b"), ("33", "c")] {
+        record(store, serial, &format!("{name}.home.example")).await;
+    }
+
+    let first = enrolled.issued(0).await;
+    assert_eq!((serials(&first), first.more), (vec!["11", "22"], true));
+    let rest = enrolled.issued(first.next).await;
+    assert_eq!((serials(&rest), rest.more), (vec!["33"], false));
+    let issued = &rest.certificates[0];
+    assert_eq!(
+        (issued.common_name.as_deref(), &issued.sans[..]),
+        (Some("c.home.example"), &["c.home.example".to_string()][..])
+    );
+    assert_eq!(
+        (issued.issuer_serial.as_str(), issued.revoked_at.as_deref()),
+        ("4096", None)
+    );
+    assert!(issued.not_after.ends_with('Z'), "{}", issued.not_after);
+    let synced = enrolled.issued(rest.next).await;
+    assert!(synced.certificates.is_empty() && !synced.more);
+    assert_eq!(synced.next, rest.next);
+
+    store.revoke("11", Some(1)).await.unwrap();
+
+    let again = enrolled.issued(rest.next).await;
+    assert_eq!(serials(&again), ["11"]);
+    assert!(again.certificates[0].revoked_at.is_some());
+    assert_eq!(again.certificates[0].revocation_reason, Some(1));
+    assert!(again.certificates[0].changed > rest.next);
+    assert_eq!(again.next, again.certificates[0].changed);
+    assert_eq!(
+        enrolled.status().await.issued,
+        Some(IssuedCounts {
+            total: 3,
+            revoked: 1
+        })
+    );
+}
+
+#[tokio::test]
+async fn the_issued_list_is_the_operators_alone_and_wants_a_numeric_cursor() {
+    let enrolled = enrolled().await;
+    assert!(
+        enrolled
+            .running
+            .call(None, "GET", path::ISSUED, "")
+            .await
+            .is_err()
+    );
+    assert_eq!(enrolled.issued(0).await.next, 0);
+    let (code, body) = enrolled
+        .as_operator("GET", &format!("{}?after=x", path::ISSUED), "")
+        .await;
+    assert_eq!((code, error(&body)), (400, ErrorKind::BadRequest), "{body}");
 }

@@ -11,13 +11,13 @@ Group=opca-acme
 ExecStart=/usr/bin/opca-acme-broker
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
-# The daemon's grace is 20 s: the listener's drain, then step-ca's stop.
+# The daemon's grace is 20 s, past the listeners' 10 s drain.
 TimeoutStopSec=30
 StateDirectory=opca-acme
 StateDirectoryMode=0700
 UMask=0077
 
-# step-ca, the broker's child, serves ACME on 443.
+# The broker serves ACME on 443.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 

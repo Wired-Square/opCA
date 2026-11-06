@@ -8,7 +8,8 @@
   box-sizing: border-box;
 }
 
-.broker-url {
+.broker-url,
+.broker-sans {
   display: block;
   font-size: 0.75rem;
   color: var(--app-text-muted);
@@ -57,4 +58,26 @@
 .enrol-domains {
   margin: 0;
   padding-left: 18px;
+}
+
+.broker-issued-row > td {
+  padding: 0 12px 12px 32px;
+}
+
+.broker-issued {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.broker-issued th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--app-text-muted);
+  padding: 4px 8px;
+}
+
+.broker-issued td {
+  padding: 4px 8px;
+  border-top: 1px solid var(--app-border);
 }

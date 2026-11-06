@@ -70,6 +70,7 @@ impl<R: Runner> CertificateAuthority<R> {
     ) -> Result<EnrolledBroker, OpcaError> {
         let endpoint = Endpoint::of_pairing(pairing);
         let client = BrokerClient::new(endpoint.clone(), None)?;
+        let as_operator = BrokerClient::new(endpoint.clone(), Some(operator))?;
         if client.offer()? != *shown {
             return Err(OpcaError::Other(
                 "The broker's request has changed since it was shown; review it again".into(),
@@ -104,6 +105,7 @@ impl<R: Runner> CertificateAuthority<R> {
             ))
         })?;
         self.contacted(id)?;
+        self.sync_issued(&as_operator, id);
         self.store_ca_database()?;
         Ok(EnrolledBroker {
             broker: self.broker(id)?,

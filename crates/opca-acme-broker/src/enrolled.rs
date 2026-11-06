@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use opca_acme_api::{
-    API_VERSION, ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuerState, Status, Versions,
+    API_VERSION, ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuedCertificate, IssuedPage,
+    IssuerState, Status, Versions,
 };
 use rustls::ServerConfig;
 use rustls::crypto::CryptoProvider;
@@ -12,8 +13,8 @@ use wslib_http_server::PeerCertificates;
 use wslib_pairing::SpkiSha256;
 use wslib_tls::{KeyFingerprint, Location, Serving};
 
+use crate::acme::store::Certificate;
 use crate::enrolment::{Enrolled, Mode, bad_request, decimal, internal, rfc_3339};
-use crate::step_ca::Files;
 use crate::{Broker, Error};
 
 /// The API's TLS once enrolled: a client must chain to `root` and present the operator's key.
@@ -81,7 +82,38 @@ impl Broker {
             subordinate_not_after: rfc_3339(subordinate.not_after),
             config: enrolled.config.clone(),
             versions: self.versions(),
+            issued: None,
         }
+    }
+
+    /// `status` with the issued counts, or without them when `acme.db` can't count.
+    pub(crate) async fn counted(
+        &self,
+        status: Result<Status, ErrorBody>,
+    ) -> Result<Status, ErrorBody> {
+        let mut status = status?;
+        status.issued = self
+            .acme()
+            .counts()
+            .await
+            .inspect_err(|error| tracing::error!(%error, "counting the issued certificates"))
+            .ok();
+        Ok(status)
+    }
+
+    pub(crate) async fn issued(&self, after: u64) -> Result<IssuedPage, ErrorBody> {
+        let cursor = i64::try_from(after).map_err(bad_request)?;
+        let changes = self
+            .acme()
+            .changed_after(cursor, self.issued_page)
+            .await
+            .map_err(internal)?;
+        let certificates: Vec<_> = changes.certificates.into_iter().map(issued).collect();
+        Ok(IssuedPage {
+            next: certificates.last().map_or(after, |last| last.changed),
+            more: changes.more,
+            certificates,
+        })
     }
 
     pub(crate) fn fresh_csr(&self, enrolled: &Enrolled) -> Result<FreshCsr, ErrorBody> {
@@ -116,7 +148,7 @@ impl Broker {
             ..current
         };
         self.store(renewed.clone())?;
-        self.on_new_chain();
+        self.refresh_acme();
         Ok(self.status_from(&subordinate, &renewed))
     }
 
@@ -136,7 +168,7 @@ impl Broker {
         };
         self.store(revoked.clone())?;
         tracing::warn!("revoked by opCA");
-        self.on_revoked();
+        self.refresh_acme();
         self.status(&revoked)
     }
 
@@ -156,53 +188,32 @@ impl Broker {
     }
 
     fn issuer_state(&self) -> IssuerState {
-        if self.step_ca.is_running() {
+        if self.acme_listener.serving().is_some() {
             IssuerState::Issuing
         } else {
-            IssuerState::StepCaDown
+            IssuerState::AcmeDown
         }
-    }
-
-    /// Writes step-ca's config from the stored enrolment, then starts it or has it reload.
-    pub(crate) fn on_new_chain(&self) {
-        let Mode::Enrolled(enrolled) = self.mode() else {
-            return;
-        };
-        if enrolled.revoked {
-            return;
-        }
-        let written = Files::in_state(&self.state).write(
-            &enrolled.chain_pem,
-            &self.host,
-            self.acme_listen,
-            &enrolled.config,
-        );
-        match written {
-            Ok(()) => self.step_ca.start_or_reload(),
-            Err(error) => tracing::error!(%error, "could not write step-ca's config"),
-        }
-    }
-
-    fn on_revoked(&self) {
-        self.step_ca.stop();
-    }
-
-    /// Starts step-ca when enrolled and not revoked; needs a Tokio runtime.
-    pub fn start_issuing(&self) {
-        self.on_new_chain();
-    }
-
-    /// Stops step-ca, killing it if it hasn't gone within `patience`.
-    pub async fn stop_issuing(&self, patience: std::time::Duration) {
-        self.step_ca.stop_and_wait(patience).await;
     }
 
     pub(crate) fn versions(&self) -> Versions {
         Versions {
             api: API_VERSION,
             broker: env!("CARGO_PKG_VERSION").into(),
-            step_ca: self.step_ca.version.to_string(),
         }
+    }
+}
+
+fn issued(certificate: Certificate) -> IssuedCertificate {
+    IssuedCertificate {
+        serial: certificate.serial,
+        common_name: certificate.common_name,
+        sans: certificate.sans,
+        not_before: rfc_3339(certificate.not_before),
+        not_after: rfc_3339(certificate.not_after),
+        issuer_serial: certificate.issuer_serial,
+        revoked_at: certificate.revoked_at.map(rfc_3339),
+        revocation_reason: certificate.revocation_reason,
+        changed: certificate.changed as u64,
     }
 }
 

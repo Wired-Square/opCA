@@ -1220,7 +1220,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 13); // v5→v6 … v16→v17, v17→v18
+    assert_eq!(info.steps.len(), 14); // v5→v6 … v17→v18, v18→v19
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1257,6 +1257,7 @@ fn a_v14_dump_imports_with_crl_batches_off() {
         .execute_batch(
             "DROP TABLE crl_batch;
              DROP TABLE brokers;
+             DROP TABLE broker_certs;
              ALTER TABLE config DROP COLUMN crl_batch_enabled;
              ALTER TABLE config DROP COLUMN openvpn_template_import;
              ALTER TABLE certificate_authority DROP COLUMN published_at;
@@ -1267,7 +1268,7 @@ fn a_v14_dump_imports_with_crl_batches_off() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v14_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (14, 4));
+    assert_eq!((info.from_version, info.steps.len()), (14, 5));
     let config = db.get_config().unwrap();
     assert_eq!(
         (config.schema_version, config.crl_batch_enabled),
@@ -1283,6 +1284,7 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
     db.conn
         .execute_batch(
             "DROP TABLE brokers;
+             DROP TABLE broker_certs;
              ALTER TABLE config DROP COLUMN openvpn_template_import;
              ALTER TABLE certificate_authority DROP COLUMN published_at;
              UPDATE config SET schema_version = 15 WHERE id = 1;",
@@ -1292,7 +1294,7 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v15_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (15, 3));
+    assert_eq!((info.from_version, info.steps.len()), (15, 4));
     assert_eq!(
         db.openvpn_template_import().unwrap(),
         TemplateImport::NotImported
@@ -1373,6 +1375,7 @@ fn a_v16_dump_gains_an_empty_brokers_table() {
     db.conn
         .execute_batch(
             "DROP TABLE brokers;
+             DROP TABLE broker_certs;
              ALTER TABLE certificate_authority DROP COLUMN published_at;
              UPDATE config SET schema_version = 16 WHERE id = 1;",
         )
@@ -1382,7 +1385,7 @@ fn a_v16_dump_gains_an_empty_brokers_table() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v16_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (16, 2));
+    assert_eq!((info.from_version, info.steps.len()), (16, 3));
     assert_eq!(
         db.get_config().unwrap().schema_version,
         Some(DEFAULT_SCHEMA_VERSION)
@@ -1397,7 +1400,8 @@ fn a_v17_dump_imports_with_nothing_published() {
         .unwrap();
     db.conn
         .execute_batch(
-            "ALTER TABLE certificate_authority DROP COLUMN published_at;
+            "DROP TABLE broker_certs;
+             ALTER TABLE certificate_authority DROP COLUMN published_at;
              UPDATE config SET schema_version = 17 WHERE id = 1;",
         )
         .unwrap();
@@ -1406,13 +1410,33 @@ fn a_v17_dump_imports_with_nothing_published() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v17_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (17, 1));
+    assert_eq!((info.from_version, info.steps.len()), (17, 2));
     let cert = db
         .query_cert(&CertLookup::Serial("2".into()), false)
         .unwrap()
         .unwrap();
     assert_eq!(cert.cn.as_deref(), Some("www.example.com"));
     assert_eq!(cert.published_at, None);
+}
+
+#[test]
+fn a_v18_dump_gains_an_empty_broker_certs_table() {
+    let db = broker_db();
+    let id = db.add_broker("100", &domains(&["home.arpa"])).unwrap();
+    db.conn
+        .execute_batch(
+            "DROP TABLE broker_certs;
+             UPDATE config SET schema_version = 18 WHERE id = 1;",
+        )
+        .unwrap();
+    let v18_sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+    assert!(!v18_sql.contains("broker_certs"));
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(&v18_sql).unwrap();
+
+    assert_eq!((info.from_version, info.steps.len()), (18, 1));
+    assert!(db.query_broker_certs().unwrap().is_empty());
+    assert_eq!(db.broker_cursor(id).unwrap(), 0);
 }
 
 #[test]
@@ -1526,6 +1550,52 @@ fn a_brokers_endpoint_and_last_contact_are_recorded_and_exported() {
     )
     .unwrap();
     assert_eq!(db.query_broker(id).unwrap().unwrap(), broker);
+}
+
+fn broker_cert(broker_id: i64, serial: &str, changed: i64) -> BrokerCert {
+    BrokerCert {
+        broker_id,
+        serial: serial.into(),
+        common_name: Some("www.home.arpa".into()),
+        sans: domains(&["www.home.arpa", "o'brien.home.arpa"]),
+        not_before: "20261105000000Z".into(),
+        not_after: format!("202612{changed:02}000000Z"),
+        issuer_serial: "100".into(),
+        revoked_at: None,
+        revocation_reason: None,
+        changed,
+    }
+}
+
+#[test]
+fn a_brokers_certs_are_replaced_by_serial_and_its_cursor_is_the_last_change() {
+    let db = broker_db();
+    let a = db.add_broker("100", &domains(&["home.arpa"])).unwrap();
+    let b = db.add_broker("101", &domains(&["home.arpa"])).unwrap();
+    db.record_broker_certs(&[broker_cert(a, "1", 1), broker_cert(a, "2", 2)])
+        .unwrap();
+    db.record_broker_certs(&[broker_cert(b, "1", 5)]).unwrap();
+    let revoked = BrokerCert {
+        revoked_at: Some("20261106000000Z".into()),
+        revocation_reason: Some(1),
+        ..broker_cert(a, "1", 3)
+    };
+    db.record_broker_certs(std::slice::from_ref(&revoked))
+        .unwrap();
+
+    assert_eq!(
+        (db.broker_cursor(a).unwrap(), db.broker_cursor(b).unwrap()),
+        (3, 5)
+    );
+    let expected = [revoked, broker_cert(a, "2", 2), broker_cert(b, "1", 5)];
+    assert_eq!(db.query_broker_certs().unwrap(), expected);
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(
+        &String::from_utf8(db.export_database().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert!(!info.migrated);
+    assert_eq!(db.query_broker_certs().unwrap(), expected);
 }
 
 #[test]

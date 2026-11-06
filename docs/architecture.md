@@ -50,7 +50,7 @@ Two more crates make up the ACME broker, which runs on a host of its own (see
 | Component | Role |
 |---|---|
 | [opca-acme-api](../crates/opca-acme-api) | The versioned wire types of the API between opCA and a broker. serde only; both ends build against it. |
-| [opca-acme-broker](../crates/opca-acme-broker) | The broker daemon (`opca-acme-broker`) and its command line (`opca-acme`): holds a subordinate CA, pairs with opCA, runs step-ca. |
+| [opca-acme-broker](../crates/opca-acme-broker) | The broker daemon (`opca-acme-broker`) and its command line (`opca-acme`): holds a subordinate CA, pairs with opCA, serves ACME. |
 
 ---
 
@@ -127,7 +127,7 @@ Organised by concern under [src/](../crates/opca-core/src):
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v18). A dump that fails to
+    automatic, forward-only migrations (currently v19). A dump that fails to
     parse or never reaches its `COMMIT` (truncated) is rejected as
     `OpcaError::DatabaseUnreadable`.
   - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
@@ -498,6 +498,17 @@ or not the broker answers (`BrokerNotice::Told` / `NotTold`), and revoking an
 already revoked row only tells the broker again, which is how an unreachable
 broker is retried. The caller regenerates the CRL, as after any revoke.
 
+**Issued list.** Whenever opCA talks to an enrolled broker (status, enrolment,
+renewal, revoke), `sync_issued` pages through `GET /v1/issued` from the
+broker's cursor and writes the rows to `broker_certs` (schema v19), keyed by
+broker id and serial, before the database is stored. Each row keeps the
+broker's `changed` sequence, and the highest one per broker is its cursor, so
+a revocation of a row already synced replaces it. Times are converted to the
+database's OpenSSL format. The sync rides on the call and costs no `op`
+round-trip of its own; a failure, such as a broker older than the list, is
+logged and never fails the call. `issuer_serial` tells a reopened broker's
+earlier subordinate apart; nothing filters on it yet.
+
 **Concerns** (`concern.rs`). `concerns` flags an active broker with a `url`
 whose subordinate expires within 30 days, whose `last_contact` is older than
 35 days, or which is signed but not delivered. The dashboard tile, the ACME
@@ -507,16 +518,18 @@ thresholds (see [What it checks](#what-it-checks)).
 Surfaces:
 
 - **Tauri** — [commands/broker.rs](../crates/opca-tauri/src/commands/broker.rs):
-  `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `broker_status`,
-  `renew_broker`, `renew_all_brokers` and `revoke_broker`. The connection mints
+  `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `list_broker_certs`,
+  `broker_status`, `renew_broker`, `renew_all_brokers` and `revoke_broker`. The connection mints
   the operator on the first broker call and keeps it (`Connection::operator`),
   minting another after 20 hours. A reconnect drops it. Every command but the
-  offer and the list runs under `withLock`, status included, since it stamps
+  offer and the lists runs under `withLock`, status included, since it stamps
   `last_contact` and stores the database. `revoke_broker` regenerates the CRL
   as the certificate revoke does.
 - **Frontend** — [pages/AcmeServers.tsx](../frontend/src/pages/AcmeServers.tsx)
   (`/acme`, "ACME Servers" in the sidebar) lists brokers with a `url`: state,
-  domains, subordinate expiry, last contact and concerns. Enrol Broker opens
+  domains, subordinate expiry, last contact, concerns and the count of
+  certificates each issued, which expands into a table of them (name and
+  other SANs, expiry, valid, expired or revoked). Enrol Broker opens
   [EnrolBrokerDialog](../frontend/src/components/EnrolBrokerDialog.tsx) (paste,
   review the offer, confirm), and Renew All, per-row Status, Renew and Revoke
   sit beside it. A `DomainsChanged` outcome offers Confirm and Renew. The
@@ -1035,8 +1048,8 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
   both themes. It prints PASS/FAIL/SKIP and exits non-zero on a failure; it
   never selects a mutating menu item.
 - **ACME broker** — `cargo test -p opca-acme-broker` runs in-process over
-  loopback against a fake step-ca (a shell script) and an in-memory opca-core
-  CA (a dev-dependency, with `test-support`);
+  loopback against an in-memory opca-core CA (a dev-dependency, with
+  `test-support`);
   [tests/opca_client.rs](../crates/opca-acme-broker/tests/opca_client.rs) runs
   opca-core's broker client against it. `sh
   crates/opca-acme-broker/tests/docker.sh` is the gated Docker check: see
@@ -1051,18 +1064,22 @@ layer and is surfaced in the UI via `setAppState("error", …)`.
 ## ACME broker (`opca-acme-broker`)
 
 A daemon for a Debian host on the LAN. It owns one name-constrained subordinate
-CA's key, pairs with opCA once, serves the API opCA calls, and runs step-ca as
-its child to answer ACME for appliances. The operator's guide is
+CA's key, pairs with opCA once, serves the API opCA calls, and answers ACME
+for appliances itself. The operator's guide is
 [acme-broker.md](acme-broker.md).
 
 Organised under [src/](../crates/opca-acme-broker/src):
 
 - [config.rs](../crates/opca-acme-broker/src/config.rs) — `broker.toml`:
   `host` (required), `listen` (`[::]:9443`), `domains`, `state_dir`
-  (`/var/lib/opca-acme`), `step_ca` (`/usr/bin/step-ca`), `acme_listen`
-  (`[::]:443`). Unknown keys are refused.
+  (`/var/lib/opca-acme`), `acme_listen` (`[::]:443`). Unknown keys are
+  refused, so a `step_ca` left from the step-ca broker stops the start.
+  `advertised_port`, never read from the file, is the port the pairing URI
+  names when it isn't `listen`'s.
+- [app.rs](../crates/opca-acme-broker/src/app.rs) — the broker as an
+  ApplianceOS app; see [As an ApplianceOS app](#as-an-applianceos-app).
 - [broker.rs](../crates/opca-acme-broker/src/broker.rs) — `Broker::start`
-  checks the host, the step-ca version and the state directory
+  checks the host and the state directory
   (`wslib_service::private_directory`), then loads or makes the subordinate key
   and CSR, the API identity (`wslib_tls::Serving::load_or_mint`) and the
   pairing code (`wslib_pairing::OneTimeCode`). `reload` re-reads all of it on
@@ -1072,12 +1089,50 @@ Organised under [src/](../crates/opca-acme-broker/src):
   mode and the checks a chain and its `IssuanceConfig` must pass, shared with
   the chain push.
 - [enrolled.rs](../crates/opca-acme-broker/src/enrolled.rs) — enrolled mode:
-  the operator-only TLS config, status, fresh CSR, chain push, revoke, and the hooks
-  into step-ca.
+  the operator-only TLS config, status, fresh CSR, chain push and revoke, each
+  of which refreshes the ACME listener.
 - [api.rs](../crates/opca-acme-broker/src/api.rs) — the axum routes, served by
   `wslib-http-server`.
-- [step_ca.rs](../crates/opca-acme-broker/src/step_ca.rs) — step-ca's config,
-  its version check and the child's supervisor.
+- [acme/](../crates/opca-acme-broker/src/acme) — the broker's own ACME server
+  (RFC 8555):
+  - [listener.rs](../crates/opca-acme-broker/src/acme/listener.rs) — the ACME
+    listener on `acme_listen` and its own certificate; see
+    [The ACME listener](#the-acme-listener).
+  - [server.rs](../crates/opca-acme-broker/src/acme/server.rs) — the ACME API
+    the listener serves; see [The ACME API](#the-acme-api).
+  - [request.rs](../crates/opca-acme-broker/src/acme/request.rs) — a request's
+    flattened JWS, checked through `wslib-crypto-jose` on the broker's rustls
+    provider: its `url`, its nonce, `jwk` or `kid` as the endpoint asks, the
+    account (which must be valid) and the signature; the nonce is redeemed only
+    once the signature verifies. Also the §7.3.5 key change, and `Nonces`, an
+    in-memory pool of single-use nonces, the oldest forgotten past 4096.
+  - [store.rs](../crates/opca-acme-broker/src/acme/store.rs) — `acme.db` on
+    `wslib-db-sqlite` (chain `acme`, opened by `Broker::start`): accounts,
+    orders, authorisations, challenges, certificates and the empty `eab_keys`.
+    Statuses are RFC 8555's and move only along its §7.1.6 diagrams; a
+    challenge's outcome settles its authorisation, and that its order.
+    Each certificate records the serial of the subordinate that issued it and
+    a `changed` sequence, taken above every other on insert and again on
+    revoke, which is the cursor of `changed_after`: a revocation brings a row
+    already synced back past the cursor, which its insert id would not.
+  - [issue.rs](../crates/opca-acme-broker/src/acme/issue.rs) — `Issuer`
+    finalises an order from a CSR: it must verify, hold only a common name
+    that is one of its DNS names, name exactly the order's identifiers, use
+    RSA 2048–8192, P-256 or P-384 and not the account key; `check_identifier`
+    refuses IPs, non-A-label names, wildcards other than the whole leftmost
+    label and names outside the permitted domains. The leaf is `serverAuth`
+    only, backdated a minute, for `leaf_days` (or the order's `notAfter`)
+    capped at `leaf_max_days` and the subordinate's end, and served with the
+    chain minus the root. Refusals are `Problem`s with RFC 8555's types.
+  - [validate.rs](../crates/opca-acme-broker/src/acme/validate.rs) —
+    `Validator` over a `wslib_dns::Resolver`, with injectable ports: http-01
+    (hyper, up to 10 redirects to a DNS host over http on 80 or https on 443,
+    1 KiB body), dns-01 (any TXT at `_acme-challenge.<base>` equal to the
+    digest) and tls-alpn-01 (RFC 8737; any certificate is taken, and the
+    handshake is checked against its key, since webpki refuses the critical
+    acmeIdentifier). 10 s per validation. The broker's resolver is
+    `wslib-dns`'s hickory over the system's; `Broker::with_validator` swaps
+    the whole `Validate` for tests.
 - [cli.rs](../crates/opca-acme-broker/src/cli.rs) and
   [bin/opca-acme.rs](../crates/opca-acme-broker/src/bin/opca-acme.rs) — the
   `opca-acme` command line.
@@ -1092,7 +1147,7 @@ The broker doesn't link opca-core; opca-core's
 first certificate carries its key and the last is the self-signed root that
 issued it, the `IssuanceConfig`'s domains equal the subordinate's DNS name
 constraints (and the broker's `domains`, when set), and `host` is a DNS name
-within them, since step-ca's own TLS certificate is issued for it. A chain push
+within them, since the ACME listener's certificate is issued for it. A chain push
 must also keep the root. Bad input is a 400 that costs no pairing attempt.
 
 ### Two TLS modes
@@ -1113,22 +1168,74 @@ survives re-enrolment.
   `Tls::reload` swaps it in on the open listener. Each enrolled route also
   checks the presented certificate (`PeerCertificates`), which turns away a
   connection opened before the swap. Routes: `GET /v1/status`, `POST /v1/csr`,
-  `PUT /v1/chain`, `POST /v1/revoke`; the enrolment routes answer 404. A
-  revoked broker answers only status and revoke.
+  `PUT /v1/chain`, `POST /v1/revoke` and `GET /v1/issued`; the enrolment
+  routes answer 404. A revoked broker answers only status, revoke and the
+  issued list. Every `Status` carries the issued and revoked counts from
+  `acme.db`, or none when it can't be read.
+  `GET /v1/issued?after=<cursor>` answers up to `ISSUED_PAGE` (500)
+  certificates changed since the cursor, oldest first, without their PEM:
+  serial, common name, SANs, validity, issuer serial, revocation and the
+  `changed` sequence. It returns the `next` cursor and whether `more` wait.
 
-### step-ca as a child
+### The ACME listener
 
-`Files::write` turns `enrolment.json` into `step-ca.json`, `step-ca-root.crt`
-and `step-ca-intermediate.crt`: the unencrypted `subordinate.key` as the
-intermediate's key (so no password), one ACME provisioner (`acme`, so the
-directory is `/acme/acme/directory`) with the enrolled challenges and leaf
-lifetimes, an x509 policy allowing each permitted domain and its subdomains,
-and a badgerv2 database in `step-ca-db/`. `StepCa` starts the child on a new
-chain or SIGHUPs a running one, restarts it 10 s after it dies, and SIGTERMs it
-on revoke and reopen. On daemon stop it waits 5 s after the SIGTERM, then
-SIGKILLs it. `step-ca version` must
-report 0.28.1 or newer at start. The status's `state` is `issuing` while the
-child lives, `step_ca_down` otherwise, and `revoked` once revoked.
+`Broker::serve_acme` runs beside the API: under the state lock it calls
+`refresh_acme`, then again every hour (10 s after a failure), and on stop it
+closes the listener and waits for its drain. Enrolment, a chain push, revoke and
+reload call `refresh_acme` too, inside their own lock. While enrolled and not
+revoked it keeps `acme.crt` (the leaf, then the chain without the root) and
+`acme.key` (0600) current, and serves them with `wslib_http_server::serve_https`
+on `acme_listen`; otherwise it stops the listener. The pair is reissued when it
+is missing, the key doesn't match, its SAN isn't `host`, the chain after the
+leaf isn't the enrolled one (so every new chain reissues), or it is two-thirds
+through its life. The leaf is `serverAuth` for `host` over a new P-256 key, from
+`Issuer::sign` like an ACME leaf but never recorded in `acme.db`, for 30 days
+capped at the subordinate's end. A running listener takes the new pair through
+`Tls::reload`; the socket is bound synchronously (`TcpSocket`, `SO_REUSEADDR`)
+so that it fits under the lock. The key is written before the certificate, so a
+crash between leaves a mismatch that the next refresh reissues. Each refresh
+also hands the ACME API a fresh `Issuer`, so a new chain or `IssuanceConfig`
+reaches new orders at once. The status's `state` is `issuing` while the
+listener serves, `acme_down` otherwise, and `revoked` once revoked.
+
+### The ACME API
+
+[server.rs](../crates/opca-acme-broker/src/acme/server.rs) routes, under
+`/acme/`: `directory`, `new-nonce` (HEAD 200, GET 204), `new-account`,
+`account/{id}` (update and deactivate) and `account/{id}/orders`, `key-change`,
+`new-order`, `order/{id}` and `order/{id}/finalize`, `authz/{id}` (and its
+deactivation), `challenge/{id}`, `cert/{id}` and `revoke-cert`. Every URL is
+built from the authority the request was sent to, so it holds behind a mapped
+port. Every response carries a fresh `Replay-Nonce` and `Link: rel="index"`;
+a challenge adds `rel="up"`, and an order, authorisation or challenge still
+processing adds `Retry-After`. Everything but the directory and new-nonce is a
+JWS POST (`application/jose+json`, else 415), and reads are POST-as-GET with an
+empty payload. Refusals are `application/problem+json` with RFC 8555's types:
+403 for `unauthorized`, `orderNotReady` and the like, 429 for `rateLimited`,
+500 for `serverInternal`, 404 (`malformed`) for an unknown resource, 409 with
+the holder's `Location` for a key change to a key in use, and 400 otherwise.
+
+- **Accounts** are keyed by the JWK's RFC 7638 thumbprint; contacts must be
+  single `mailto:` addresses. A deactivated account is refused everything.
+- **Orders** take DNS identifiers only (an `ip` one is `rejectedIdentifier`),
+  each through `check_identifier`. Every identifier gets an authorisation with
+  one challenge of each type the `IssuanceConfig` offers, except that a
+  wildcard gets dns-01 alone and is refused without it. An order and its
+  authorisations expire 24 hours after they are made (`ORDER_LIFETIME`;
+  `Broker::with_order_lifetime` for tests); each order, authorisation or
+  challenge read expires what is stale first.
+- **Challenges** move to `processing` on the client's POST and are validated
+  in a background task against `token.thumbprint`; the outcome settles the
+  challenge, its authorisation and the order, and a failure keeps its
+  problem. Challenges a restart left `processing` are validated again when the
+  listener first serves.
+- **Finalising** a ready order goes through `Issuer::finalise` with the
+  account key's SPKI (`Jwk::subject_public_key_info`), so the CSR can't reuse
+  it. The certificate is the chain as `application/pem-certificate-chain`.
+- **Revocation** is by the ordering account (`kid`) or by the certificate's
+  own key (`jwk`), for a certificate whose DER matches the one issued. Reasons
+  0–6, 9 and 10 are taken (0 is stored as none); `Store::revoke` bumps the
+  `changed` sequence, so opCA's next sync sees it.
 
 ### State directory
 
@@ -1139,10 +1246,10 @@ child lives, `step_ca_down` otherwise, and `revoked` once revoked.
 - `pairing-code` — the code's hash and attempts;
 - `enrolment.json` — chain, operator pin, issuance config, the API pin opCA
   saw, and `revoked`;
-- `step-ca.json`, `step-ca-root.crt`, `step-ca-intermediate.crt`,
-  `step-ca-db/`;
+- `acme.crt`, `acme.key` (0600) — the ACME listener's pair;
 - `archive/<time>/` — what each reopen set aside;
-- `broker.pid`, `step-ca.pid`, `state.lock`, `pairing-code.lock`.
+- `acme.db` (0600, with its `-wal` and `-shm`) — the ACME server's store;
+- `broker.pid`, `state.lock`, `pairing-code.lock`.
 
 The file is the authority throughout: the daemon re-reads the code and the
 enrolment from disk, so the command line can change them under `state.lock`.
@@ -1150,31 +1257,114 @@ enrolment from disk, so the command line can change them under `state.lock`.
 ### Command line and reload
 
 `opca-acme pairing` issues a new code while enrolling; `status` reads the state
-directory; `enrol --reopen` (root only) archives the enrolment and step-ca's
-files, deletes the subordinate key, makes a new one and a new code, and
+directory; `enrol --reopen` (root only) archives `enrolment.json` and
+`subordinate.csr`, deletes the subordinate key, makes a new one and a new code, and
 SIGHUPs the daemon through `broker.pid`. Run as root, the command line drops to
 the state directory's owner with setgid/setuid first, so nothing it writes is
 root's. The daemon's `reload` re-reads the subordinate and the mode, swaps the
-TLS config back and stops step-ca.
+TLS config back and stops the ACME listener. `acme.db` and the listener's pair
+stay: the store's accounts and issued certificates are the host's, and the pair
+is reissued on the next enrolment, since its chain is no longer the enrolled one.
+
+### As an ApplianceOS app
+
+`opca-acme-broker --app` is the image's entrypoint. `App::load` reads `host`
+and `domains` from `/data/options.json`, which the console writes from the
+manifest's options before each start, and then from the app's own
+`/data/broker.toml` (the same two keys), a blank value giving way to the next.
+The listeners are fixed at the manifest's ports, `api` 9443 and `acme` 8443,
+and the state lives in `/data/state` (0700). `APPLIANCE_LISTENER_API_PORT`, the
+host port the console mapped, becomes `advertised_port`, so the pairing URI
+names the port opCA dials; both variables are reported, and absent ones fall
+back to the manifest's ports.
+
+With no host, `serve_needing_host` touches no state: it binds both listeners,
+answers every request on them with a plain-HTTP 503 saying the broker needs a
+host, and is healthy. Setting the option restarts the container, which then
+starts the broker as usual. `serve_health` answers only
+`GET /apps/opca-acme/healthz` on `/run/appliance/app.sock`, with the state
+(`needs_host`, `enrolling`, `enrolled` or `revoked`) and both ports. The
+pairing URI is in the container's log.
+
+`serve_console` binds `/run/appliance/hooks.sock` before it serves health, so
+the console finds the hooks before it reads the app as healthy, and a console
+that finds none takes a cold tar of `/data`, key included. Both sockets are
+0660: the console connects through group root. `serve_hooks` answers `GET /v1`
+(`HookIndex`, `backup: true`), `GET /v1/about`, and the hot backup in
+[backup.rs](../crates/opca-acme-broker/src/backup.rs), one call at a time:
+
+- `POST /v1/backup/capture`: a `Capture` (format `opca-acme-broker`, version 1)
+  holding the enrolment as `enrolment.json` has it and `acme.db` as
+  `Store::snapshot` takes it live (`VACUUM INTO`, then the chains of expired
+  certificates blanked and the copy vacuumed), deflated and in base64url, with
+  its schema. Never `subordinate.key` or any other key. About 0.6 KiB per live
+  certificate, so the console's 7 MiB cap is some 13,000 away.
+- `POST /v1/backup/inspect`: the capture, as the console sends it, staged as
+  `restore.db`, opened by `Store::open_restorable` (migrated forward, integrity
+  and foreign keys checked, tables compared with the live ones), and answered as
+  an `AppInspection` with sections `acme` and `enrolment`. A capture that isn't
+  ours, a newer version or schema, or a section that doesn't parse is
+  `blocked`; so is an enrolment for another key on an enrolled broker, or one
+  that would undo a revocation. Each blocked reason is a warning too ("This
+  backup will not be restored …"), as the console at ApplianceOS `5a2d0f2`
+  reads only the warnings.
+- `POST /v1/backup/restore`: under the state lock, refused while anything is
+  blocked. `Store::replace_from` replaces every table from the staged copy in
+  one transaction and moves each certificate's `changed` past every change
+  either database made, so opCA's sync cursor misses nothing. The enrolment is
+  written just before the commit and put back if the commit fails, then the
+  state is reloaded. An enrolment whose chain isn't for the held key is left
+  out on a broker still enrolling, with a warning naming the old subordinate
+  for opCA to revoke. The work is spawned, so a console that stops waiting doesn't cut it off.
+
+With no host, `capture_left` captures whatever `/data/state` holds, as a
+running broker would: `acme.db` opened and snapshotted if there is one, and the
+enrolment, so unsetting `host` never fails the box's backup. Only an empty
+capture restores until the host is set.
 
 ### Packaging and verification
 
 [debian/](../crates/opca-acme-broker/debian) holds the systemd unit
 (`Type=notify`, `User=opca-acme`, `StateDirectory`, `ExecReload`,
-`CAP_NET_BIND_SERVICE` for step-ca's 443, and hardening), the sysusers entry,
+`CAP_NET_BIND_SERVICE` for the ACME listener's 443, and hardening), the sysusers entry,
 the commented `broker.toml` and a postinst note. `[package.metadata.deb]` in
 the crate's `Cargo.toml` drives `cargo-deb`; the `acme-broker` job in
 [build.yml](../.github/workflows/build.yml) builds `-p opca-acme-broker` alone
 against the system libssl3 and attaches the `.deb` to `v*` releases.
 
-[tests/docker.sh](../crates/opca-acme-broker/tests/docker.sh) builds the Linux
-binaries and the `.deb` in a throwaway `rust:1.99-bookworm` container from a
-vendored copy of the two crates, takes step-ca out of `smallstep/step-ca:0.28.1`,
-and runs [tests/step_ca_docker.rs](../crates/opca-acme-broker/tests/step_ca_docker.rs)
-with `OPCA_ACME_DOCKER_TEST=1`: step-ca issuing to lego over http-01 and
-refusing an out-of-domain name, a renewal reloaded by SIGHUP, the command
-line's privilege drop, and the `.deb` installed and enrolled under systemd in
+[scripts/stage-broker-src.sh](../scripts/stage-broker-src.sh) stages the two
+crates without their dev-dependencies, with every dependency vendored, for
+builds that can't reach the registries. Its config links arm64 with lld and
+`--fix-cortex-a53-843419`, since bookworm's ld leaves an erratum 843419 site
+even with its fix on; both arm64 builds check their binaries with
+`wslib-appliance-xtask erratum-843419`.
+[scripts/build-broker-deb.sh](../scripts/build-broker-deb.sh) `--platform
+linux/arm64|linux/amd64` builds the Linux binaries and the `.deb` from it in a
+throwaway `rust:1.99-bookworm` container of that platform (emulated when it
+isn't the host's), into `target/acme-docker/<arch>/`.
+[tests/docker.sh](../crates/opca-acme-broker/tests/docker.sh) takes the same
+flag, builds, and runs
+[tests/broker_docker.rs](../crates/opca-acme-broker/tests/broker_docker.rs)
+with `OPCA_ACME_DOCKER_TEST=1` in containers of that platform: the command
+line's privilege drop and reopen, and the `.deb` installed, enrolled and
+serving the ACME listener's certificate for `host` under systemd in
 `debian:bookworm`. Without the variable those tests skip.
+
+[scripts/build-acme-app.sh](../scripts/build-acme-app.sh) `[--keys <dir>]
+--platform linux/arm64` (keys from `.env` without `--keys`) builds the app image from the staged crates with
+[appliance/Dockerfile](../crates/opca-acme-broker/appliance/Dockerfile) on the
+`appliance-image` buildx builder: the broker compiled in `rust:1.99-bookworm`,
+run on `distroless/cc-debian12`, whose glibc and libssl3 are the same Debian
+release's. It labels the image with the manifest that
+[examples/appliance-label.rs](../crates/opca-acme-broker/examples/appliance-label.rs)
+builds from `wslib-appliance-types`' `AppManifest` and checks with its
+validator (its tests run under `cargo test`), writes a docker-load tarball to
+`target/acme-app/`, and packs it with a signed index through ApplianceOS's
+`make-app-archive.sh`, with throwaway keys. With `OPCA_ACME_APP_IMAGE` naming
+the tarball, `broker_docker.rs` runs the image as the console would (its own
+uid in group 0, no capabilities, the `data` and socket volumes, a mapped API
+port): healthy and refusing with no host, then, with `host` in
+`options.json` and a restart, enrolled and serving ACME.
 
 ---
 

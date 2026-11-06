@@ -20,11 +20,12 @@ pub struct Config {
     pub domains: Vec<String>,
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
-    #[serde(default = "default_step_ca")]
-    pub step_ca: PathBuf,
-    /// Where step-ca serves ACME.
+    /// Where the broker serves ACME.
     #[serde(default = "default_acme_listen")]
     pub acme_listen: SocketAddr,
+    /// The port opCA dials when it isn't `listen`'s, as behind a container's mapped port.
+    #[serde(skip)]
+    pub advertised_port: Option<u16>,
 }
 
 impl Config {
@@ -37,6 +38,11 @@ impl Config {
     pub fn parse(text: &str) -> Result<Self, Error> {
         Ok(toml::from_str(text)?)
     }
+
+    /// The port the pairing URI names.
+    pub fn port(&self) -> u16 {
+        self.advertised_port.unwrap_or(self.listen.port())
+    }
 }
 
 fn default_listen() -> SocketAddr {
@@ -45,10 +51,6 @@ fn default_listen() -> SocketAddr {
 
 fn default_state_dir() -> PathBuf {
     "/var/lib/opca-acme".into()
-}
-
-fn default_step_ca() -> PathBuf {
-    "/usr/bin/step-ca".into()
 }
 
 fn default_acme_listen() -> SocketAddr {
