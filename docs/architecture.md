@@ -506,8 +506,8 @@ broker's `changed` sequence, and the highest one per broker is its cursor, so
 a revocation of a row already synced replaces it. Times are converted to the
 database's OpenSSL format. The sync rides on the call and costs no `op`
 round-trip of its own; a failure, such as a broker older than the list, is
-logged and never fails the call. `issuer_serial` tells a reopened broker's
-earlier subordinate apart; nothing filters on it yet.
+logged and never fails the call. The broker leaves out what a reopened
+broker's earlier subordinate issued, by `issuer_serial`.
 
 **Concerns** (`concern.rs`). `concerns` flags an active broker with a `url`
 whose subordinate expires within 30 days, whose `last_contact` is older than
@@ -1176,6 +1176,10 @@ survives re-enrolment.
   certificates changed since the cursor, oldest first, without their PEM:
   serial, common name, SANs, validity, issuer serial, revocation and the
   `changed` sequence. It returns the `next` cursor and whether `more` wait.
+  The list and the counts hold only what this enrolment's subordinates
+  issued: `Enrolled::issuers` keeps their serials, the enrolled one and each
+  renewal's, so a reopened broker's earlier subordinate stays out. An
+  enrolment from before it was kept has none and answers for every row.
 
 ### The ACME listener
 

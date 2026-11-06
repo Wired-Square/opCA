@@ -567,22 +567,22 @@ async fn the_cursor_pages_through_what_changed_after_it_in_order() {
     let id = account(&store, "thumb").await;
     record(&store, id, &["10", "20", "30"]).await;
 
-    let all = store.changed_after(0, 10).await.unwrap();
+    let all = store.changed_after(0, None, 10).await.unwrap();
     assert_eq!((serials(&all), all.more), (vec!["10", "20", "30"], false));
     assert!(
         all.certificates
             .windows(2)
             .all(|pair| pair[0].changed < pair[1].changed)
     );
-    let first = store.changed_after(0, 2).await.unwrap();
+    let first = store.changed_after(0, None, 2).await.unwrap();
     assert_eq!((serials(&first), first.more), (vec!["10", "20"], true));
     let rest = store
-        .changed_after(first.certificates[1].changed, 2)
+        .changed_after(first.certificates[1].changed, None, 2)
         .await
         .unwrap();
     assert_eq!((serials(&rest), rest.more), (vec!["30"], false));
     let past = store
-        .changed_after(all.certificates[2].changed, 10)
+        .changed_after(all.certificates[2].changed, None, 10)
         .await
         .unwrap();
     assert!(past.certificates.is_empty() && !past.more);
@@ -593,18 +593,18 @@ async fn revoking_a_certificate_already_past_the_cursor_brings_it_back() {
     let (_dir, store) = open().await;
     let id = account(&store, "thumb").await;
     record(&store, id, &["10", "20"]).await;
-    let synced = store.changed_after(0, 10).await.unwrap();
+    let synced = store.changed_after(0, None, 10).await.unwrap();
     let cursor = synced.certificates[1].changed;
 
     store.revoke("10", Some(4)).await.unwrap();
     record(&store, id, &["30"]).await;
 
-    let changes = store.changed_after(cursor, 10).await.unwrap();
+    let changes = store.changed_after(cursor, None, 10).await.unwrap();
     assert_eq!(serials(&changes), ["10", "30"]);
     assert_eq!(changes.certificates[0].revocation_reason, Some(4));
     assert!(changes.certificates[0].revoked_at.is_some());
     assert_eq!(
-        store.counts().await.unwrap(),
+        store.counts(None).await.unwrap(),
         IssuedCounts {
             total: 3,
             revoked: 1

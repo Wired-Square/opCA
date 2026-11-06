@@ -222,7 +222,7 @@ revoke the old subordinate in opCA.
 
 Worth backing up, for the record of what was issued: `acme.db` (with the broker stopped) and
 `archive/`. A re-opening keeps `acme.db`: its accounts and issued certificates belong to the host,
-not to one enrolment.
+not to one enrolment. opCA is told only of those the current enrolment's subordinate issued.
 
 ## Logs
 

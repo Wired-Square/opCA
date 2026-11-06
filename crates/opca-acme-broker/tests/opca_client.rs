@@ -450,8 +450,7 @@ async fn enrolment_status_and_renewal_sync_the_issued_list_a_page_at_a_time() {
     let state = private_tempdir();
     let (daemon, uri) = Daemon::start(&config(state.path(), &[])).await.unwrap();
     let running = run(state, daemon.with_issued_page(1), uri).await;
-    record(running.broker.acme(), "11", "a.home.example").await;
-    record(running.broker.acme(), "22", "b.home.example").await;
+    record(running.broker.acme(), "1", "earlier.home.example").await;
 
     let Enrolled {
         running,
@@ -459,7 +458,15 @@ async fn enrolment_status_and_renewal_sync_the_issued_list_a_page_at_a_time() {
         operator,
         id,
     } = enrolled_on(running).await;
+    assert_eq!(synced(&ca), serials(&[]));
+    let store = running.broker.acme();
+    let issuer = row(&ca, id).subordinate_serial;
+    record_by(store, &issuer, "11", "a.home.example").await;
+    record_by(store, &issuer, "22", "b.home.example").await;
+    stores(&ca, 1);
+    let status = ca.ca.broker_status(&operator, id).unwrap();
     assert_eq!(synced(&ca), serials(&[("11", false), ("22", false)]));
+    assert_eq!(status.issued.map(|c| (c.total, c.revoked)), Some((2, 0)));
     let [cert, ..] = &ca
         .ca
         .ca_database
@@ -473,9 +480,8 @@ async fn enrolment_status_and_renewal_sync_the_issued_list_a_page_at_a_time() {
     assert_eq!(cert.broker_id, id);
     assert!(cert.not_after.len() == 15 && cert.not_after.ends_with('Z'));
 
-    let store = running.broker.acme();
     store.revoke("11", Some(1)).await.unwrap();
-    record(store, "33", "c.home.example").await;
+    record_by(store, &issuer, "33", "c.home.example").await;
     stores(&ca, 1);
     let status = ca.ca.broker_status(&operator, id).unwrap();
     assert_eq!(

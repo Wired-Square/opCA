@@ -92,20 +92,28 @@ impl Broker {
         status: Result<Status, ErrorBody>,
     ) -> Result<Status, ErrorBody> {
         let mut status = status?;
+        let issuers = match self.mode() {
+            Mode::Enrolled(enrolled) => enrolled.issuers,
+            Mode::Enrolling => None,
+        };
         status.issued = self
             .acme()
-            .counts()
+            .counts(issuers.as_deref())
             .await
             .inspect_err(|error| tracing::error!(%error, "counting the issued certificates"))
             .ok();
         Ok(status)
     }
 
-    pub(crate) async fn issued(&self, after: u64) -> Result<IssuedPage, ErrorBody> {
+    pub(crate) async fn issued(
+        &self,
+        enrolled: &Enrolled,
+        after: u64,
+    ) -> Result<IssuedPage, ErrorBody> {
         let cursor = i64::try_from(after).map_err(bad_request)?;
         let changes = self
             .acme()
-            .changed_after(cursor, self.issued_page)
+            .changed_after(cursor, enrolled.issuers.as_deref(), self.issued_page)
             .await
             .map_err(internal)?;
         let certificates: Vec<_> = changes.certificates.into_iter().map(issued).collect();
@@ -142,9 +150,13 @@ impl Broker {
             ));
         }
         self.check_config(&update.config, &subordinate)?;
+        let issuers = current
+            .issuers
+            .map(|serials| [serials, vec![decimal(&subordinate.serial)]].concat());
         let renewed = Enrolled {
             chain_pem: update.chain_pem,
             config: update.config,
+            issuers,
             ..current
         };
         self.store(renewed.clone())?;
