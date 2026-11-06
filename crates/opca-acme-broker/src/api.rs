@@ -124,7 +124,7 @@ fn parse<T: DeserializeOwned>(body: &[u8]) -> Result<T, ErrorBody> {
     serde_json::from_slice(body).map_err(bad_request)
 }
 
-fn reply<T: Serialize>(answer: Result<T, ErrorBody>) -> Response {
+pub(crate) fn reply<T: Serialize>(answer: Result<T, ErrorBody>) -> Response {
     match answer {
         Ok(body) => json(StatusCode::OK, &body),
         Err(refusal) => json(
@@ -135,7 +135,7 @@ fn reply<T: Serialize>(answer: Result<T, ErrorBody>) -> Response {
     }
 }
 
-fn json(status: StatusCode, body: &impl Serialize) -> Response {
+pub(crate) fn json(status: StatusCode, body: &impl Serialize) -> Response {
     let body = serde_json::to_vec(body).expect("the API's types serialise");
     (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
 }

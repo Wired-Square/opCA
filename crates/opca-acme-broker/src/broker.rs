@@ -176,6 +176,16 @@ impl Broker {
         }
     }
 
+    /// The state lock, held across awaits by whoever keeps the file.
+    pub(crate) async fn lock(&self) -> Result<std::fs::File, Error> {
+        let state = self.state.clone();
+        let locking = tokio::task::spawn_blocking(move || lock_state(&state));
+        let locked = tokio::time::timeout(self.lock_timeout, locking)
+            .await
+            .map_err(|_| "timed out waiting for the state's lock")?;
+        Ok(locked??)
+    }
+
     /// Takes up what `opca-acme enrol --reopen` changed on disk: the
     /// subordinate, the mode, the TLS it implies, and the ACME listener.
     pub async fn reload(self: &Arc<Self>) -> Result<(), ErrorBody> {
@@ -183,7 +193,7 @@ impl Broker {
             .await
     }
 
-    fn reload_locked(&self) -> Result<(), Error> {
+    pub(crate) fn reload_locked(&self) -> Result<(), Error> {
         let subordinate =
             Subordinate::load_or_generate(self.provider.clone(), &self.state, &self.host)?;
         let mode = enrolment::load(&self.state)?;

@@ -11,8 +11,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use wslib_db_sqlite::sqlx::error::BoxDynError;
 use wslib_db_sqlite::sqlx::migrate::{Migration, MigrationSource, MigrationType, Migrator};
-use wslib_db_sqlite::sqlx::sqlite::SqliteRow;
-use wslib_db_sqlite::sqlx::{self, Row, SqliteConnection};
+use wslib_db_sqlite::sqlx::sqlite::{SqliteConnectOptions, SqliteRow};
+use wslib_db_sqlite::sqlx::{
+    self, ConnectOptions, Connection, Row, Sqlite, SqliteConnection, Transaction,
+};
 use wslib_db_sqlite::{Chain, Database, stamp};
 
 use super::{Named, Problem, base64url};
@@ -29,6 +31,9 @@ const MIGRATIONS: [(i64, &str, &str); 2] = [
         include_str!("../../migrations/0002_issued_changes.sql"),
     ),
 ];
+
+/// The newest migration, which a capture of `acme.db` records.
+pub const SCHEMA: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 
 named! {
     pub enum AccountStatus {
@@ -137,6 +142,7 @@ pub enum Error {
     KeyInUse {
         account: i64,
     },
+    Unrestorable(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -150,6 +156,7 @@ impl fmt::Display for Error {
             }
             Self::AlreadyRevoked { serial } => write!(f, "certificate {serial} is already revoked"),
             Self::KeyInUse { account } => write!(f, "account {account} holds that key"),
+            Self::Unrestorable(why) => f.write_str(why),
         }
     }
 }
@@ -305,6 +312,8 @@ const CHALLENGE: &str =
 const CERTIFICATE: &str = "SELECT id, serial, account, order_id, common_name, sans, not_before, \
                            not_after, chain_pem, issuer_serial, revoked_at, revocation_reason, \
                            created, changed FROM certificates";
+
+const DANGLING: &str = "a row in it refers to one that is not there";
 
 const NEXT_CHANGE: &str = "(SELECT COALESCE(MAX(changed), 0) + 1 FROM certificates)";
 
@@ -788,6 +797,137 @@ impl Store {
             authorisations,
         })
     }
+
+    /// A consistent copy at `path`, taken live, keeping no chain of a certificate expired at `now`.
+    pub async fn snapshot(&self, path: &Path, now: SystemTime) -> Result<(), Error> {
+        sqlx::query("VACUUM INTO ?")
+            .bind(path.to_string_lossy().into_owned())
+            .execute(self.db.pool())
+            .await?;
+        let mut copy = SqliteConnectOptions::new().filename(path).connect().await?;
+        sqlx::query("UPDATE certificates SET chain_pem = '' WHERE not_after <= ?")
+            .bind(format(now))
+            .execute(&mut copy)
+            .await?;
+        sqlx::query("PRAGMA journal_mode = DELETE")
+            .execute(&mut copy)
+            .await?;
+        sqlx::query("VACUUM").execute(&mut copy).await?;
+        copy.close().await?;
+        Ok(())
+    }
+
+    /// Opens the copy at `path`, migrated forward, and counts its certificates;
+    /// refused unless it is whole and has this database's tables.
+    pub async fn open_restorable(&self, path: &Path) -> Result<u64, Error> {
+        let copy = Self::open(path, self.provider.clone()).await?;
+        let checked = copy.restorable_beside(self).await;
+        copy.db.close().await;
+        checked
+    }
+
+    async fn restorable_beside(&self, live: &Self) -> Result<u64, Error> {
+        let pool = self.db.pool();
+        let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
+            .fetch_one(pool)
+            .await?;
+        if integrity != "ok" {
+            return Err(Error::Unrestorable("it is damaged"));
+        }
+        if sqlx::query("PRAGMA foreign_key_check")
+            .fetch_optional(pool)
+            .await?
+            .is_some()
+        {
+            return Err(Error::Unrestorable(DANGLING));
+        }
+        if schema(self).await? != schema(live).await? {
+            return Err(Error::Unrestorable("its tables are not this broker's"));
+        }
+        Ok(self.counts().await?.total)
+    }
+
+    /// Every row replaced by those of the copy at `path`, which [`Store::open_restorable`]
+    /// passed, in one transaction that `before_commit` may still refuse. Each
+    /// certificate's change moves past every change either database made, so a
+    /// sync cursor from before the restore misses nothing after it.
+    pub async fn replace_from<E: From<Error>>(
+        &self,
+        path: &Path,
+        before_commit: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        // Out of the pool, so the attachment never reaches another query.
+        let mut conn = self
+            .db
+            .writer()
+            .acquire()
+            .await
+            .map_err(Error::from)?
+            .detach();
+        let tx = replaced(&mut conn, path).await?;
+        before_commit()?;
+        tx.commit().await.map_err(Error::from)?;
+        Ok(())
+    }
+}
+
+async fn schema(store: &Store) -> Result<Vec<(String, String, String)>, Error> {
+    Ok(sqlx::query_as(
+        "SELECT type, name, COALESCE(sql, '') FROM sqlite_master ORDER BY type, name",
+    )
+    .fetch_all(store.db.pool())
+    .await?)
+}
+
+async fn replaced<'c>(
+    conn: &'c mut SqliteConnection,
+    path: &Path,
+) -> Result<Transaction<'c, Sqlite>, Error> {
+    sqlx::query("ATTACH DATABASE ? AS restored")
+        .bind(path.to_string_lossy().into_owned())
+        .execute(&mut *conn)
+        .await?;
+    // Off, and checked whole before the commit: deferred, a whole-table replace
+    // failed its commit with no violation left.
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await?;
+    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
+    let past: i64 = sqlx::query_scalar(
+        "SELECT MAX((SELECT COALESCE(MAX(changed), 0) FROM main.certificates), \
+         (SELECT COALESCE(MAX(changed), 0) FROM restored.certificates))",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\'",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for table in tables {
+        sqlx::query(&format!("DELETE FROM main.\"{table}\""))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(&format!(
+            "INSERT INTO main.\"{table}\" SELECT * FROM restored.\"{table}\""
+        ))
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("UPDATE main.certificates SET changed = changed + ?")
+        .bind(past)
+        .execute(&mut *tx)
+        .await?;
+    if sqlx::query("PRAGMA main.foreign_key_check")
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some()
+    {
+        return Err(Error::Unrestorable(
+            "a row in it refers to one that is not there",
+        ));
+    }
+    Ok(tx)
 }
 
 async fn read_status<S: Lifecycle>(conn: &mut SqliteConnection, id: i64) -> Result<S, Error> {

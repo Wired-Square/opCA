@@ -849,6 +849,40 @@ fn plain_get(address: std::net::SocketAddr, path: &str) -> (String, String) {
     (head.lines().next().unwrap().into(), body.into())
 }
 
+const HOT_BACKUP: &str = r#"set -eu
+hook() { curl -sf --unix-socket /run/appliance/hooks.sock -H 'Content-Type: application/json' "$@"; }
+hook http://localhost/v1 | grep -q '"backup":true' && echo INDEX-SAYS-BACKUP
+hook -X POST http://localhost/v1/backup/capture > /tmp/capture.json
+grep -q '"format":"opca-acme-broker"' /tmp/capture.json && echo CAPTURED
+hook -X POST --data-binary @/tmp/capture.json http://localhost/v1/backup/inspect > /tmp/inspection.json
+grep -q '"blocked":{}' /tmp/inspection.json && echo NOTHING-BLOCKED
+{ printf '{"chosen": {"app": ["acme", "enrolment"]}, "sections": '; cat /tmp/capture.json; printf '}'; } > /tmp/restore.json
+hook -X POST --data-binary @/tmp/restore.json http://localhost/v1/backup/restore > /tmp/report.json
+grep -q '"app":\["acme","enrolment"\]' /tmp/report.json && echo RESTORED
+"#;
+
+/// Captures, inspects and restores as the console would, through a container sharing the socket volume.
+fn hot_backup_round_trip(socket: &str) {
+    let mount = format!("{socket}:/run/appliance");
+    let ran = docker(
+        &["run", "--rm", "-v", &mount, RUNTIME, "sh", "-c", HOT_BACKUP],
+        120,
+    );
+    let said = text(&ran.stdout);
+    for step in [
+        "INDEX-SAYS-BACKUP",
+        "CAPTURED",
+        "NOTHING-BLOCKED",
+        "RESTORED",
+    ] {
+        assert!(
+            said.contains(step),
+            "{step}:\n{said}\n{}",
+            text(&ran.stderr)
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_app_image_needs_a_host_then_enrols() {
     let Ok(tarball) = std::env::var("OPCA_ACME_APP_IMAGE") else {
@@ -965,6 +999,8 @@ async fn the_app_image_needs_a_host_then_enrols() {
     assert_eq!(presented[1], chain[0]);
     let (code, _) = acme.call("GET", "/acme/directory", "").await.unwrap();
     assert_eq!(code, 200);
+    hot_backup_round_trip(&socket);
+    wait_for_state(&socket, AppState::Enrolled);
 
     let stopped = docker(&["stop", "-t", "30", &app], 60);
     assert!(stopped.status.success(), "{}", text(&stopped.stderr));

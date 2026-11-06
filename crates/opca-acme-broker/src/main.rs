@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use opca_acme_broker::app::{self, App, AppState};
+use opca_acme_broker::app::{self, App, AppState, Hooked};
 use opca_acme_broker::{Broker, CONFIG_PATH, Config, Error, Mode, cli};
 use tokio::signal::unix::{SignalKind, signal};
 use wslib_http_server::{Bounds, Listener};
@@ -43,7 +43,12 @@ fn main() -> ExitCode {
                             let (api, acme) =
                                 (bind(app::API_PORT).await?, bind(app::ACME_PORT).await?);
                             return app
-                                .serve_needing_host(app::SOCKET.into(), api, acme, stop.token())
+                                .serve_needing_host(
+                                    Path::new(app::SOCKETS),
+                                    api,
+                                    acme,
+                                    stop.token(),
+                                )
                                 .await;
                         }
                     }
@@ -87,14 +92,17 @@ fn main() -> ExitCode {
                     }
                 }
             });
-            let health = app.map(|app| {
-                let broker = broker.clone();
-                tokio::spawn(app::serve_health(
-                    app::SOCKET.into(),
-                    move || app.health(AppState::from(&broker.mode())),
-                    stop.token().cancelled_owned(),
-                ))
-            });
+            let console = app
+                .map(|app| {
+                    let running = broker.clone();
+                    app::serve_console(
+                        Path::new(app::SOCKETS),
+                        Hooked::Running(broker.clone()),
+                        move || app.health(AppState::from(&running.mode())),
+                        stop.token(),
+                    )
+                })
+                .transpose()?;
             let token = stop.token();
             let acme = tokio::spawn(
                 broker
@@ -103,8 +111,8 @@ fn main() -> ExitCode {
             );
             let served = opca_acme_broker::serve(broker.clone(), listener, stop).await;
             let _ = acme.await;
-            if let Some(health) = health {
-                health.await??;
+            if let Some(console) = console {
+                console.await??;
             }
             let _ = std::fs::remove_file(&pid_file);
             served?;

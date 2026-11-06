@@ -417,6 +417,25 @@ pub fn error(body: &str) -> ErrorKind {
 
 /// Records a certificate for `name` as finalising its order would.
 pub async fn record(store: &Store, serial: &str, name: &str) {
+    let now = SystemTime::now();
+    record_chain(
+        store,
+        serial,
+        name,
+        "",
+        now + Duration::from_secs(30 * 86_400),
+    )
+    .await;
+}
+
+/// As [`record`], with `chain_pem` and `not_after`.
+pub async fn record_chain(
+    store: &Store,
+    serial: &str,
+    name: &str,
+    chain_pem: &str,
+    not_after: SystemTime,
+) {
     let expires = SystemTime::now() + Duration::from_secs(3600);
     let (account, _) = store
         .create_account(r#"{"kty":"EC"}"#, &format!("thumb-{serial}"), &[])
@@ -449,7 +468,6 @@ pub async fn record(store: &Store, serial: &str, name: &str) {
             .await
             .unwrap();
     }
-    let now = SystemTime::now();
     store
         .record_certificate(
             order.id,
@@ -457,9 +475,9 @@ pub async fn record(store: &Store, serial: &str, name: &str) {
                 serial: serial.into(),
                 common_name: Some(name.into()),
                 sans: vec![name.into()],
-                not_before: now,
-                not_after: now + Duration::from_secs(30 * 86_400),
-                chain_pem: String::new(),
+                not_before: not_after - Duration::from_secs(30 * 86_400),
+                not_after,
+                chain_pem: chain_pem.into(),
                 issuer_serial: "4096".into(),
             },
         )

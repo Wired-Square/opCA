@@ -4052,6 +4052,7 @@ name = "opca-acme-broker"
 version = "0.102.4"
 dependencies = [
  "axum",
+ "flate2",
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",

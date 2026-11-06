@@ -192,16 +192,16 @@ async fn health_answers_only_healthz_under_the_apps_base() {
 
 #[tokio::test]
 async fn without_a_host_it_is_healthy_and_refuses_on_both_listeners() {
-    let data = private_tempdir();
-    let socket = data.path().join("app.sock");
+    let (data, sockets) = (private_tempdir(), private_tempdir());
+    let socket = sockets.path().join("app.sock");
     let app = load(data.path(), &[("APPLIANCE_LISTENER_ACME_PORT", "443")]);
     let bind = || Listener::bind(format!("{LOOPBACK}:0").parse().unwrap(), Bounds::SERVING);
     let (api, acme) = (bind().await.unwrap(), bind().await.unwrap());
     let addresses = [api.local_addr(), acme.local_addr()];
     let stop = CancellationToken::new();
     let served = tokio::spawn({
-        let (socket, stop) = (socket.clone(), stop.clone());
-        async move { app.serve_needing_host(socket, api, acme, stop).await }
+        let (sockets, stop) = (sockets.path().to_owned(), stop.clone());
+        async move { app.serve_needing_host(&sockets, api, acme, stop).await }
     });
 
     let (status, body) = socket_answer(&socket, "/apps/opca-acme/healthz").await;
@@ -223,11 +223,8 @@ async fn without_a_host_it_is_healthy_and_refuses_on_both_listeners() {
         assert!(status.ends_with("503 Service Unavailable"), "{status}");
         assert!(body.contains("needs a host"), "{body}");
     }
-    assert_eq!(
-        fs::read_dir(data.path()).unwrap().count(),
-        1,
-        "only the socket"
-    );
+    assert_eq!(fs::read_dir(data.path()).unwrap().count(), 0, "no state");
+    assert!(sockets.path().join("hooks.sock").exists());
 
     stop.cancel();
     tokio::time::timeout(Duration::from_secs(15), served)

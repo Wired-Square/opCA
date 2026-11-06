@@ -262,8 +262,14 @@ listener's host port.
 Options come first; `/data/broker.toml`, with the same `host` and `domains` keys, second. A
 blank option gives way to it.
 
-The app is backed up cold, with the app stopped, so the backup is whole but includes the
-subordinate key: keep app backups as carefully as the key itself.
+The app takes its own backups while it runs, so the box's backup holds `acme.db` (accounts and
+issued certificates), the enrolment, its chain and its config, and **never the subordinate key**.
+A restore is all or nothing, and the box keeps the key it holds. On the same box the broker
+carries on as it was. On a fresh box, whose key is a new one, the issued certificates come back
+but the enrolment doesn't: the broker wants enrolling again, and the restore says so and names
+the old subordinate's serial, which you then revoke in opCA. A restore is refused onto a broker
+enrolled with another key, onto a revoked broker by a backup from before the revocation, and onto
+an app that still needs its `host`.
 
 To build it and pack it into an archive the console's **Apps › Install** takes:
 

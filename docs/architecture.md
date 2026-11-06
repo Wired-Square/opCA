@@ -1284,8 +1284,41 @@ host, and is healthy. Setting the option restarts the container, which then
 starts the broker as usual. `serve_health` answers only
 `GET /apps/opca-acme/healthz` on `/run/appliance/app.sock`, with the state
 (`needs_host`, `enrolling`, `enrolled` or `revoked`) and both ports. The
-pairing URI is in the container's log. The console stops the app before it
-snapshots `/data`, so `acme.db` needs no backup hooks.
+pairing URI is in the container's log.
+
+`serve_console` binds `/run/appliance/hooks.sock` before it serves health, so
+the console finds the hooks before it reads the app as healthy, and a console
+that finds none takes a cold tar of `/data`, key included. Both sockets are
+0660: the console connects through group root. `serve_hooks` answers `GET /v1`
+(`HookIndex`, `backup: true`), `GET /v1/about`, and the hot backup in
+[backup.rs](../crates/opca-acme-broker/src/backup.rs), one call at a time:
+
+- `POST /v1/backup/capture`: a `Capture` (format `opca-acme-broker`, version 1)
+  holding the enrolment as `enrolment.json` has it and `acme.db` as
+  `Store::snapshot` takes it live (`VACUUM INTO`, then the chains of expired
+  certificates blanked and the copy vacuumed), deflated and in base64url, with
+  its schema. Never `subordinate.key` or any other key. About 0.6 KiB per live
+  certificate, so the console's 7 MiB cap is some 13,000 away.
+- `POST /v1/backup/inspect`: the capture, as the console sends it, staged as
+  `restore.db`, opened by `Store::open_restorable` (migrated forward, integrity
+  and foreign keys checked, tables compared with the live ones), and answered as
+  an `AppInspection` with sections `acme` and `enrolment`. A capture that isn't
+  ours, a newer version or schema, or a section that doesn't parse is
+  `blocked`; so is an enrolment for another key on an enrolled broker, or one
+  that would undo a revocation. Each blocked reason is a warning too ("This
+  backup will not be restored …"), as the console at ApplianceOS `5a2d0f2`
+  reads only the warnings.
+- `POST /v1/backup/restore`: under the state lock, refused while anything is
+  blocked. `Store::replace_from` replaces every table from the staged copy in
+  one transaction and moves each certificate's `changed` past every change
+  either database made, so opCA's sync cursor misses nothing. The enrolment is
+  written just before the commit and put back if the commit fails, then the
+  state is reloaded. An enrolment whose chain isn't for the held key is left
+  out on a broker still enrolling, with a warning naming the old subordinate
+  for opCA to revoke. The work is spawned, so a console that stops waiting doesn't cut it off.
+
+With no host, capture is empty (or refused if `/data/state` exists), and only
+an empty capture restores.
 
 ### Packaging and verification
 
