@@ -36,7 +36,11 @@ describe("CA init tab", () => {
       ca_days: 3650,
       days: 365,
       crl_days: 30,
+      web_server_days: 90,
+      vpn_server_days: 365,
+      vpn_client_days: 365,
     });
+    expect(initCa.mock.calls[0][0]).not.toHaveProperty("device_days");
   });
 
   it("flags a certificate lifetime over Apple's 825-day server limit", () => {

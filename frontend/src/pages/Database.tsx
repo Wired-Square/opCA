@@ -5,7 +5,7 @@ import { getDatabaseInfo, getActionLog } from "../api/database";
 import { uploadCaDatabase } from "../api/ca";
 import { errorMessage } from "../api/tauri";
 import Spinner from "../components/Spinner";
-import type { DatabaseInfo, LocalBackupsInfo, LogEntry } from "../api/types";
+import { TYPE_LIFETIMES, type DatabaseInfo, type LocalBackupsInfo, type LogEntry } from "../api/types";
 import { ActionOutcome } from "../components/ResultBanner";
 import { createPublishFlow } from "../utils/publishFlow";
 import BackupAge from "../components/BackupAge";
@@ -164,6 +164,9 @@ function ConfigTab(props: { info: Resource<DatabaseInfo> }) {
             <Row label="Country" value={d().config.country} />
             <Row label="Certificate Days" value={d().config.days != null ? String(d().config.days) : null} />
             <Row label="CRL Days" value={d().config.crl_days != null ? String(d().config.crl_days) : null} />
+            <For each={TYPE_LIFETIMES}>
+              {(t) => <Row label={t.label} value={d().config[t.field]?.toString()} />}
+            </For>
             <Row label="CA URL" value={d().config.ca_url} mono />
             <Row label="CRL URL" value={d().config.crl_url} mono />
             <Row label="Public Store" value={d().config.ca_public_store} mono />

@@ -4,7 +4,7 @@ import { appleTlsLimitWarning, defaultCertDays } from "../api/types";
 
 export type CertDays = ReturnType<typeof createCertDays>;
 
-/** A lifetime prefilled from the CA's days for `certType`, reset when the type changes;
+/** A lifetime prefilled from the CA's default for `certType`, reset when the type changes;
  * `days()` is undefined when blank, leaving the backend default. */
 export function createCertDays(certType: () => string) {
   const [config] = createResource(() => getCaConfig().catch(() => null));
@@ -12,8 +12,8 @@ export function createCertDays(certType: () => string) {
   createEffect(on(certType, () => setEntered(null), { defer: true }));
 
   const defaultDays = () => {
-    const caDays = config()?.days;
-    return caDays ? defaultCertDays(certType(), caDays) : undefined;
+    const caConfig = config();
+    return caConfig ? defaultCertDays(certType(), caConfig) : undefined;
   };
   const text = () => entered() ?? String(defaultDays() ?? "");
   const days = () => parseInt(text()) || undefined;

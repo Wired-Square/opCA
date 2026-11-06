@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 19;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 20;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v19 — current)
+// Table DDL (v20 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -32,7 +32,11 @@ pub const CREATE_CONFIG_TABLE: &str = "
         ca_backup_store TEXT,
         ca_aws_region TEXT,
         crl_batch_enabled INTEGER,
-        openvpn_template_import INTEGER
+        openvpn_template_import INTEGER,
+        web_server_days INTEGER,
+        vpn_server_days INTEGER,
+        vpn_client_days INTEGER,
+        device_days INTEGER
     )
 ";
 
@@ -528,8 +532,25 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
             .map_err(|e| OpcaError::SchemaMigration(format!("v18→v19: {e}")))?;
 
         version = 19;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 19, ok: true });
+    }
+
+    // v19 → v20: per-type default certificate lifetimes. Only WebServer moves
+    // to 90 days, so existing CAs keep issuing the other types as before.
+    if version == 19 {
+        conn.execute_batch(
+            "ALTER TABLE config ADD COLUMN web_server_days INTEGER;
+             ALTER TABLE config ADD COLUMN vpn_server_days INTEGER;
+             ALTER TABLE config ADD COLUMN vpn_client_days INTEGER;
+             ALTER TABLE config ADD COLUMN device_days INTEGER;
+             UPDATE config SET web_server_days = MIN(COALESCE(days, 90), 90);
+             UPDATE config SET schema_version = 20 WHERE id = 1;",
+        )
+        .map_err(|e| OpcaError::SchemaMigration(format!("v19→v20: {e}")))?;
+
+        version = 20;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 20, ok: true });
     }
 
     info.migrated = true;

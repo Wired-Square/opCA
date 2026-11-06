@@ -39,15 +39,15 @@ fn handle_config_get<R: Runner>(app: &mut AppContext<R>) -> Result<(), OpcaError
     Ok(())
 }
 
-fn handle_config_set<R: Runner>(
-    app: &mut AppContext<R>,
-    conf: Vec<String>,
-) -> Result<(), OpcaError> {
-    output::title("Updating CA Database Configuration");
+fn parse_int(key: &str, value: &str) -> Result<i64, OpcaError> {
+    value
+        .parse()
+        .map_err(|_| OpcaError::Other(format!("Invalid integer for '{key}': {value}")))
+}
 
-    // Parse key=value pairs
+fn parse_config_updates(conf: &[String]) -> Result<CaConfig, OpcaError> {
     let mut updates = CaConfig::default();
-    for entry in &conf {
+    for entry in conf {
         let parts: Vec<&str> = entry.splitn(2, '=').collect();
         if parts.len() != 2 {
             return Err(OpcaError::Other(format!(
@@ -65,16 +65,12 @@ fn handle_config_set<R: Runner>(
             "country" => updates.country = Some(value),
             "ca_url" => updates.ca_url = Some(value),
             "crl_url" => updates.crl_url = Some(value),
-            "days" => {
-                updates.days = Some(value.parse::<i64>().map_err(|_| {
-                    OpcaError::Other(format!("Invalid integer for '{key}': {value}"))
-                })?);
-            }
-            "crl_days" => {
-                updates.crl_days = Some(value.parse::<i64>().map_err(|_| {
-                    OpcaError::Other(format!("Invalid integer for '{key}': {value}"))
-                })?);
-            }
+            "days" => updates.days = Some(parse_int(key, &value)?),
+            "crl_days" => updates.crl_days = Some(parse_int(key, &value)?),
+            "web_server_days" => updates.web_server_days = Some(parse_int(key, &value)?),
+            "vpn_server_days" => updates.vpn_server_days = Some(parse_int(key, &value)?),
+            "vpn_client_days" => updates.vpn_client_days = Some(parse_int(key, &value)?),
+            "device_days" => updates.device_days = Some(parse_int(key, &value)?),
             "ca_public_store" => updates.ca_public_store = Some(value),
             "ca_private_store" => updates.ca_private_store = Some(value),
             "ca_backup_store" => updates.ca_backup_store = Some(value),
@@ -93,7 +89,16 @@ fn handle_config_set<R: Runner>(
             }
         }
     }
+    Ok(updates)
+}
 
+fn handle_config_set<R: Runner>(
+    app: &mut AppContext<R>,
+    conf: Vec<String>,
+) -> Result<(), OpcaError> {
+    output::title("Updating CA Database Configuration");
+
+    let updates = parse_config_updates(&conf)?;
     let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
 
     {
@@ -210,6 +215,10 @@ fn print_config(config: &CaConfig) {
     field("CRL URL", &config.crl_url);
     ifield("Days", &config.days);
     ifield("CRL Days", &config.crl_days);
+    ifield("Web Server Days", &config.web_server_days);
+    ifield("VPN Server Days", &config.vpn_server_days);
+    ifield("VPN Client Days", &config.vpn_client_days);
+    ifield("Device Days", &config.device_days);
     field("Public Store", &config.ca_public_store);
     field("Private Store", &config.ca_private_store);
     field("Backup Store", &config.ca_backup_store);
@@ -222,4 +231,34 @@ fn print_config(config: &CaConfig) {
             "off"
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(conf: &[&str]) -> Result<CaConfig, OpcaError> {
+        parse_config_updates(&conf.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn config_set_takes_the_type_lifetimes() {
+        let updates = parse(&[
+            "web_server_days=90",
+            "vpn_server_days=365",
+            "vpn_client_days=0",
+            "device_days=30",
+        ])
+        .unwrap();
+        assert_eq!(
+            (
+                updates.web_server_days,
+                updates.vpn_server_days,
+                updates.vpn_client_days,
+                updates.device_days,
+            ),
+            (Some(90), Some(365), Some(0), Some(30))
+        );
+        assert!(parse(&["device_days=soon"]).is_err());
+    }
 }

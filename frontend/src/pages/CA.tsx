@@ -13,7 +13,7 @@ import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { caDaysOverAppleLimit, defaultKeyAlgorithm, type CaInfo, type CaConfig, type RestoreResult, type BackupInfoResult, type StoreTestResults, type AwsItemRef } from "../api/types";
+import { TYPE_LIFETIMES, caDaysOverAppleLimit, defaultKeyAlgorithm, isTlsServer, type TypeDaysField, type CaInfo, type CaConfig, type RestoreResult, type BackupInfoResult, type StoreTestResults, type AwsItemRef } from "../api/types";
 import KeyAlgorithmSelect from "../components/KeyAlgorithmSelect";
 import { ActionOutcome } from "../components/ResultBanner";
 import ResignCaDialog from "../components/ResignCaDialog";
@@ -235,6 +235,7 @@ function ConfigTab(props: { config: () => CaConfig | undefined; onSave: () => vo
               <FormField label="CA URL" value={merged().ca_url} onChange={(v) => set("ca_url", v)} />
               <FormField label="CRL URL" value={merged().crl_url} onChange={(v) => set("crl_url", v)} />
             </div>
+            <DefaultLifetimes config={merged()} set={set} />
 
             <ActionOutcome action={save} />
 
@@ -479,6 +480,9 @@ function InitTab(props: { onInitialised: () => void }) {
     ca_days: 3650,
     days: 365,
     crl_days: 30,
+    web_server_days: 90,
+    vpn_server_days: 365,
+    vpn_client_days: 365,
     key_algorithm: defaultKeyAlgorithm("ca"),
   });
 
@@ -526,6 +530,7 @@ function InitTab(props: { onInitialised: () => void }) {
             onChange={(v) => setForm((f) => ({ ...f, key_algorithm: v }))}
           />
         </div>
+        <DefaultLifetimes config={form()} set={set} />
 
         <Notice tone="bad" class="form-notice">{error()}</Notice>
 
@@ -815,6 +820,25 @@ function DetailRow(props: {
         {props.value ?? "\u2014"}
       </span>
     </div>
+  );
+}
+
+/** A blank field sends 0, which clears the type back to Certificate Days. */
+function DefaultLifetimes(props: { config: Partial<CaConfig>; set: (key: TypeDaysField, value: number) => void }) {
+  return (
+    <>
+      <h3 class="section-heading">Default Lifetimes</h3>
+      <p class="text-muted mb-3">Blank uses Certificate Days.</p>
+      <div class="form-grid">
+        <For each={TYPE_LIFETIMES}>
+          {(t) => (
+            <FormField label={t.label} value={String(props.config[t.field] || "")} type="number"
+              onChange={(v) => props.set(t.field, parseInt(v) || 0)}
+              warning={isTlsServer(t.certType) ? caDaysOverAppleLimit(props.config[t.field]) : null} />
+          )}
+        </For>
+      </div>
+    </>
   );
 }
 

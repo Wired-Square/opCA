@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The CA's init and Configuration tabs set a default lifetime per
+  certificate type (Web Server, VPN Server, VPN Client, Device), blank
+  meaning Certificate Days, and the Database page lists them. New certificates
+  are pre-filled with their type's lifetime.
 - The ACME broker ships as the `opca-acme` ApplianceOS app (arm64): a
   signed image with the `api` (9443) and `acme` (8443) listeners and a `data`
   volume, its `host` and `domains` set as app options. Until `host` is set it
@@ -39,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   directory: ACME accounts, orders, authorisations, challenges and the
   certificates it issues, each with a cursor for opCA to sync from. Statuses
   move only as RFC 8555 draws them.
+- The dashboard asks for renewal of certificates that expire within 30 days,
+  opening the Expiring Soon list.
 - The ACME broker lists what it has issued at `GET /v1/issued?after=<cursor>`,
   a page at a time, and its status counts the certificates issued and
   revoked. The cursor moves on revocation too, so a revoked certificate comes
@@ -71,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   broker with each certificate's names, expiry and state. A failed sync is
   logged and never fails the call. The CA database moves to schema v19;
   older dumps import unchanged.
+- `opca ca init` takes `--web-server-days` (default 90), `--vpn-server-days`
+  and `--vpn-client-days` (365) and `--device-days`, and `opca database
+  config-set` takes `web_server_days`, `vpn_server_days`, `vpn_client_days`
+  and `device_days` (`=0` falls back to `days`).
 
 ### Changed
 
@@ -84,6 +94,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   it. `step_ca` in `broker.toml` is now refused, the status reports
   `acme_down` in place of `step_ca_down`, and the versions no longer name
   step-ca. The ACME directory moves to `/acme/directory`.
+- Certificates take their type's default lifetime from the CA config, else
+  the CA's `days`, and server types stay capped at 825 days. A new CA issues
+  Web Server certificates for 90 days and VPN Server and VPN Client ones for
+  365. The CA database moves to schema v20, which sets an existing CA's Web
+  Server lifetime to 90 days (or its `days` if lower) and leaves the other
+  types on `days`.
 
 ### Fixed
 

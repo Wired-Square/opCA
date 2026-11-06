@@ -6,7 +6,7 @@ use opca_core::services::database::CaConfig;
 
 use crate::app::{AppContext, with_lock};
 use crate::output;
-use crate::{CaAction, CaArgs};
+use crate::{CaAction, CaArgs, TypeLifetimeArgs};
 
 pub fn dispatch(args: CaArgs, app: &mut AppContext<ShellRunner>) -> Result<(), OpcaError> {
     match args.action {
@@ -16,6 +16,7 @@ pub fn dispatch(args: CaArgs, app: &mut AppContext<ShellRunner>) -> Result<(), O
             ca_days,
             crl_days,
             days,
+            lifetimes,
             email,
             ou,
             city,
@@ -26,8 +27,8 @@ pub fn dispatch(args: CaArgs, app: &mut AppContext<ShellRunner>) -> Result<(), O
             key,
             create_vault: _,
         } => handle_init(
-            app, cn, org, ca_days, crl_days, days, email, ou, city, state, country, ca_url,
-            crl_url, key,
+            app, cn, org, ca_days, crl_days, days, lifetimes, email, ou, city, state, country,
+            ca_url, crl_url, key,
         ),
         CaAction::Import {
             cert_file,
@@ -69,6 +70,7 @@ fn handle_init<R: Runner>(
     ca_days: i64,
     crl_days: i64,
     days: i64,
+    lifetimes: TypeLifetimeArgs,
     email: Option<String>,
     ou: Option<String>,
     city: Option<String>,
@@ -96,6 +98,10 @@ fn handle_init<R: Runner>(
         crl_url,
         days: Some(days),
         crl_days: Some(crl_days),
+        web_server_days: Some(lifetimes.web_server_days),
+        vpn_server_days: Some(lifetimes.vpn_server_days),
+        vpn_client_days: Some(lifetimes.vpn_client_days),
+        device_days: lifetimes.device_days,
         ..CaConfig::default()
     };
 
@@ -445,4 +451,40 @@ pub fn write_file(path: &str, data: &[u8], mode: u32) -> Result<(), OpcaError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::{CaAction, CaArgs, Cli, Commands};
+
+    fn init_lifetimes(extra: &str) -> (i64, i64, i64, Option<i64>) {
+        let args = format!(
+            "opca -v CA ca init -n Root -o Org --ca-days 3650 --crl-days 30 --days 365 {extra}"
+        );
+        match Cli::try_parse_from(args.split_whitespace())
+            .unwrap()
+            .command
+        {
+            Commands::Ca(CaArgs {
+                action: CaAction::Init { lifetimes: l, .. },
+            }) => (
+                l.web_server_days,
+                l.vpn_server_days,
+                l.vpn_client_days,
+                l.device_days,
+            ),
+            _ => panic!("not ca init"),
+        }
+    }
+
+    #[test]
+    fn init_defaults_the_type_lifetimes_to_the_new_ca_values() {
+        assert_eq!(init_lifetimes(""), (90, 365, 365, None));
+        assert_eq!(
+            init_lifetimes("--web-server-days 30 --device-days 90"),
+            (30, 365, 365, Some(90))
+        );
+    }
 }

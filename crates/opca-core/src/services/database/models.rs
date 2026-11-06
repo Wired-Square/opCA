@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Duration, Utc};
 
 use crate::constants::CSR_STALE_DAYS;
-use crate::services::cert::KeyAlgorithm;
+use crate::services::cert::{CertType, KeyAlgorithm};
 use crate::utils::datetime::{self, DateTimeFormat};
 
 /// Certificate status values stored in the database.
@@ -186,6 +186,25 @@ pub struct CaConfig {
     /// Sign a batch of staggered CRLs for the private store instead of one
     /// `crl_days` CRL. Off unless set: needs the releasing Lambda.
     pub crl_batch_enabled: Option<bool>,
+    /// Per-type default lifetimes, overriding `days`; `Some(0)` clears one.
+    pub web_server_days: Option<i64>,
+    pub vpn_server_days: Option<i64>,
+    pub vpn_client_days: Option<i64>,
+    pub device_days: Option<i64>,
+}
+
+impl CaConfig {
+    /// The default lifetime set for `cert_type`, else the CA's `days`.
+    pub fn type_days(&self, cert_type: &CertType) -> Option<i64> {
+        match cert_type {
+            CertType::WebServer => self.web_server_days,
+            CertType::VpnServer => self.vpn_server_days,
+            CertType::VpnClient => self.vpn_client_days,
+            CertType::Device => self.device_days,
+            _ => None,
+        }
+        .or(self.days)
+    }
 }
 
 /// A DKIM key entry (`dkim_key` table). Mirrors the small set of metadata

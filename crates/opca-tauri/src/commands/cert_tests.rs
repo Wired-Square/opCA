@@ -3,6 +3,7 @@ use opca_core::services::database::{CaConfig, CertLookup};
 use opca_core::testutil::{Output, created, item_json};
 use serde_json::{Value, json};
 
+use super::ca::*;
 use super::cert::*;
 use super::csr::inspect_csr;
 use super::dto::InspectCertificateResult;
@@ -17,7 +18,9 @@ fn handler() -> impl Handler {
         revoke_cert,
         delete_cert,
         bulk_revoke_certs,
-        bulk_delete_certs
+        bulk_delete_certs,
+        get_ca_config,
+        update_ca_config
     ]
 }
 
@@ -195,6 +198,31 @@ fn create_cert_returns_the_list_item_and_stores_the_bundle_and_the_database() {
     assert!(creates[0].contains(&"--title=CRT_2_www.example.com".to_string()));
     assert_eq!(h.op_calls(&["document", "edit", "CA_Database"]).len(), 1);
     assert!(h.last_log().success);
+}
+
+fn type_days(h: &Harness) -> Value {
+    let config = h.invoke("get_ca_config", json!({})).unwrap();
+    json!([config["web_server_days"], config["device_days"]])
+}
+
+#[test]
+fn a_type_lifetime_saved_as_zero_clears() {
+    let h = Harness::with_ca(vec![], handler());
+    h.answer_writes(2);
+
+    h.invoke(
+        "update_ca_config",
+        json!({ "config": { "web_server_days": 90, "device_days": 30 } }),
+    )
+    .unwrap();
+    assert_eq!(type_days(&h), json!([90, 30]));
+
+    h.invoke(
+        "update_ca_config",
+        json!({ "config": { "web_server_days": 0 } }),
+    )
+    .unwrap();
+    assert_eq!(type_days(&h), json!([null, 30]));
 }
 
 #[test]

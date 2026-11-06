@@ -9,6 +9,7 @@ export type ActionKind =
   | "regenerate_and_upload_crl"
   | "regenerate_crl"
   | "view_expired_certs"
+  | "view_expiring_certs"
   | "view_pending_csrs"
   | "view_ca";
 
@@ -97,6 +98,10 @@ export interface CaConfig {
    * credential itself is per-user (see `api/aws.ts`). */
   ca_aws_region: string | null;
   crl_batch_enabled?: boolean | null;
+  web_server_days: number | null;
+  vpn_server_days: number | null;
+  vpn_client_days: number | null;
+  device_days: number | null;
   /** Init only. */
   key_algorithm?: KeyAlgorithm;
   /** Init only. */
@@ -161,10 +166,26 @@ export function isTlsServer(certType: string): boolean {
 /** Mirrors `SUBORDINATE_CA_DAYS`. */
 export const SUBORDINATE_CA_DAYS = 90;
 
-/** Mirrors `CertType::default_days`. */
-export function defaultCertDays(certType: string, caDays: number): number {
+/** The certificate types with their own default lifetime in the CA config. */
+export const TYPE_LIFETIMES = [
+  { certType: "webserver", field: "web_server_days", label: "Web Server Days" },
+  { certType: "vpnserver", field: "vpn_server_days", label: "VPN Server Days" },
+  { certType: "vpnclient", field: "vpn_client_days", label: "VPN Client Days" },
+  { certType: "device", field: "device_days", label: "Device Days" },
+] as const;
+
+export type TypeDaysField = (typeof TYPE_LIFETIMES)[number]["field"];
+
+/** Mirrors `CaConfig::type_days` and `CertType::default_days`. */
+export function defaultCertDays(
+  certType: string,
+  config: Partial<Pick<CaConfig, "days" | TypeDaysField>>,
+): number | undefined {
   if (certType === "subordinateca") return SUBORDINATE_CA_DAYS;
-  return isTlsServer(certType) ? Math.min(caDays, APPLE_TLS_MAX_DAYS) : caDays;
+  const field = TYPE_LIFETIMES.find((t) => t.certType === certType)?.field;
+  const days = (field && config[field]) || config.days;
+  if (!days) return undefined;
+  return isTlsServer(certType) ? Math.min(days, APPLE_TLS_MAX_DAYS) : days;
 }
 
 export function appleTlsLimitWarning(certType: string, days: number | undefined): string | null {

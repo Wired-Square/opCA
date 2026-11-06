@@ -1044,7 +1044,7 @@ impl<R: Runner> CertificateAuthority<R> {
         datetime::parse_datetime(&not_after_str, DateTimeFormat::Openssl)
     }
 
-    /// Sign `csr` for the requested lifetime, else the CA's `days` capped per
+    /// Sign `csr` for the requested lifetime, else the type's default lifetime capped per
     /// [`CertType::default_days`], with any warnings about where it won't be trusted.
     pub fn issue_certificate(
         &mut self,
@@ -1068,8 +1068,8 @@ impl<R: Runner> CertificateAuthority<R> {
                     .ca_database
                     .as_ref()
                     .ok_or_else(|| OpcaError::Other("CA not initialised".into()))?;
-                let ca_days = db.get_config()?.days.unwrap_or(365) as u32;
-                Ok(cert_type.default_days(ca_days))
+                let days = db.get_config()?.type_days(cert_type).unwrap_or(365) as u32;
+                Ok(cert_type.default_days(days))
             }
         }
     }
@@ -3426,13 +3426,24 @@ mod tests {
         cert_type: CertType,
         requested: Option<u32>,
     ) -> (i32, Vec<CertIssuanceWarning>) {
-        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
-        let db = ca.ca_database.as_ref().unwrap();
-        db.update_config(&CaConfig {
+        let config = CaConfig {
             days: Some(ca_days),
             ..CaConfig::default()
-        })
-        .unwrap();
+        };
+        issued_days_under(&config, cert_type, requested)
+    }
+
+    fn issued_days_under(
+        config: &CaConfig,
+        cert_type: CertType,
+        requested: Option<u32>,
+    ) -> (i32, Vec<CertIssuanceWarning>) {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        ca.ca_database
+            .as_ref()
+            .unwrap()
+            .update_config(config)
+            .unwrap();
         let leaf = CertificateBundle::generate(
             cert_type.clone(),
             "leaf.example.com",
@@ -3466,6 +3477,65 @@ mod tests {
     #[test]
     fn a_requested_lifetime_beats_the_ca_days() {
         assert_eq!(issued_days(365, CertType::VpnClient, Some(90)).0, 90);
+    }
+
+    fn per_type_config() -> CaConfig {
+        CaConfig {
+            days: Some(400),
+            web_server_days: Some(90),
+            vpn_server_days: Some(200),
+            vpn_client_days: Some(180),
+            device_days: Some(30),
+            ..CaConfig::default()
+        }
+    }
+
+    #[test]
+    fn each_type_defaults_to_its_own_lifetime() {
+        let config = per_type_config();
+        for (cert_type, days) in [
+            (CertType::WebServer, 90),
+            (CertType::VpnServer, 200),
+            (CertType::VpnClient, 180),
+            (CertType::Device, 30),
+            (CertType::CodeSigning, 400),
+        ] {
+            assert_eq!(issued_days_under(&config, cert_type, None).0, days);
+        }
+    }
+
+    #[test]
+    fn an_unset_type_lifetime_falls_back_to_the_ca_days() {
+        let config = CaConfig {
+            web_server_days: None,
+            ..per_type_config()
+        };
+        assert_eq!(issued_days_under(&config, CertType::WebServer, None).0, 400);
+    }
+
+    #[test]
+    fn a_server_type_lifetime_over_the_apple_limit_is_capped() {
+        let config = CaConfig {
+            web_server_days: Some(1000),
+            vpn_client_days: Some(1000),
+            ..per_type_config()
+        };
+        assert_eq!(
+            issued_days_under(&config, CertType::WebServer, None),
+            (825, vec![])
+        );
+        assert_eq!(
+            issued_days_under(&config, CertType::VpnClient, None).0,
+            1000
+        );
+    }
+
+    #[test]
+    fn a_requested_lifetime_beats_the_type_lifetime() {
+        assert_eq!(
+            issued_days_under(&per_type_config(), CertType::WebServer, Some(30)).0,
+            30
+        );
     }
 
     #[test]
