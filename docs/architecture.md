@@ -1389,7 +1389,7 @@ serving the ACME listener's certificate for `host` under systemd in
 `debian:bookworm`. Without the variable those tests skip.
 
 [scripts/build-acme-app.sh](../scripts/build-acme-app.sh) `[--keys <dir>]
---platform linux/arm64` (keys from `.env` without `--keys`) builds the app image from the staged crates with
+[--source <name>] --platform linux/arm64` (keys from `.env` without `--keys`) builds the app image from the staged crates with
 [appliance/Dockerfile](../crates/opca-acme-broker/appliance/Dockerfile) on the
 `appliance-image` buildx builder: the broker compiled in `rust:1.99-bookworm`,
 run on `distroless/cc-debian12`, whose glibc and libssl3 are the same Debian
@@ -1399,8 +1399,18 @@ SVGs into `/usr/share/opca-acme/ui`, with no node in the image (26-4). It labels
 [examples/appliance-label.rs](../crates/opca-acme-broker/examples/appliance-label.rs)
 builds from `wslib-appliance-types`' `AppManifest` and checks with its
 validator (its tests run under `cargo test`), writes a docker-load tarball to
-`target/acme-app/`, and packs it with a signed index through ApplianceOS's
-`make-app-archive.sh`, with throwaway keys. With `OPCA_ACME_APP_IMAGE` naming
+`target/acme-app/`, and packs it with a signed index using ApplianceOS's
+`app-index.sh` (`--image` packs a tarball built before). Source `opca-test`, the
+default, signs with throwaway keys. Source `wired-square`, which every image
+ships, signs with the `WiredSquare-Codesigning` leaf read from 1Password, its
+key piped to OpenSSL and never written out, once the leaf passes `openssl verify
+-purpose codesign` against ApplianceOS's shipped `wired-square.pem`
+(`WIRED_SQUARE_ROOT` overrides it). [tests/app-signing.sh](../crates/opca-acme-broker/tests/app-signing.sh)
+checks both on a stand-in tarball with throwaway keys and a stand-in `op`. On a
+`v*` tag, the Build workflow's `acme-app` job builds both arches signed as
+`wired-square` and attaches them to the draft release, with an ApplianceOS
+checkout (`APPLIANCEOS_READ_TOKEN`) and a 1Password service account
+(`OP_SERVICE_ACCOUNT_TOKEN`). With `OPCA_ACME_APP_IMAGE` naming
 the tarball, `broker_docker.rs` runs the image as the console would (its own
 uid in group 0, no capabilities, the `data` and socket volumes, a mapped API
 port): healthy and refusing with no host, hanging up on a uid that isn't the

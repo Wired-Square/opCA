@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and status (valid, expiring in its last third, expired, or revoked with the
   reason), filtered by revocation. It is read-only: revoke in opCA. Light,
   dark or the system's scheme.
+- Each release carries the `opca-acme` app for arm64 and amd64, signed as the
+  `wired-square` source every ApplianceOS image ships, so it installs from
+  Apps › Install with no source to add. `scripts/build-acme-app.sh --source
+  wired-square` signs with the leaf in 1Password, never writing its key out,
+  and refuses a leaf that isn't a code-signing leaf of the shipped root.
 - The ACME broker answers ACME (RFC 8555) itself at `/acme/directory`:
   accounts, key changes and deactivation, orders validated in the background
   over http-01, dns-01 or tls-alpn-01, finalising, certificate download, and

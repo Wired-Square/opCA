@@ -212,3 +212,73 @@ jobs:
           name: opca-acme-broker-deb
           path: dist/
           if-no-files-found: error
+
+  # The opca-acme ApplianceOS app, one archive per arch signed as the
+  # wired-square source every image ships (26-5).
+  acme-app:
+    needs: [create-release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+    runs-on: ${{ matrix.runner }}
+
+    env:
+      CARGO_REGISTRIES_WIRED_SQUARE_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
+      APPLIANCEOS: ${{ github.workspace }}/ApplianceOS
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Checkout ApplianceOS's app signing scripts and shipped roots
+        uses: actions/checkout@v5
+        with:
+          repository: Wired-Square/ApplianceOS
+          token: ${{ secrets.APPLIANCEOS_READ_TOKEN }}
+          path: ApplianceOS
+          sparse-checkout: |
+            scripts
+            layers/meta-applianceos/recipes-apps/applianceos-app-sources/files
+
+      - name: Read the wslib crates from the registry mirror
+        run: |
+          mkdir -p "${CARGO_HOME:-$HOME/.cargo}"
+          cat .cargo/mirror.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.99
+
+      - name: Install the erratum checker
+        if: matrix.platform == 'linux/arm64'
+        run: cargo install wslib-appliance-xtask --registry wired-square --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: crates/opca-acme-broker/ui/package-lock.json
+
+      - name: Authenticate to the npm registry mirror
+        env:
+          NPM_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
+        run: echo "//mirror.wiredsquare.com/npm/:_authToken=${NPM_MIRROR_TOKEN}" >> ~/.npmrc
+
+      - name: Install the 1Password CLI
+        uses: 1password/install-cli-action@v2
+
+      - name: Build and sign the app archive
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+        run: scripts/build-acme-app.sh --source wired-square --platform ${{ matrix.platform }}
+
+      - name: Upload release asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" target/acme-app/opca-acme-*-wired-square.tar --clobber
