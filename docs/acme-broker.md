@@ -269,7 +269,8 @@ carries on as it was. On a fresh box, whose key is a new one, the issued certifi
 but the enrolment doesn't: the broker wants enrolling again, and the restore says so and names
 the old subordinate's serial, which you then revoke in opCA. A restore is refused onto a broker
 enrolled with another key, onto a revoked broker by a backup from before the revocation, and onto
-an app that still needs its `host`.
+an app that still needs its `host`. Unsetting `host` doesn't stop the backups: they keep what the
+broker left.
 
 To build it and pack it into an archive the console's **Apps › Install** takes:
 

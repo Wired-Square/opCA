@@ -27,7 +27,7 @@ use wslib_appliance_types::hooks::{AppAbout, AppInspection, AppRestore, HookInde
 use wslib_http_server::{Listener, serve_http};
 
 use crate::api::{json, reply};
-use crate::backup::{Capture, both_blocked, failed, warned_of_blocked};
+use crate::backup::{Capture, both_blocked, capture_left, failed, warned_of_blocked};
 use crate::enrolment::bad_request;
 use crate::{Broker, Config, Error, Mode};
 
@@ -44,8 +44,6 @@ pub const ACME_PORT: u16 = 8443;
 const NEEDS_HOST: &str = "the broker needs a host: set the app's host option";
 const NEEDS_HOST_TO_RESTORE: &str = "the broker needs a host first: set host (and domains) in \
                                      the app's options, then restore";
-const STATE_WITHOUT_HOST: &str = "the broker has state but no host, so it cannot take its \
-                                  backup: set the app's host option";
 
 /// The settings the console's options and the app's own config can give.
 #[derive(Default, Deserialize)]
@@ -280,8 +278,7 @@ async fn capture(State(hooks): State<Hooks>) -> Response {
     let _turn = hooks.one_at_a_time.lock().await;
     reply(match &hooks.hooked {
         Hooked::Running(broker) => broker.capture().await.map_err(failed),
-        Hooked::NeedsHost(state) if state.exists() => Err(failed(STATE_WITHOUT_HOST)),
-        Hooked::NeedsHost(_) => Ok(Capture::new(None, None)),
+        Hooked::NeedsHost(state) => capture_left(state).await.map_err(failed),
     })
 }
 

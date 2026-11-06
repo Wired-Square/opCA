@@ -10,14 +10,16 @@ use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use opca_acme_api::ErrorBody;
+use rustls_openssl::default_provider;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wslib_appliance_types::backup::{Chosen, RestoreReport};
 use wslib_appliance_types::hooks::{AppInspection, AppRestore};
 use wslib_crypto_x509::{inspect, pem};
 
-use crate::acme::store::SCHEMA;
+use crate::acme::store::{SCHEMA, Store};
 use crate::acme::{base64url, from_base64url};
+use crate::broker::lock_state;
 use crate::enrolment::{self, Enrolled, Mode, bad_request, decimal, rfc_3339};
 use crate::{Broker, Error};
 
@@ -94,22 +96,7 @@ struct Checked {
 impl Broker {
     pub async fn capture(&self) -> Result<Capture, Error> {
         let _lock = self.lock().await?;
-        let copy = self.state.join("capture.db");
-        remove_db(&copy)?;
-        let taken = self.acme().snapshot(&copy, SystemTime::now()).await;
-        let db = taken
-            .map_err(Error::from)
-            .and_then(|()| Ok(std::fs::read(&copy)?));
-        remove_db(&copy)?;
-        let acme = AcmeSection {
-            schema: SCHEMA,
-            db: base64url(&deflate(&db?)?),
-        };
-        let enrolment = match enrolment::load(&self.state)? {
-            Mode::Enrolled(enrolled) => Some(serde_json::to_value(enrolled)?),
-            Mode::Enrolling => None,
-        };
-        Ok(Capture::new(Some(serde_json::to_value(acme)?), enrolment))
+        capture_state(&self.state, Some(self.acme())).await
     }
 
     pub async fn inspect(&self, blob: Value) -> Result<AppInspection, ErrorBody> {
@@ -310,6 +297,49 @@ impl Broker {
         }
         Ok(Some(restored))
     }
+}
+
+/// What a broker without a host left in `state`, captured as a running one would capture it.
+pub async fn capture_left(state: &Path) -> Result<Capture, Error> {
+    if !state.exists() {
+        return Ok(Capture::new(None, None));
+    }
+    let locking = state.to_owned();
+    let _lock = tokio::task::spawn_blocking(move || lock_state(&locking)).await??;
+    let db = state.join("acme.db");
+    let acme = if db.exists() {
+        Some(Store::open(&db, Arc::new(default_provider())).await?)
+    } else {
+        None
+    };
+    capture_state(state, acme.as_ref()).await
+}
+
+/// `acme`'s snapshot and the enrolment in `state`, never a key or the pairing code.
+async fn capture_state(state: &Path, acme: Option<&Store>) -> Result<Capture, Error> {
+    let acme = match acme {
+        Some(acme) => Some(serde_json::to_value(AcmeSection {
+            schema: SCHEMA,
+            db: base64url(&deflate(&snapshot(state, acme).await?)?),
+        })?),
+        None => None,
+    };
+    let enrolment = match enrolment::load(state)? {
+        Mode::Enrolled(enrolled) => Some(serde_json::to_value(enrolled)?),
+        Mode::Enrolling => None,
+    };
+    Ok(Capture::new(acme, enrolment))
+}
+
+async fn snapshot(state: &Path, acme: &Store) -> Result<Vec<u8>, Error> {
+    let copy = state.join("capture.db");
+    remove_db(&copy)?;
+    let taken = acme.snapshot(&copy, SystemTime::now()).await;
+    let db = taken
+        .map_err(Error::from)
+        .and_then(|()| Ok(std::fs::read(&copy)?));
+    remove_db(&copy)?;
+    db
 }
 
 /// Whatever a capture holds, blocked for one reason.

@@ -1317,8 +1317,10 @@ that finds none takes a cold tar of `/data`, key included. Both sockets are
   out on a broker still enrolling, with a warning naming the old subordinate
   for opCA to revoke. The work is spawned, so a console that stops waiting doesn't cut it off.
 
-With no host, capture is empty (or refused if `/data/state` exists), and only
-an empty capture restores.
+With no host, `capture_left` captures whatever `/data/state` holds, as a
+running broker would: `acme.db` opened and snapshotted if there is one, and the
+enrolment, so unsetting `host` never fails the box's backup. Only an empty
+capture restores until the host is set.
 
 ### Packaging and verification
 

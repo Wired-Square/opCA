@@ -159,7 +159,15 @@ async fn a_capture_never_holds_the_subordinate_key_or_any_other() {
     let state = enrolled.running.state.path();
     record(enrolled.running.broker.acme(), "11", "a.home.example").await;
     let captured = capture(sockets.path()).await;
-    let db = inflated_db(&captured);
+    assert_holds_no_key(state, &captured);
+    assert!(
+        contains(&inflated_db(&captured), b"a.home.example"),
+        "the capture holds the issued certificates"
+    );
+}
+
+fn assert_holds_no_key(state: &Path, captured: &str) {
+    let db = inflated_db(captured);
     let key_pem = fs::read_to_string(state.join("subordinate.key")).unwrap();
     let key_der = pem::private_key(&key_pem).unwrap();
     let key_der = key_der.secret_der();
@@ -170,10 +178,6 @@ async fn a_capture_never_holds_the_subordinate_key_or_any_other() {
             assert!(!contains(held, line.as_bytes()), "{line}");
         }
     }
-    assert!(
-        contains(&db, b"a.home.example"),
-        "the capture holds the issued certificates"
-    );
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -336,7 +340,7 @@ async fn an_enrolment_for_another_key_or_one_undoing_a_revocation_is_blocked() {
 }
 
 #[tokio::test]
-async fn without_a_host_the_capture_is_empty_and_only_an_empty_one_restores() {
+async fn without_a_host_or_a_database_the_capture_is_empty_and_only_an_empty_one_restores() {
     let data = private_tempdir();
     let sockets = console(Hooked::NeedsHost(data.path().join("state")));
     let empty = capture(sockets.path()).await;
@@ -367,12 +371,47 @@ async fn without_a_host_the_capture_is_empty_and_only_an_empty_one_restores() {
     assert_eq!(code, 400);
 
     fs::create_dir(data.path().join("state")).unwrap();
-    let (code, body) = hook(sockets.path(), "POST", "/v1/backup/capture", "").await;
+    let parsed: Value = serde_json::from_str(&capture(sockets.path()).await).unwrap();
     assert_eq!(
-        code, 500,
-        "a broker with state but no host does not hand over nothing"
+        (&parsed["acme"], &parsed["enrolment"]),
+        (&Value::Null, &Value::Null),
+        "state with no acme.db yet captures as it is"
     );
-    assert!(body.contains("no host"), "{body}");
+    assert!(!data.path().join("state/acme.db").exists());
+}
+
+#[tokio::test]
+async fn with_its_host_unset_the_broker_still_captures_what_it_left_and_restores_it_once_set() {
+    let (enrolled, sockets) = enrolled().await;
+    let (running, state) = (&enrolled.running, enrolled.running.state.path());
+    record(running.broker.acme(), "11", "a.home.example").await;
+    let unset = console(Hooked::NeedsHost(state.to_owned()));
+
+    let captured = capture(unset.path()).await;
+    assert_holds_no_key(state, &captured);
+    assert!(contains(&inflated_db(&captured), b"a.home.example"));
+    let parsed: Value = serde_json::from_str(&captured).unwrap();
+    assert_eq!(
+        parsed["enrolment"],
+        serde_json::from_slice::<Value>(&fs::read(state.join("enrolment.json")).unwrap()).unwrap()
+    );
+    let (code, _) = restore(unset.path(), &captured).await;
+    assert_eq!(
+        code, 400,
+        "a capture with something in it waits for the host"
+    );
+
+    record(running.broker.acme(), "12", "b.home.example").await;
+    let (code, body) = restore(sockets.path(), &captured).await;
+    assert_eq!(code, 200, "{body}");
+    let report: RestoreReport = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        report.applied.app,
+        ["acme", "enrolment"].map(String::from).into()
+    );
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    assert_eq!(total(running).await, 1);
+    assert!(!state.join("capture.db").exists());
 }
 
 /// Measures, and pins well under, what a certificate costs a capture: the console caps it at 7 MiB.
