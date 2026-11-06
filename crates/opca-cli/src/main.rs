@@ -120,6 +120,9 @@ pub enum CaAction {
         #[arg(long)]
         days: i64,
 
+        #[command(flatten)]
+        lifetimes: TypeLifetimeArgs,
+
         /// Email address for the certificate subject
         #[arg(short = 'e', long)]
         email: Option<String>,
@@ -346,7 +349,7 @@ pub struct CertCreateArgs {
     #[arg(long)]
     pub key: Option<KeyAlgorithm>,
 
-    /// Validity in days (default: the CA's, capped at 825 for server certificates)
+    /// Validity in days (default: the type's, else the CA's, capped at 825 for server certificates)
     #[arg(long)]
     pub days: Option<u32>,
 }
@@ -401,6 +404,26 @@ pub struct CertIdentifier {
     pub serial: Option<String>,
 }
 
+/// Per-type default lifetimes for a new CA; an unset one falls back to `--days`.
+#[derive(Args)]
+pub struct TypeLifetimeArgs {
+    /// Days a web server certificate is valid for by default
+    #[arg(long, default_value_t = 90)]
+    pub web_server_days: i64,
+
+    /// Days a VPN server certificate is valid for by default
+    #[arg(long, default_value_t = 365)]
+    pub vpn_server_days: i64,
+
+    /// Days a VPN client certificate is valid for by default
+    #[arg(long, default_value_t = 365)]
+    pub vpn_client_days: i64,
+
+    /// Days a device certificate is valid for by default (default: --days)
+    #[arg(long)]
+    pub device_days: Option<i64>,
+}
+
 #[derive(Args)]
 pub struct CertRekeyArgs {
     #[command(flatten)]
@@ -410,7 +433,7 @@ pub struct CertRekeyArgs {
     #[arg(long)]
     pub key: Option<KeyAlgorithm>,
 
-    /// Validity in days (default: the CA's, capped at 825 for server certificates)
+    /// Validity in days (default: the type's, else the CA's, capped at 825 for server certificates)
     #[arg(long)]
     pub days: Option<u32>,
 }
@@ -420,7 +443,7 @@ pub struct CertRenewArgs {
     #[command(flatten)]
     pub id: CertIdentifier,
 
-    /// Validity in days (default: the CA's, capped at 825 for server certificates)
+    /// Validity in days (default: the type's, else the CA's, capped at 825 for server certificates)
     #[arg(long)]
     pub days: Option<u32>,
 }
@@ -557,7 +580,7 @@ pub enum CsrAction {
         #[arg(short = 'n', long)]
         cn: Option<String>,
 
-        /// Validity in days (default: the CA's, capped at 825 for server certificates)
+        /// Validity in days (default: the type's, else the CA's, capped at 825 for server certificates)
         #[arg(long)]
         days: Option<u32>,
     },
@@ -696,7 +719,8 @@ pub enum DatabaseAction {
 
     /// Modify the CA Database configuration
     ConfigSet {
-        /// Configuration attributes (e.g. --conf city=Canberra --conf days=30)
+        /// Configuration attributes (e.g. --conf city=Canberra --conf days=30); a per-type
+        /// lifetime such as web_server_days=0 clears it back to days
         #[arg(long, required = true)]
         conf: Vec<String>,
     },

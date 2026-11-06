@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   broker with each certificate's names, expiry and state. A failed sync is
   logged and never fails the call. The CA database moves to schema v19;
   older dumps import unchanged.
+- `opca ca init` takes `--web-server-days` (default 90), `--vpn-server-days`
+  and `--vpn-client-days` (365) and `--device-days`, and `opca database
+  config-set` takes `web_server_days`, `vpn_server_days`, `vpn_client_days`
+  and `device_days` (`=0` falls back to `days`).
 
 ### Changed
 

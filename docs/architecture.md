@@ -313,6 +313,10 @@ page lists the four, and `defaultCertDays` in `api/types.ts` mirrors the
 lookup for `CertDaysField`'s prefill. The dashboard's Apple-limit item judges
 the server types' defaults.
 
+`opca ca init` takes `--web-server-days` (90), `--vpn-server-days` and
+`--vpn-client-days` (365) and an optional `--device-days`; `opca database
+config-set` takes the four keys, `=0` clearing one.
+
 ### Deleted certificates
 
 Delete is a soft delete. `delete_certificate` refuses the CA and any cert that
