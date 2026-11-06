@@ -1,17 +1,20 @@
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use opca_acme_api::{Challenge as ChallengeType, IssuedCounts};
 use opca_acme_broker::acme::store::{
-    AccountStatus, AuthorisationStatus, ChallengeStatus, Changes, Error, Expired, NewAuthorisation,
-    NewCertificate, NewOrder, Order, OrderStatus,
+    AccountStatus, AuthorisationStatus, Certificate, ChallengeStatus, Changes, Error, Expired,
+    NewAuthorisation, NewCertificate, NewOrder, Order, OrderStatus,
 };
 use opca_acme_broker::acme::{Problem, ProblemType, Store};
 use tempfile::TempDir;
-use wslib_db_sqlite::sqlx::{self, Row};
+use wslib_db_sqlite::sqlx::migrate::Migrator;
+use wslib_db_sqlite::sqlx::{self, Connection, Row};
+use wslib_db_sqlite::{Chain, Database};
 
 const HOUR: Duration = Duration::from_secs(3600);
 
@@ -658,4 +661,193 @@ async fn stale_orders_and_authorisations_expire_and_take_their_orders_with_them(
         .unwrap();
     assert_eq!(expired.status, AuthorisationStatus::Expired);
     assert_eq!(store.expire_stale(now).await.unwrap(), Expired::default());
+}
+
+const VERSION_1_COLUMNS: [(&str, &str); 6] = [
+    ("accounts", "id, jwk, thumbprint, status, contacts, created"),
+    (
+        "orders",
+        "id, account, status, identifiers, not_before, not_after, expires, error, certificate, \
+         created",
+    ),
+    (
+        "authorisations",
+        "id, order_id, identifier, wildcard, status, expires",
+    ),
+    (
+        "challenges",
+        "id, authorisation, type, token, status, validated, error",
+    ),
+    (
+        "certificates",
+        "id, serial, account, order_id, common_name, sans, not_before, not_after, chain_pem, \
+         revoked_at, revocation_reason, created",
+    ),
+    ("eab_keys", "key_id, hmac_key, account, created"),
+];
+
+/// A version-1 `acme.db` at `path` with the rows of the one at `rows` and an EAB key, as a broker before 0002 left it.
+async fn version_1_copy(rows: &Path, path: &Path) {
+    let migrations = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0001_acme_store.sql"
+        ),
+        migrations.path().join("0001_acme_store.sql"),
+    )
+    .unwrap();
+    let migrator = Migrator::new(migrations.path()).await.unwrap();
+    let db = Database::open(path, &[Chain::new("acme", &migrator)])
+        .await
+        .unwrap();
+    let mut conn = db.writer().acquire().await.unwrap().detach();
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    sqlx::query("ATTACH DATABASE ? AS rows")
+        .bind(rows.to_string_lossy().into_owned())
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    for (table, columns) in VERSION_1_COLUMNS {
+        sqlx::query(&format!(
+            "INSERT INTO main.{table} ({columns}) SELECT {columns} FROM rows.{table}"
+        ))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO main.eab_keys VALUES ('kid-1', x'0102', 1, '2026-11-07T00:00:00Z')")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_version_1_database_with_rows_migrates_to_version_2_keeping_every_row() {
+    let (rows, source) = open().await;
+    let (valid, _) = source
+        .create_account(
+            r#"{"kty":"EC"}"#,
+            "valid",
+            &["mailto:ops@home.example".into()],
+        )
+        .await
+        .unwrap();
+    let gone = account(&source, "gone").await;
+    source
+        .set_account_status(gone, AccountStatus::Deactivated)
+        .await
+        .unwrap();
+    record(&source, valid.id, &["100", "200"]).await;
+    source.revoke("200", Some(4)).await.unwrap();
+    source
+        .create_order(&new_order(
+            gone,
+            &["*.home.example", "c.home.example"],
+            SystemTime::now() + HOUR,
+        ))
+        .await
+        .unwrap();
+    let failed = ready_order(&source, valid.id, "d.home.example").await;
+    source
+        .set_order_status(failed.id, OrderStatus::Processing, None)
+        .await
+        .unwrap();
+    source
+        .set_order_status(
+            failed.id,
+            OrderStatus::Invalid,
+            Some(&Problem::new(ProblemType::ServerInternal, "signing failed")),
+        )
+        .await
+        .unwrap();
+
+    let mut orders = Vec::new();
+    for id in [valid.id, gone] {
+        for order in source.orders_of(id).await.unwrap() {
+            orders.push(source.order(order).await.unwrap().unwrap());
+        }
+    }
+    let mut authorisations = Vec::new();
+    for order in &orders {
+        for &id in &order.authorisations {
+            authorisations.push(source.authorisation(id).await.unwrap().unwrap());
+        }
+    }
+    assert_eq!((orders.len(), authorisations.len()), (4, 5));
+    let certificates = [
+        source.certificate_by_serial("100").await.unwrap().unwrap(),
+        source.certificate_by_serial("200").await.unwrap().unwrap(),
+    ];
+
+    let dir = tempfile::tempdir().unwrap();
+    version_1_copy(&rows.path().join("acme.db"), &dir.path().join("acme.db")).await;
+    let store = reopen(&dir).await;
+
+    for id in [valid.id, gone] {
+        assert_eq!(
+            store.account(id).await.unwrap(),
+            source.account(id).await.unwrap()
+        );
+    }
+    for order in &orders {
+        assert_eq!(store.order(order.id).await.unwrap().as_ref(), Some(order));
+    }
+    for authorisation in &authorisations {
+        assert_eq!(
+            store
+                .authorisation(authorisation.id)
+                .await
+                .unwrap()
+                .as_ref(),
+            Some(authorisation)
+        );
+    }
+    for certificate in &certificates {
+        let migrated = Certificate {
+            issuer_serial: String::new(),
+            changed: certificate.id,
+            ..certificate.clone()
+        };
+        assert_eq!(
+            store.certificate(certificate.id).await.unwrap(),
+            Some(migrated)
+        );
+    }
+    assert_eq!(
+        serials(&store.changed_after(0, None, 10).await.unwrap()),
+        ["100", "200"]
+    );
+
+    record(&store, valid.id, &["300"]).await;
+    store.revoke("100", None).await.unwrap();
+    let after = store
+        .changed_after(certificates[1].id, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(serials(&after), ["300", "100"]);
+    assert!(after.certificates[0].id > certificates[1].id);
+
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        dir.path().join("acme.db").display()
+    ))
+    .await
+    .unwrap();
+    let applied: Vec<i64> = sqlx::query_scalar("SELECT version FROM _acme_migrations")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(applied, [1, 2]);
+    let eab: (String, Vec<u8>, i64) =
+        sqlx::query_as("SELECT key_id, hmac_key, account FROM eab_keys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(eab, ("kid-1".into(), vec![1, 2], 1));
 }
