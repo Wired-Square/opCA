@@ -15,17 +15,13 @@ RUN --mount=type=cache,id=opca-acme-target-$TARGETARCH,target=/target \
     && cp /target/release/opca-acme-broker /usr/local/bin/ \
     && mkdir -p /empty/volume/data /empty/socket/appliance
 
-# Built on the host, so no node here; gzipped once, and sent as it is.
-FROM --platform=$BUILDPLATFORM rust:1.99-bookworm@sha256:cfcbed05398d0f6f81b7c3a24579475c567f97007ae7837ab421f9ca3e66333d AS ui
-COPY crates/opca-acme-broker/ui/dist /ui
-RUN find /ui/assets -type f \( -name '*.js' -o -name '*.css' -o -name '*.svg' \) -exec gzip -9n {} +
-
 FROM scratch AS binary
 COPY --from=build /usr/local/bin/opca-acme-broker /
 
 FROM gcr.io/distroless/cc-debian12@sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa
 COPY --from=build /usr/local/bin/opca-acme-broker /usr/bin/opca-acme-broker
-COPY --from=ui /ui /usr/share/opca-acme/ui
+# Built on the host, so no node here, with a .gz beside each file gzip shrinks.
+COPY crates/opca-acme-broker/ui/dist /usr/share/opca-acme/ui
 # Each copied into its parent, so the parent keeps root's ownership.
 COPY --from=build --chown=10001:0 --chmod=0770 /empty/volume/ /
 COPY --from=build --chown=10001:0 --chmod=0770 /empty/socket/ /run/

@@ -266,11 +266,11 @@ listener's host port.
 Options come first; `/data/broker.toml`, with the same `host` and `domains` keys, second. A
 blank option gives way to it.
 
-**Open it from Apps** to see its page, as any role: the broker's state, host, domains and
-subordinate, then the certificates it has issued, newest first, each with its names, serial,
-validity and status: valid, expiring (in the last third of its lifetime, when ACME clients
-renew), expired, or revoked with the reason. A filter shows only the revoked or the rest. The
-page is read-only; revoke in opCA.
+**Open it from Apps** to see its page, as any role, under the console's masthead with its app
+switcher: the broker's state, host, domains and subordinate, then the certificates it has
+issued, newest first, each with its names, serial, validity and status: valid, expiring (in the
+last third of its lifetime, when ACME clients renew), expired, or revoked with the reason. A
+filter shows only the revoked or the rest. The page is read-only; revoke in opCA.
 
 The app takes its own backups while it runs, so the box's backup holds `acme.db` (accounts and
 issued certificates), the enrolment, its chain and its config, and **never the subordinate key**.

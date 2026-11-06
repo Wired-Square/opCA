@@ -5,7 +5,6 @@ import {
   Loaded,
   Notice,
   NothingYet,
-  SchemePicker,
   Section,
   Select,
   Table,
@@ -41,16 +40,12 @@ const FILTERS: Record<string, RevokedFilter> = { all: null, unrevoked: false, re
 export function App() {
   const [broker, { refetch }] = createResource(status);
   return (
-    <main class="page">
-      <header class="page__head">
-        <h1>ACME broker</h1>
-        <SchemePicker />
-      </header>
+    <>
       <Loaded of={broker} refetch={refetch} reading="the broker's status">
         {(broker) => <Status status={broker()} />}
       </Loaded>
       <Issued />
-    </main>
+    </>
   );
 }
 

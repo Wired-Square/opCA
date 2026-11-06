@@ -20,8 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   every role: the broker's state, host, domains and subordinate, then what it
   has issued, newest first, with each certificate's names, serial, validity
   and status (valid, expiring in its last third, expired, or revoked with the
-  reason), filtered by revocation. It is read-only: revoke in opCA. Light,
-  dark or the system's scheme.
+  reason), filtered by revocation. It is read-only: revoke in opCA. It sits
+  in the appliance shell: the console's masthead and brand, its app switcher,
+  and the scheme the console chose.
 - Each release carries the `opca-acme` app for arm64 and amd64, signed as the
   `wired-square` source every ApplianceOS image ships, so it installs from
   Apps › Install with no source to add. `scripts/build-acme-app.sh --source

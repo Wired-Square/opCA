@@ -1352,13 +1352,17 @@ gets the index, but a missing asset and anything under `api/` are 404. With no
 page installed the index is a 404 and health is unchanged.
 
 [ui/](../crates/opca-acme-broker/ui) is the page: SolidJS and
-`@wired-square/kit` alone, as `@wired-square/appliance-ui`'s `Shell` needs the
-chassis server's session and branding routes (26-1). Vite builds it with
-relative asset paths, which the base resolves. It shows the status, then
+`@wired-square/kit`, in `@wired-square/appliance-ui`'s `Shell` and `Chrome`
+(27-1), which read the chassis's `api/session` and `api/branding` under the
+base and bring the masthead, the brand and the console's app switcher, read
+from `/api/switcher` at the origin. `applianceVite` builds it with relative
+asset paths, which the base resolves, and a `.gz` beside each file gzip
+shrinks. It shows the status, then
 `createPagedList` over `api/issued` with a revocation filter;
 `standing.ts` decides each row's status (valid, expiring in its last third,
 expired, revoked with the RFC 5280 reason), and its vitest tests pin that. The
-kit's light and dark schemes come with its `SchemePicker`, and opCA's accent.
+page has no scheme picker: `index.html` takes the scheme the console stored for
+the origin, and the theme is the kit's with opCA's accent.
 
 ### Packaging and verification
 
@@ -1394,8 +1398,8 @@ serving the ACME listener's certificate for `host` under systemd in
 `appliance-image` buildx builder: the broker compiled in `rust:1.99-bookworm`,
 run on `distroless/cc-debian12`, whose glibc and libssl3 are the same Debian
 release's. It builds the page first (`npm ci`, `vite build` into `ui/dist`), and
-the Dockerfile's `ui` stage copies that `dist` and gzips its scripts, styles and
-SVGs into `/usr/share/opca-acme/ui`, with no node in the image (26-4). It labels the image with the manifest that
+the Dockerfile copies that `dist`, its `.gz` files included, into
+`/usr/share/opca-acme/ui`, with no node in the image (26-4). It labels the image with the manifest that
 [examples/appliance-label.rs](../crates/opca-acme-broker/examples/appliance-label.rs)
 builds from `wslib-appliance-types`' `AppManifest` and checks with its
 validator (its tests run under `cargo test`), writes a docker-load tarball to
