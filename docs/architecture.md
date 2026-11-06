@@ -127,7 +127,7 @@ Organised by concern under [src/](../crates/opca-core/src):
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v19). A dump that fails to
+    automatic, forward-only migrations (currently v20). A dump that fails to
     parse or never reaches its `COMMIT` (truncated) is rejected as
     `OpcaError::DatabaseUnreadable`.
   - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
@@ -295,6 +295,17 @@ replacement is stored (`ignored_reason` = `renewed`/`rekeyed`, `ignored_note` =
 `replaced by <new_serial>`, riding the same `store_ca_database` save — no extra
 1Password calls); and the cert detail page's `Ignore` action (`ignored_reason`
 = `manual`). An `Un-ignore` action clears all four columns.
+
+### Certificate lifetimes
+
+Create, CSR sign, renew and rekey take a requested `days`, else the type's
+default from `config` (`web_server_days`, `vpn_server_days`, `vpn_client_days`,
+`device_days`, schema v20; `CaConfig::type_days`), else the CA's `days`, and
+then cap WebServer and VpnServer at 825 (`CertType::default_days`). A requested
+`days` above 825 only warns. An unset type column means the CA's `days`; an
+update stores 0 to clear one, which reads back as unset. The v20 migration sets
+`web_server_days` to `min(days, 90)` and leaves the others unset, so existing
+CAs keep issuing every other type as before.
 
 ### Deleted certificates
 

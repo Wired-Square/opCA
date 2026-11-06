@@ -239,6 +239,10 @@ impl CertificateAuthorityDB {
         push_field!(ca_backup_store, "ca_backup_store", str);
         push_field!(ca_aws_region, "ca_aws_region", str);
         push_field!(crl_batch_enabled, "crl_batch_enabled", int);
+        push_field!(web_server_days, "web_server_days", int);
+        push_field!(vpn_server_days, "vpn_server_days", int);
+        push_field!(vpn_client_days, "vpn_client_days", int);
+        push_field!(device_days, "device_days", int);
 
         let col_list = columns.join(", ");
         let placeholders = (0..columns.len())
@@ -270,6 +274,11 @@ fn non_blank(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
 }
 
+/// A per-type lifetime is cleared by storing 0, which must read back as unset.
+fn positive(value: Option<i64>) -> Option<i64> {
+    value.filter(|&v| v > 0)
+}
+
 impl CertificateAuthorityDB {
     /// Retrieve all CA configuration attributes.
     pub fn get_config(&self) -> Result<CaConfig, OpcaError> {
@@ -277,7 +286,8 @@ impl CertificateAuthorityDB {
             "SELECT next_serial, next_crl_serial, org, ou, email, city, state, country,
                     ca_url, crl_url, days, crl_days, schema_version,
                     ca_public_store, ca_private_store, ca_backup_store, ca_aws_region,
-                    crl_batch_enabled
+                    crl_batch_enabled, web_server_days, vpn_server_days, vpn_client_days,
+                    device_days
              FROM config LIMIT 1",
         )?;
 
@@ -312,6 +322,10 @@ impl CertificateAuthorityDB {
                 ca_backup_store: non_blank(row.get(15)?),
                 ca_aws_region: non_blank(row.get(16)?),
                 crl_batch_enabled: row.get(17)?,
+                web_server_days: positive(row.get(18)?),
+                vpn_server_days: positive(row.get(19)?),
+                vpn_client_days: positive(row.get(20)?),
+                device_days: positive(row.get(21)?),
             })
         })?;
 
@@ -364,6 +378,10 @@ impl CertificateAuthorityDB {
         maybe_update!(ca_backup_store, "ca_backup_store", str);
         maybe_update!(ca_aws_region, "ca_aws_region", str);
         maybe_update!(crl_batch_enabled, "crl_batch_enabled", int);
+        maybe_update!(web_server_days, "web_server_days", int);
+        maybe_update!(vpn_server_days, "vpn_server_days", int);
+        maybe_update!(vpn_client_days, "vpn_client_days", int);
+        maybe_update!(device_days, "device_days", int);
 
         if set_clauses.is_empty() {
             return Ok(());

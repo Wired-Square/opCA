@@ -84,6 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   it. `step_ca` in `broker.toml` is now refused, the status reports
   `acme_down` in place of `step_ca_down`, and the versions no longer name
   step-ca. The ACME directory moves to `/acme/directory`.
+- Certificates take their type's default lifetime from the CA config, else
+  the CA's `days`, and server types stay capped at 825 days. A new CA issues
+  Web Server certificates for 90 days and VPN Server and VPN Client ones for
+  365. The CA database moves to schema v20, which sets an existing CA's Web
+  Server lifetime to 90 days (or its `days` if lower) and leaves the other
+  types on `days`.
 
 ### Fixed
 

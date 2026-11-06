@@ -96,11 +96,11 @@ impl CertType {
         matches!(self, CertType::WebServer | CertType::VpnServer)
     }
 
-    pub fn default_days(&self, ca_days: u32) -> u32 {
+    pub fn default_days(&self, configured: u32) -> u32 {
         match self {
             CertType::SubordinateCa => SUBORDINATE_CA_DAYS,
-            _ if self.is_tls_server() => ca_days.min(APPLE_TLS_MAX_DAYS),
-            _ => ca_days,
+            _ if self.is_tls_server() => configured.min(APPLE_TLS_MAX_DAYS),
+            _ => configured,
         }
     }
 }
