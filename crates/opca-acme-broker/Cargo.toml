@@ -34,7 +34,7 @@ tokio = { version = "1", default-features = false, features = ["net", "rt", "sig
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 tracing = "0.1"
 wslib-crypto = { version = "0.1.2", registry = "wired-square" }
-wslib-crypto-ca = { version = "0.2.0", registry = "wired-square" }
+wslib-crypto-ca = { version = "0.2.1", registry = "wired-square" }
 wslib-crypto-x509 = { version = "0.1.3", registry = "wired-square" }
 wslib-db-sqlite = { version = "0.2.4", registry = "wired-square" }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }

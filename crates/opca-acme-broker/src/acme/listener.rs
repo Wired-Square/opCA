@@ -240,7 +240,7 @@ fn issue_pair(
     let signer = Signer::new(provider.clone(), &PrivateKeyDer::Pkcs8(key))?;
     let csr_der = build_csr(&signer, &Subject::new(host), &[host.parse()?])?;
     let csr = Csr::from_der(&csr_der, provider.signature_verification_algorithms.all)?;
-    let (_, cert_pem) = issuer.sign(&csr, validity)?;
+    let (_, cert_pem) = issuer.sign(&csr, Some(host), validity)?;
     Ok((cert_pem, key_pem))
 }
 

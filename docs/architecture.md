@@ -1139,12 +1139,14 @@ Organised under [src/](../crates/opca-acme-broker/src):
     revoke, which is the cursor of `changed_after`: a revocation brings a row
     already synced back past the cursor, which its insert id would not.
   - [issue.rs](../crates/opca-acme-broker/src/acme/issue.rs) — `Issuer`
-    finalises an order from a CSR: it must verify, hold only a common name
-    that is one of its DNS names, name exactly the order's identifiers, use
-    RSA 2048–8192, P-256 or P-384 and not the account key; `check_identifier`
-    refuses IPs, non-A-label names, wildcards other than the whole leftmost
-    label and names outside the permitted domains. The leaf is `serverAuth`
-    only, backdated a minute, for `leaf_days` (or the order's `notAfter`)
+    finalises an order from a CSR: it must verify, name exactly the order's
+    identifiers, use RSA 2048–8192, P-256 or P-384 and not the account key;
+    `check_identifier` refuses IPs, non-A-label names, wildcards other than
+    the whole leftmost label and names outside the permitted domains. The
+    CSR's subject is ignored, as Let's Encrypt does: the leaf's subject is a
+    lone CN, the CSR's if it is one of its DNS names, else the first name of
+    at most 64 octets, else empty with the SAN critical. The leaf is
+    `serverAuth` only, backdated a minute, for `leaf_days` (or the order's `notAfter`)
     capped at `leaf_max_days` and the subordinate's end, and served with the
     chain minus the root. Refusals are `Problem`s with RFC 8555's types.
   - [validate.rs](../crates/opca-acme-broker/src/acme/validate.rs) —

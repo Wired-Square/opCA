@@ -8,12 +8,10 @@ use opca_acme_api::IssuanceConfig;
 use wslib_crypto::Signer;
 use wslib_crypto_ca::{
     Authority, BasicConstraints, Csr, Extension, KeyIdentifierMethod, Profile, SanPolicy, Serial,
-    Validity,
+    Subject, Validity,
 };
 use wslib_crypto_x509::pem::{self, CERTIFICATE};
-use wslib_crypto_x509::{
-    ExtendedKeyUsage, KeyDescription, KeyUsage, SubjectAltName, inspect, name_attributes,
-};
+use wslib_crypto_x509::{ExtendedKeyUsage, KeyDescription, KeyUsage, SubjectAltName, inspect};
 
 use super::store::{Certificate, NewCertificate, Order, Store};
 use super::{Problem, ProblemType};
@@ -22,7 +20,9 @@ use crate::enrolment::{decimal, host_within};
 const DAY: Duration = Duration::from_secs(86_400);
 /// As step-ca does, for clients whose clocks run a little behind.
 pub(crate) const BACKDATE: Duration = Duration::from_secs(60);
-const COMMON_NAME: &str = "2.5.4.3";
+/// RFC 5280's ub-common-name.
+const COMMON_NAME_MAX: usize = 64;
+const EMPTY_NAME: [u8; 2] = [0x30, 0x00];
 
 pub struct Issuer {
     authority: Authority,
@@ -91,7 +91,6 @@ impl Issuer {
         }
         check_key(csr.key())?;
         let names = self.requested_names(&csr)?;
-        check_subject(&csr, &names)?;
         let ordered: BTreeSet<String> = order
             .identifiers
             .iter()
@@ -104,10 +103,13 @@ impl Issuer {
         }
 
         let validity = self.validity(order, now)?;
-        let (serial, chain_pem) = self.sign(&csr, validity).map_err(internal)?;
+        let common_name = leaf_common_name(&csr);
+        let (serial, chain_pem) = self
+            .sign(&csr, common_name.as_deref(), validity)
+            .map_err(internal)?;
         Ok(NewCertificate {
             serial: serial.to_string(),
-            common_name: csr.common_name().map(str::to_string),
+            common_name,
             sans: names.into_iter().collect(),
             not_before: validity.not_before,
             not_after: validity.not_after,
@@ -116,16 +118,26 @@ impl Issuer {
         })
     }
 
-    /// A serverAuth leaf for `csr`, unchecked, followed by the chain to serve it with.
+    /// A serverAuth leaf for `csr`, unchecked, its subject `common_name` alone or
+    /// empty, followed by the chain to serve it with.
     pub(crate) fn sign(
         &self,
         csr: &Csr,
+        common_name: Option<&str>,
         validity: Validity,
     ) -> Result<(Serial, String), wslib_crypto_ca::Error> {
+        let subject = match common_name {
+            Some(cn) => Subject::new(cn).to_der()?,
+            None => EMPTY_NAME.to_vec(),
+        };
         let serial = Serial::random(self.authority.signer().provider())?;
-        let leaf = self
-            .authority
-            .issue(csr, &leaf_profile(csr), &serial, validity)?;
+        let leaf = self.authority.issue_with_subject(
+            csr,
+            &subject,
+            &leaf_profile(csr),
+            &serial,
+            validity,
+        )?;
         Ok((serial, pem::encode(CERTIFICATE, &leaf) + &self.chain_pem))
     }
 
@@ -225,25 +237,23 @@ fn check_key(key: &KeyDescription) -> Result<(), Problem> {
     }
 }
 
-/// The subject is copied into the leaf as it is, so it may hold one common name, one of the names, and nothing else.
-fn check_subject(csr: &Csr, names: &BTreeSet<String>) -> Result<(), Problem> {
-    let attributes = name_attributes(csr.subject()).map_err(bad_csr)?;
-    match (&attributes[..], csr.common_name()) {
-        ([], _) => Ok(()),
-        ([only], Some(cn)) if only.oid == COMMON_NAME => {
-            if names.contains(&cn.to_ascii_lowercase()) {
-                Ok(())
-            } else {
-                Err(bad_csr(format!(
-                    "the common name {cn:?} is not one of the CSR's DNS names"
-                )))
+/// As Let's Encrypt chooses, among the CSR's DNS names short enough for a
+/// common name: its common name if it is one, else the first, else none.
+fn leaf_common_name(csr: &Csr) -> Option<String> {
+    let fitting: Vec<String> = csr
+        .names()
+        .iter()
+        .filter_map(|name| match name {
+            SubjectAltName::Dns(dns) if dns.len() <= COMMON_NAME_MAX => {
+                Some(dns.to_ascii_lowercase())
             }
-        }
-        _ => Err(bad_csr(format!(
-            "the subject {:?} holds more than one common name",
-            csr.subject_text()
-        ))),
-    }
+            _ => None,
+        })
+        .collect();
+    csr.common_name()
+        .map(str::to_ascii_lowercase)
+        .filter(|cn| fitting.contains(cn))
+        .or_else(|| fitting.into_iter().next())
 }
 
 fn leaf_profile(csr: &Csr) -> Profile {
