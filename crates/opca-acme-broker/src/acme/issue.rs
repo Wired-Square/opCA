@@ -16,6 +16,7 @@ use wslib_crypto_x509::{ExtendedKeyUsage, KeyDescription, KeyUsage, SubjectAltNa
 use super::store::{Certificate, NewCertificate, Order, Store};
 use super::{Problem, ProblemType};
 use crate::enrolment::{decimal, host_within};
+use crate::pki::{CA_PATH, CRL_PATH};
 
 const DAY: Duration = Duration::from_secs(86_400);
 /// As step-ca does, for clients whose clocks run a little behind.
@@ -31,6 +32,8 @@ pub struct Issuer {
     subordinate_serial: String,
     subordinate_not_after: SystemTime,
     config: IssuanceConfig,
+    /// Where the leaves say the subordinate and its CRL are published.
+    pki_origin: Option<String>,
 }
 
 impl Issuer {
@@ -55,7 +58,16 @@ impl Issuer {
             subordinate_serial: decimal(&view.serial),
             subordinate_not_after: view.not_after,
             config,
+            pki_origin: None,
         })
+    }
+
+    /// Leaves issued from now on point at `origin`'s [`CRL_PATH`] and [`CA_PATH`].
+    pub fn published_at(self, origin: impl Into<String>) -> Self {
+        Self {
+            pki_origin: Some(origin.into()),
+            ..self
+        }
     }
 
     /// Issues for `order` from `csr_der` and records the certificate, which makes the order valid.
@@ -134,11 +146,33 @@ impl Issuer {
         let leaf = self.authority.issue_with_subject(
             csr,
             &subject,
-            &leaf_profile(csr),
+            &self.leaf_profile(csr),
             &serial,
             validity,
         )?;
         Ok((serial, pem::encode(CERTIFICATE, &leaf) + &self.chain_pem))
+    }
+
+    fn leaf_profile(&self, csr: &Csr) -> Profile {
+        let mut usages = vec![KeyUsage::DigitalSignature];
+        if csr.has_rsa_key() {
+            usages.push(KeyUsage::KeyEncipherment);
+        }
+        let at = |path: &str| {
+            self.pki_origin
+                .iter()
+                .map(|o| format!("{o}{path}"))
+                .collect()
+        };
+        Profile {
+            basic_constraints: Some(Extension::non_critical(BasicConstraints::EndEntity)),
+            key_usage: Some(Extension::critical(usages)),
+            extended_key_usage: Some(Extension::non_critical(vec![ExtendedKeyUsage::ServerAuth])),
+            names: SanPolicy::Requested,
+            crl_distribution_points: at(CRL_PATH),
+            ca_issuers: at(CA_PATH),
+            ..Profile::default()
+        }
     }
 
     pub(crate) fn subordinate_not_after(&self) -> SystemTime {
@@ -254,20 +288,6 @@ fn leaf_common_name(csr: &Csr) -> Option<String> {
         .map(str::to_ascii_lowercase)
         .filter(|cn| fitting.contains(cn))
         .or_else(|| fitting.into_iter().next())
-}
-
-fn leaf_profile(csr: &Csr) -> Profile {
-    let mut usages = vec![KeyUsage::DigitalSignature];
-    if csr.has_rsa_key() {
-        usages.push(KeyUsage::KeyEncipherment);
-    }
-    Profile {
-        basic_constraints: Some(Extension::non_critical(BasicConstraints::EndEntity)),
-        key_usage: Some(Extension::critical(usages)),
-        extended_key_usage: Some(Extension::non_critical(vec![ExtendedKeyUsage::ServerAuth])),
-        names: SanPolicy::Requested,
-        ..Profile::default()
-    }
 }
 
 fn bad_csr(detail: impl std::fmt::Display) -> Problem {

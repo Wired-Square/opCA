@@ -16,7 +16,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use opca_acme_api::Challenge as ChallengeType;
+use opca_acme_api::{Challenge as ChallengeType, REVOCATION_REASONS};
 use rustls::crypto::CryptoProvider;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -33,6 +33,7 @@ use super::store::{
 use super::validate::Validate;
 use super::{Problem, ProblemType, from_base64url};
 use crate::enrolment::decimal;
+use crate::pki::Published;
 
 /// How long an order and its authorisations live, as step-ca's default.
 pub const ORDER_LIFETIME: Duration = Duration::from_secs(86_400);
@@ -52,6 +53,7 @@ pub(crate) struct Server {
     pub(crate) lifetime: Duration,
     issuer: RwLock<Option<Arc<Issuer>>>,
     resumed: AtomicBool,
+    pub(crate) published: Arc<Published>,
 }
 
 impl Server {
@@ -59,6 +61,7 @@ impl Server {
         store: Store,
         provider: Arc<CryptoProvider>,
         validator: Arc<dyn Validate>,
+        published: Arc<Published>,
     ) -> Self {
         Self {
             store,
@@ -68,6 +71,7 @@ impl Server {
             lifetime: ORDER_LIFETIME,
             issuer: RwLock::default(),
             resumed: AtomicBool::new(false),
+            published,
         }
     }
 
@@ -625,7 +629,7 @@ async fn revoke(State(server): Shared, post: Post) -> Result<Response, Refusal> 
     }
     let reason = match request.reason {
         None | Some(0) => None,
-        Some(reason @ (1..=6 | 9 | 10)) => Some(reason),
+        Some(reason) if REVOCATION_REASONS.contains(&reason) => Some(reason),
         Some(other) => {
             return Err(Problem::new(
                 ProblemType::BadRevocationReason,
@@ -635,6 +639,7 @@ async fn revoke(State(server): Shared, post: Post) -> Result<Response, Refusal> 
         }
     };
     server.store.revoke(&serial, reason).await.map_err(stored)?;
+    server.published.resign();
     Ok(StatusCode::OK.into_response())
 }
 

@@ -67,6 +67,18 @@ function Status(props: { status: AppStatus }) {
         <dd>{props.status.host ?? "—"}</dd>
         <Url label="API" url={props.status.api_url} />
         <Url label="ACME directory" url={props.status.acme_directory} />
+        <Url label="CA certificate" url={props.status.ca_url} />
+        <Url label="CRL" url={props.status.crl_url} />
+        <Show when={props.status.crl}>
+          {(crl) => (
+            <>
+              <dt>CRL updated</dt>
+              <dd>{when(crl().this_update)}</dd>
+              <dt>CRL next update</dt>
+              <dd>{when(crl().next_update)}</dd>
+            </>
+          )}
+        </Show>
         <dt>Domains</dt>
         <dd>{props.status.domains.join(", ") || "chosen in opCA"}</dd>
         <Show when={props.status.subordinate}>

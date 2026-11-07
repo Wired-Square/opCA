@@ -22,7 +22,7 @@ use hyper_util::rt::TokioIo;
 use log::warn;
 use opca_acme_api::{
     ChainUpdate, Enrolment, EnrolmentOffer, ErrorBody, ErrorKind, FreshCsr, IssuedCertificate,
-    IssuedPage, Status, path,
+    IssuedPage, LeafRevocation, Status, path,
 };
 use rustls_pki_types::ServerName;
 use serde::Serialize;
@@ -171,6 +171,15 @@ impl BrokerClient {
         self.call(Method::GET, &path, Vec::new())
     }
 
+    pub fn revoke_issued(
+        &self,
+        serial: &str,
+        reason: u8,
+    ) -> Result<IssuedCertificate, BrokerError> {
+        let body = json(&LeafRevocation { reason });
+        self.call(Method::POST, &path::revoke_issued(serial), body)
+    }
+
     fn call<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -293,6 +302,31 @@ impl<R: Runner> CertificateAuthority<R> {
         self.sync_issued(&client, id);
         self.store_ca_database()?;
         Ok(status)
+    }
+
+    /// Has broker `id` revoke its leaf with decimal `serial` for RFC 5280
+    /// `reason`, and records the row it answers with; nothing changes when the
+    /// broker can't be reached.
+    pub fn revoke_broker_cert(
+        &mut self,
+        operator: &Operator,
+        id: i64,
+        serial: &str,
+        reason: u8,
+    ) -> Result<BrokerCert, OpcaError> {
+        let client = BrokerClient::new(Endpoint::of_broker(&self.broker(id)?)?, Some(operator))?;
+        let revoked = broker_cert(id, client.revoke_issued(serial, reason)?)?;
+        self.contacted(id)?;
+        let db = self.db()?;
+        // Not past the cursor, so the next sync still fetches what changed before the revocation.
+        let revoked = BrokerCert {
+            changed: revoked.changed.min(db.broker_cursor(id)?),
+            ..revoked
+        };
+        db.record_broker_certs(std::slice::from_ref(&revoked))?;
+        self.sync_issued(&client, id);
+        self.store_ca_database()?;
+        Ok(revoked)
     }
 
     /// What every broker issued, as last synced.

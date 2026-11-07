@@ -167,6 +167,27 @@ pub async fn renew_all_brokers(state: State<'_, AppState>) -> Result<Vec<BrokerR
 }
 
 #[tauri::command]
+pub async fn revoke_broker_cert(
+    state: State<'_, AppState>,
+    id: i64,
+    serial: String,
+    reason: u8,
+) -> Result<BrokerCert, String> {
+    let action = "revoke_broker_cert";
+    info!("[tauri] {action}: id={id} serial={serial} reason={reason}");
+    let mut conn = state.ensure_ca()?;
+    let (ca, operator) = with_operator(&state, action, &mut conn)?;
+    let revoked = ca
+        .revoke_broker_cert(operator, id, &serial, reason)
+        .map_err(logged(&state, action))?;
+    state.log_ok(
+        action,
+        format!("Broker {id} revoked certificate {serial} and signed its CRL afresh"),
+    );
+    Ok(revoked)
+}
+
+#[tauri::command]
 pub async fn revoke_broker(
     state: State<'_, AppState>,
     id: i64,

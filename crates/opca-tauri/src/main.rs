@@ -127,6 +127,7 @@ fn main() {
             commands::broker::renew_broker,
             commands::broker::renew_all_brokers,
             commands::broker::revoke_broker,
+            commands::broker::revoke_broker_cert,
             commands::cert::list_certs,
             commands::cert::list_external_certs,
             commands::cert::get_cert_info,

@@ -80,6 +80,9 @@ async fn needing_a_host_it_has_the_configured_domains_and_nothing_issued() {
             host: None,
             api_url: None,
             acme_directory: None,
+            ca_url: None,
+            crl_url: None,
+            crl: None,
             domains: vec!["home.example".into()],
             subordinate: None,
         }
@@ -122,6 +125,7 @@ async fn the_urls_name_the_ports_the_console_mapped() {
     let mapped = [
         ("APPLIANCE_LISTENER_API_PORT", "19443"),
         ("APPLIANCE_LISTENER_ACME_PORT", "443"),
+        ("APPLIANCE_LISTENER_PKI_PORT", "80"),
     ];
     let app = console_app(private_tempdir().path(), &mapped);
     let sockets = serve_console(app, Hooked::Running(running.broker.clone())).await;
@@ -131,7 +135,14 @@ async fn the_urls_name_the_ports_the_console_mapped() {
         (status.api_url.unwrap(), status.acme_directory.unwrap()),
         (
             format!("https://{HOST}:19443"),
-            format!("https://{HOST}:443/acme/directory")
+            format!("https://{HOST}/acme/directory")
+        )
+    );
+    assert_eq!(
+        (status.ca_url.unwrap(), status.crl_url.unwrap()),
+        (
+            format!("http://{HOST}/ca.crt"),
+            format!("http://{HOST}/crl")
         )
     );
 }
@@ -160,6 +171,9 @@ async fn enrolled_it_names_its_subordinate_and_pages_the_issued_newest_first() {
             host: Some(HOST.into()),
             api_url: Some(format!("https://{HOST}:9443")),
             acme_directory: Some(format!("https://{HOST}:8443/acme/directory")),
+            ca_url: Some(format!("http://{HOST}:8080/ca.crt")),
+            crl_url: Some(format!("http://{HOST}:8080/crl")),
+            crl: status.crl.clone(),
             domains: DOMAINS.iter().map(|d| d.to_string()).collect(),
             subordinate: Some(Issuer {
                 serial: enrolled.status.subordinate_serial.clone(),

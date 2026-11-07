@@ -41,7 +41,7 @@ trait Named: Copy {
     fn parse(text: &str) -> Option<Self>;
 }
 
-mod issue;
+pub(crate) mod issue;
 pub(crate) mod listener;
 mod problem;
 pub mod request;

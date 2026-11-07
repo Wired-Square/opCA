@@ -23,6 +23,7 @@ use crate::acme::server::Server;
 use crate::acme::validate::Validator;
 use crate::enrolled::{operator_config, root_of};
 use crate::enrolment::{self, Mode, host_within, internal};
+use crate::pki::{Published, origin};
 use crate::{Config, Error};
 
 pub use opca_acme_api::PAIRING_SCHEME as SCHEME;
@@ -50,6 +51,9 @@ pub struct Broker {
     pub(crate) domains: Vec<String>,
     pub(crate) state: PathBuf,
     pub(crate) acme_listener: AcmeListener,
+    pub(crate) published: Arc<Published>,
+    /// `http://<host>:<advertised PKI port>`, which the leaves point at.
+    pub(crate) pki_origin: String,
     acme: Store,
     lock_timeout: Duration,
     pub(crate) issued_page: u32,
@@ -89,7 +93,8 @@ impl Broker {
         let acme = Store::open(&state.join("acme.db"), provider.clone()).await?;
         let resolver = wslib_dns::HickoryResolver::from_system(Default::default())?;
         let validator = Arc::new(Validator::new(resolver, provider.clone())?);
-        let acme_server = Server::new(acme.clone(), provider.clone(), validator);
+        let published = Published::new(state.into());
+        let acme_server = Server::new(acme.clone(), provider.clone(), validator, published.clone());
         let broker = Self {
             provider,
             serving,
@@ -102,6 +107,8 @@ impl Broker {
             domains: config.domains.clone(),
             state: state.into(),
             acme_listener: AcmeListener::new(config.acme_listen, acme_server),
+            published,
+            pki_origin: origin("http", &config.host, config.advertised_pki_port()),
             acme,
             lock_timeout: LOCK_TIMEOUT,
             issued_page: ISSUED_PAGE,
@@ -202,6 +209,7 @@ impl Broker {
         *self.subordinate.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(subordinate);
         *self.mode.write().unwrap_or_else(|e| e.into_inner()) = mode;
         self.refresh_acme();
+        self.published.resign();
         tracing::info!("reloaded the state from disk");
         Ok(())
     }

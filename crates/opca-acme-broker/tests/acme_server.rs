@@ -467,6 +467,17 @@ async fn revocation_by_the_account_key_or_the_certificates_key() {
         assert_eq!(reasons, [Some(1), Some(4)]);
         let newest_before = before.iter().map(|c| c.changed).max().unwrap();
         assert!(after.iter().all(|c| c.changed > newest_before));
+
+        let pki = acme.enrolled.running.pki;
+        let mut crl = crl_after(pki, 0).await;
+        while crl.revoked.len() < 2 {
+            crl = crl_after(pki, crl.number.unwrap()).await;
+        }
+        let mut serials: Vec<String> = crl.revoked.iter().map(|r| r.serial.to_string()).collect();
+        let mut revoked: Vec<String> = after.iter().map(|c| c.serial.clone()).collect();
+        serials.sort();
+        revoked.sort();
+        assert_eq!(serials, revoked);
     })
     .await
     .expect("the flow finishes");

@@ -700,6 +700,19 @@ pub enum BrokerAction {
         /// Broker ID, as `opca broker list` shows it
         id: i64,
     },
+
+    /// Have a broker revoke a certificate it issued and put it on its CRL
+    RevokeCert {
+        /// Broker ID, as `opca broker list` shows it
+        id: i64,
+
+        /// The certificate's serial, in decimal
+        serial: String,
+
+        /// RFC 5280's reason
+        #[arg(long, default_value = "unspecified", value_parser = commands::broker::reason_parser())]
+        reason: u8,
+    },
 }
 
 // ---------------------------------------------------------------------------

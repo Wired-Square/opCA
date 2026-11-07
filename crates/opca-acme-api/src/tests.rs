@@ -47,6 +47,7 @@ fn paths_carry_the_api_version() {
         path::CHAIN,
         path::REVOKE,
         path::ISSUED,
+        path::REVOKE_ISSUED,
     ] {
         assert!(p.starts_with(&format!("/v{API_VERSION}/")), "{p}");
     }
@@ -214,6 +215,12 @@ fn chain_update_wire_format() {
 }
 
 #[test]
+fn revoking_a_leaf_names_its_serial_in_the_path() {
+    assert_eq!(path::revoke_issued("4096"), "/v1/issued/4096/revoke");
+    pinned(LeafRevocation { reason: 1 }, json!({"reason": 1}));
+}
+
+#[test]
 fn error_body_wire_format() {
     let error = |kind| ErrorBody {
         kind,
@@ -227,6 +234,7 @@ fn error_body_wire_format() {
         (ErrorKind::BadRequest, "bad_request"),
         (ErrorKind::CodeSpent, "code_spent"),
         (ErrorKind::Revoked, "revoked"),
+        (ErrorKind::NotFound, "not_found"),
         (ErrorKind::Internal, "internal"),
     ] {
         pinned(error(kind), json!({"error": tag, "message": "no"}));
@@ -238,12 +246,13 @@ fn error_kinds_map_to_http_statuses() {
     let statuses = [
         ErrorKind::BadRequest,
         ErrorKind::WrongCode { remaining: 0 },
+        ErrorKind::NotFound,
         ErrorKind::Revoked,
         ErrorKind::CodeSpent,
         ErrorKind::Internal,
     ]
     .map(ErrorKind::http_status);
-    assert_eq!(statuses, [400, 403, 409, 410, 500]);
+    assert_eq!(statuses, [400, 403, 404, 409, 410, 500]);
 }
 
 #[test]

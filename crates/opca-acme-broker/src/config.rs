@@ -26,6 +26,12 @@ pub struct Config {
     /// The port opCA dials when it isn't `listen`'s, as behind a container's mapped port.
     #[serde(skip)]
     pub advertised_port: Option<u16>,
+    /// Where the broker serves its CA certificate and CRL over plain HTTP.
+    #[serde(default = "default_pki_listen")]
+    pub pki_listen: SocketAddr,
+    /// The port certificates name for them when it isn't `pki_listen`'s.
+    #[serde(default)]
+    pub pki_port: Option<u16>,
 }
 
 impl Config {
@@ -43,6 +49,11 @@ impl Config {
     pub fn port(&self) -> u16 {
         self.advertised_port.unwrap_or(self.listen.port())
     }
+
+    /// The port the leaves' CRL and CA certificate URLs name.
+    pub fn advertised_pki_port(&self) -> u16 {
+        self.pki_port.unwrap_or(self.pki_listen.port())
+    }
 }
 
 fn default_listen() -> SocketAddr {
@@ -51,6 +62,10 @@ fn default_listen() -> SocketAddr {
 
 fn default_state_dir() -> PathBuf {
     "/var/lib/opca-acme".into()
+}
+
+fn default_pki_listen() -> SocketAddr {
+    (Ipv6Addr::UNSPECIFIED, 80).into()
 }
 
 fn default_acme_listen() -> SocketAddr {

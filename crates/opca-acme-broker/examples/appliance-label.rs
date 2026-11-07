@@ -5,7 +5,7 @@
 
 use std::process::ExitCode;
 
-use opca_acme_broker::app::{ACME_PORT, API_PORT, DATA, NAME};
+use opca_acme_broker::app::{ACME_PORT, API_PORT, DATA, NAME, PKI_PORT};
 use wslib_appliance_types::manifest::{
     AppArch, AppImage, AppLabel, AppListener, AppManifest, AppOption, AppOptionKind, AppVolume,
     ListenerProtocol,
@@ -33,7 +33,11 @@ fn manifest(arch: AppArch) -> AppManifest {
         dns_sd: None,
         enabled: true,
     };
-    manifest.listeners = vec![listener("api", API_PORT), listener("acme", ACME_PORT)];
+    manifest.listeners = vec![
+        listener("api", API_PORT),
+        listener("acme", ACME_PORT),
+        listener("pki", PKI_PORT),
+    ];
     manifest.health.start_timeout_s = Some(60);
     let mut host = AppOption::new("host", AppOptionKind::String);
     host.required = true;

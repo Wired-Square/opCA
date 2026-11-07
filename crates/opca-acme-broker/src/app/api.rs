@@ -18,7 +18,8 @@ use super::{App, AppState, Hooked, NEEDS_HOST};
 use crate::api::{json, param, reply};
 use crate::cli::pairing_locked;
 use crate::enrolled::issued;
-use crate::enrolment::{bad_request, internal};
+use crate::enrolment::{bad_request, internal, rfc_3339};
+use crate::pki::{CA_PATH, CRL_PATH, origin};
 use crate::{Broker, Mode};
 
 /// The `GET /apps/opca-acme/api/status` response.
@@ -30,6 +31,11 @@ pub struct AppStatus {
     pub api_url: Option<String>,
     /// `https://<host>:<acme port>/acme/directory`, for ACME clients; `None` until a host is set.
     pub acme_directory: Option<String>,
+    /// `http://<host>:<pki port>/ca.crt` and `/crl`, as new leaves name them; `None` until a host is set.
+    pub ca_url: Option<String>,
+    pub crl_url: Option<String>,
+    /// The CRL being published, if one is.
+    pub crl: Option<PublishedCrl>,
     /// The permitted domains once enrolled; before, the configured ones, empty when opCA chooses them.
     pub domains: Vec<String>,
     /// Once enrolled.
@@ -42,6 +48,15 @@ pub struct Issuer {
     pub serial: String,
     /// RFC 3339.
     pub not_after: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedCrl {
+    pub number: Option<u64>,
+    /// RFC 3339.
+    pub this_update: String,
+    /// RFC 3339.
+    pub next_update: Option<String>,
 }
 
 /// The `POST /apps/opca-acme/api/pairing` response: a new code's URI, the old code spent.
@@ -65,6 +80,7 @@ struct Read {
     domains: Vec<String>,
     api_port: u16,
     acme_port: u16,
+    pki_port: u16,
 }
 
 impl FromRef<Read> for ApplianceState {
@@ -86,6 +102,7 @@ pub(super) fn routes(app: &App, hooked: &Hooked) -> Mount {
         domains: app.domains.clone(),
         api_port: app.api_port,
         acme_port: app.acme_port,
+        pki_port: app.pki_port,
     })
 }
 
@@ -124,15 +141,20 @@ impl Read {
                 host: None,
                 api_url: None,
                 acme_directory: None,
+                ca_url: None,
+                crl_url: None,
+                crl: None,
                 domains: self.domains.clone(),
                 subordinate: None,
             },
         };
-        let at = |port| status.host.as_deref().map(|host| origin(host, port));
-        (status.api_url, status.acme_directory) = (
-            at(self.api_port),
-            at(self.acme_port).map(|acme| format!("{acme}/acme/directory")),
-        );
+        let at = |scheme, port, path| {
+            (status.host.as_deref()).map(|host| format!("{}{path}", origin(scheme, host, port)))
+        };
+        status.api_url = at("https", self.api_port, "");
+        status.acme_directory = at("https", self.acme_port, "/acme/directory");
+        status.ca_url = at("http", self.pki_port, CA_PATH);
+        status.crl_url = at("http", self.pki_port, CRL_PATH);
         Ok(status)
     }
 
@@ -145,14 +167,6 @@ impl Read {
                 before: None,
             }),
         }
-    }
-}
-
-fn origin(host: &str, port: u16) -> String {
-    if host.contains(':') {
-        format!("https://[{host}]:{port}")
-    } else {
-        format!("https://{host}:{port}")
     }
 }
 
@@ -185,6 +199,13 @@ impl Broker {
             host: Some(self.host.clone()),
             api_url: None,
             acme_directory: None,
+            ca_url: None,
+            crl_url: None,
+            crl: self.published.crl().map(|crl| PublishedCrl {
+                number: crl.number,
+                this_update: rfc_3339(crl.this_update),
+                next_update: crl.next_update.map(rfc_3339),
+            }),
             domains,
             subordinate,
         })

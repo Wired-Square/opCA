@@ -35,6 +35,8 @@ domains = ["home.example"]
 | `listen` | `[::]:9443` | The broker's API, for opCA |
 | `domains` | none | The permitted domains to ask opCA for; left out, they're chosen in opCA |
 | `acme_listen` | `[::]:443` | The ACME listener, for appliances |
+| `pki_listen` | `[::]:80` | The CA certificate and CRL, over plain HTTP, for anyone checking a certificate |
+| `pki_port` | `pki_listen`'s | The port certificates name for them, when a mapped port differs |
 | `state_dir` | `/var/lib/opca-acme` | Where the broker keeps its state |
 
 **`host` must be a DNS name inside the permitted domains**, such as `acme.home.example` for
@@ -122,7 +124,11 @@ CRL, regenerates the CRL and tells the broker, which stops serving ACME. The rev
 if the broker can't be reached; revoke again to tell it once it's back.
 
 **Issued certificates.** The page's **Issued** column counts the certificates each broker has
-issued and revoked; click it to list them, with their names, expiry and state. opCA brings the
+issued and revoked; click it to list them, with their names, expiry and state. To revoke one,
+right-click it (or use its ⋮) and choose **Revoke…**, pick the reason, and confirm; or run
+`opca broker revoke-cert <id> <serial> [--reason key-compromise]`, with the serial in decimal.
+The broker revokes it, puts it on its CRL at once and answers, and opCA shows it revoked. The
+broker must be reachable: if it isn't, the dialog says so and nothing changes. opCA brings the
 list up to date whenever it talks to the broker (status, enrolment, renewal, revoke), and keeps it
 in the CA database. A broker that can't send it doesn't stop the call: opCA logs it and carries on.
 
@@ -134,7 +140,8 @@ challenges it passes. Limit who can reach port 443 at the network.
 set at pairing), account key changes and deactivation, and revocation by the ordering account or
 by the certificate's own key. A wildcard is validated only by dns-01, IP addresses are refused, and
 names outside the permitted domains are refused when the order is placed. An order lasts 24
-hours. A certificate revoked through ACME shows as revoked in opCA after its next sync.
+hours. A certificate revoked through ACME goes on the broker's CRL at once, and shows as revoked
+in opCA after its next sync.
 
 ## Status
 
@@ -184,7 +191,8 @@ on the CRL but doesn't reach the broker. Revoke from the ACME Servers page or wi
 | Port | Direction | For |
 |---|---|---|
 | 9443 | opCA to broker | The broker's API. After pairing it admits only opCA's operator certificate |
-| 443 | appliances to broker | ACME |
+| 443 | appliances to broker | ACME, and the CA certificate and CRL over HTTPS |
+| 80 | anyone to broker | The CA certificate (`/ca.crt`) and the CRL (`/crl`), over plain HTTP |
 | 80 / 443 | broker to appliances | Checking http-01 and tls-alpn-01 challenges |
 | 53 | broker to its resolvers | Checking dns-01 challenges, through the system's resolvers |
 
@@ -200,6 +208,22 @@ at most and never past the subordinate's end. The broker issues it on each new c
 start, and again two-thirds of the way through its life. Only names inside the permitted domains are issued, with the challenges and
 lifetimes opCA set at pairing.
 
+## The CA certificate and CRL
+
+Certificates the broker issues name `http://<host>/crl` as their CRL distribution point and
+`http://<host>/ca.crt` as where their issuer's certificate is, with `:<pki_port>` when it isn't 80.
+Both are DER. They answer 404 until the broker is enrolled, and again once its subordinate is
+revoked, whose certificates the root's CRL then covers. The same two are served over HTTPS on the
+ACME port, for a fetch you want authenticated; certificates point only at `http://`, which is what
+Windows and NSS follow, and the CRL's signature is what makes it trustworthy.
+
+The broker signs the CRL with the subordinate's key. It lists every revoked certificate that
+hasn't expired, with its reason, and is valid for 4 days. It is signed again every day, at once
+after a revocation, and when the subordinate changes; its number only rises. If the broker is
+down, relying parties have 3 days before its CRL goes stale. Certificates issued before this
+version carry neither pointer. Plain HTTP never carries the root: install opCA's root out of
+band, and check it against its fingerprint.
+
 ## The state directory
 
 `/var/lib/opca-acme` is owned by `opca-acme` and readable by nobody else.
@@ -212,6 +236,7 @@ lifetimes opCA set at pairing.
 | `pairing-code` | The pairing code's hash and attempts |
 | `enrolment.json` | The signed chain, opCA's operator pin and the issuance settings |
 | `acme.crt`, `acme.key` | The ACME listener's certificate and key, issued by the subordinate |
+| `ca.crt`, `leaves.crl` | The subordinate's certificate and the CRL the broker serves |
 | `acme.db` (with `-wal`, `-shm`) | The ACME server's database: accounts, orders and issued certificates |
 | `archive/` | What each re-opening set aside |
 | `broker.pid`, `*.lock` | Runtime files |
@@ -247,7 +272,7 @@ declares:
 
 | | |
 |---|---|
-| Listeners | `api` on 9443 (opCA) and `acme` on 8443 (appliances), both on at install |
+| Listeners | `api` on 9443 (opCA), `acme` on 8443 (appliances) and `pki` on 8080 (the CA certificate and CRL), all on at install |
 | Volume | `data`, at `/data`: the state lives in `/data/state` |
 | Options | `host` (required) and `domains` (optional), as in `broker.toml` |
 
@@ -256,13 +281,14 @@ data: the app serves its sockets through the appliance chassis, which answers an
 nobody and hangs up on it at the hooks.
 
 **Set `host` after installing.** Until it's set the app is healthy but does nothing else: it
-reports that it needs a host, answers both ports with a 503 saying so, and makes no keys. Setting
+reports that it needs a host, answers every port with a 503 saying so, and makes no keys. Setting
 the option restarts the app, which then starts as the broker does on Debian and logs the pairing
 URI. On ApplianceOS after 0.1.10 the URI names the API's host port as the console mapped it,
 which may not be 9443. An
 appliance's ACME directory is `https://<host>:<acme port>/acme/directory`, with the `acme`
 listener's host port. The app's page shows both, the API's URL and the ACME directory, once
-`host` is set.
+`host` is set, with the CA certificate and CRL URLs on the `pki` listener's host port, which new
+certificates name, and the CRL's last and next update.
 
 Options come first; `/data/broker.toml`, with the same `host` and `domains` keys, second. A
 blank option gives way to it.

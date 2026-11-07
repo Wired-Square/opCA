@@ -24,6 +24,7 @@ fn handler() -> impl Handler {
         renew_broker,
         renew_all_brokers,
         revoke_broker,
+        revoke_broker_cert,
         super::dashboard::get_dashboard
     ]
 }
@@ -222,6 +223,27 @@ fn renew_all_reports_an_unreachable_broker() {
         json!([]),
         "heard from today, 90 days left"
     );
+}
+
+#[test]
+fn revoking_a_certificate_the_broker_never_issued_is_refused_and_logged() {
+    let running = serve(&["home.example"]);
+    let h = Harness::with_ca(vec![], handler());
+    answer_operator_minted(&h);
+    let id = enrol(&h, &running, json!([]))["broker"]["id"].clone();
+
+    let refused = h.invoke(
+        "revoke_broker_cert",
+        json!({ "id": id, "serial": "99", "reason": 1 }),
+    );
+
+    let refused = refused.unwrap_err();
+    assert!(
+        refused.as_str().unwrap().contains("no certificate 99"),
+        "{refused}"
+    );
+    assert!(!h.last_log().success);
+    assert_eq!(h.invoke("list_broker_certs", json!({})).unwrap(), json!([]));
 }
 
 #[test]

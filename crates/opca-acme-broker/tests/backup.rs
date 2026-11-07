@@ -16,8 +16,8 @@ use opca_acme_broker::acme::from_base64url;
 use opca_acme_broker::app::{HOOKS_SOCKET, Hooked};
 use serde_json::{Value, json};
 use support::{
-    DOMAINS, Enrolled, Running, console_app, enrol, private_tempdir, record, record_chain, serve,
-    serve_console,
+    DOMAINS, Enrolled, Running, console_app, crl_after, enrol, private_tempdir, record,
+    record_chain, serve, serve_console,
 };
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -150,6 +150,28 @@ async fn a_restore_puts_back_the_capture_and_moves_the_sync_cursor_past_every_ch
         .unwrap();
     assert_eq!(next.certificates[0].serial, "13");
     assert!(!enrolled.running.state.path().join("restore.db").exists());
+}
+
+#[tokio::test]
+async fn a_restore_keeps_the_higher_crl_number_and_signs_afresh() {
+    let (enrolled, sockets) = enrolled().await;
+    let captured_at = crl_after(enrolled.running.pki, 0).await.number.unwrap();
+    let captured = capture(sockets.path()).await;
+    let store = enrolled.running.broker.acme();
+    for _ in 0..3 {
+        store.next_crl_number().await.unwrap();
+    }
+    let highest = captured_at + 3;
+
+    let (code, body) = restore(sockets.path(), &captured).await;
+    assert_eq!(code, 200, "{body}");
+    assert!(
+        crl_after(enrolled.running.pki, highest)
+            .await
+            .number
+            .unwrap()
+            > highest
+    );
 }
 
 #[tokio::test]

@@ -519,6 +519,13 @@ or not the broker answers (`BrokerNotice::Told` / `NotTold`), and revoking an
 already revoked row only tells the broker again, which is how an unreachable
 broker is retried. The caller regenerates the CRL, as after any revoke.
 
+**Revoke one leaf.** `revoke_broker_cert` `POST`s
+`/v1/issued/{serial}/revoke` with an RFC 5280 reason and records the row the
+broker answers with in `broker_certs` at once, its `changed` held at the
+broker's cursor so the sync that follows still fetches whatever changed before
+it. The broker must answer: an unreachable one changes nothing, and nothing is
+queued.
+
 **Issued list.** Whenever opCA talks to an enrolled broker (status, enrolment,
 renewal, revoke), `sync_issued` pages through `GET /v1/issued` from the
 broker's cursor and writes the rows to `broker_certs` (schema v19), keyed by
@@ -540,7 +547,8 @@ Surfaces:
 
 - **Tauri** — [commands/broker.rs](../crates/opca-tauri/src/commands/broker.rs):
   `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `list_broker_certs`,
-  `broker_status`, `renew_broker`, `renew_all_brokers` and `revoke_broker`. The connection mints
+  `broker_status`, `renew_broker`, `renew_all_brokers`, `revoke_broker` and
+  `revoke_broker_cert`. The connection mints
   the operator on the first broker call and keeps it (`Connection::operator`),
   minting another after 20 hours. A reconnect drops it. Every command but the
   offer and the lists runs under `withLock`, status included, since it stamps
@@ -550,7 +558,10 @@ Surfaces:
   (`/acme`, "ACME Servers" in the sidebar) lists brokers with a `url`: state,
   domains, subordinate expiry, last contact, concerns and the count of
   certificates each issued, which expands into a table of them (name and
-  other SANs, expiry, valid, expired or revoked). Enrol Broker opens
+  other SANs, expiry, valid, expired or revoked). Each valid row of an active
+  broker has "Revoke…" in its menu, opened from its ⋮ or by right-clicking the
+  row, which asks for the reason and keeps the broker's refusal in the dialog.
+  Enrol Broker opens
   [EnrolBrokerDialog](../frontend/src/components/EnrolBrokerDialog.tsx) (paste,
   review the offer, confirm), and Renew All, per-row Status, Renew and Revoke
   sit beside it. A `DomainsChanged` outcome offers Confirm and Renew. The
@@ -560,8 +571,10 @@ Surfaces:
   `opca broker enrol <pairing> [--domain …] [--yes]` (refuses before prompting
   when neither the broker nor `--domain` gives domains), `list`,
   `status <id>`, `renew <id> [--change-domains]` or `renew --all` (non-zero
-  unless every broker renewed), and `revoke <id>` (revokes, regenerates and
-  prints the CRL, then tells the broker). Writes run under the vault lock.
+  unless every broker renewed), `revoke <id>` (revokes, regenerates and
+  prints the CRL, then tells the broker), and
+  `revoke-cert <id> <serial> [--reason key-compromise|…]` (the broker revokes
+  one leaf). Writes run under the vault lock.
 
 ### AWS credentials
 
@@ -1098,7 +1111,9 @@ Organised under [src/](../crates/opca-acme-broker/src):
   (`/var/lib/opca-acme`), `acme_listen` (`[::]:443`). Unknown keys are
   refused, so a `step_ca` left from the step-ca broker stops the start.
   `advertised_port`, never read from the file, is the port the pairing URI
-  names when it isn't `listen`'s.
+  names when it isn't `listen`'s. `pki_listen` (`[::]:80`) is the PKI
+  listener, and `pki_port` the port leaves name for it when it isn't
+  `pki_listen`'s.
 - [app.rs](../crates/opca-acme-broker/src/app.rs) — the broker as an
   ApplianceOS app; see [As an ApplianceOS app](#as-an-applianceos-app).
 - [broker.rs](../crates/opca-acme-broker/src/broker.rs) — `Broker::start`
@@ -1138,6 +1153,7 @@ Organised under [src/](../crates/opca-acme-broker/src):
     a `changed` sequence, taken above every other on insert and again on
     revoke, which is the cursor of `changed_after`: a revocation brings a row
     already synced back past the cursor, which its insert id would not.
+    `crl_number` holds the last CRL number taken, which only rises.
   - [issue.rs](../crates/opca-acme-broker/src/acme/issue.rs) — `Issuer`
     finalises an order from a CSR: it must verify, name exactly the order's
     identifiers, use RSA 2048–8192, P-256 or P-384 and not the account key;
@@ -1148,7 +1164,10 @@ Organised under [src/](../crates/opca-acme-broker/src):
     at most 64 octets, else empty with the SAN critical. The leaf is
     `serverAuth` only, backdated a minute, for `leaf_days` (or the order's `notAfter`)
     capped at `leaf_max_days` and the subordinate's end, and served with the
-    chain minus the root. Refusals are `Problem`s with RFC 8555's types.
+    chain minus the root. Since phase 29 it carries a CRL distribution point
+    and an AIA caIssuers, `http://<host>:<advertised PKI port>/crl` and
+    `/ca.crt`, the port left out when it is 80 (`Issuer::published_at`); leaves issued before have neither.
+    Refusals are `Problem`s with RFC 8555's types.
   - [validate.rs](../crates/opca-acme-broker/src/acme/validate.rs) —
     `Validator` over a `wslib_dns::Resolver`, with injectable ports: http-01
     (hyper, up to 10 redirects to a DNS host over http on 80 or https on 443,
@@ -1193,7 +1212,8 @@ survives re-enrolment.
   `Tls::reload` swaps it in on the open listener. Each enrolled route also
   checks the presented certificate (`PeerCertificates`), which turns away a
   connection opened before the swap. Routes: `GET /v1/status`, `POST /v1/csr`,
-  `PUT /v1/chain`, `POST /v1/revoke` and `GET /v1/issued`; the enrolment
+  `PUT /v1/chain`, `POST /v1/revoke`, `GET /v1/issued` and
+  `POST /v1/issued/{serial}/revoke`; the enrolment
   routes answer 404. A revoked broker answers only status, revoke and the
   issued list. Every `Status` carries the issued and revoked counts from
   `acme.db`, or none when it can't be read.
@@ -1205,6 +1225,11 @@ survives re-enrolment.
   issued: `Enrolled::issuers` keeps their serials, the enrolled one and each
   renewal's, so a reopened broker's earlier subordinate stays out. An
   enrolment from before it was kept has none and answers for every row.
+  `POST /v1/issued/{serial}/revoke` takes `{reason}` (0–6, 9 or 10, else 400),
+  revokes one of those leaves in `acme.db`, signs the CRL afresh and answers
+  the row; one of another subordinate, or none, is a 404 (`not_found`), one
+  already revoked is answered as it stands, and a revoked broker answers 409.
+  Each revocation is logged with its serial and reason.
 
 ### The ACME listener
 
@@ -1226,6 +1251,19 @@ crash between leaves a mismatch that the next refresh reissues. Each refresh
 also hands the ACME API a fresh `Issuer`, so a new chain or `IssuanceConfig`
 reaches new orders at once. The status's `state` is `issuing` while the
 listener serves, `acme_down` otherwise, and `revoked` once revoked.
+
+### The PKI listener
+
+[pki.rs](../crates/opca-acme-broker/src/pki.rs) serves `GET` and `HEAD` of
+`/ca.crt` (the subordinate, `application/pkix-cert`) and `/crl` (the leaves'
+CRL, `application/pkix-crl`), both DER from the state directory and cached
+(`Cache-Control: max-age`) for the CRL's remaining life, and nothing else.
+`Broker::serve_pki` serves them over plain HTTP on `pki_listen`, while enrolled
+with a subordinate that isn't revoked, and answers 404 otherwise, as
+`refresh_acme` sets it. The ACME listener serves the same two routes over
+HTTPS, for an authenticated fetch; the leaves name only the `http://` URLs,
+since Windows and NSS follow nothing else and fetching a CRL over TLS can depend
+on the very chain it checks.
 
 ### The ACME API
 
@@ -1266,6 +1304,24 @@ the holder's `Location` for a key change to a key in use, and 400 otherwise.
   0–6, 9 and 10 are taken (0 is stored as none); `Store::revoke` bumps the
   `changed` sequence, so opCA's next sync sees it.
 
+### The leaves' CRL
+
+`serve_pki` also keeps the CRL fresh, in a task that wakes on a timer and when
+`refresh_acme` or a revocation asks, and stops between signings. One signing
+at a time, it signs with the subordinate's key (`Authority::revocation_list`): every revoked,
+unexpired leaf of this enrolment's subordinates, which share its key and name,
+with its reason; the next `crl_number`; `thisUpdate` a minute back and
+`nextUpdate` 4 days on. It writes `ca.crt` and `leaves.crl` atomically, under
+the state lock off the runtime. It
+signs again once under 3 days are left (so daily), at once after a revocation
+from opCA (before the route answers) or ACME (in the background), after a
+reload or restore, and whenever the CRL on disk isn't the current
+subordinate's; it looks at least hourly, and a minute after a failure. A
+reopen starts a fresh list under a new key, and a revoked subordinate stops
+publishing, its leaves covered by the root's CRL. A capture carries the number
+inside `acme.db` but not the file, and a restore keeps the higher number and
+signs afresh.
+
 A server outside opCA can take its certificate from the broker with
 [contrib/acme-client/](../contrib/acme-client/README.md), a lego container
 configured from `.env` whose entrypoint also bakes into other images.
@@ -1280,6 +1336,7 @@ configured from `.env` whose entrypoint also bakes into other images.
 - `enrolment.json` — chain, operator pin, issuance config, the API pin opCA
   saw, and `revoked`;
 - `acme.crt`, `acme.key` (0600) — the ACME listener's pair;
+- `ca.crt`, `leaves.crl` — what the PKI listener serves;
 - `archive/<time>/` — what each reopen set aside;
 - `acme.db` (0600, with its `-wal` and `-shm`) — the ACME server's store;
 - `broker.pid`, `state.lock`, `pairing-code.lock`.
@@ -1291,8 +1348,8 @@ enrolment from disk, so the command line can change them under `state.lock`.
 
 `opca-acme pairing` issues a new code while enrolling, as an admin can from the
 app's page; `status` reads the state
-directory; `enrol --reopen` (root only) archives `enrolment.json` and
-`subordinate.csr`, deletes the subordinate key, makes a new one and a new code, and
+directory; `enrol --reopen` (root only) archives `enrolment.json`,
+`subordinate.csr`, `ca.crt` and `leaves.crl`, deletes the subordinate key, makes a new one and a new code, and
 SIGHUPs the daemon through `broker.pid`. Run as root, the command line drops to
 the state directory's owner with setgid/setuid first, so nothing it writes is
 root's. The daemon's `reload` re-reads the subordinate and the mode, swaps the
@@ -1306,12 +1363,14 @@ is reissued on the next enrolment, since its chain is no longer the enrolled one
 and `domains` from `/data/options.json`, which the console writes from the
 manifest's options before each start, and then from the app's own
 `/data/broker.toml` (the same two keys), a blank value giving way to the next.
-The listeners are fixed at the manifest's ports, `api` 9443 and `acme` 8443,
-and the state lives in `/data/state` (0700). `APPLIANCE_LISTENER_API_PORT`, the
-host port the console mapped, becomes `advertised_port`, so the pairing URI
-names the port opCA dials; absent variables fall back to the manifest's ports.
+The listeners are fixed at the manifest's ports, `api` 9443, `acme` 8443 and
+`pki` 8080, and the state lives in `/data/state` (0700).
+`APPLIANCE_LISTENER_API_PORT`, the host port the console mapped, becomes
+`advertised_port`, so the pairing URI names the port opCA dials, and
+`APPLIANCE_LISTENER_PKI_PORT` becomes `pki_port`, the one leaves name; absent
+variables fall back to the manifest's ports.
 
-With no host, `serve_needing_host` touches no state: it binds both listeners,
+With no host, `serve_needing_host` touches no state: it binds all three listeners,
 answers every request on them with a plain-HTTP 503 saying the broker needs a
 host, and is healthy. Setting the option restarts the container, which then
 starts the broker as usual. The pairing URI is in the container's log, and an
@@ -1374,9 +1433,12 @@ the console's `appliance-identity`: with a malformed one it is a 400; without on
 it is a 401. `GET /apps/opca-acme/api/status` is an `AppStatus`: the state, the
 host, `api_url` (`https://<host>:<api port>`) and `acme_directory`
 (`https://<host>:<acme port>/acme/directory`) on the ports `App::load` read,
-the mapped ones as the pairing URI names them (both `None` until a host is
-set), the permitted domains once enrolled (the configured ones before), and the
-subordinate's serial and expiry. `GET /apps/opca-acme/api/issued` is an
+the mapped ones as the pairing URI names them, `ca_url` and `crl_url`
+(`http://<host>:<pki port>/ca.crt` and `/crl`, as leaves name them; each URL
+leaves out its scheme's default port, 80 or 443; all four
+`None` until a host is set), the permitted domains once enrolled (the
+configured ones before), the subordinate's serial and expiry, and the CRL
+being published, its number, last and next update. `GET /apps/opca-acme/api/issued` is an
 `IssuedNewest`, `IssuedCertificate` rows read from `acme.db` by
 `Store::newest`, newest issue first (by row id, which a revocation doesn't
 move), `issued_page` at a time; `?before=<cursor>` takes the next page and
@@ -1403,8 +1465,8 @@ page installed the index is a 404 and health is unchanged.
 base and bring the masthead, the brand and the console's app switcher, read
 from `/api/switcher` at the origin. `applianceVite` builds it with relative
 asset paths, which the base resolves, and a `.gz` beside each file gzip
-shrinks. It shows the status, then
-`createPagedList` over `api/issued` with a revocation filter. While enrolling,
+shrinks. It shows the status, the CA certificate and CRL URLs and the CRL's last and
+next update among it, then `createPagedList` over `api/issued` with a revocation filter. While enrolling,
 an admin gets a "New pairing URI" button, behind a confirmation that it cancels
 any URI already handed out; the URI it answers is held only in the page's state,
 masked (its code hidden) until revealed, with Copy; other roles see a line that

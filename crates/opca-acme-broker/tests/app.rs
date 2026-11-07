@@ -14,6 +14,7 @@ use std::time::Duration;
 use opca_acme_broker::Broker;
 use opca_acme_broker::app::{
     ACME_PORT, API_PORT, APP_SOCKET, App, AppState, AppStatus, CONSOLE_UID, HOOKS_SOCKET, Hooked,
+    PKI_PORT,
 };
 use support::{LOOPBACK, console_app, private_tempdir, serve_console};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -81,16 +82,18 @@ fn with_no_host_anywhere_there_is_no_config_and_no_state() {
 fn the_console_ports_are_named_when_given_else_the_manifests() {
     let data = private_tempdir();
     let app = load(data.path(), &[]);
-    assert_eq!((app.api_port, app.acme_port), (API_PORT, ACME_PORT));
+    let ports = |app: &App| (app.api_port, app.acme_port, app.pki_port);
+    assert_eq!(ports(&app), (API_PORT, ACME_PORT, PKI_PORT));
 
     let app = load(
         data.path(),
         &[
             ("APPLIANCE_LISTENER_API_PORT", "19443"),
             ("APPLIANCE_LISTENER_ACME_PORT", "443"),
+            ("APPLIANCE_LISTENER_PKI_PORT", "80"),
         ],
     );
-    assert_eq!((app.api_port, app.acme_port), (19443, 443));
+    assert_eq!(ports(&app), (19443, 443, 80));
 
     let refused = App::load(data.path(), |name| {
         (name == "APPLIANCE_LISTENER_API_PORT").then(|| "port".into())
@@ -272,19 +275,23 @@ async fn the_overflow_uid_is_refused_as_the_console() {
 }
 
 #[tokio::test]
-async fn without_a_host_it_is_healthy_and_refuses_on_both_listeners() {
+async fn without_a_host_it_is_healthy_and_refuses_on_every_listener() {
     let (data, sockets) = (private_tempdir(), private_tempdir());
     let socket = sockets.path().join(APP_SOCKET);
     let app = console_app(data.path(), &[("APPLIANCE_LISTENER_ACME_PORT", "443")]);
     let bind = || Listener::bind(format!("{LOOPBACK}:0").parse().unwrap(), Bounds::SERVING);
-    let (api, acme) = (bind().await.unwrap(), bind().await.unwrap());
-    let addresses = [api.local_addr(), acme.local_addr()];
+    let listeners = [
+        bind().await.unwrap(),
+        bind().await.unwrap(),
+        bind().await.unwrap(),
+    ];
+    let addresses = listeners.each_ref().map(Listener::local_addr);
     let stop = CancellationToken::new();
     let served = tokio::spawn({
         let (sockets, stop) = (sockets.path().to_owned(), stop.clone());
         let logs = wslib_appliance_server::logs(&[]);
         async move {
-            app.serve_needing_host(&sockets, logs, api, acme, stop)
+            app.serve_needing_host(&sockets, logs, listeners, stop)
                 .await
         }
     });
@@ -296,7 +303,7 @@ async fn without_a_host_it_is_healthy_and_refuses_on_both_listeners() {
     assert_eq!(status.state, AppState::NeedsHost);
     for (address, path) in addresses
         .into_iter()
-        .zip(["/v1/enrolment", "/acme/directory"])
+        .zip(["/v1/enrolment", "/acme/directory", "/crl"])
     {
         let stream = TcpStream::connect(address).await.unwrap();
         let (status, body) = exchange(stream, path, None).await;

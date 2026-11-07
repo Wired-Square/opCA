@@ -37,7 +37,7 @@ use crate::{Broker, Config, Error, Mode};
 
 mod api;
 
-pub use api::{AppStatus, IssuedNewest, Issuer, NewPairing};
+pub use api::{AppStatus, IssuedNewest, Issuer, NewPairing, PublishedCrl};
 
 pub const NAME: &str = "opca-acme";
 pub const DATA: &str = "/data";
@@ -48,6 +48,7 @@ pub const HOOKS_SOCKET: &str = "hooks.sock";
 /// The listeners' ports inside the container, as the manifest declares them.
 pub const API_PORT: u16 = 9443;
 pub const ACME_PORT: u16 = 8443;
+pub const PKI_PORT: u16 = 8080;
 /// Where the image holds the page's files.
 pub const UI: &str = "/usr/share/opca-acme/ui";
 /// The console's uid inside the container: Docker runs rootful, with no userns-remap (ApplianceOS D63).
@@ -75,6 +76,8 @@ pub struct App {
     /// The host ports opCA and ACME clients dial.
     pub api_port: u16,
     pub acme_port: u16,
+    /// The host port the leaves' CRL and CA certificate URLs name.
+    pub pki_port: u16,
     /// The uid the chassis hears as the console.
     pub console_uid: u32,
     /// The page's files.
@@ -122,6 +125,7 @@ impl App {
             data: data.into(),
             api_port: variable(&env, "APPLIANCE_LISTENER_API_PORT", API_PORT)?,
             acme_port: variable(&env, "APPLIANCE_LISTENER_ACME_PORT", ACME_PORT)?,
+            pki_port: variable(&env, "APPLIANCE_LISTENER_PKI_PORT", PKI_PORT)?,
             console_uid: variable(&env, "APPLIANCE_CONSOLE_UID", CONSOLE_UID)?,
             ui: UI.into(),
         })
@@ -144,16 +148,17 @@ impl App {
             state_dir,
             acme_listen: any(ACME_PORT),
             advertised_port: Some(self.api_port),
+            pki_listen: any(PKI_PORT),
+            pki_port: Some(self.pki_port),
         }))
     }
 
-    /// Healthy in `sockets` with no host set, refusing every request on either listener, until `stop`.
+    /// Healthy in `sockets` with no host set, refusing every request on each listener, until `stop`.
     pub async fn serve_needing_host(
         &self,
         sockets: &Path,
         logs: Logs,
-        api: Listener,
-        acme: Listener,
+        [api, acme, pki]: [Listener; 3],
         stop: CancellationToken,
     ) -> Result<(), Error> {
         tracing::warn!("{NEEDS_HOST}; answering only the page and the hooks until then");
@@ -167,6 +172,7 @@ impl App {
         tokio::try_join!(
             self.serve_console(sockets, hooked, logs, stop.clone().cancelled_owned()),
             refusing(acme, stop.clone()),
+            refusing(pki, stop.clone()),
             refusing(api, stop),
         )?;
         Ok(())

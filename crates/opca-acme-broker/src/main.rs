@@ -45,14 +45,16 @@ fn main() -> ExitCode {
                         Some(config) => (config, Some(app)),
                         None => {
                             let bind = |port| Listener::bind(app::any(port), Bounds::SERVING);
-                            let (api, acme) =
-                                (bind(app::API_PORT).await?, bind(app::ACME_PORT).await?);
+                            let listeners = [
+                                bind(app::API_PORT).await?,
+                                bind(app::ACME_PORT).await?,
+                                bind(app::PKI_PORT).await?,
+                            ];
                             return app
                                 .serve_needing_host(
                                     Path::new(app::SOCKETS),
                                     logs,
-                                    api,
-                                    acme,
+                                    listeners,
                                     stop.token(),
                                 )
                                 .await;
@@ -61,7 +63,7 @@ fn main() -> ExitCode {
                 }
             };
             let pid_file = cli::daemon_pid_file(&config.state_dir);
-            let listen = config.listen;
+            let (listen, pki_listen) = (config.listen, config.pki_listen);
             let (broker, uri) = Broker::start(&config).await?;
             match (uri, broker.mode(), broker.code_status()?) {
                 (Some(uri), ..) => tracing::info!("pairing URI: {}", uri.expose()),
@@ -80,9 +82,12 @@ fn main() -> ExitCode {
                 }
                 (None, ..) => {}
             }
-            let listener = Listener::bind(listen, Bounds::SERVING)
-                .await
-                .map_err(|e| format!("listening on {listen}: {e}"))?;
+            let bind = |address| async move {
+                Listener::bind(address, Bounds::SERVING)
+                    .await
+                    .map_err(|e| format!("listening on {address}: {e}"))
+            };
+            let (listener, pki_listener) = (bind(listen).await?, bind(pki_listen).await?);
             let broker = Arc::new(broker);
             wslib_file_atomic::replace_readable(
                 &pid_file,
@@ -111,8 +116,10 @@ fn main() -> ExitCode {
                 app.serve_console(Path::new(app::SOCKETS), hooked, logs, console_stop)
                     .await
             };
+            let pki_stop = stop.token();
+            let pki = async { Ok(broker.clone().serve_pki(pki_listener, pki_stop).await?) };
             let api = async { Ok(opca_acme_broker::serve(broker.clone(), listener, stop).await?) };
-            let served = tokio::try_join!(api, console);
+            let served = tokio::try_join!(api, console, pki);
             if served.is_ok() {
                 let _ = acme.await;
             }

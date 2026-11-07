@@ -14,7 +14,16 @@ pub mod path {
     pub const CHAIN: &str = "/v1/chain";
     pub const REVOKE: &str = "/v1/revoke";
     pub const ISSUED: &str = "/v1/issued";
+    /// `POST`s a [`LeafRevocation`](super::LeafRevocation), answered with the [`IssuedCertificate`](super::IssuedCertificate).
+    pub const REVOKE_ISSUED: &str = "/v1/issued/{serial}/revoke";
+
+    pub fn revoke_issued(serial: &str) -> String {
+        REVOKE_ISSUED.replace("{serial}", serial)
+    }
 }
+
+/// The RFC 5280 CRLReason codes a leaf may be revoked for, as ACME's `revoke-cert` takes them.
+pub const REVOCATION_REASONS: [u8; 9] = [0, 1, 2, 3, 4, 5, 6, 9, 10];
 
 /// The `GET /v1/enrolment` response: what the broker asks opCA to sign.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +142,13 @@ pub struct IssuedCertificate {
     pub changed: u64,
 }
 
+/// The body of a `POST /v1/issued/{serial}/revoke`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeafRevocation {
+    /// One of [`REVOCATION_REASONS`].
+    pub reason: u8,
+}
+
 /// The body of every refusal the broker itself makes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -148,6 +164,7 @@ pub enum ErrorKind {
     WrongCode { remaining: u32 },
     CodeSpent,
     Revoked,
+    NotFound,
     Internal,
 }
 
@@ -156,6 +173,7 @@ impl ErrorKind {
         match self {
             Self::BadRequest => 400,
             Self::WrongCode { .. } => 403,
+            Self::NotFound => 404,
             Self::Revoked => 409,
             Self::CodeSpent => 410,
             Self::Internal => 500,

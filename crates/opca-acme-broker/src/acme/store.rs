@@ -20,7 +20,7 @@ use wslib_db_sqlite::{Chain, Database, stamp};
 
 use super::{Named, Problem, base64url};
 
-const MIGRATIONS: [(i64, &str, &str); 2] = [
+const MIGRATIONS: [(i64, &str, &str); 3] = [
     (
         1,
         "acme store",
@@ -30,6 +30,11 @@ const MIGRATIONS: [(i64, &str, &str); 2] = [
         2,
         "issued changes",
         include_str!("../../migrations/0002_issued_changes.sql"),
+    ),
+    (
+        3,
+        "crl number",
+        include_str!("../../migrations/0003_crl_number.sql"),
     ),
 ];
 
@@ -719,6 +724,38 @@ impl Store {
         Ok(certificate)
     }
 
+    /// The revoked certificates that the subordinates with serials `issuers`
+    /// issued, when given, and that are still unexpired at `now`.
+    pub async fn revoked_unexpired(
+        &self,
+        issuers: Option<&[String]>,
+        now: SystemTime,
+    ) -> Result<Vec<Certificate>, Error> {
+        let issuers = issuers.map(json);
+        let sql =
+            format!("{CERTIFICATE} WHERE revoked_at IS NOT NULL AND not_after > ? AND {ISSUED_BY}");
+        sqlx::query(&sql)
+            .bind(format(now))
+            .bind(&issuers)
+            .bind(&issuers)
+            .fetch_all(self.db.pool())
+            .await?
+            .iter()
+            .map(certificate)
+            .collect()
+    }
+
+    /// Takes the next CRL number: one past the last taken, from 1.
+    pub async fn next_crl_number(&self) -> Result<u64, Error> {
+        let number: i64 = sqlx::query_scalar(
+            "INSERT INTO crl_number (id, number) VALUES (1, 1) \
+             ON CONFLICT (id) DO UPDATE SET number = number + 1 RETURNING number",
+        )
+        .fetch_one(self.db.pool())
+        .await?;
+        Ok(number as u64)
+    }
+
     /// Up to `limit` certificates issued or revoked after change `cursor`, oldest change first; 0 starts at the beginning.
     /// Only those the subordinates with serials `issuers` issued, when given.
     pub async fn changed_after(
@@ -893,7 +930,8 @@ impl Store {
     /// Every row replaced by those of the copy at `path`, which [`Store::open_restorable`]
     /// passed, in one transaction that `before_commit` may still refuse. Each
     /// certificate's change moves past every change either database made, so a
-    /// sync cursor from before the restore misses nothing after it.
+    /// sync cursor from before the restore misses nothing after it, and the CRL
+    /// number keeps the higher of the two.
     pub async fn replace_from<E: From<Error>>(
         &self,
         path: &Path,
@@ -942,6 +980,12 @@ async fn replaced<'c>(
     )
     .fetch_one(&mut *tx)
     .await?;
+    let crl_number: i64 = sqlx::query_scalar(
+        "SELECT MAX((SELECT COALESCE(MAX(number), 0) FROM main.crl_number), \
+         (SELECT COALESCE(MAX(number), 0) FROM restored.crl_number))",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     let tables: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\'",
     )
@@ -961,6 +1005,12 @@ async fn replaced<'c>(
         .bind(past)
         .execute(&mut *tx)
         .await?;
+    if crl_number > 0 {
+        sqlx::query("INSERT OR REPLACE INTO main.crl_number (id, number) VALUES (1, ?)")
+            .bind(crl_number)
+            .execute(&mut *tx)
+            .await?;
+    }
     if sqlx::query("PRAGMA main.foreign_key_check")
         .fetch_optional(&mut *tx)
         .await?

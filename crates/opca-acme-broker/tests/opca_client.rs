@@ -526,3 +526,62 @@ async fn a_failed_sync_leaves_the_status_standing() {
     assert!(synced(&ca).is_empty());
     assert!(ca.op.is_done(), "the database was still stored");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leaf_revoked_from_opca_is_recorded_at_once_and_lands_on_the_brokers_crl() {
+    let Enrolled {
+        running,
+        mut ca,
+        operator,
+        id,
+    } = enrolled(&[]).await;
+    let store = running.broker.acme();
+    let issuer = row(&ca, id).subordinate_serial;
+    record_by(store, &issuer, "11", "a.home.example").await;
+    stores(&ca, 1);
+    ca.ca.broker_status(&operator, id).unwrap();
+    record_by(store, &issuer, "22", "b.home.example").await;
+    let first = crl_after(running.pki, 0).await.number.unwrap();
+
+    stores(&ca, 1);
+    let revoked = ca.ca.revoke_broker_cert(&operator, id, "11", 1).unwrap();
+
+    assert_eq!(
+        (revoked.serial.as_str(), revoked.revocation_reason),
+        ("11", Some(1))
+    );
+    assert!(revoked.revoked_at.is_some());
+    assert_eq!(synced(&ca), serials(&[("11", true), ("22", false)]));
+    let crl = crl_after(running.pki, first).await;
+    let on_crl: Vec<String> = crl.revoked.iter().map(|r| r.serial.to_string()).collect();
+    assert_eq!(on_crl, ["11"]);
+    assert!(ca.op.is_done());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_leaf_needs_the_broker_and_changes_nothing_without_it() {
+    let Enrolled {
+        running,
+        mut ca,
+        operator,
+        id,
+    } = enrolled(&[]).await;
+    let issuer = row(&ca, id).subordinate_serial;
+    record_by(running.broker.acme(), &issuer, "11", "a.home.example").await;
+    stores(&ca, 1);
+    ca.ca.broker_status(&operator, id).unwrap();
+    let pin = row(&ca, id).pinned_key.unwrap();
+    move_to_a_closed_port(&ca, id, &pin);
+
+    let refused = ca.ca.revoke_broker_cert(&operator, id, "11", 1);
+
+    assert!(
+        matches!(
+            refused,
+            Err(OpcaError::Broker(BrokerError::Unreachable { .. }))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(synced(&ca), serials(&[("11", false)]));
+    assert!(ca.op.is_done(), "nothing stored");
+}
