@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- CI reads the `mirror.wiredsquare.com` cargo and npm mirror without a
+  token: it is public.
+
 ## [0.103.0] - 2026-11-07
 
 ### Added
