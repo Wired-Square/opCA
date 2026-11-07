@@ -65,10 +65,6 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
 
-    env:
-      # cargo resolves the optional wslib-mcp from the private registry even with the mcp feature off.
-      CARGO_REGISTRIES_WIRED_SQUARE_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -102,12 +98,6 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             frontend/package-lock.json
-
-      - name: Authenticate to the npm registry mirror
-        shell: bash
-        env:
-          NPM_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
-        run: echo "//mirror.wiredsquare.com/npm/:_authToken=${NPM_MIRROR_TOKEN}" >> ~/.npmrc
 
       - name: Install npm dependencies
         run: |
@@ -182,9 +172,6 @@ jobs:
     if: always()
     runs-on: ubuntu-22.04
 
-    env:
-      CARGO_REGISTRIES_WIRED_SQUARE_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -244,7 +231,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     env:
-      CARGO_REGISTRIES_WIRED_SQUARE_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
       APPLIANCEOS: ${{ github.workspace }}/ApplianceOS
 
     steps:
@@ -281,11 +267,6 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: crates/opca-acme-broker/ui/package-lock.json
-
-      - name: Authenticate to the npm registry mirror
-        env:
-          NPM_MIRROR_TOKEN: ${{ secrets.CARGO_REGISTRIES_WIRED_SQUARE_TOKEN }}
-        run: echo "//mirror.wiredsquare.com/npm/:_authToken=${NPM_MIRROR_TOKEN}" >> ~/.npmrc
 
       - name: Install the 1Password CLI
         uses: 1password/install-cli-action@v2
