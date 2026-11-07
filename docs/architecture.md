@@ -554,13 +554,18 @@ Surfaces:
 
 - **Tauri** — [commands/broker.rs](../crates/opca-tauri/src/commands/broker.rs):
   `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `list_broker_certs`,
-  `broker_status`, `pause_broker`, `renew_broker`,
+  `broker_status`, `sync_brokers`, `pause_broker`, `renew_broker`,
   `renew_all_brokers`, `revoke_broker` and `revoke_broker_cert`. The connection mints
   the operator on the first broker call and keeps it (`Connection::operator`),
   minting another after 20 hours. A reconnect drops it. Every command but the
   offer and the lists runs under `withLock`, status included, since it stamps
   `last_contact` and stores the database. `revoke_broker` regenerates the CRL
-  as the certificate revoke does.
+  as the certificate revoke does. `sync_brokers` is the load sync: it holds
+  the connection only to set up a `BrokerCall` per active broker with a `url`
+  and to record the answers (`record_answers`), asking each broker for its
+  status and issued list in between, and stores the database once, only if a
+  broker answered; one that didn't is logged. With no such broker it mints
+  nothing.
 - **Frontend** — [pages/AcmeServers.tsx](../frontend/src/pages/AcmeServers.tsx)
   (`/acme`, "ACME Servers" in the sidebar) lists brokers with a `url`: state,
   domains, subordinate expiry, last contact, concerns and the count of
@@ -578,6 +583,11 @@ Surfaces:
   `DomainsChanged` outcome offers Confirm and Renew. The dashboard's ACME
   Servers tile shows while there is an active broker, and lists the flagged
   ones. Subordinates signed by hand stay on the CSR page.
+- **Load sync** — once connected to a valid CA, `App` runs `sync_brokers` in
+  the background under `withLock`
+  ([stores/brokerSync.ts](../frontend/src/stores/brokerSync.ts)); a held lock
+  or a failure skips it, and the dashboard and both ACME pages refetch when it
+  lands.
 - **CLI** — [commands/broker.rs](../crates/opca-cli/src/commands/broker.rs):
   `opca broker enrol <pairing> [--domain …] [--yes]` (refuses before prompting
   when neither the broker nor `--domain` gives domains), `list`,

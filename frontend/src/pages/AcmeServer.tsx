@@ -7,6 +7,7 @@ import ActionMenu from "../components/ActionMenu";
 import { BrokerBadges, brokerName, createBrokerControls, issuedText } from "../components/BrokerControls";
 import Spinner from "../components/Spinner";
 import StoredDate from "../components/StoredDate";
+import { onBrokersSynced } from "../stores/brokerSync";
 import { createActing, failureOf } from "../utils/acting";
 import { asn1Date } from "../utils/dates";
 import "../styles/pages/acme.css";
@@ -33,6 +34,7 @@ export default function AcmeServer() {
     void refetchBrokers();
     void refetchCerts();
   };
+  onBrokersSynced(refetch);
 
   const broker = () => brokers()?.find((b) => b.id === id());
   const issued = () => (certs() ?? []).filter((c) => c.broker_id === id());

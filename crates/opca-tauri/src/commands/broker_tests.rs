@@ -2,6 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 use opca_acme_broker::{Broker, Config};
+use opca_core::services::acme_broker::api::IssuerState;
 use opca_core::testutil::{created, not_found};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -21,6 +22,7 @@ fn handler() -> impl Handler {
         list_brokers,
         list_broker_certs,
         broker_status,
+        sync_brokers,
         renew_broker,
         renew_all_brokers,
         revoke_broker,
@@ -243,6 +245,57 @@ fn renew_all_reports_an_unreachable_broker() {
         dashboard["brokers_flagged"],
         json!([]),
         "heard from today, 90 days left"
+    );
+}
+
+#[test]
+fn syncing_without_brokers_calls_nothing() {
+    let h = Harness::with_ca(vec![], handler());
+
+    h.invoke("sync_brokers", json!({})).unwrap();
+
+    assert!(h.op_calls(&[]).is_empty(), "nothing minted or stored");
+}
+
+#[test]
+fn syncing_records_each_answer_and_stores_only_when_one_came() {
+    let running = serve(&["home.example"]);
+    let h = Harness::with_ca(vec![], handler());
+    answer_operator_minted(&h);
+    let id = enrol(&h, &running, json!([]))["broker"]["id"].clone();
+    h.answer_writes(1);
+    h.invoke("pause_broker", json!({ "id": id, "paused": true }))
+        .unwrap();
+    h.state()
+        .conn
+        .lock()
+        .unwrap()
+        .db()
+        .unwrap()
+        .set_broker_issuer_state(id.as_i64().unwrap(), IssuerState::Issuing)
+        .unwrap();
+
+    h.answer_writes(1);
+    h.invoke("sync_brokers", json!({})).unwrap();
+
+    let listed = h.invoke("list_brokers", json!({})).unwrap();
+    assert_eq!(
+        listed[0]["issuer_state"], "paused",
+        "recorded from the answer"
+    );
+    running.runtime.shutdown_background();
+    let calls = h.op_calls(&[]).len();
+
+    h.invoke("sync_brokers", json!({})).unwrap();
+
+    assert_eq!(h.op_calls(&[]).len(), calls, "nothing stored");
+    let logged = h.last_log();
+    assert!(!logged.success);
+    assert!(
+        logged
+            .detail
+            .unwrap()
+            .starts_with(&format!("Broker {id} did not answer"))
     );
 }
 

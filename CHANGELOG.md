@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `POST /v1/issued/{serial}/revoke` with an RFC 5280 reason, answered with the
   revoked row once the CRL is signed afresh. A leaf of another subordinate is
   a 404, and one already revoked is answered as it stands.
+- Once connected, opCA syncs its ACME brokers in the background: each active
+  broker is asked for its status and what it issued, the database is stored
+  once if any answered, and the dashboard and ACME pages refresh. It is
+  skipped while the lock is held elsewhere, and a broker that doesn't answer
+  is only logged.
 - The ACME Servers page revokes an issued certificate from its right-click
   menu, or its ⋮, with a reason picker, and shows it revoked at once; an
   unreachable broker leaves the dialog open with the error and changes

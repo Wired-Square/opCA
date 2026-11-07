@@ -37,7 +37,7 @@ use crate::op::Runner;
 use crate::services::ca::CertificateAuthority;
 use crate::services::ca::operator::Operator;
 use crate::services::cert::crypto_provider;
-use crate::services::database::models::{Broker, BrokerCert};
+use crate::services::database::models::{Broker, BrokerCert, BrokerState};
 use crate::utils::block_on;
 use crate::utils::datetime::{DateTimeFormat, format_datetime};
 
@@ -176,6 +176,19 @@ impl BrokerClient {
         self.call(Method::GET, &path, Vec::new())
     }
 
+    /// Every certificate issued or revoked since `after`, a page at a time.
+    pub fn issued_since(&self, mut after: u64) -> Result<Vec<IssuedCertificate>, BrokerError> {
+        let mut certificates = Vec::new();
+        loop {
+            let page = self.issued(after)?;
+            certificates.extend(page.certificates);
+            if !page.more || page.next <= after {
+                return Ok(certificates);
+            }
+            after = page.next;
+        }
+    }
+
     pub fn revoke_issued(
         &self,
         serial: &str,
@@ -267,6 +280,33 @@ impl BrokerClient {
             next = error.source();
         }
         BrokerError::Unreachable { message }
+    }
+}
+
+/// A status call to one broker, with where its issued list was last synced to.
+pub struct BrokerCall {
+    id: i64,
+    client: BrokerClient,
+    after: u64,
+}
+
+/// What a broker answered: its status and what it issued since the last sync.
+pub struct BrokerAnswer {
+    id: i64,
+    answer: Result<(Status, Vec<IssuedCertificate>), BrokerError>,
+}
+
+impl BrokerCall {
+    pub fn ask(self) -> BrokerAnswer {
+        let id = self.id;
+        let answer = self.client.status().map(|status| {
+            let issued = self.client.issued_since(self.after).unwrap_or_else(|e| {
+                warn!("[broker] syncing broker {id}'s issued certificates: {e}");
+                Vec::new()
+            });
+            (status, issued)
+        });
+        BrokerAnswer { id, answer }
     }
 }
 
@@ -362,21 +402,69 @@ impl<R: Runner> CertificateAuthority<R> {
     }
 
     fn try_sync_issued(&self, client: &BrokerClient, id: i64) -> Result<(), OpcaError> {
-        let db = self.db()?;
-        let mut after = db.broker_cursor(id)? as u64;
-        loop {
-            let page = client.issued(after)?;
-            let certs = page
-                .certificates
-                .into_iter()
-                .map(|cert| broker_cert(id, cert))
-                .collect::<Result<Vec<_>, _>>()?;
-            db.record_broker_certs(&certs)?;
-            if !page.more || page.next <= after {
-                return Ok(());
+        self.record_issued(id, client.issued_since(self.cursor(id)?)?)
+    }
+
+    fn cursor(&self, id: i64) -> Result<u64, OpcaError> {
+        Ok(self.db()?.broker_cursor(id)? as u64)
+    }
+
+    fn record_issued(&self, id: i64, issued: Vec<IssuedCertificate>) -> Result<(), OpcaError> {
+        let certs = issued
+            .into_iter()
+            .map(|cert| broker_cert(id, cert))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.db()?.record_broker_certs(&certs)
+    }
+
+    /// The active brokers opCA calls, those with a URL.
+    pub fn watched_brokers(&self) -> Result<Vec<Broker>, OpcaError> {
+        let mut brokers = self.list_subordinates()?;
+        brokers.retain(|b| b.state == BrokerState::Active && b.url.is_some());
+        Ok(brokers)
+    }
+
+    /// A call to each of `brokers`, made without the CA by [`BrokerCall::ask`].
+    pub fn broker_calls(
+        &self,
+        operator: &Operator,
+        brokers: &[Broker],
+    ) -> Result<Vec<BrokerCall>, OpcaError> {
+        brokers
+            .iter()
+            .map(|broker| {
+                Ok(BrokerCall {
+                    id: broker.id,
+                    client: BrokerClient::new(Endpoint::of_broker(broker)?, Some(operator))?,
+                    after: self.cursor(broker.id)?,
+                })
+            })
+            .collect()
+    }
+
+    /// Records each answer as a status call does, storing the database once if any broker
+    /// answered; returns the brokers that didn't, with why.
+    pub fn record_answers(
+        &mut self,
+        answers: Vec<BrokerAnswer>,
+    ) -> Result<Vec<(i64, BrokerError)>, OpcaError> {
+        let asked = answers.len();
+        let mut unanswered = Vec::new();
+        for BrokerAnswer { id, answer } in answers {
+            match answer {
+                Ok((status, issued)) => {
+                    self.reported(id, &status)?;
+                    if let Err(e) = self.record_issued(id, issued) {
+                        warn!("[broker] recording broker {id}'s issued certificates: {e}");
+                    }
+                }
+                Err(error) => unanswered.push((id, error)),
             }
-            after = page.next;
         }
+        if unanswered.len() < asked {
+            self.store_ca_database()?;
+        }
+        Ok(unanswered)
     }
 
     /// Stamps `last_contact`, which the next database store persists.
@@ -399,7 +487,6 @@ impl<R: Runner> CertificateAuthority<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::database::models::BrokerState;
 
     fn broker(url: &str) -> Broker {
         Broker {

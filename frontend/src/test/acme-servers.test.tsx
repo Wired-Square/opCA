@@ -5,6 +5,7 @@ import AcmeServer from "../pages/AcmeServer";
 import AcmeServers from "../pages/AcmeServers";
 import Dashboard from "../pages/Dashboard";
 import { setAppState } from "../stores/app";
+import { brokersSynced, syncBrokersInBackground } from "../stores/brokerSync";
 import type { BrokerCert, BrokerRow, DashboardData } from "../api/types";
 
 const listBrokers = vi.hoisted(() => vi.fn());
@@ -14,6 +15,7 @@ const renewBroker = vi.hoisted(() => vi.fn());
 const renewAllBrokers = vi.hoisted(() => vi.fn());
 const revokeBroker = vi.hoisted(() => vi.fn());
 const revokeBrokerCert = vi.hoisted(() => vi.fn());
+const syncBrokers = vi.hoisted(() => vi.fn());
 const pauseBroker = vi.hoisted(() => vi.fn());
 const getDashboard = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
@@ -26,6 +28,7 @@ vi.mock("../api/brokers", async (actual) => ({
   renewAllBrokers,
   revokeBroker,
   revokeBrokerCert,
+  syncBrokers,
   pauseBroker,
 }));
 vi.mock("../api/dashboard", () => ({ getDashboard }));
@@ -371,6 +374,32 @@ describe("dashboard ACME servers tile", () => {
     expect(card).toHaveTextContent("acme.lab.example: signed, not delivered");
     card.click();
     expect(navigate).toHaveBeenCalledWith("/acme");
+  });
+
+  it("refreshes, as the ACME Servers page does, when a background sync lands, and not when it is skipped", async () => {
+    getDashboard.mockResolvedValue(dashboard(1, []));
+    listBrokers.mockResolvedValue([row()]);
+    listBrokerCerts.mockResolvedValue([]);
+    render(() => (
+      <>
+        <Dashboard />
+        <AcmeServers />
+      </>
+    ));
+    await tile();
+    const synced = brokersSynced();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    syncBrokers.mockRejectedValueOnce(new Error("the lock is held"));
+    syncBrokersInBackground();
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(brokersSynced()).toBe(synced);
+    syncBrokers.mockResolvedValueOnce(undefined);
+    syncBrokersInBackground();
+
+    await vi.waitFor(() => expect(getDashboard).toHaveBeenCalledTimes(2));
+    expect(listBrokers).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 
   it("is hidden with no brokers", async () => {

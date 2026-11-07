@@ -1,6 +1,7 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { appState } from "../stores/app";
+import { onBrokersSynced } from "../stores/brokerSync";
 import { getDashboard } from "../api/dashboard";
 import { generateCrl, uploadCrl } from "../api/crl";
 import StatusBubble, { type StatusTone } from "../components/StatusBubble";
@@ -49,6 +50,7 @@ export default function Dashboard() {
     () => appState.vaultState !== "database_unreadable" && appState.vaultState,
     getDashboard,
   );
+  onBrokersSynced(refetch);
   const [pending, setPending] = createSignal<string | null>(null);
   const action = createAction();
 

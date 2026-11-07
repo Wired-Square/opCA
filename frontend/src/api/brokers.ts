@@ -37,6 +37,11 @@ export async function brokerStatus(id: number): Promise<BrokerStatus> {
   return withLock("broker_status", () => tauriInvoke<BrokerStatus>("broker_status", { id }));
 }
 
+/** Asks every active broker for its status and what it issued, as Status does for one. */
+export async function syncBrokers(): Promise<void> {
+  return withLock("sync_brokers", () => tauriInvoke<void>("sync_brokers"));
+}
+
 export async function renewBroker(id: number, changeDomains = false): Promise<Renewal> {
   return withLock("renew_broker", () => tauriInvoke<Renewal>("renew_broker", { id, changeDomains }));
 }

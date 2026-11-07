@@ -7,6 +7,7 @@ import { BrokerBadges, brokerName, createBrokerControls, issuedText } from "../c
 import EnrolBrokerDialog from "../components/EnrolBrokerDialog";
 import Spinner from "../components/Spinner";
 import StoredDate from "../components/StoredDate";
+import { onBrokersSynced } from "../stores/brokerSync";
 import { failureOf } from "../utils/acting";
 import "../styles/pages/acme.css";
 
@@ -20,6 +21,7 @@ export default function AcmeServers() {
     void refetchBrokers();
     void refetchCerts();
   };
+  onBrokersSynced(refetch);
 
   const certsOf = (id: number) => (certs() ?? []).filter((c) => c.broker_id === id);
 

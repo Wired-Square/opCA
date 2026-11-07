@@ -124,6 +124,7 @@ fn main() {
             commands::broker::list_brokers,
             commands::broker::list_broker_certs,
             commands::broker::broker_status,
+            commands::broker::sync_brokers,
             commands::broker::renew_broker,
             commands::broker::renew_all_brokers,
             commands::broker::revoke_broker,

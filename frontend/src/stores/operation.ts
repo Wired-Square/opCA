@@ -70,6 +70,7 @@ const operationLabels: Record<string, string> = {
   enrol_broker: "Enrolling broker\u2026",
   list_brokers: "Loading ACME servers\u2026",
   broker_status: "Checking broker\u2026",
+  sync_brokers: "Syncing ACME servers\u2026",
   renew_broker: "Renewing broker\u2026",
   renew_all_brokers: "Renewing brokers\u2026",
   revoke_broker: "Revoking broker\u2026",

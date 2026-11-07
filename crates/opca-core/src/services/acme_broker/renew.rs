@@ -117,12 +117,8 @@ impl<R: Runner> CertificateAuthority<R> {
         &mut self,
         operator: &Operator,
     ) -> Result<Vec<BrokerRenewal>, OpcaError> {
-        let brokers = self.list_subordinates()?;
         let mut renewals = Vec::new();
-        for broker in brokers
-            .iter()
-            .filter(|b| b.state == BrokerState::Active && b.url.is_some())
-        {
+        for broker in &self.watched_brokers()? {
             renewals.push(BrokerRenewal {
                 id: broker.id,
                 renewal: self.renew_at(operator, broker, false),
