@@ -194,6 +194,8 @@ async fn a_revoked_broker_answers_only_status_and_revoke_and_stays_revoked() {
     for (method, route, body) in [
         ("POST", path::CSR, String::new()),
         ("PUT", path::CHAIN, enrolled.update(renewed)),
+        ("POST", path::PAUSE, String::new()),
+        ("POST", path::RESUME, String::new()),
     ] {
         let (code, answer) = enrolled.as_operator(method, route, &body).await;
         assert_eq!((code, error(&answer)), (409, ErrorKind::Revoked), "{route}");

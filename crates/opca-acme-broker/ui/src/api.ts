@@ -1,6 +1,6 @@
 import { Refusal } from "@wired-square/kit/core";
 
-export type AppState = "needs_host" | "enrolling" | "enrolled" | "revoked";
+export type AppState = "needs_host" | "enrolling" | "enrolled" | "paused" | "revoked";
 
 export interface AppStatus {
   state: AppState;

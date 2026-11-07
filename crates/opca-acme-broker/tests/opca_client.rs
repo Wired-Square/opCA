@@ -585,3 +585,29 @@ async fn revoking_a_leaf_needs_the_broker_and_changes_nothing_without_it() {
     assert_eq!(synced(&ca), serials(&[("11", false)]));
     assert!(ca.op.is_done(), "nothing stored");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pausing_and_resuming_record_the_state_the_broker_answers() {
+    let Enrolled {
+        running,
+        mut ca,
+        operator,
+        id,
+    } = enrolled(&[]).await;
+    assert_eq!(row(&ca, id).issuer_state, Some(IssuerState::Issuing));
+
+    for paused in [true, false] {
+        stores(&ca, 1);
+        let status = ca.ca.pause_broker(&operator, id, paused).unwrap();
+
+        let expected = if paused {
+            IssuerState::Paused
+        } else {
+            IssuerState::Issuing
+        };
+        assert_eq!(status.state, expected);
+        assert_eq!(row(&ca, id).issuer_state, Some(expected));
+        assert!(matches!(running.broker.mode(), Mode::Enrolled(e) if e.paused == paused));
+    }
+    assert!(ca.op.is_done());
+}

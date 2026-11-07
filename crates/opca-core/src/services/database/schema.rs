@@ -5,10 +5,10 @@ use crate::utils::datetime::{self, DateTimeFormat};
 
 use super::models::{MigrationInfo, MigrationStep};
 
-pub const DEFAULT_SCHEMA_VERSION: i64 = 20;
+pub const DEFAULT_SCHEMA_VERSION: i64 = 21;
 
 // ---------------------------------------------------------------------------
-// Table DDL (v20 — current)
+// Table DDL (v21 — current)
 // ---------------------------------------------------------------------------
 
 pub const CREATE_CONFIG_TABLE: &str = "
@@ -169,7 +169,8 @@ pub const CREATE_BROKERS_TABLE: &str = "
         state TEXT NOT NULL,
         last_contact TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        issuer_state TEXT
     )
 ";
 
@@ -549,10 +550,34 @@ pub fn migrate(conn: &Connection, current_version: i64) -> Result<MigrationInfo,
         .map_err(|e| OpcaError::SchemaMigration(format!("v19→v20: {e}")))?;
 
         version = 20;
-        let _ = version; // suppress unused warning
         info.steps.push(MigrationStep { to: 20, ok: true });
+    }
+
+    // v20 → v21: the issuer state each broker last reported. A brokers table
+    // made by the v16 → v17 step above already has it.
+    if version == 20 {
+        if !has_column(conn, "brokers", "issuer_state")? {
+            conn.execute_batch("ALTER TABLE brokers ADD COLUMN issuer_state TEXT;")
+                .map_err(|e| OpcaError::SchemaMigration(format!("v20→v21: {e}")))?;
+        }
+        conn.execute_batch("UPDATE config SET schema_version = 21 WHERE id = 1;")
+            .map_err(|e| OpcaError::SchemaMigration(format!("v20→v21: {e}")))?;
+
+        version = 21;
+        let _ = version; // suppress unused warning
+        info.steps.push(MigrationStep { to: 21, ok: true });
     }
 
     info.migrated = true;
     Ok(info)
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, OpcaError> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        [table, column],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+    .map_err(|e| OpcaError::SchemaMigration(format!("reading {table}'s columns: {e}")))
 }

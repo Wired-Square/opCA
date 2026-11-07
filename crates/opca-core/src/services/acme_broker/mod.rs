@@ -166,6 +166,11 @@ impl BrokerClient {
         self.call(Method::POST, path::REVOKE, Vec::new())
     }
 
+    pub fn pause(&self, paused: bool) -> Result<Status, BrokerError> {
+        let path = if paused { path::PAUSE } else { path::RESUME };
+        self.call(Method::POST, path, Vec::new())
+    }
+
     pub fn issued(&self, after: u64) -> Result<IssuedPage, BrokerError> {
         let path = format!("{}?after={after}", path::ISSUED);
         self.call(Method::GET, &path, Vec::new())
@@ -298,8 +303,22 @@ impl<R: Runner> CertificateAuthority<R> {
         let endpoint = Endpoint::of_broker(&self.broker(id)?)?;
         let client = BrokerClient::new(endpoint, Some(operator))?;
         let status = client.status()?;
-        self.contacted(id)?;
+        self.reported(id, &status)?;
         self.sync_issued(&client, id);
+        self.store_ca_database()?;
+        Ok(status)
+    }
+
+    /// Pauses or resumes broker `id`'s issuance, recording the state it answers with.
+    pub fn pause_broker(
+        &mut self,
+        operator: &Operator,
+        id: i64,
+        paused: bool,
+    ) -> Result<Status, OpcaError> {
+        let client = BrokerClient::new(Endpoint::of_broker(&self.broker(id)?)?, Some(operator))?;
+        let status = client.pause(paused)?;
+        self.reported(id, &status)?;
         self.store_ca_database()?;
         Ok(status)
     }
@@ -365,6 +384,12 @@ impl<R: Runner> CertificateAuthority<R> {
         self.db()?.touch_broker(id)
     }
 
+    /// Stamps `last_contact` and the issuer state `status` gives, for the next store to persist.
+    fn reported(&self, id: i64, status: &Status) -> Result<(), OpcaError> {
+        self.contacted(id)?;
+        self.db()?.set_broker_issuer_state(id, status.state)
+    }
+
     /// The subordinate, then the root, as a broker takes them.
     fn chain_of(&self, cert_pem: &str) -> Result<String, OpcaError> {
         Ok(format!("{cert_pem}{}", self.get_certificate()?))
@@ -389,6 +414,7 @@ mod tests {
             updated_at: String::new(),
             cn: None,
             expiry_date: None,
+            issuer_state: None,
         }
     }
 

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- opCA can pause an ACME broker and resume it, from its ⋮, its page or
+  `opca broker pause|resume <id>` (`POST /v1/pause` and `/v1/resume`). A
+  paused broker refuses new orders and finalising with a 503 until resumed,
+  across restarts, while revocation, the CRL and its subordinate's renewal
+  carry on, and its own page says it is paused. opCA records the state each
+  broker last reported (schema v21), and a paused broker needs attention on
+  the dashboard and in the Lambda.
 - The ACME broker serves its subordinate's certificate and its leaves' CRL,
   DER, at `/ca.crt` and `/crl` on a plain-HTTP `pki` listener (`pki_listen`,
   `[::]:80`, in `broker.toml`; 8080 in the app, its host port read from

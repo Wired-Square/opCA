@@ -135,6 +135,24 @@ pub async fn broker_status(state: State<'_, AppState>, id: i64) -> Result<Status
 }
 
 #[tauri::command]
+pub async fn pause_broker(
+    state: State<'_, AppState>,
+    id: i64,
+    paused: bool,
+) -> Result<Status, String> {
+    let action = "pause_broker";
+    info!("[tauri] {action}: id={id} paused={paused}");
+    let mut conn = state.ensure_ca()?;
+    let (ca, operator) = with_operator(&state, action, &mut conn)?;
+    let status = ca
+        .pause_broker(operator, id, paused)
+        .map_err(logged(&state, action))?;
+    let done = if paused { "Paused" } else { "Resumed" };
+    state.log_ok(action, format!("{done} broker {id}'s issuance"));
+    Ok(status)
+}
+
+#[tauri::command]
 pub async fn renew_broker(
     state: State<'_, AppState>,
     id: i64,

@@ -1220,7 +1220,7 @@ COMMIT;
     assert!(info.migrated);
     assert_eq!(info.from_version, 5);
     assert_eq!(info.to_version, DEFAULT_SCHEMA_VERSION);
-    assert_eq!(info.steps.len(), 15); // v5→v6 … v18→v19, v19→v20
+    assert_eq!(info.steps.len(), 16); // v5→v6 … v19→v20, v20→v21
 
     let config = db.get_config().unwrap();
     assert_eq!(config.schema_version, Some(DEFAULT_SCHEMA_VERSION));
@@ -1250,8 +1250,19 @@ COMMIT;
     assert!(db.query_all_openvpn_templates().unwrap().is_empty());
 }
 
+/// Drop the v21 column so the schema matches v20.
+fn as_v20(db: &CertificateAuthorityDB) {
+    db.conn
+        .execute_batch(
+            "ALTER TABLE brokers DROP COLUMN issuer_state;
+             UPDATE config SET schema_version = 20 WHERE id = 1;",
+        )
+        .unwrap();
+}
+
 /// Drop the v20 columns so the schema matches v19.
 fn as_v19(db: &CertificateAuthorityDB) {
+    as_v20(db);
     db.conn
         .execute_batch(
             "ALTER TABLE config DROP COLUMN web_server_days;
@@ -1273,6 +1284,29 @@ fn type_days(config: &CaConfig) -> [Option<i64>; 4] {
 }
 
 #[test]
+fn a_v20_dump_keeps_its_brokers_with_no_issuer_state_recorded() {
+    let db = broker_db();
+    let id = db.add_broker("100", &domains(&["home.arpa"])).unwrap();
+    as_v20(&db);
+    let v20_sql = String::from_utf8(db.export_database().unwrap()).unwrap();
+    assert!(!v20_sql.contains("issuer_state"));
+
+    let (db, info) = CertificateAuthorityDB::from_sql_dump(&v20_sql).unwrap();
+
+    assert_eq!((info.from_version, info.steps.len()), (20, 1));
+    let broker = db.query_broker(id).unwrap().unwrap();
+    assert_eq!(
+        (broker.subordinate_serial.as_str(), broker.issuer_state),
+        ("100", None)
+    );
+    db.set_broker_issuer_state(id, IssuerState::Paused).unwrap();
+    assert_eq!(
+        db.query_broker(id).unwrap().unwrap().issuer_state,
+        Some(IssuerState::Paused)
+    );
+}
+
+#[test]
 fn a_v19_dump_caps_web_servers_at_90_days_and_leaves_the_other_types_unset() {
     for (ca_days, web_server_days) in [(365, 90), (30, 30)] {
         let db = test_db();
@@ -1286,7 +1320,7 @@ fn a_v19_dump_caps_web_servers_at_90_days_and_leaves_the_other_types_unset() {
 
         let (db, info) = CertificateAuthorityDB::from_sql_dump(&v19_sql).unwrap();
 
-        assert_eq!((info.from_version, info.steps.len()), (19, 1));
+        assert_eq!((info.from_version, info.steps.len()), (19, 2));
         let config = db.get_config().unwrap();
         assert_eq!(
             type_days(&config),
@@ -1333,7 +1367,7 @@ fn a_v14_dump_imports_with_crl_batches_off() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v14_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (14, 6));
+    assert_eq!((info.from_version, info.steps.len()), (14, 7));
     let config = db.get_config().unwrap();
     assert_eq!(
         (config.schema_version, config.crl_batch_enabled),
@@ -1360,7 +1394,7 @@ fn a_v15_dump_has_not_imported_its_openvpn_templates() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v15_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (15, 5));
+    assert_eq!((info.from_version, info.steps.len()), (15, 6));
     assert_eq!(
         db.openvpn_template_import().unwrap(),
         TemplateImport::NotImported
@@ -1452,7 +1486,7 @@ fn a_v16_dump_gains_an_empty_brokers_table() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v16_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (16, 4));
+    assert_eq!((info.from_version, info.steps.len()), (16, 5));
     assert_eq!(
         db.get_config().unwrap().schema_version,
         Some(DEFAULT_SCHEMA_VERSION)
@@ -1478,7 +1512,7 @@ fn a_v17_dump_imports_with_nothing_published() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v17_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (17, 3));
+    assert_eq!((info.from_version, info.steps.len()), (17, 4));
     let cert = db
         .query_cert(&CertLookup::Serial("2".into()), false)
         .unwrap()
@@ -1503,7 +1537,7 @@ fn a_v18_dump_gains_an_empty_broker_certs_table() {
 
     let (db, info) = CertificateAuthorityDB::from_sql_dump(&v18_sql).unwrap();
 
-    assert_eq!((info.from_version, info.steps.len()), (18, 2));
+    assert_eq!((info.from_version, info.steps.len()), (18, 3));
     assert!(db.query_broker_certs().unwrap().is_empty());
     assert_eq!(db.broker_cursor(id).unwrap(), 0);
 }

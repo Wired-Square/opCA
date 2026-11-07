@@ -4,6 +4,7 @@ import {
   brokerErrorText,
   brokerStatus,
   concernText,
+  pauseBroker,
   renewBroker,
   renewalText,
   revokeBroker,
@@ -73,9 +74,14 @@ export function createBrokerControls(props: { nameOf: (id: number) => string; re
     props.refetch();
   };
 
+  const pause = (b: BrokerRow, paused: boolean) => action.run(() => pauseBroker(b.id, paused), reportStatus(b));
+
   const items = (b: BrokerRow): MenuAction[] => [
     { label: "Status", onSelect: () => action.run(() => brokerStatus(b.id), reportStatus(b)), disabled: notDelivered(b) },
     { label: "Renew", onSelect: () => renewOne(b.id), disabled: b.state !== "active" },
+    b.issuer_state === "paused"
+      ? { label: "Resume", onSelect: () => pause(b, false), disabled: b.state !== "active" }
+      : { label: "Pause", onSelect: () => pause(b, true), disabled: b.state !== "active" || notDelivered(b) },
     { label: "Revoke", onSelect: () => setRevoking(b), danger: true },
   ];
 

@@ -73,6 +73,7 @@ const operationLabels: Record<string, string> = {
   renew_broker: "Renewing broker\u2026",
   renew_all_brokers: "Renewing brokers\u2026",
   revoke_broker: "Revoking broker\u2026",
+  pause_broker: "Pausing or resuming broker\u2026",
   revoke_broker_cert: "Revoking certificate\u2026",
 
   // DKIM

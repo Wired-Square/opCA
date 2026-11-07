@@ -104,7 +104,7 @@ impl<R: Runner> CertificateAuthority<R> {
                  Enrol with the same pairing string to send it again; it is not signed twice."
             ))
         })?;
-        self.contacted(id)?;
+        self.reported(id, &status)?;
         self.sync_issued(&as_operator, id);
         self.store_ca_database()?;
         Ok(EnrolledBroker {

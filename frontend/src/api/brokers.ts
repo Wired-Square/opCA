@@ -49,6 +49,10 @@ export async function revokeBroker(id: number): Promise<BrokerRevocation> {
   return withLock("revoke_broker", () => tauriInvoke<BrokerRevocation>("revoke_broker", { id }));
 }
 
+export async function pauseBroker(id: number, paused: boolean): Promise<BrokerStatus> {
+  return withLock("pause_broker", () => tauriInvoke<BrokerStatus>("pause_broker", { id, paused }));
+}
+
 export async function revokeBrokerCert(id: number, serial: string, reason: number): Promise<BrokerCert> {
   return withLock("revoke_broker_cert", () =>
     tauriInvoke<BrokerCert>("revoke_broker_cert", { id, serial, reason }),
@@ -76,6 +80,8 @@ export function concernText(c: Concern): string {
       return `not heard from in ${c.days} days`;
     case "not_delivered":
       return "signed, not delivered";
+    case "paused":
+      return "issuance paused";
   }
 }
 

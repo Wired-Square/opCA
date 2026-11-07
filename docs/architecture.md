@@ -127,7 +127,7 @@ Organised by concern under [src/](../crates/opca-core/src):
     certificate, CSR, CRL metadata record, CRL batch record, and OpenVPN
     template/profile. The whole DB is serialised and persisted as the
     `CA_Database` document in 1Password. A schema-version field drives
-    automatic, forward-only migrations (currently v20). A dump that fails to
+    automatic, forward-only migrations (currently v21). A dump that fails to
     parse or never reaches its `COMMIT` (truncated) is rejected as
     `OpcaError::DatabaseUnreadable`.
   - [local_backup.rs](../crates/opca-core/src/services/local_backup.rs) —
@@ -439,7 +439,9 @@ constraints.
 Each subordinate has a row in the `brokers` table (schema v17): its current
 `subordinate_serial`, the broker's `url` and `pinned_key` (both `NULL` for one
 signed by hand), `permitted_domains` as JSON, `state` (`active` / `revoked`),
-`last_contact`, and `created_at` / `updated_at`. Expiry and CN are read from
+`last_contact`, `created_at` / `updated_at`, and `issuer_state` (schema v21):
+the `IssuerState` the broker last answered a status with, `NULL` until it has.
+Expiry and CN are read from
 the certificate row by serial, not stored twice. `renew_subordinate` signs a
 fresh CSR for the row's domains and moves the row to the new serial. Different
 domains need `change_domains`, so a renewal never widens on its own. The old
@@ -469,7 +471,8 @@ from the pairing URI while enrolling and from `brokers.pinned_key` after. Each
 call is capped at 15 s, and fails as a `BrokerError`: `Unreachable`, `WrongKey`
 (the pin didn't match), `Refused` (the broker's `ErrorBody`), `Status` or
 `Malformed`. Each successful call to an enrolled broker stamps
-`brokers.last_contact`.
+`brokers.last_contact`, and each that answers a `Status` records its state in
+`brokers.issuer_state`.
 
 **Operator identity.** Once enrolled, a broker admits only a client
 certificate that chains to the root and carries the key it pinned at
@@ -519,6 +522,9 @@ or not the broker answers (`BrokerNotice::Told` / `NotTold`), and revoking an
 already revoked row only tells the broker again, which is how an unreachable
 broker is retried. The caller regenerates the CRL, as after any revoke.
 
+**Pause.** `pause_broker` `POST`s `/v1/pause` or `/v1/resume` and records
+the state the broker answers with.
+
 **Revoke one leaf.** `revoke_broker_cert` `POST`s
 `/v1/issued/{serial}/revoke` with an RFC 5280 reason and records the row the
 broker answers with in `broker_certs` at once, its `changed` held at the
@@ -539,16 +545,17 @@ broker's earlier subordinate issued, by `issuer_serial`.
 
 **Concerns** (`concern.rs`). `concerns` flags an active broker with a `url`
 whose subordinate expires within 30 days, whose `last_contact` is older than
-35 days, or which is signed but not delivered. The dashboard tile, the ACME
-Servers page and `opca broker list` use it, and the Lambda applies the same
-thresholds (see [What it checks](#what-it-checks)).
+35 days, which is signed but not delivered, or whose recorded `issuer_state`
+is `paused`. The dashboard tile, the ACME Servers page and `opca broker list`
+use it, and the Lambda applies the same thresholds (see
+[What it checks](#what-it-checks)).
 
 Surfaces:
 
 - **Tauri** — [commands/broker.rs](../crates/opca-tauri/src/commands/broker.rs):
   `fetch_broker_offer`, `enrol_broker`, `list_brokers`, `list_broker_certs`,
-  `broker_status`, `renew_broker`, `renew_all_brokers`, `revoke_broker` and
-  `revoke_broker_cert`. The connection mints
+  `broker_status`, `pause_broker`, `renew_broker`,
+  `renew_all_brokers`, `revoke_broker` and `revoke_broker_cert`. The connection mints
   the operator on the first broker call and keeps it (`Connection::operator`),
   minting another after 20 hours. A reconnect drops it. Every command but the
   offer and the lists runs under `withLock`, status included, since it stamps
@@ -565,8 +572,8 @@ Surfaces:
   menu, opened from its ⋮ or by right-clicking the row, which asks for the
   reason and keeps the broker's refusal in the dialog. Enrol Broker opens
   [EnrolBrokerDialog](../frontend/src/components/EnrolBrokerDialog.tsx) (paste,
-  review the offer, confirm), and Renew All sits beside it. Status, Renew and
-  Revoke are on each row's ⋮ and the broker's page, from
+  review the offer, confirm), and Renew All sits beside it. Status, Renew,
+  Pause or Resume, and Revoke are on each row's ⋮ and the broker's page, from
   [BrokerControls](../frontend/src/components/BrokerControls.tsx). A
   `DomainsChanged` outcome offers Confirm and Renew. The dashboard's ACME
   Servers tile shows while there is an active broker, and lists the flagged
@@ -574,7 +581,8 @@ Surfaces:
 - **CLI** — [commands/broker.rs](../crates/opca-cli/src/commands/broker.rs):
   `opca broker enrol <pairing> [--domain …] [--yes]` (refuses before prompting
   when neither the broker nor `--domain` gives domains), `list`,
-  `status <id>`, `renew <id> [--change-domains]` or `renew --all` (non-zero
+  `status <id>`, `pause <id>` and `resume <id>`,
+  `renew <id> [--change-domains]` or `renew --all` (non-zero
   unless every broker renewed), `revoke <id>` (revokes, regenerates and
   prints the CRL, then tells the broker), and
   `revoke-cert <id> <serial> [--reason key-compromise|…]` (the broker revokes
@@ -1216,10 +1224,12 @@ survives re-enrolment.
   `Tls::reload` swaps it in on the open listener. Each enrolled route also
   checks the presented certificate (`PeerCertificates`), which turns away a
   connection opened before the swap. Routes: `GET /v1/status`, `POST /v1/csr`,
-  `PUT /v1/chain`, `POST /v1/revoke`, `GET /v1/issued` and
-  `POST /v1/issued/{serial}/revoke`; the enrolment
+  `PUT /v1/chain`, `POST /v1/revoke`, `POST /v1/pause`, `POST /v1/resume`,
+  `GET /v1/issued` and `POST /v1/issued/{serial}/revoke`; the enrolment
   routes answer 404. A revoked broker answers only status, revoke and the
-  issued list. Every `Status` carries the issued and revoked counts from
+  issued list. Pause and resume set `Enrolled::paused`, kept in
+  `enrolment.json` (serde default `false`, carried through renewals), and
+  answer the `Status`; each is idempotent. Every `Status` carries the issued and revoked counts from
   `acme.db`, or none when it can't be read.
   `GET /v1/issued?after=<cursor>` answers up to `ISSUED_PAGE` (500)
   certificates changed since the cursor, oldest first, without their PEM:
@@ -1253,8 +1263,9 @@ capped at the subordinate's end. A running listener takes the new pair through
 so that it fits under the lock. The key is written before the certificate, so a
 crash between leaves a mismatch that the next refresh reissues. Each refresh
 also hands the ACME API a fresh `Issuer`, so a new chain or `IssuanceConfig`
-reaches new orders at once. The status's `state` is `issuing` while the
-listener serves, `acme_down` otherwise, and `revoked` once revoked.
+reaches new orders at once, and tells it whether the enrolment is paused. The
+status's `state` is `issuing` while the listener serves, `acme_down`
+otherwise, `paused` while paused, and `revoked` once revoked.
 
 ### The PKI listener
 
@@ -1283,7 +1294,7 @@ processing adds `Retry-After`. Everything but the directory and new-nonce is a
 JWS POST (`application/jose+json`, else 415), and reads are POST-as-GET with an
 empty payload. Refusals are `application/problem+json` with RFC 8555's types:
 403 for `unauthorized`, `orderNotReady` and the like, 429 for `rateLimited`,
-500 for `serverInternal`, 404 (`malformed`) for an unknown resource, 409 with
+500 for `serverInternal` (503 while paused), 404 (`malformed`) for an unknown resource, 409 with
 the holder's `Location` for a key change to a key in use, and 400 otherwise.
 
 - **Accounts** are keyed by the JWK's RFC 7638 thumbprint; contacts must be
@@ -1300,6 +1311,11 @@ the holder's `Location` for a key change to a key in use, and 400 otherwise.
   challenge, its authorisation and the order, and a failure keeps its
   problem. Challenges a restart left `processing` are validated again when the
   listener first serves.
+- **Paused** (`Enrolled::paused`), `new-order` and `finalize` are refused with
+  503 and a `serverInternal` problem, "the operator paused issuance".
+  Everything else, `revoke-cert` included, keeps working, as do the PKI
+  listener, the CRL and every operator route, so the subordinate's renewal and
+  leaf revocation still go through.
 - **Finalising** a ready order goes through `Issuer::finalise` with the
   account key's SPKI (`Jwk::subject_public_key_info`), so the CSR can't reuse
   it. The certificate is the chain as `application/pem-certificate-chain`.
@@ -1434,8 +1450,8 @@ calls on `app.sock`, under the chassis's `/api`: reads for every role (26-2:
 read-only, since revocation is opCA's) and one admin action. Each read takes its
 `Viewer`, which reads
 the console's `appliance-identity`: with a malformed one it is a 400; without one,
-it is a 401. `GET /apps/opca-acme/api/status` is an `AppStatus`: the state, the
-host, `api_url` (`https://<host>:<api port>`) and `acme_directory`
+it is a 401. `GET /apps/opca-acme/api/status` is an `AppStatus`: the state
+(`needs_host`, `enrolling`, `enrolled`, `paused` or `revoked`), the host, `api_url` (`https://<host>:<api port>`) and `acme_directory`
 (`https://<host>:<acme port>/acme/directory`) on the ports `App::load` read,
 the mapped ones as the pairing URI names them, `ca_url` and `crl_url`
 (`http://<host>:<pki port>/ca.crt` and `/crl`, as leaves name them; each URL
@@ -1590,7 +1606,9 @@ downloads and calls `run_tests`, which reports on:
 - **ACME brokers** — from the `brokers` table, for each active broker with a
   `url`: its subordinate (read from its certificate row) expiring within 30
   days, a `last_contact` older than 35 days, or none at all (signed, not
-  delivered). These are the app's [concern](#acme-broker-client) thresholds.
+  delivered), and an `issuer_state` of `paused`; a dump from before the
+  column (schema v21) raises nothing for it. These are the app's
+  [concern](#acme-broker-client) thresholds.
   The Lambda can't reach brokers on the LAN, so the age of `last_contact` is
   its only sign that one is unreachable. Revoked brokers and subordinates
   signed by hand are skipped, and a dump from before the table (schema v17)

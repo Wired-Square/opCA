@@ -24,6 +24,7 @@ fn handler() -> impl Handler {
         renew_broker,
         renew_all_brokers,
         revoke_broker,
+        pause_broker,
         revoke_broker_cert,
         super::dashboard::get_dashboard
     ]
@@ -146,7 +147,7 @@ fn the_offer_shows_the_pinned_key_and_the_brokers_domains() {
 }
 
 #[test]
-fn enrol_status_renew_and_revoke_mint_the_operator_once() {
+fn enrol_status_pause_renew_and_revoke_mint_the_operator_once() {
     let running = serve(&[]);
     let h = Harness::with_ca(vec![], handler());
     answer_operator_minted(&h);
@@ -171,6 +172,26 @@ fn enrol_status_renew_and_revoke_mint_the_operator_once() {
     assert_eq!(
         status["subordinate_serial"],
         enrolled["broker"]["subordinate_serial"]
+    );
+
+    h.answer_writes(1);
+    let paused = h
+        .invoke("pause_broker", json!({ "id": id, "paused": true }))
+        .unwrap();
+    assert_eq!(paused["state"], "paused");
+    let dashboard = h.invoke("get_dashboard", json!({})).unwrap();
+    assert_eq!(
+        dashboard["brokers_flagged"][0]["concerns"],
+        json!([{ "concern": "paused" }])
+    );
+    h.answer_writes(1);
+    let resumed = h
+        .invoke("pause_broker", json!({ "id": id, "paused": false }))
+        .unwrap();
+    assert_eq!(resumed["state"], "issuing");
+    assert_eq!(
+        h.last_log().detail.unwrap(),
+        format!("Resumed broker {id}'s issuance")
     );
 
     h.answer([created("CRT")]);

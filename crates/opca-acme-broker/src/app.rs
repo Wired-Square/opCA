@@ -90,6 +90,7 @@ pub enum AppState {
     NeedsHost,
     Enrolling,
     Enrolled,
+    Paused,
     Revoked,
 }
 
@@ -98,6 +99,7 @@ impl From<&Mode> for AppState {
         match mode {
             Mode::Enrolling => Self::Enrolling,
             Mode::Enrolled(enrolled) if enrolled.revoked => Self::Revoked,
+            Mode::Enrolled(enrolled) if enrolled.paused => Self::Paused,
             Mode::Enrolled(_) => Self::Enrolled,
         }
     }

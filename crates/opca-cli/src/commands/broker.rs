@@ -31,6 +31,8 @@ pub fn dispatch(args: BrokerArgs, app: &mut AppContext<ShellRunner>) -> Result<(
             id.expect("clap requires an id without --all"),
             change_domains,
         ),
+        BrokerAction::Pause { id } => handle_pause(app, id, true),
+        BrokerAction::Resume { id } => handle_pause(app, id, false),
         BrokerAction::Revoke { id } => handle_revoke(app, id),
         BrokerAction::RevokeCert { id, serial, reason } => {
             handle_revoke_cert(app, id, &serial, reason)
@@ -170,12 +172,7 @@ fn handle_status<R: Runner>(app: &mut AppContext<R>, id: i64) -> Result<(), Opca
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
         let operator = ca.operator()?;
         let status = ca.broker_status(&operator, id)?;
-        let state = match status.state {
-            IssuerState::Issuing => "issuing",
-            IssuerState::AcmeDown => "ACME down",
-            IssuerState::Revoked => "revoked",
-        };
-        output::info("State", state);
+        output::info("State", issuer_state(status.state));
         output::info("Subordinate serial", &status.subordinate_serial);
         output::info("Subordinate expires", &status.subordinate_not_after);
         output::info("Domains", &status.config.permitted_domains.join(", "));
@@ -192,6 +189,37 @@ fn handle_status<R: Runner>(app: &mut AppContext<R>, id: i64) -> Result<(), Opca
                 "broker {}, API {}",
                 status.versions.broker, status.versions.api
             ),
+        );
+        Ok(())
+    })
+}
+
+fn issuer_state(state: IssuerState) -> &'static str {
+    match state {
+        IssuerState::Issuing => "issuing",
+        IssuerState::AcmeDown => "ACME down",
+        IssuerState::Paused => "paused",
+        IssuerState::Revoked => "revoked",
+    }
+}
+
+fn handle_pause<R: Runner>(
+    app: &mut AppContext<R>,
+    id: i64,
+    paused: bool,
+) -> Result<(), OpcaError> {
+    output::title(if paused {
+        "Pausing ACME Broker"
+    } else {
+        "Resuming ACME Broker"
+    });
+    with_lock(app, "broker_pause", |app| {
+        let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+        let operator = ca.operator()?;
+        let status = ca.pause_broker(&operator, id, paused)?;
+        output::print_result(
+            &format!("Broker {id}: {}", issuer_state(status.state)),
+            true,
         );
         Ok(())
     })
@@ -402,6 +430,19 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn pause_and_resume_take_one_id() {
+        assert!(matches!(
+            parse(&["broker", "pause", "3"]),
+            Ok(BrokerAction::Pause { id: 3 })
+        ));
+        assert!(matches!(
+            parse(&["broker", "resume", "3"]),
+            Ok(BrokerAction::Resume { id: 3 })
+        ));
+        assert!(parse(&["broker", "pause"]).is_err());
     }
 
     #[test]

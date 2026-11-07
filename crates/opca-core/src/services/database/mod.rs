@@ -12,6 +12,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::OpcaError;
+use crate::services::acme_broker::api::IssuerState;
 use crate::utils::datetime::{self, DateTimeFormat};
 
 /// Critical expiry warning window in days.
@@ -1136,7 +1137,7 @@ impl CertificateAuthorityDB {
 
 const BROKER_SELECT: &str = "SELECT b.id, b.subordinate_serial, b.url, b.pinned_key,
         b.permitted_domains, b.state, b.last_contact, b.created_at, b.updated_at,
-        c.cn, c.expiry_date
+        c.cn, c.expiry_date, b.issuer_state
     FROM brokers b LEFT JOIN certificate_authority c ON c.serial = b.subordinate_serial";
 
 fn domains_json(domains: &[String]) -> Result<String, OpcaError> {
@@ -1223,6 +1224,15 @@ impl CertificateAuthorityDB {
         Ok(())
     }
 
+    pub fn set_broker_issuer_state(&self, id: i64, state: IssuerState) -> Result<(), OpcaError> {
+        let state = serde_json::to_value(state).map_err(|e| OpcaError::Database(e.to_string()))?;
+        self.conn.execute(
+            "UPDATE brokers SET issuer_state = ?2 WHERE id = ?1",
+            rusqlite::params![id, state.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// Marks the broker whose current subordinate is `serial`, however it was revoked.
     pub fn revoke_brokers_of(&self, serial: &str) -> Result<(), OpcaError> {
         self.conn.execute(
@@ -1254,6 +1264,9 @@ impl CertificateAuthorityDB {
             updated_at: row.get(8)?,
             cn: row.get(9)?,
             expiry_date: row.get(10)?,
+            issuer_state: row
+                .get::<_, Option<String>>(11)?
+                .and_then(|state| serde_json::from_value(state.into()).ok()),
         })
     }
 }

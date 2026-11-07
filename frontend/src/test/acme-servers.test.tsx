@@ -14,6 +14,7 @@ const renewBroker = vi.hoisted(() => vi.fn());
 const renewAllBrokers = vi.hoisted(() => vi.fn());
 const revokeBroker = vi.hoisted(() => vi.fn());
 const revokeBrokerCert = vi.hoisted(() => vi.fn());
+const pauseBroker = vi.hoisted(() => vi.fn());
 const getDashboard = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("../api/brokers", async (actual) => ({
@@ -25,6 +26,7 @@ vi.mock("../api/brokers", async (actual) => ({
   renewAllBrokers,
   revokeBroker,
   revokeBrokerCert,
+  pauseBroker,
 }));
 vi.mock("../api/dashboard", () => ({ getDashboard }));
 vi.mock("@solidjs/router", () => ({ useNavigate: () => navigate, useParams: () => ({ id: "1" }) }));
@@ -41,6 +43,7 @@ const row = (overrides: Partial<BrokerRow> = {}): BrokerRow => ({
   updated_at: "20261001000000Z",
   cn: "acme.home.arpa",
   expiry_date: "20270101000000Z",
+  issuer_state: "issuing",
   concerns: [],
   ...overrides,
 });
@@ -149,8 +152,36 @@ describe("ACME servers page", () => {
     expect(items.map((i) => [i.textContent, i.getAttribute("aria-disabled") === "true"])).toEqual([
       ["Status", false],
       ["Renew", true],
+      ["Pause", true],
       ["Revoke", false],
     ]);
+  });
+
+  it("pauses a broker from its menu, and offers to resume one recorded paused", async () => {
+    const status = (state: string) => ({
+      state,
+      subordinate_serial: "10",
+      subordinate_not_after: "2027-01-01T00:00:00Z",
+      config: { permitted_domains: ["home.arpa"], leaf_days: 30, leaf_max_days: 45, challenges: [] },
+      versions: { api: 1, broker: "0.103.0" },
+      issued: null,
+    });
+    pauseBroker.mockResolvedValue(status("paused"));
+    listBrokers.mockResolvedValueOnce([row()]);
+    listBrokers.mockResolvedValue([row({ issuer_state: "paused", concerns: [{ concern: "paused" }] })]);
+    render(() => <AcmeServers />);
+
+    fireEvent.click(within(await rowOf("acme.home.arpa")).getByRole("button", { name: "Actions for acme.home.arpa" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pause" }));
+
+    expect(await screen.findByText("acme.home.arpa: paused, serial 10, broker 0.103.0")).toBeInTheDocument();
+    expect(pauseBroker).toHaveBeenCalledWith(1, true);
+    const paused = within(await rowOf("acme.home.arpa"));
+    expect(await paused.findByText("issuance paused")).toHaveClass("status-badge", "status-paused");
+    fireEvent.click(paused.getByRole("button", { name: "Actions for acme.home.arpa" }));
+    pauseBroker.mockResolvedValue(status("issuing"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Resume" }));
+    await vi.waitFor(() => expect(pauseBroker).toHaveBeenCalledWith(1, false));
   });
 
   it("renews all and reports each broker, offering to confirm changed domains", async () => {

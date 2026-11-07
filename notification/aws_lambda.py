@@ -63,17 +63,19 @@ def crl_batch_enabled(db_path):
     return bool(rows and rows[0][0])
 
 def active_brokers(db_path):
-    try:
-        return ca_database_handler(db_path, """
-            SELECT b.subordinate_serial, COALESCE(c.cn, b.url), c.expiry_date, b.last_contact
-            FROM brokers b LEFT JOIN certificate_authority c ON c.serial = b.subordinate_serial
-            WHERE b.state = 'active' AND b.url IS NOT NULL
-        """)
-    except sqlite3.OperationalError:
+    columns = {row[1] for row in ca_database_handler(db_path, 'PRAGMA table_info(brokers)')}
+    if not columns:
         # A dump older than schema v17 has no brokers.
         return []
+    # One older than v21 has no issuer state.
+    issuer_state = 'b.issuer_state' if 'issuer_state' in columns else 'NULL'
+    return ca_database_handler(db_path, f"""
+        SELECT b.subordinate_serial, COALESCE(c.cn, b.url), c.expiry_date, b.last_contact, {issuer_state}
+        FROM brokers b LEFT JOIN certificate_authority c ON c.serial = b.subordinate_serial
+        WHERE b.state = 'active' AND b.url IS NOT NULL
+    """)
 
-def broker_concerns(expiry_str, last_contact_str):
+def broker_concerns(expiry_str, last_contact_str, issuer_state):
     def days_until(stamp):
         return timestamp_until(datetime.strptime(stamp, '%Y%m%d%H%M%SZ'))['days']
 
@@ -84,6 +86,8 @@ def broker_concerns(expiry_str, last_contact_str):
         found.append('signed, not delivered')
     elif (silent := -days_until(last_contact_str)) > BROKER_SILENT_DAYS:
         found.append(f'not heard from in {silent} days')
+    if issuer_state == 'paused':
+        found.append('issuance paused')
     return found
 
 def check_brokers(db_path):
@@ -92,8 +96,8 @@ def check_brokers(db_path):
         return '', False
 
     flagged = [f'    [{serial}] {name} - {", ".join(found)}\n'
-               for serial, name, expiry_str, last_contact_str in brokers
-               if (found := broker_concerns(expiry_str, last_contact_str))]
+               for serial, name, expiry_str, last_contact_str, issuer_state in brokers
+               if (found := broker_concerns(expiry_str, last_contact_str, issuer_state))]
 
     msg = concat_msg('\n*ACME Brokers*')
     if flagged:

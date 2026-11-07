@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use super::api::IssuerState;
 use crate::services::database::models::{Broker, BrokerState};
 use crate::utils::datetime::{DateTimeFormat, parse_datetime};
 
@@ -21,6 +22,8 @@ pub enum Concern {
     },
     /// Signed, but the broker has never taken it.
     NotDelivered,
+    /// The operator paused its issuance.
+    Paused,
 }
 
 impl std::fmt::Display for Concern {
@@ -30,6 +33,7 @@ impl std::fmt::Display for Concern {
             Self::Expiring { days } => write!(f, "expires in {days} days"),
             Self::Silent { days } => write!(f, "not heard from in {days} days"),
             Self::NotDelivered => f.write_str("signed, not delivered"),
+            Self::Paused => f.write_str("issuance paused"),
         }
     }
 }
@@ -52,6 +56,9 @@ pub fn concerns(broker: &Broker, now: DateTime<Utc>) -> Vec<Concern> {
         None => found.push(Concern::NotDelivered),
         Some(days) if days > SILENT_AFTER_DAYS => found.push(Concern::Silent { days }),
         Some(_) => {}
+    }
+    if broker.issuer_state == Some(IssuerState::Paused) {
+        found.push(Concern::Paused);
     }
     found
 }
@@ -87,6 +94,7 @@ mod tests {
             updated_at: String::new(),
             cn: Some("acme.home.arpa".into()),
             expiry_date: at(now, expires_in),
+            issuer_state: Some(IssuerState::Issuing),
         }
     }
 
@@ -108,6 +116,21 @@ mod tests {
             concerns(&broker(now, -2, None), now),
             [Concern::Expiring { days: -2 }, Concern::NotDelivered]
         );
+    }
+
+    #[test]
+    fn a_paused_broker_is_flagged_and_one_never_asked_is_not() {
+        let now = now();
+        let with = |issuer_state| Broker {
+            issuer_state,
+            ..broker(now, 60, Some(3))
+        };
+        assert_eq!(
+            concerns(&with(Some(IssuerState::Paused)), now),
+            [Concern::Paused]
+        );
+        assert!(concerns(&with(None), now).is_empty());
+        assert_eq!(Concern::Paused.to_string(), "issuance paused");
     }
 
     #[test]
