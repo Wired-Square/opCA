@@ -137,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A prerelease tag (`v0.102.5-dev.10`) builds only the ACME broker's `.deb`
+  and the `opca-acme` app archives, as a draft prerelease.
 - The `opca-acme` app serves its page, API and backup hooks through the
   appliance chassis (`wslib-appliance-server`), at the fixed base
   `/apps/opca-acme/`. `hooks.sock` answers only the console's uid
