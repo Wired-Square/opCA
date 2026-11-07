@@ -2,7 +2,7 @@ services:
   acme-client:
     build: .
     image: opca-acme-client
-    restart: unless-stopped
+    restart: on-failure
     env_file:
       - path: .env
         required: false
