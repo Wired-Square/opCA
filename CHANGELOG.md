@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The ACME broker serves its subordinate's certificate and its leaves' CRL,
+  DER, at `/ca.crt` and `/crl` on a plain-HTTP `pki` listener (`pki_listen`,
+  `[::]:80`, in `broker.toml`; 8080 in the app, its host port read from
+  `APPLIANCE_LISTENER_PKI_PORT`), cached for the CRL's remaining life, and
+  over HTTPS on the ACME listener too. Both answer 404 before enrolment and
+  once the subordinate is revoked.
+- The ACME broker signs a CRL of its revoked, unexpired leaves with the
+  subordinate's key, valid for 4 days and signed again daily, at once after
+  any revocation, and when the subordinate changes. Its number only rises; a
+  box backup carries it, and a restore keeps the higher one.
+- Certificates the ACME broker issues point at its CRL and its CA certificate
+  (`http://<host>:<pki port>/crl` and `/ca.crt`, the port left out when it
+  is 80), on the port the console maps.
+- opCA can have a broker revoke one of its leaves:
+  `POST /v1/issued/{serial}/revoke` with an RFC 5280 reason, answered with the
+  revoked row once the CRL is signed afresh. A leaf of another subordinate is
+  a 404, and one already revoked is answered as it stands.
+- The ACME Servers page revokes an issued certificate from its right-click
+  menu, or its ⋮, with a reason picker, and shows it revoked at once; an
+  unreachable broker leaves the dialog open with the error and changes
+  nothing. `opca broker revoke-cert <id> <serial> [--reason …]` does the same.
+- The `opca-acme` app's page shows the CA certificate and CRL URLs, and the
+  CRL's last and next update.
 - `contrib/acme-client/` is a lego container, configured from `.env`, that
   orders a certificate from the ACME broker or any RFC 8555 server over
   http-01, tls-alpn-01 or a lego DNS provider, renews it on an interval and
