@@ -509,7 +509,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let ca_cert = ca_bundle
             .certificate
             .as_ref()
-            .ok_or_else(|| OpcaError::CaNotFound)?;
+            .ok_or(OpcaError::CaNotFound)?;
 
         let serial = Serial::try_from(db.increment_serial(SerialType::Cert, None)?)?;
         let now = Utc::now();
@@ -580,7 +580,7 @@ impl<R: Runner> CertificateAuthority<R> {
         // Check time validity
         let now =
             Asn1Time::days_from_now(0).map_err(|e| OpcaError::Crypto(format!("Asn1Time: {e}")))?;
-        if cert.not_before() > &now || cert.not_after() < &now {
+        if cert.not_before() > now || cert.not_after() < now {
             return Ok(false);
         }
 
@@ -902,14 +902,11 @@ impl<R: Runner> CertificateAuthority<R> {
         let ca_config = db.get_config()?;
         let batch_uri = crl_batch_uri(&ca_config)?;
 
-        let ca_bundle = self
-            .ca_bundle
-            .as_ref()
-            .ok_or_else(|| OpcaError::CaNotFound)?;
+        let ca_bundle = self.ca_bundle.as_ref().ok_or(OpcaError::CaNotFound)?;
         let ca_cert = ca_bundle
             .certificate
             .as_ref()
-            .ok_or_else(|| OpcaError::CaNotFound)?;
+            .ok_or(OpcaError::CaNotFound)?;
         let ca_key = ca_bundle
             .private_key
             .as_ref()
@@ -1946,7 +1943,7 @@ fn format_db_item(
 
     // Check if expired
     let now = Asn1Time::days_from_now(0).map_err(|e| OpcaError::Crypto(format!("{e}")))?;
-    let expired = cert.not_after() < &now;
+    let expired = cert.not_after() < now;
     let status = if expired { "Expired" } else { "Valid" };
 
     Ok(CertRecord {
@@ -2315,7 +2312,7 @@ mod tests {
         assert_eq!(record.title, Some("CA".to_string()));
         assert_eq!(record.status, Some("Valid".to_string()));
         assert_eq!(record.cert_type, Some("ca".to_string()));
-        assert!(record.serial.len() > 0);
+        assert!(!record.serial.is_empty());
     }
 
     #[test]

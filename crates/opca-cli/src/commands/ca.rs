@@ -63,6 +63,7 @@ pub fn dispatch(args: CaArgs, app: &mut AppContext<ShellRunner>) -> Result<(), O
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_init<R: Runner>(
     app: &mut AppContext<R>,
     cn: String,
@@ -115,6 +116,7 @@ fn handle_init<R: Runner>(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_import<R: Runner>(
     app: &mut AppContext<R>,
     cert_file: String,

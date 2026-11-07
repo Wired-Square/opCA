@@ -52,6 +52,8 @@ pub struct BackupPayload {
     pub items: Vec<BackupItem>,
 }
 
+pub type RestoreProgress<'a> = &'a dyn Fn(&str, &str);
+
 impl BackupPayload {
     /// The items a restore writes: a backup made before the lock was left out still carries it.
     pub fn restorable_items<'a>(
@@ -178,7 +180,7 @@ impl<'a, R: Runner> VaultBackup<'a, R> {
     pub fn restore_backup(
         &self,
         payload: &BackupPayload,
-        on_progress: Option<&dyn Fn(&str, &str)>,
+        on_progress: Option<RestoreProgress<'_>>,
     ) -> Result<RestoreCounts, OpcaError> {
         if self
             .vault

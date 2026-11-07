@@ -95,7 +95,7 @@ fn handle_create<R: Runner>(
             let subject = bundle
                 .csr
                 .as_ref()
-                .map(|c| csr_subject_string(c))
+                .map(csr_subject_string)
                 .unwrap_or_default();
 
             let record = CsrRecord {
