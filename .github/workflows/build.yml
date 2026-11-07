@@ -32,14 +32,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ inputs.tag || github.ref_name }}" \
+          tag="${{ inputs.tag || github.ref_name }}"
+          gh release create "$tag" \
             --draft \
-            --title "opCA ${{ inputs.tag || github.ref_name }}" \
+            $([[ "$tag" == *-* ]] && echo --prerelease) \
+            --title "opCA $tag" \
             --notes "See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details."
 
+  # A prerelease tag (v1.2.3-dev.4) builds only the ACME broker and app.
   build:
     needs: [create-release]
-    if: always()
+    if: always() && !contains(needs.create-release.outputs.tag, '-')
     strategy:
       fail-fast: false
       matrix:
