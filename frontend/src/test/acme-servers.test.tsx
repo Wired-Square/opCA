@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@solidjs/testing-library";
 import { DateModes } from "@wired-square/kit";
+import AcmeServer from "../pages/AcmeServer";
 import AcmeServers from "../pages/AcmeServers";
 import Dashboard from "../pages/Dashboard";
 import { setAppState } from "../stores/app";
@@ -26,7 +27,7 @@ vi.mock("../api/brokers", async (actual) => ({
   revokeBrokerCert,
 }));
 vi.mock("../api/dashboard", () => ({ getDashboard }));
-vi.mock("@solidjs/router", () => ({ useNavigate: () => navigate }));
+vi.mock("@solidjs/router", () => ({ useNavigate: () => navigate, useParams: () => ({ id: "1" }) }));
 
 const row = (overrides: Partial<BrokerRow> = {}): BrokerRow => ({
   id: 1,
@@ -101,80 +102,18 @@ describe("ACME servers page", () => {
     );
   });
 
-  it("counts each broker's issued certificates and lists them on demand", async () => {
-    listBrokerCerts.mockResolvedValue([
-      cert(),
-      cert({ serial: "222", common_name: null, sans: ["printer.home.arpa"], revoked_at: "20261102000000Z", changed: 3 }),
-      cert({ serial: "333", common_name: "old.home.arpa", sans: ["old.home.arpa"], not_after: "20200101000000Z" }),
-    ]);
+  it("counts each broker's issued certificates and opens its page from the row, not the ⋮", async () => {
+    listBrokerCerts.mockResolvedValue([cert(), cert({ serial: "222", revoked_at: "20261102000000Z" })]);
     render(() => <AcmeServers />);
 
-    const pendingRow = await rowOf("acme.lab.example");
-    expect(within(pendingRow).queryByRole("button", { name: /issued/ })).toBeNull();
-    const toggle = await within(await rowOf("acme.home.arpa")).findByRole("button", { name: "3 issued, 1 revoked" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("table", { name: /Certificates issued by/ })).toBeNull();
+    const healthy = await rowOf("acme.home.arpa");
+    expect(await within(healthy).findByText("2 issued, 1 revoked")).toBeInTheDocument();
+    expect(await rowOf("acme.lab.example")).not.toHaveTextContent("issued");
 
-    fireEvent.click(toggle);
-
-    const issued = within(screen.getByRole("table", { name: "Certificates issued by acme.home.arpa" }));
-    const state = (name: string) => within(issued.getByText(name).closest("tr") as HTMLElement);
-    expect(state("nas.home.arpa").getByText("files.home.arpa")).toHaveClass("broker-sans");
-    expect(state("nas.home.arpa").getByText("valid")).toHaveClass("status-valid");
-    expect(state("printer.home.arpa").getByText("revoked")).toHaveClass("status-revoked");
-    expect(state("old.home.arpa").getByText("expired")).toHaveClass("status-expired");
-    fireEvent.click(toggle);
-    expect(screen.queryByRole("table", { name: /Certificates issued by/ })).toBeNull();
-  });
-
-  const openIssued = async () => {
-    fireEvent.click(await within(await rowOf("acme.home.arpa")).findByRole("button", { name: /issued/ }));
-    return within(screen.getByRole("table", { name: "Certificates issued by acme.home.arpa" }));
-  };
-
-  it("revokes an issued certificate from its right-click menu with the reason picked", async () => {
-    listBrokerCerts.mockResolvedValueOnce([cert()]);
-    listBrokerCerts.mockResolvedValue([cert({ revoked_at: "20261107000000Z", revocation_reason: 1, changed: 2 })]);
-    revokeBrokerCert.mockResolvedValue(cert({ revoked_at: "20261107000000Z", revocation_reason: 1, changed: 2 }));
-    render(() => <AcmeServers />);
-    const issued = await openIssued();
-
-    fireEvent.contextMenu(issued.getByText("nas.home.arpa").closest("tr") as HTMLElement);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Revoke…" }));
-    const reason = screen.getByLabelText("Reason") as HTMLSelectElement;
-    expect([...reason.options].map((o) => o.textContent)).toContain("cessation of operation");
-    fireEvent.change(reason, { target: { value: "1" } });
-    screen.getByRole("button", { name: "Revoke" }).click();
-
-    await vi.waitFor(() => expect(revokeBrokerCert).toHaveBeenCalledWith(1, "111", 1));
-    expect(await screen.findByText(/revoked nas.home.arpa/)).toBeInTheDocument();
-    const shown = within((await screen.findByText("nas.home.arpa")).closest("tr") as HTMLElement);
-    expect(await shown.findByText("revoked")).toHaveClass("status-revoked");
-  });
-
-  it("keeps the dialog open on the broker's refusal and offers nothing for a revoked or expired certificate", async () => {
-    listBrokerCerts.mockResolvedValue([
-      cert(),
-      cert({ serial: "222", common_name: "gone.home.arpa", revoked_at: "20261102000000Z" }),
-      cert({ serial: "333", common_name: "old.home.arpa", not_after: "20200101000000Z" }),
-    ]);
-    revokeBrokerCert.mockRejectedValue("unreachable: connection refused");
-    render(() => <AcmeServers />);
-    const issued = await openIssued();
-
-    for (const name of ["gone.home.arpa", "old.home.arpa"]) {
-      fireEvent.click(issued.getByRole("button", { name: `Actions for ${name}` }));
-      const menu = within(screen.getByRole("menu", { name: `Actions for ${name}` }));
-      expect(menu.getByRole("menuitem", { name: "Revoke…" })).toHaveAttribute("aria-disabled", "true");
-    }
-    fireEvent.click(issued.getByRole("button", { name: "Actions for nas.home.arpa" }));
-    const menu = within(screen.getByRole("menu", { name: "Actions for nas.home.arpa" }));
-    fireEvent.click(menu.getByRole("menuitem", { name: "Revoke…" }));
-    screen.getByRole("button", { name: "Revoke" }).click();
-
-    expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
-    expect(revokeBrokerCert).toHaveBeenCalledWith(1, "111", 0);
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(within(healthy).getByRole("button", { name: "Actions for acme.home.arpa" }));
+    expect(navigate).not.toHaveBeenCalled();
+    fireEvent.click(healthy);
+    expect(navigate).toHaveBeenCalledWith("/acme/1");
   });
 
   it("reports the issued counts with the status and refreshes the list it synced", async () => {
@@ -250,6 +189,108 @@ describe("ACME servers page", () => {
 
     await vi.waitFor(() => expect(revokeBroker).toHaveBeenCalledWith(1));
     expect(await screen.findByText(/the broker was not told: timed out/)).toBeInTheDocument();
+  });
+});
+
+describe("an ACME server's page", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listBrokers.mockResolvedValue([row(), pending]);
+    listBrokerCerts.mockResolvedValue([cert()]);
+  });
+
+  const openIssued = async () => {
+    render(() => <AcmeServer />);
+    return within(await screen.findByRole("table", { name: "Certificates issued by acme.home.arpa" }));
+  };
+
+  it("heads the page with the broker, its summary and Back to list", async () => {
+    listBrokerCerts.mockResolvedValue([cert(), cert({ serial: "9", broker_id: 2, common_name: "lab.lab.example" })]);
+    render(() => (
+      <DateModes initial="utc" locale="en-AU">
+        <AcmeServer />
+      </DateModes>
+    ));
+
+    expect(await screen.findByRole("heading", { name: "acme.home.arpa" })).toBeInTheDocument();
+    const grid = within(document.querySelector(".detail-grid") as HTMLElement);
+    const summary = (label: string) => grid.getByText(label).closest(".detail-row") as HTMLElement;
+    expect(summary("URL")).toHaveTextContent("https://acme.home.arpa:9443");
+    expect(summary("Domains")).toHaveTextContent("home.arpa");
+    expect(within(summary("State")).getByText("active")).toHaveClass("status-badge");
+    expect(summary("Subordinate Expires")).toHaveTextContent("1 Jan 2027, 00:00:00 UTC");
+    expect(summary("Last Contact")).toHaveTextContent("20 Oct 2026, 00:00:00 UTC");
+    expect(summary("Issued")).toHaveTextContent("1 issued");
+    expect(await screen.findByText("nas.home.arpa")).toBeInTheDocument();
+    expect(screen.queryByText("lab.lab.example")).toBeNull();
+
+    screen.getByRole("button", { name: "Back to list" }).click();
+    expect(navigate).toHaveBeenCalledWith("/acme");
+  });
+
+  it("offers the broker's actions from its header", async () => {
+    render(() => <AcmeServer />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for acme.home.arpa" }));
+    for (const name of ["Status", "Renew", "Revoke"]) expect(screen.getByRole("menuitem", { name })).toBeInTheDocument();
+  });
+
+  it("lists every issued certificate with its names and state", async () => {
+    listBrokerCerts.mockResolvedValue([
+      cert(),
+      cert({ serial: "222", common_name: null, sans: ["printer.home.arpa"], revoked_at: "20261102000000Z", changed: 3 }),
+      cert({ serial: "333", common_name: "old.home.arpa", sans: ["old.home.arpa"], not_after: "20200101000000Z" }),
+    ]);
+    const issued = await openIssued();
+
+    const state = (name: string) => within(issued.getByText(name).closest("tr") as HTMLElement);
+    expect(state("nas.home.arpa").getByText("files.home.arpa")).toHaveClass("broker-sans");
+    expect(state("nas.home.arpa").getByText("valid")).toHaveClass("status-valid");
+    expect(state("printer.home.arpa").getByText("revoked")).toHaveClass("status-revoked");
+    expect(state("old.home.arpa").getByText("expired")).toHaveClass("status-expired");
+  });
+
+  it("revokes an issued certificate from its right-click menu with the reason picked", async () => {
+    listBrokerCerts.mockResolvedValueOnce([cert()]);
+    listBrokerCerts.mockResolvedValue([cert({ revoked_at: "20261107000000Z", revocation_reason: 1, changed: 2 })]);
+    revokeBrokerCert.mockResolvedValue(cert({ revoked_at: "20261107000000Z", revocation_reason: 1, changed: 2 }));
+    const issued = await openIssued();
+
+    fireEvent.contextMenu(issued.getByText("nas.home.arpa").closest("tr") as HTMLElement);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revoke…" }));
+    const reason = screen.getByLabelText("Reason") as HTMLSelectElement;
+    expect([...reason.options].map((o) => o.textContent)).toContain("cessation of operation");
+    fireEvent.change(reason, { target: { value: "1" } });
+    screen.getByRole("button", { name: "Revoke" }).click();
+
+    await vi.waitFor(() => expect(revokeBrokerCert).toHaveBeenCalledWith(1, "111", 1));
+    expect(await screen.findByText(/revoked nas.home.arpa/)).toBeInTheDocument();
+    const shown = within((await screen.findByText("nas.home.arpa")).closest("tr") as HTMLElement);
+    expect(await shown.findByText("revoked")).toHaveClass("status-revoked");
+  });
+
+  it("keeps the dialog open on the broker's refusal and offers nothing for a revoked or expired certificate", async () => {
+    listBrokerCerts.mockResolvedValue([
+      cert(),
+      cert({ serial: "222", common_name: "gone.home.arpa", revoked_at: "20261102000000Z" }),
+      cert({ serial: "333", common_name: "old.home.arpa", not_after: "20200101000000Z" }),
+    ]);
+    revokeBrokerCert.mockRejectedValue("unreachable: connection refused");
+    const issued = await openIssued();
+
+    for (const name of ["gone.home.arpa", "old.home.arpa"]) {
+      fireEvent.click(issued.getByRole("button", { name: `Actions for ${name}` }));
+      const menu = within(screen.getByRole("menu", { name: `Actions for ${name}` }));
+      expect(menu.getByRole("menuitem", { name: "Revoke…" })).toHaveAttribute("aria-disabled", "true");
+    }
+    fireEvent.click(issued.getByRole("button", { name: "Actions for nas.home.arpa" }));
+    const menu = within(screen.getByRole("menu", { name: "Actions for nas.home.arpa" }));
+    fireEvent.click(menu.getByRole("menuitem", { name: "Revoke…" }));
+    screen.getByRole("button", { name: "Revoke" }).click();
+
+    expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
+    expect(revokeBrokerCert).toHaveBeenCalledWith(1, "111", 0);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
 

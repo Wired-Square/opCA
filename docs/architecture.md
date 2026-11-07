@@ -557,16 +557,20 @@ Surfaces:
 - **Frontend** — [pages/AcmeServers.tsx](../frontend/src/pages/AcmeServers.tsx)
   (`/acme`, "ACME Servers" in the sidebar) lists brokers with a `url`: state,
   domains, subordinate expiry, last contact, concerns and the count of
-  certificates each issued, which expands into a table of them (name and
-  other SANs, expiry, valid, expired or revoked). Each valid row of an active
-  broker has "Revoke…" in its menu, opened from its ⋮ or by right-clicking the
-  row, which asks for the reason and keeps the broker's refusal in the dialog.
-  Enrol Broker opens
+  certificates each issued. Clicking a row opens
+  [pages/AcmeServer.tsx](../frontend/src/pages/AcmeServer.tsx) (`/acme/:id`),
+  headed by the broker's name with Back to list and its actions, then its
+  summary and a table of what it issued (name and other SANs, expiry, valid,
+  expired or revoked). Each valid row of an active broker has "Revoke…" in its
+  menu, opened from its ⋮ or by right-clicking the row, which asks for the
+  reason and keeps the broker's refusal in the dialog. Enrol Broker opens
   [EnrolBrokerDialog](../frontend/src/components/EnrolBrokerDialog.tsx) (paste,
-  review the offer, confirm), and Renew All, per-row Status, Renew and Revoke
-  sit beside it. A `DomainsChanged` outcome offers Confirm and Renew. The
-  dashboard's ACME Servers tile shows while there is an active broker, and
-  lists the flagged ones. Subordinates signed by hand stay on the CSR page.
+  review the offer, confirm), and Renew All sits beside it. Status, Renew and
+  Revoke are on each row's ⋮ and the broker's page, from
+  [BrokerControls](../frontend/src/components/BrokerControls.tsx). A
+  `DomainsChanged` outcome offers Confirm and Renew. The dashboard's ACME
+  Servers tile shows while there is an active broker, and lists the flagged
+  ones. Subordinates signed by hand stay on the CSR page.
 - **CLI** — [commands/broker.rs](../crates/opca-cli/src/commands/broker.rs):
   `opca broker enrol <pairing> [--domain …] [--yes]` (refuses before prompting
   when neither the broker nor `--domain` gives domains), `list`,
