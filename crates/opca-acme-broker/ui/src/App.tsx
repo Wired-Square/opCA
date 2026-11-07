@@ -22,6 +22,7 @@ import { useAllows } from "@wired-square/appliance-ui";
 import { issued, newPairing, status } from "./api";
 import type { AppState, AppStatus, IssuedCertificate, RevokedFilter } from "./api";
 import { pairingView } from "./pairing";
+import { hexSerial } from "./serial";
 import { standing } from "./standing";
 import type { Standing } from "./standing";
 
@@ -221,7 +222,7 @@ function Row(props: { certificate: IssuedCertificate; now: number }) {
     <Tr dim={held().kind === "expired" || held().kind === "revoked"}>
       <Td strong>{props.certificate.common_name ?? "—"}</Td>
       <Td>{props.certificate.sans.join(", ")}</Td>
-      <Td numeric>{props.certificate.serial}</Td>
+      <Td numeric>{hexSerial(props.certificate.serial)}</Td>
       <Td numeric>
         <span title={when(props.certificate.not_before)}>{day(props.certificate.not_before)}</span>
       </Td>
