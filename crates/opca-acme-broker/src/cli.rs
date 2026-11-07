@@ -11,10 +11,11 @@ use wslib_tls::KeyFingerprint;
 
 use crate::broker::{Subordinate, code_path, lock_state};
 use crate::enrolment::{self, Mode, decimal, rfc_3339};
+use crate::pki::{CA_FILE, CRL_FILE};
 use crate::{ATTEMPTS, Config, Error, SCHEME};
 
 /// What a reopen moves aside; the subordinate key is deleted instead.
-const ARCHIVED: &[&str] = &["enrolment.json", "subordinate.csr"];
+const ARCHIVED: &[&str] = &["enrolment.json", "subordinate.csr", CA_FILE, CRL_FILE];
 
 /// Runs as the owner of `state`: drops to it from root with setgid and
 /// setuid, carries on as it, and refuses anyone else; `root_only` refuses the

@@ -142,6 +142,7 @@ async fn opening_makes_every_table_owner_only_and_reopening_migrates_nothing_twi
             "authorisations",
             "certificates",
             "challenges",
+            "crl_number",
             "eab_keys",
             "orders"
         ]
@@ -150,7 +151,7 @@ async fn opening_makes_every_table_owner_only_and_reopening_migrates_nothing_twi
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(applied, [1, 2]);
+    assert_eq!(applied, [1, 2, 3]);
     let eab: i64 = sqlx::query_scalar("SELECT count(*) FROM eab_keys")
         .fetch_one(&pool)
         .await
@@ -728,7 +729,7 @@ async fn version_1_copy(rows: &Path, path: &Path) {
 }
 
 #[tokio::test]
-async fn a_version_1_database_with_rows_migrates_to_version_2_keeping_every_row() {
+async fn a_version_1_database_with_rows_migrates_forward_keeping_every_row() {
     let (rows, source) = open().await;
     let (valid, _) = source
         .create_account(
@@ -843,7 +844,7 @@ async fn a_version_1_database_with_rows_migrates_to_version_2_keeping_every_row(
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(applied, [1, 2]);
+    assert_eq!(applied, [1, 2, 3]);
     let eab: (String, Vec<u8>, i64) =
         sqlx::query_as("SELECT key_id, hmac_key, account FROM eab_keys")
             .fetch_one(&pool)

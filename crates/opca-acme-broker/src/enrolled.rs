@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use opca_acme_api::{
     API_VERSION, ChainUpdate, ErrorBody, ErrorKind, FreshCsr, IssuedCertificate, IssuedPage,
-    IssuerState, Status, Versions,
+    IssuerState, LeafRevocation, REVOCATION_REASONS, Status, Versions,
 };
 use rustls::ServerConfig;
 use rustls::crypto::CryptoProvider;
@@ -13,7 +13,7 @@ use wslib_http_server::PeerCertificates;
 use wslib_pairing::SpkiSha256;
 use wslib_tls::{KeyFingerprint, Location, Serving};
 
-use crate::acme::store::Certificate;
+use crate::acme::store::{self, Certificate};
 use crate::enrolment::{Enrolled, Mode, bad_request, decimal, internal, rfc_3339};
 use crate::{Broker, Error};
 
@@ -122,6 +122,61 @@ impl Broker {
             more: changes.more,
             certificates,
         })
+    }
+
+    /// Revokes the leaf with decimal `serial`, one of this enrolment's, and
+    /// signs the CRL afresh; a leaf already revoked is answered as it stands.
+    pub(crate) async fn revoke_leaf(
+        self: &Arc<Self>,
+        enrolled: &Enrolled,
+        serial: &str,
+        revocation: LeafRevocation,
+    ) -> Result<IssuedCertificate, ErrorBody> {
+        refuse_if_revoked(enrolled)?;
+        if !REVOCATION_REASONS.contains(&revocation.reason) {
+            return Err(bad_request(format!(
+                "{} is not a revocation reason",
+                revocation.reason
+            )));
+        }
+        let ours = |c: &Certificate| {
+            (enrolled.issuers.as_ref()).is_none_or(|issuers| issuers.contains(&c.issuer_serial))
+        };
+        let acme = self.acme();
+        let Some(found) = acme
+            .certificate_by_serial(serial)
+            .await
+            .map_err(internal)?
+            .filter(ours)
+        else {
+            return Err(ErrorBody {
+                kind: ErrorKind::NotFound,
+                message: format!("no certificate {serial} of this broker's subordinate"),
+            });
+        };
+        if found.revoked_at.is_some() {
+            return Ok(issued(found));
+        }
+        let reason = Some(revocation.reason).filter(|&code| code != 0);
+        let revoked = match acme.revoke(serial, reason).await {
+            Err(store::Error::AlreadyRevoked { .. }) => {
+                let current = acme.certificate_by_serial(serial).await.map_err(internal)?;
+                return current
+                    .map(issued)
+                    .ok_or_else(|| internal("the certificate went"));
+            }
+            revoked => revoked.map_err(internal)?,
+        };
+        tracing::warn!(
+            serial,
+            reason = revocation.reason,
+            "revoked a certificate at opCA's request"
+        );
+        if let Err(error) = self.refresh_crl(true).await {
+            tracing::error!(%error, "could not sign the CRL; retrying");
+            self.published.resign();
+        }
+        Ok(issued(revoked))
     }
 
     pub(crate) fn fresh_csr(&self, enrolled: &Enrolled) -> Result<FreshCsr, ErrorBody> {

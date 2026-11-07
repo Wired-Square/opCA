@@ -7,6 +7,10 @@ export interface AppStatus {
   host: string | null;
   api_url: string | null;
   acme_directory: string | null;
+  ca_url: string | null;
+  crl_url: string | null;
+  /** The CRL being published, while one is. */
+  crl: { number: number | null; this_update: string; next_update: string | null } | null;
   domains: string[];
   subordinate: { serial: string; not_after: string } | null;
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{FromRequestParts, State};
+use axum::extract::{FromRequestParts, Path, State};
 use axum::http::request::Parts;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -36,6 +36,7 @@ fn router(broker: Arc<Broker>) -> Router {
         .route(path::CHAIN, put(chain))
         .route(path::REVOKE, post(revoke))
         .route(path::ISSUED, get(issued))
+        .route(path::REVOKE_ISSUED, post(revoke_issued))
         .with_state(broker)
 }
 
@@ -85,6 +86,18 @@ async fn revoke(State(broker): Shared, _: Operator) -> Response {
 async fn issued(State(broker): Shared, Operator(enrolled): Operator, uri: Uri) -> Response {
     match after(uri.query()) {
         Ok(after) => reply(broker.issued(&enrolled, after).await),
+        Err(refusal) => reply::<()>(Err(refusal)),
+    }
+}
+
+async fn revoke_issued(
+    State(broker): Shared,
+    Operator(enrolled): Operator,
+    Path(serial): Path<String>,
+    body: Bytes,
+) -> Response {
+    match parse(&body) {
+        Ok(revocation) => reply(broker.revoke_leaf(&enrolled, &serial, revocation).await),
         Err(refusal) => reply::<()>(Err(refusal)),
     }
 }

@@ -20,12 +20,13 @@ use opca_core::services::database::CertificateAuthorityDB;
 use opca_core::services::database::models::CaConfig;
 use opca_core::testutil::{FakeRunner, Output, created, fake_vault};
 use tempfile::TempDir;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpStream, UnixStream};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+use wslib_crypto_ca::CrlView;
 use wslib_crypto_x509::pem;
 use wslib_http_server::{Bounds, Listener};
 use wslib_pairing::{PairingUri, SpkiSha256};
@@ -162,6 +163,8 @@ pub struct Running {
     pub state: TempDir,
     pub broker: Arc<Broker>,
     pub api: Api,
+    /// Where the PKI listener serves, on loopback.
+    pub pki: SocketAddr,
 }
 
 impl std::ops::Deref for Running {
@@ -242,11 +245,11 @@ pub async fn start(state: TempDir, domains: &[&str], uri: Option<PairingUri>) ->
 /// Serves `broker`, started in `state`, as `start` does.
 pub async fn run(state: TempDir, broker: Broker, uri: Option<PairingUri>) -> Running {
     let broker = Arc::new(broker);
-    let listener = Listener::bind(format!("{LOOPBACK}:0").parse().unwrap(), Bounds::SERVING)
-        .await
-        .unwrap();
-    let address = listener.local_addr();
+    let bind = || Listener::bind(format!("{LOOPBACK}:0").parse().unwrap(), Bounds::SERVING);
+    let (listener, pki) = (bind().await.unwrap(), bind().await.unwrap());
+    let (address, pki_address) = (listener.local_addr(), pki.local_addr());
     tokio::spawn(broker.clone().serve_acme(std::future::pending()));
+    tokio::spawn(broker.clone().serve_pki(pki, Default::default()));
     tokio::spawn(opca_acme_broker::serve(
         broker.clone(),
         listener,
@@ -259,6 +262,7 @@ pub async fn run(state: TempDir, broker: Broker, uri: Option<PairingUri>) -> Run
             uri: uri.expect("a URI, issued now or kept from before"),
             address,
         },
+        pki: pki_address,
     }
 }
 
@@ -363,41 +367,76 @@ impl Connection {
         path: &str,
         body: &str,
     ) -> io::Result<(u16, String)> {
-        let request = format!(
-            "{method} {path} HTTP/1.1\r\nHost: {HOST}\r\nContent-Type: application/json\r\n\
-             Content-Length: {}\r\n\r\n{body}",
-            body.len()
-        );
-        self.0.write_all(request.as_bytes()).await?;
-        let mut response = Vec::new();
-        let head_end = loop {
-            if let Some(end) = response.windows(4).position(|w| w == b"\r\n\r\n") {
-                break end + 4;
-            }
-            let mut chunk = [0; 4096];
-            match self.0.read(&mut chunk).await? {
-                0 => return Err(io::ErrorKind::UnexpectedEof.into()),
-                read => response.extend_from_slice(&chunk[..read]),
-            }
-        };
-        let head = String::from_utf8(response[..head_end].to_vec()).unwrap();
-        let length: usize = head
-            .lines()
-            .find_map(|line| {
-                line.to_ascii_lowercase()
-                    .strip_prefix("content-length: ")
-                    .map(str::to_owned)
-            })
-            .map_or(0, |length| length.trim().parse().unwrap());
-        let mut body = response[head_end..].to_vec();
-        body.resize(length, 0);
-        let already = response.len() - head_end;
-        self.0.read_exact(&mut body[already..]).await?;
-        Ok((
-            head[9..12].parse().unwrap(),
-            String::from_utf8(body).unwrap(),
-        ))
+        let (status, _, body) = exchange(&mut self.0, method, path, body).await?;
+        Ok((status, String::from_utf8(body).unwrap()))
     }
+
+    /// As [`call`](Self::call), with the head and the body as bytes.
+    pub async fn fetch(&mut self, method: &str, path: &str) -> io::Result<(u16, String, Vec<u8>)> {
+        exchange(&mut self.0, method, path, "").await
+    }
+}
+
+/// One HTTP/1.1 request on `stream`: the status, the head, and the body.
+async fn exchange(
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    method: &str,
+    path: &str,
+    body: &str,
+) -> io::Result<(u16, String, Vec<u8>)> {
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {HOST}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await?;
+    let mut response = Vec::new();
+    let head_end = loop {
+        if let Some(end) = response.windows(4).position(|w| w == b"\r\n\r\n") {
+            break end + 4;
+        }
+        let mut chunk = [0; 4096];
+        match stream.read(&mut chunk).await? {
+            0 => return Err(io::ErrorKind::UnexpectedEof.into()),
+            read => response.extend_from_slice(&chunk[..read]),
+        }
+    };
+    let head = String::from_utf8(response[..head_end].to_vec()).unwrap();
+    let length: usize = head
+        .lines()
+        .find_map(|line| {
+            line.to_ascii_lowercase()
+                .strip_prefix("content-length: ")
+                .map(str::to_owned)
+        })
+        .filter(|_| method != "HEAD")
+        .map_or(0, |length| length.trim().parse().unwrap());
+    let mut body = response[head_end..].to_vec();
+    body.resize(length, 0);
+    let already = response.len() - head_end;
+    stream.read_exact(&mut body[already..]).await?;
+    Ok((head[9..12].parse().unwrap(), head, body))
+}
+
+/// One plain-HTTP request to the PKI listener at `address`.
+pub async fn pki_fetch(address: SocketAddr, method: &str, path: &str) -> (u16, String, Vec<u8>) {
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    exchange(&mut stream, method, path, "").await.unwrap()
+}
+
+/// The CRL the PKI listener at `address` serves, once it serves one numbered past `after`.
+pub async fn crl_after(address: SocketAddr, after: u64) -> CrlView {
+    for _ in 0..200 {
+        let (status, _, body) = pki_fetch(address, "GET", "/crl").await;
+        if status == 200 {
+            let crl = CrlView::from_der(&body).unwrap();
+            if crl.number.unwrap() > after {
+                return crl;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("no CRL past number {after} at {address}");
 }
 
 /// A broker enrolled by its own opCA, with an operator, within [`DOMAINS`].

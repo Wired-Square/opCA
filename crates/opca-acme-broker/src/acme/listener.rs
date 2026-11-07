@@ -23,6 +23,7 @@ use super::issue::{BACKDATE, Issuer};
 use super::server::{Server, router};
 use super::validate::Validate;
 use crate::enrolment::{Enrolled, Mode};
+use crate::pki;
 use crate::{Broker, Error};
 
 const CERT: &str = "acme.crt";
@@ -75,7 +76,8 @@ impl AcmeListener {
         self.server.resume();
         let served = tokio::spawn({
             let tls = tls.clone();
-            let router = router(self.server.clone());
+            let router =
+                router(self.server.clone()).merge(pki::routes(self.server.published.clone()));
             async move {
                 let stopped = async {
                     let _ = stopped.await;
@@ -167,7 +169,10 @@ impl Broker {
     /// when it is no longer current; under the state lock. `false` when it
     /// should serve and can't.
     pub(crate) fn refresh_acme(&self) -> bool {
-        let enrolled = match self.mode() {
+        let mode = self.mode();
+        self.published
+            .set_live(matches!(&mode, Mode::Enrolled(enrolled) if !enrolled.revoked));
+        let enrolled = match mode {
             Mode::Enrolled(enrolled) if !enrolled.revoked => enrolled,
             _ => {
                 if self.acme_listener.stop().is_some() {
@@ -199,7 +204,8 @@ impl Broker {
             self.subordinate().signer()?,
             &enrolled.chain_pem,
             enrolled.config.clone(),
-        )?;
+        )?
+        .published_at(&self.pki_origin);
         if !current {
             let (cert_pem, key_pem) = issue_pair(&self.provider, &issuer, &self.host, now)?;
             wslib_file_atomic::replace_private(&key, key_pem.as_bytes())?;

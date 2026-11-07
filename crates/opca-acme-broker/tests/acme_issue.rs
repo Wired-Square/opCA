@@ -518,3 +518,58 @@ fn an_rsa_leaf_also_has_key_encipherment() {
         Some(vec![KeyUsage::DigitalSignature, KeyUsage::KeyEncipherment])
     );
 }
+
+/// The CRL distribution point and caIssuers URLs `leaf` names.
+fn pointers(leaf: &[u8]) -> (Vec<String>, Vec<String>) {
+    use x509_parser::prelude::{
+        DistributionPointName, FromDer, GeneralName, ParsedExtension, X509Certificate,
+    };
+    let uri = |name: &GeneralName| match name {
+        GeneralName::URI(uri) => Some(uri.to_string()),
+        _ => None,
+    };
+    let (_, leaf) = X509Certificate::from_der(leaf).unwrap();
+    let (mut crls, mut issuers) = (Vec::new(), Vec::new());
+    for extension in leaf.extensions() {
+        match extension.parsed_extension() {
+            ParsedExtension::CRLDistributionPoints(points) => {
+                for point in points.iter() {
+                    if let Some(DistributionPointName::FullName(names)) = &point.distribution_point
+                    {
+                        crls.extend(names.iter().filter_map(uri));
+                    }
+                }
+            }
+            ParsedExtension::AuthorityInfoAccess(access) => issuers.extend(
+                (access.accessdescs.iter())
+                    .filter(|d| d.access_method.to_id_string() == "1.3.6.1.5.5.7.48.2")
+                    .filter_map(|d| uri(&d.access_location)),
+            ),
+            _ => {}
+        }
+    }
+    (crls, issuers)
+}
+
+#[test]
+fn a_leaf_points_at_the_published_crl_and_subordinate_on_the_advertised_port() {
+    let issue = |issuer: &Issuer| {
+        let order = order_for(&["a.home.example"]);
+        let der = request("a.home.example", &["a.home.example"]);
+        let issued = issuer
+            .issue(&order, &der, ACCOUNT_KEY, SystemTime::now())
+            .unwrap();
+        pointers(&pem::certificates(&issued.chain_pem).unwrap()[0])
+    };
+    let published = pki(365 * DAY)
+        .issuer
+        .published_at("http://acme.home.example:18080");
+    assert_eq!(
+        issue(&published),
+        (
+            vec!["http://acme.home.example:18080/crl".to_string()],
+            vec!["http://acme.home.example:18080/ca.crt".to_string()]
+        )
+    );
+    assert_eq!(issue(&pki(365 * DAY).issuer), (Vec::new(), Vec::new()));
+}

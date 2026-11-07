@@ -9,6 +9,7 @@ pub mod cli;
 mod config;
 mod enrolled;
 mod enrolment;
+mod pki;
 
 pub use api::serve;
 pub use broker::{ATTEMPTS, Broker, SCHEME, Subordinate};

@@ -14,4 +14,11 @@
 # Where the broker serves ACME.
 #acme_listen = "[::]:443"
 
+# Where the broker serves its CA certificate (/ca.crt) and CRL (/crl) over
+# plain HTTP. New certificates point at http://<host>:<port>/crl and /ca.crt,
+# the port being pki_port when set, as behind a mapped port, and left out when
+# it is 80.
+#pki_listen = "[::]:80"
+#pki_port = 80
+
 #state_dir = "/var/lib/opca-acme"
