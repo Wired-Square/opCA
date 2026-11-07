@@ -25,3 +25,16 @@
   color: var(--app-text-muted);
   font-size: 0.85em;
 }
+
+.pairing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.pairing__uri {
+  font-family: var(--app-font-mono);
+  overflow-wrap: anywhere;
+}

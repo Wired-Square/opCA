@@ -32,10 +32,10 @@ export interface IssuedNewest {
 export type RevokedFilter = boolean | null;
 
 /** `path` is relative, so it resolves against the `<base href>` the broker serves. */
-async function read<T>(path: string): Promise<T> {
+async function ask<T>(path: string, method = "GET"): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, { headers: { accept: "application/json" } });
+    response = await fetch(path, { method, headers: { accept: "application/json" } });
   } catch {
     throw new Refusal("the broker didn't answer", { unanswered: true });
   }
@@ -50,12 +50,15 @@ async function read<T>(path: string): Promise<T> {
   return response.json();
 }
 
-export const status = () => read<AppStatus>("api/status");
+export const status = () => ask<AppStatus>("api/status");
+
+/** Admins only: a new pairing code's URI, which spends the code before it. */
+export const newPairing = () => ask<{ uri: string }>("api/pairing", "POST");
 
 export function issued(revoked: RevokedFilter, before: number | null): Promise<IssuedNewest> {
   const query = new URLSearchParams();
   if (before !== null) query.set("before", String(before));
   if (revoked !== null) query.set("revoked", String(revoked));
   const asked = String(query);
-  return read<IssuedNewest>(asked ? `api/issued?${asked}` : "api/issued");
+  return ask<IssuedNewest>(asked ? `api/issued?${asked}` : "api/issued");
 }
