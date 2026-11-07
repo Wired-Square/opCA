@@ -49,6 +49,25 @@ export async function revokeBroker(id: number): Promise<BrokerRevocation> {
   return withLock("revoke_broker", () => tauriInvoke<BrokerRevocation>("revoke_broker", { id }));
 }
 
+export async function revokeBrokerCert(id: number, serial: string, reason: number): Promise<BrokerCert> {
+  return withLock("revoke_broker_cert", () =>
+    tauriInvoke<BrokerCert>("revoke_broker_cert", { id, serial, reason }),
+  );
+}
+
+/** The RFC 5280 CRLReasons a broker takes for a leaf, named as the broker's page names them. */
+export const REVOCATION_REASONS: [number, string][] = [
+  [0, "unspecified"],
+  [1, "key compromise"],
+  [2, "CA compromise"],
+  [3, "affiliation changed"],
+  [4, "superseded"],
+  [5, "cessation of operation"],
+  [6, "certificate hold"],
+  [9, "privilege withdrawn"],
+  [10, "AA compromise"],
+];
+
 export function concernText(c: Concern): string {
   switch (c.concern) {
     case "expiring":

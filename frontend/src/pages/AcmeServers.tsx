@@ -1,5 +1,15 @@
 import { For, Show, createResource, createSignal } from "solid-js";
-import { Badges, Button, Confirm, DateModeToggle, NothingYet, Notice, createAction, type Tone } from "@wired-square/kit";
+import {
+  Badges,
+  Button,
+  Confirm,
+  DateModeToggle,
+  NothingYet,
+  Notice,
+  Select,
+  createAction,
+  type Tone,
+} from "@wired-square/kit";
 import {
   brokerErrorText,
   brokerStatus,
@@ -8,8 +18,10 @@ import {
   listBrokers,
   renewAllBrokers,
   renewBroker,
+  REVOCATION_REASONS,
   renewalText,
   revokeBroker,
+  revokeBrokerCert,
 } from "../api/brokers";
 import type { BrokerCert, BrokerRenewal, BrokerRow, BrokerStatus } from "../api/types";
 import ActionMenu from "../components/ActionMenu";
@@ -52,6 +64,7 @@ export default function AcmeServers() {
   const [expanded, setExpanded] = createSignal<number | null>(null);
   const [enrolling, setEnrolling] = createSignal(false);
   const [revoking, setRevoking] = createSignal<BrokerRow | null>(null);
+  const [revokingCert, setRevokingCert] = createSignal<BrokerCert | null>(null);
   const [outcomes, setOutcomes] = createSignal<BrokerRenewal[]>([]);
   const [report, setReport] = createSignal<{ tone: Tone; text: string } | null>(null);
   const action = createAction();
@@ -222,7 +235,12 @@ export default function AcmeServers() {
                         <Show when={expanded() === b.id}>
                           <tr class="broker-issued-row">
                             <td colSpan={7}>
-                              <IssuedTable name={brokerName(b)} certs={certsOf(b.id)} />
+                              <IssuedTable
+                                name={brokerName(b)}
+                                certs={certsOf(b.id)}
+                                revocable={b.state === "active"}
+                                onRevoke={setRevokingCert}
+                              />
                             </td>
                           </tr>
                         </Show>
@@ -247,6 +265,16 @@ export default function AcmeServers() {
         }}
       />
 
+      <RevokeBrokerCertDialog
+        cert={revokingCert()}
+        brokerName={nameOf}
+        onClose={() => setRevokingCert(null)}
+        onDone={(text) => {
+          setReport({ tone: "good", text });
+          void refetchCerts();
+        }}
+      />
+
       <RevokeBrokerDialog
         broker={revoking()}
         onClose={() => setRevoking(null)}
@@ -259,7 +287,18 @@ export default function AcmeServers() {
   );
 }
 
-function IssuedTable(props: { name: string; certs: BrokerCert[] }) {
+/** Right-clicking a row opens its menu, which also sits behind the row's ⋮. */
+const openRowMenu = (e: MouseEvent & { currentTarget: HTMLElement }) => {
+  e.preventDefault();
+  e.currentTarget.querySelector<HTMLButtonElement>(".app-menu__trigger")?.click();
+};
+
+function IssuedTable(props: {
+  name: string;
+  certs: BrokerCert[];
+  revocable: boolean;
+  onRevoke: (cert: BrokerCert) => void;
+}) {
   return (
     <table class="broker-issued" aria-label={`Certificates issued by ${props.name}`}>
       <thead>
@@ -267,12 +306,13 @@ function IssuedTable(props: { name: string; certs: BrokerCert[] }) {
           <th>Certificate</th>
           <th>Expires</th>
           <th>State</th>
+          <th class="kebab-col"></th>
         </tr>
       </thead>
       <tbody>
         <For each={props.certs}>
           {(c) => (
-            <tr>
+            <tr onContextMenu={openRowMenu}>
               <td>
                 {certName(c)}
                 <Show when={otherSans(c).length > 0}>
@@ -283,11 +323,60 @@ function IssuedTable(props: { name: string; certs: BrokerCert[] }) {
               <td>
                 <span class={`status-badge status-${certState(c)}`}>{certState(c)}</span>
               </td>
+              <td class="kebab-col">
+                <ActionMenu
+                  aria-label={`Actions for ${certName(c)}`}
+                  items={[
+                    {
+                      label: "Revoke…",
+                      onSelect: () => props.onRevoke(c),
+                      disabled: !props.revocable || certState(c) !== "valid",
+                      danger: true,
+                    },
+                  ]}
+                />
+              </td>
             </tr>
           )}
         </For>
       </tbody>
     </table>
+  );
+}
+
+function RevokeBrokerCertDialog(props: {
+  cert: BrokerCert | null;
+  brokerName: (id: number) => string;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}) {
+  const acting = createActing();
+  const [reason, setReason] = createSignal("0");
+  return (
+    <Show when={props.cert}>
+      {(c) => (
+        <Confirm
+          title="Revoke Certificate"
+          verb={acting.verb("Revoke", "Revoking…")}
+          onClose={() => {
+            setReason("0");
+            props.onClose();
+          }}
+          act={acting.act(async () => {
+            await revokeBrokerCert(c().broker_id, c().serial, Number(reason()));
+            props.onDone(`${props.brokerName(c().broker_id)} revoked ${certName(c())} and published it on its CRL`);
+          })}
+        >
+          <p>
+            Have <span class="mono">{props.brokerName(c().broker_id)}</span> revoke{" "}
+            <span class="mono">{certName(c())}</span>? It goes on the broker's CRL at once. This cannot be undone.
+          </p>
+          <Select label="Reason" value={reason()} onValue={setReason}>
+            <For each={REVOCATION_REASONS}>{([code, name]) => <option value={code}>{name}</option>}</For>
+          </Select>
+        </Confirm>
+      )}
+    </Show>
   );
 }
 

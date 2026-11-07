@@ -1,5 +1,7 @@
 use std::io::{self, BufRead, Write};
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
+
 use chrono::Utc;
 use opca_core::error::OpcaError;
 use opca_core::op::{Runner, ShellRunner};
@@ -30,7 +32,32 @@ pub fn dispatch(args: BrokerArgs, app: &mut AppContext<ShellRunner>) -> Result<(
             change_domains,
         ),
         BrokerAction::Revoke { id } => handle_revoke(app, id),
+        BrokerAction::RevokeCert { id, serial, reason } => {
+            handle_revoke_cert(app, id, &serial, reason)
+        }
     }
+}
+
+/// RFC 5280's CRLReasons a leaf may be revoked for, by name.
+const REASONS: [(&str, u8); 9] = [
+    ("unspecified", 0),
+    ("key-compromise", 1),
+    ("ca-compromise", 2),
+    ("affiliation-changed", 3),
+    ("superseded", 4),
+    ("cessation-of-operation", 5),
+    ("certificate-hold", 6),
+    ("privilege-withdrawn", 9),
+    ("aa-compromise", 10),
+];
+
+pub fn reason_parser() -> impl TypedValueParser<Value = u8> {
+    PossibleValuesParser::new(REASONS.map(|(name, _)| name)).map(|name| {
+        REASONS
+            .iter()
+            .find_map(|&(known, code)| (known == name).then_some(code))
+            .expect("only the names offered parse")
+    })
 }
 
 /// Whether the answer to `question` on `input` is yes.
@@ -250,6 +277,26 @@ fn handle_revoke<R: Runner>(app: &mut AppContext<R>, id: i64) -> Result<(), Opca
     })
 }
 
+fn handle_revoke_cert<R: Runner>(
+    app: &mut AppContext<R>,
+    id: i64,
+    serial: &str,
+    reason: u8,
+) -> Result<(), OpcaError> {
+    output::title("Revoking a Broker's Certificate");
+    with_lock(app, "broker_revoke_cert", |app| {
+        let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+        let operator = ca.operator()?;
+        let revoked = ca.revoke_broker_cert(&operator, id, serial, reason)?;
+        let name = revoked.common_name.as_deref().unwrap_or("no common name");
+        output::print_result(
+            &format!("Revoke certificate {serial} ({name}) on broker {id}"),
+            true,
+        );
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -314,6 +361,47 @@ mod tests {
         assert_eq!(pairing, "opca-enrol://acme.home.arpa:9443#pin=ab&code=CD");
         assert_eq!(domains, ["home.arpa", "lab.example"]);
         assert!(yes);
+    }
+
+    #[test]
+    fn revoke_cert_takes_an_rfc_5280_reason_by_name() {
+        assert!(matches!(
+            parse(&["broker", "revoke-cert", "3", "4096"]),
+            Ok(BrokerAction::RevokeCert { id: 3, ref serial, reason: 0 }) if serial == "4096"
+        ));
+        assert!(matches!(
+            parse(&[
+                "broker",
+                "revoke-cert",
+                "3",
+                "4096",
+                "--reason",
+                "key-compromise"
+            ]),
+            Ok(BrokerAction::RevokeCert { reason: 1, .. })
+        ));
+        assert!(matches!(
+            parse(&[
+                "broker",
+                "revoke-cert",
+                "3",
+                "4096",
+                "--reason",
+                "aa-compromise"
+            ]),
+            Ok(BrokerAction::RevokeCert { reason: 10, .. })
+        ));
+        assert!(
+            parse(&[
+                "broker",
+                "revoke-cert",
+                "3",
+                "4096",
+                "--reason",
+                "remove-from-crl"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
