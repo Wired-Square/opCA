@@ -1285,7 +1285,8 @@ enrolment from disk, so the command line can change them under `state.lock`.
 
 ### Command line and reload
 
-`opca-acme pairing` issues a new code while enrolling; `status` reads the state
+`opca-acme pairing` issues a new code while enrolling, as an admin can from the
+app's page; `status` reads the state
 directory; `enrol --reopen` (root only) archives `enrolment.json` and
 `subordinate.csr`, deletes the subordinate key, makes a new one and a new code, and
 SIGHUPs the daemon through `broker.pid`. Run as root, the command line drops to
@@ -1309,7 +1310,8 @@ names the port opCA dials; absent variables fall back to the manifest's ports.
 With no host, `serve_needing_host` touches no state: it binds both listeners,
 answers every request on them with a plain-HTTP 503 saying the broker needs a
 host, and is healthy. Setting the option restarts the container, which then
-starts the broker as usual. The pairing URI is in the container's log.
+starts the broker as usual. The pairing URI is in the container's log, and an
+admin can issue a new one from the page.
 
 `App::serve_console` serves both console sockets through
 `wslib-appliance-server`'s app-socket mode (27-1), with
@@ -1360,9 +1362,10 @@ running broker would: `acme.db` opened and snapshotted if there is one, and the
 enrolment, so unsetting `host` never fails the box's backup. Only an empty
 capture restores until the host is set.
 
-[app/api.rs](../crates/opca-acme-broker/src/app/api.rs) is the read API the
-page calls on `app.sock`, for every role (26-2: read-only, since revocation is
-opCA's), under the chassis's `/api`. Each route takes its `Viewer`, which reads
+[app/api.rs](../crates/opca-acme-broker/src/app/api.rs) is the API the page
+calls on `app.sock`, under the chassis's `/api`: reads for every role (26-2:
+read-only, since revocation is opCA's) and one admin action. Each read takes its
+`Viewer`, which reads
 the console's `appliance-identity`: with a malformed one it is a 400; without one,
 it is a 401. `GET /apps/opca-acme/api/status` is an `AppStatus`: the state, the
 host, `api_url` (`https://<host>:<api port>`) and `acme_directory`
@@ -1377,6 +1380,13 @@ move), `issued_page` at a time; `?before=<cursor>` takes the next page and
 alone: nothing issued. The chassis adds `GET /apps/opca-acme/api/session` and
 `/api/branding`, which the page's shell reads.
 
+`POST /apps/opca-acme/api/pairing` takes the chassis's `Admin` (403 for a
+viewer or operator) and issues a new pairing code as `opca-acme pairing` does,
+through `cli::pairing_locked` under `state.lock` off the runtime, answering a
+`NewPairing` with its URI. The new code replaces the old one, a lockout
+included, so the old URI stops pairing. Enrolled, revoked or needing a host, it
+is a 409 saying why. The code's hash alone is stored, so the URI is shown once.
+
 The chassis serves the page from `/usr/share/opca-acme/ui` (`App::ui`) to any
 caller, `index.html` with its `<base href>` naming `/apps/opca-acme/`, and a
 `.gz` beside a file to a client that takes gzip. A path the page doesn't hold
@@ -1390,7 +1400,12 @@ base and bring the masthead, the brand and the console's app switcher, read
 from `/api/switcher` at the origin. `applianceVite` builds it with relative
 asset paths, which the base resolves, and a `.gz` beside each file gzip
 shrinks. It shows the status, then
-`createPagedList` over `api/issued` with a revocation filter;
+`createPagedList` over `api/issued` with a revocation filter. While enrolling,
+an admin gets a "New pairing URI" button, behind a confirmation that it cancels
+any URI already handed out; the URI it answers is held only in the page's state,
+masked (its code hidden) until revealed, with Copy; other roles see a line that
+an admin can issue one. `pairing.ts` decides what each role sees, and its vitest
+tests pin that;
 `standing.ts` decides each row's status (valid, expiring in its last third,
 expired, revoked with the RFC 5280 reason), and its vitest tests pin that. The
 page has no scheme picker: `index.html` takes the scheme the console stored for
@@ -1451,7 +1466,7 @@ the tarball, `broker_docker.rs` runs the image as the console would (its own
 uid in group 0, no capabilities, the `data` and socket volumes, a mapped API
 port): healthy and refusing with no host, a uid that isn't the console's
 served as nobody, then, with `host` in `options.json` and a restart, enrolled
-and serving ACME, with the page, a gzipped asset, both API routes and the
+and serving ACME, with the page, a gzipped asset, both read routes and the
 chassis's session and branding answering a viewer through `app.sock`.
 
 ---
