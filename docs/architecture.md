@@ -550,6 +550,12 @@ is `paused`. The dashboard tile, the ACME Servers page and `opca broker list`
 use it, and the Lambda applies the same thresholds (see
 [What it checks](#what-it-checks)).
 
+**Leaves due** (`leaf_due.rs`). `leaves_due` picks the issued leaves of the
+active brokers that are unrevoked, past two-thirds of their life (where ACME
+clients renew), expired 14 days ago at most, and have no later unrevoked leaf
+from the same broker for the same set of names. The dashboard lists them; the
+Lambda doesn't, so a box nobody watches doesn't nag.
+
 Surfaces:
 
 - **Tauri** — [commands/broker.rs](../crates/opca-tauri/src/commands/broker.rs):
@@ -581,8 +587,9 @@ Surfaces:
   Pause or Resume, and Revoke are on each row's ⋮ and the broker's page, from
   [BrokerControls](../frontend/src/components/BrokerControls.tsx). A
   `DomainsChanged` outcome offers Confirm and Renew. The dashboard's ACME
-  Servers tile shows while there is an active broker, and lists the flagged
-  ones. Subordinates signed by hand stay on the CSR page.
+  Servers tile shows while there is an active broker, lists the flagged ones
+  and the leaves due for renewal, each linking to its broker's page.
+  Subordinates signed by hand stay on the CSR page.
 - **Load sync** — once connected to a valid CA, `App` runs `sync_brokers` in
   the background under `withLock`
   ([stores/brokerSync.ts](../frontend/src/stores/brokerSync.ts)); a held lock
@@ -816,7 +823,8 @@ generate) to flush the change.
 The DTO surfaces both a reshaped CA status (value + expiry + graduated
 warning) and a mirrored CRL status (next_update, or a batch's signed-until,
 + graduated warning from `assess_crl_expiry`), along with a `pending_csrs` count,
-the active broker count and the flagged `brokers_flagged` rows, and an
+the active broker count, the flagged `brokers_flagged` rows and the
+`leaves_due` (each with its broker's name), and an
 `action_items: Vec<ActionItemDto>` list. Action items carry a stable `id`,
 severity, human-readable message, button label, and an `action` token that
 the frontend dispatches on (`regenerate_and_upload_crl`, `regenerate_crl`,

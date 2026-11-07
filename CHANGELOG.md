@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Certificates the ACME broker issues point at its CRL and its CA certificate
   (`http://<host>:<pki port>/crl` and `/ca.crt`, the port left out when it
   is 80), on the port the console maps.
+- The dashboard's ACME Servers tile lists each issued certificate due for
+  renewal: past two-thirds of its life, with no later certificate for the same
+  names, until 14 days after it expires. Each shows its broker and the days
+  left, and opens the broker's page.
 - opCA can have a broker revoke one of its leaves:
   `POST /v1/issued/{serial}/revoke` with an RFC 5280 reason, answered with the
   revoked row once the CRL is signed afresh. A leaf of another subordinate is

@@ -77,10 +77,12 @@ export const REVOCATION_REASONS: [number, string][] = [
   [10, "AA compromise"],
 ];
 
+export const expiryText = (days: number) => (days < 0 ? `expired ${-days} days ago` : `expires in ${days} days`);
+
 export function concernText(c: Concern): string {
   switch (c.concern) {
     case "expiring":
-      return c.days < 0 ? `expired ${-c.days} days ago` : `expires in ${c.days} days`;
+      return expiryText(c.days);
     case "silent":
       return `not heard from in ${c.days} days`;
     case "not_delivered":

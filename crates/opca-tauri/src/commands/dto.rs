@@ -3,8 +3,8 @@
 //! These structs bridge opca-core domain types to the frontend.
 //! They are Serialize-only — the frontend never sends them back.
 
-use opca_core::services::acme_broker::Concern;
 use opca_core::services::acme_broker::api::EnrolmentOffer;
+use opca_core::services::acme_broker::{Concern, LeafDue};
 use opca_core::services::cert::KeyAlgorithm;
 use opca_core::services::database::Broker;
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,7 @@ pub struct DashboardData {
     /// Active brokers, and those of them that need attention.
     pub brokers: usize,
     pub brokers_flagged: Vec<BrokerRow>,
+    pub leaves_due: Vec<LeafDueRow>,
     pub action_items: Vec<ActionItemDto>,
 }
 
@@ -436,6 +437,13 @@ pub struct BrokerRow {
     #[serde(flatten)]
     pub broker: Broker,
     pub concerns: Vec<Concern>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LeafDueRow {
+    #[serde(flatten)]
+    pub leaf: LeafDue,
+    pub broker: String,
 }
 
 /// `domains` replaces the recorded ones only with `change_domains`.

@@ -2,6 +2,7 @@ use chrono::Utc;
 use log::warn;
 use tauri::State;
 
+use opca_core::services::acme_broker::leaves_due;
 use opca_core::services::ca::{CaExpiryWarning, CrlExpiryWarning, assess_crl_expiry};
 use opca_core::services::cert::{APPLE_TLS_MAX_DAYS, CertType};
 use opca_core::utils::datetime::{self, DateTimeFormat};
@@ -10,7 +11,9 @@ use opca_core::services::database::{BrokerState, EXPIRY_WARNING_DAYS};
 
 use crate::commands::broker::broker_rows;
 use crate::commands::crl::crl_batch_dto;
-use crate::commands::dto::{ActionItemDto, CaExpiryWarningDto, CrlExpiryWarningDto, DashboardData};
+use crate::commands::dto::{
+    ActionItemDto, CaExpiryWarningDto, CrlExpiryWarningDto, DashboardData, LeafDueRow,
+};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -121,6 +124,19 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         .filter(|row| row.broker.state == BrokerState::Active)
         .collect();
     let brokers = active_brokers.len();
+    let ids: Vec<_> = active_brokers.iter().map(|row| row.broker.id).collect();
+    let certs = ca.list_broker_certs().map_err(|e| e.to_string())?;
+    let name_of = |id| {
+        let broker = &active_brokers[ids.iter().position(|&watched| watched == id)?].broker;
+        broker.cn.clone().or_else(|| broker.url.clone())
+    };
+    let leaves_due = leaves_due(&ids, &certs, Utc::now())
+        .into_iter()
+        .map(|leaf| LeafDueRow {
+            broker: name_of(leaf.broker_id).unwrap_or_default(),
+            leaf,
+        })
+        .collect();
     let brokers_flagged = active_brokers
         .into_iter()
         .filter(|row| !row.concerns.is_empty())
@@ -168,6 +184,7 @@ pub async fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, 
         crl_batch,
         brokers,
         brokers_flagged,
+        leaves_due,
         action_items,
     })
 }

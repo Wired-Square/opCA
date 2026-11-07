@@ -246,6 +246,7 @@ fn renew_all_reports_an_unreachable_broker() {
         json!([]),
         "heard from today, 90 days left"
     );
+    assert_eq!(dashboard["leaves_due"], json!([]), "nothing issued");
 }
 
 #[test]

@@ -29,6 +29,7 @@ const dashboard: DashboardData = {
   crl_batch: null,
   brokers: 0,
   brokers_flagged: [],
+  leaves_due: [],
   action_items: [
     {
       id: "expiring_certs",

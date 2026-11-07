@@ -6,7 +6,7 @@ import AcmeServers from "../pages/AcmeServers";
 import Dashboard from "../pages/Dashboard";
 import { setAppState } from "../stores/app";
 import { brokersSynced, syncBrokersInBackground } from "../stores/brokerSync";
-import type { BrokerCert, BrokerRow, DashboardData } from "../api/types";
+import type { BrokerCert, BrokerRow, DashboardData, LeafDue } from "../api/types";
 
 const listBrokers = vi.hoisted(() => vi.fn());
 const listBrokerCerts = vi.hoisted(() => vi.fn());
@@ -329,7 +329,7 @@ describe("an ACME server's page", () => {
 });
 
 describe("dashboard ACME servers tile", () => {
-  const dashboard = (brokers: number, brokers_flagged: BrokerRow[]): DashboardData => ({
+  const dashboard = (brokers: number, brokers_flagged: BrokerRow[], leaves_due: LeafDue[] = []): DashboardData => ({
     ca_valid: true,
     ca_cn: "Test CA",
     ca_expiry: null,
@@ -349,6 +349,7 @@ describe("dashboard ACME servers tile", () => {
     crl_batch: null,
     brokers,
     brokers_flagged,
+    leaves_due,
     action_items: [],
   });
 
@@ -400,6 +401,26 @@ describe("dashboard ACME servers tile", () => {
     await vi.waitFor(() => expect(getDashboard).toHaveBeenCalledTimes(2));
     expect(listBrokers).toHaveBeenCalledTimes(2);
     warn.mockRestore();
+  });
+
+  it("lists each certificate due for renewal, opening its broker's page", async () => {
+    getDashboard.mockResolvedValue(
+      dashboard(1, [], [
+        { broker_id: 1, broker: "acme.home.arpa", serial: "111", name: "nas.home.arpa", days: 12 },
+        { broker_id: 1, broker: "acme.home.arpa", serial: "112", name: "old.home.arpa", days: -3 },
+      ]),
+    );
+    render(() => <Dashboard />);
+
+    const card = await tile();
+    expect(card).toHaveTextContent("1 healthy");
+    expect(within(card).getByText("1 healthy")).toHaveClass("text-warning");
+    expect(card).toHaveTextContent("2 certificates need renewing");
+    const due = within(within(card).getByRole("list", { name: "Certificates to renew" }));
+    expect(due.getByRole("button", { name: "old.home.arpa on acme.home.arpa: expired 3 days ago" })).toBeInTheDocument();
+    due.getByRole("button", { name: "nas.home.arpa on acme.home.arpa: expires in 12 days" }).click();
+    expect(navigate).toHaveBeenCalledWith("/acme/1");
+    expect(navigate).not.toHaveBeenCalledWith("/acme");
   });
 
   it("is hidden with no brokers", async () => {

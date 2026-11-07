@@ -57,6 +57,7 @@ const dashboard = (overrides: Partial<DashboardData> = {}): DashboardData => ({
   crl_batch: batch(),
   brokers: 0,
   brokers_flagged: [],
+  leaves_due: [],
   action_items: [],
   ...overrides,
 });

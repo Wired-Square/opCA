@@ -54,7 +54,18 @@ export interface DashboardData {
   /** Active brokers, and those of them that need attention. */
   brokers: number;
   brokers_flagged: BrokerRow[];
+  /** Active brokers' leaves past two-thirds of their life with no renewal. */
+  leaves_due: LeafDue[];
   action_items: ActionItem[];
+}
+
+/** `days` is negative once expired. */
+export interface LeafDue {
+  broker_id: number;
+  broker: string;
+  serial: string;
+  name: string;
+  days: number;
 }
 
 // ---------------------------------------------------------------------------

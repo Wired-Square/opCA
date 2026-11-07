@@ -3,10 +3,12 @@
 
 mod concern;
 mod enrol;
+mod leaf_due;
 mod renew;
 
 pub use concern::{Concern, concerns};
 pub use enrol::{EnrolledBroker, fetch_offer, issuance, parse_pairing};
+pub use leaf_due::{LeafDue, leaves_due};
 pub use opca_acme_api as api;
 pub use renew::{BrokerNotice, BrokerRenewal, BrokerRevocation, Renewal};
 
