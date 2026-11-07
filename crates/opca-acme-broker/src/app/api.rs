@@ -1,19 +1,22 @@
-//! The read API the app's page calls on `app.sock`, for every console role (opCA phase 26-2).
+//! The API the app's page calls on `app.sock`: reads for every console role (opCA phase 26-2),
+//! and a new pairing code for an admin.
 
 use std::fmt::Display;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{FromRef, State};
-use axum::http::Uri;
+use axum::http::{StatusCode, Uri};
 use axum::response::Response;
-use axum::routing::get;
+use axum::routing::{get, post};
 use opca_acme_api::{ErrorBody, IssuedCertificate};
 use serde::{Deserialize, Serialize};
-use wslib_appliance_server::{ApplianceState, Mount, Viewer};
+use wslib_appliance_server::{Admin, ApplianceState, Mount, Viewer};
 
-use super::{App, AppState, Hooked};
-use crate::api::{param, reply};
+use super::{App, AppState, Hooked, NEEDS_HOST};
+use crate::api::{json, param, reply};
+use crate::cli::pairing_locked;
 use crate::enrolled::issued;
 use crate::enrolment::{bad_request, internal};
 use crate::{Broker, Mode};
@@ -41,6 +44,12 @@ pub struct Issuer {
     pub not_after: String,
 }
 
+/// The `POST /apps/opca-acme/api/pairing` response: a new code's URI, the old code spent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewPairing {
+    pub uri: String,
+}
+
 /// The `GET /apps/opca-acme/api/issued?before=<cursor>&revoked=<bool>` response, newest first.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssuedNewest {
@@ -64,12 +73,13 @@ impl FromRef<Read> for ApplianceState {
     }
 }
 
-/// Under the chassis's `/api`, for every console role (opCA phase 26-2).
+/// Under the chassis's `/api`.
 pub(super) fn routes(app: &App, hooked: &Hooked) -> Mount {
     let (hooked, app) = (hooked.clone(), app.clone());
     let routes = Router::new()
         .route("/status", get(status))
-        .route("/issued", get(issued_newest));
+        .route("/issued", get(issued_newest))
+        .route("/pairing", post(new_pairing));
     Mount::new(routes, move |appliance| Read {
         appliance,
         hooked: hooked.clone(),
@@ -85,6 +95,24 @@ async fn status(State(read): State<Read>, _: Viewer) -> Response {
 
 async fn issued_newest(State(read): State<Read>, _: Viewer, uri: Uri) -> Response {
     reply(read.issued_newest(&uri).await)
+}
+
+async fn new_pairing(State(read): State<Read>, _: Admin) -> Response {
+    let Hooked::Running(broker) = &read.hooked else {
+        return conflict(NEEDS_HOST);
+    };
+    match broker.new_pairing().await {
+        Ok(Ok(uri)) => reply(Ok(NewPairing { uri })),
+        Ok(Err(why)) => conflict(&why),
+        Err(failed) => reply::<()>(Err(failed)),
+    }
+}
+
+fn conflict(message: &str) -> Response {
+    json(
+        StatusCode::CONFLICT,
+        &serde_json::json!({ "message": message }),
+    )
 }
 
 impl Read {
@@ -160,6 +188,19 @@ impl Broker {
             domains,
             subordinate,
         })
+    }
+
+    /// As `opca-acme pairing`; the inner `Err` says why the broker is not enrolling.
+    async fn new_pairing(self: &Arc<Self>) -> Result<Result<String, String>, ErrorBody> {
+        let issued = self
+            .locked(|broker| {
+                pairing_locked(&broker.state, &broker.host, broker.port).map_err(internal)
+            })
+            .await?;
+        if issued.is_ok() {
+            tracing::info!("issued a new pairing code for an admin on the app's page");
+        }
+        Ok(issued.map(|uri| uri.expose()))
     }
 
     async fn issued_newest(

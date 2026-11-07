@@ -37,7 +37,7 @@ use crate::{Broker, Config, Error, Mode};
 
 mod api;
 
-pub use api::{AppStatus, IssuedNewest, Issuer};
+pub use api::{AppStatus, IssuedNewest, Issuer, NewPairing};
 
 pub const NAME: &str = "opca-acme";
 pub const DATA: &str = "/data";

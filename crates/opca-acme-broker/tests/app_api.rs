@@ -1,4 +1,5 @@
-//! The read API the app's page calls on `app.sock`: the status, and the issued certificates newest first.
+//! The API the app's page calls on `app.sock`: the status, the issued certificates newest first,
+//! and a new pairing code for an admin.
 
 #![cfg(unix)]
 
@@ -7,27 +8,36 @@ mod support;
 use std::fs;
 use std::path::Path;
 
-use opca_acme_broker::Broker;
-use opca_acme_broker::app::{APP_SOCKET, AppState, AppStatus, Hooked, IssuedNewest, Issuer};
+use opca_acme_api::{Enrolment, ErrorKind, path};
+use opca_acme_broker::app::{
+    APP_SOCKET, AppState, AppStatus, Hooked, IssuedNewest, Issuer, NewPairing,
+};
+use opca_acme_broker::{Broker, SCHEME};
 use support::{
-    DOMAINS, HOST, config, console_app, enrol, private_tempdir, record, run, serve_console,
+    Api, DOMAINS, HOST, Running, TestCa, config, console_app, enrol, error, private_tempdir,
+    record, run, serve_console, wrong,
 };
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
+use wslib_pairing::{PairingUri, SpentBy, Status};
 
 const VIEWER: &str = "v1; id=a1; user=someone; role=viewer";
+const OPERATOR: &str = "v1; id=a2; user=hand; role=operator";
+const ADMIN: &str = "v1; id=a3; user=boss; role=admin";
 const STATUS: &str = "/apps/opca-acme/api/status";
 const ISSUED: &str = "/apps/opca-acme/api/issued";
+const PAIRING: &str = "/apps/opca-acme/api/pairing";
 
-/// `GET path` on `app.sock` in `sockets`, as the console asserting `identity`: its status and body.
-async fn get(sockets: &Path, path: &str, identity: Option<&str>) -> (u16, String) {
+/// `method path` on `app.sock` in `sockets`, as the console asserting `identity`: its status and body.
+async fn call(sockets: &Path, method: &str, path: &str, identity: Option<&str>) -> (u16, String) {
     let mut stream = UnixStream::connect(sockets.join(APP_SOCKET)).await.unwrap();
     let asserted = identity.map_or(String::new(), |identity| {
         format!("Appliance-Identity: {identity}\r\n")
     });
-    let request =
-        format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{asserted}\r\n");
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n{asserted}\r\n"
+    );
     stream.write_all(request.as_bytes()).await.unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
@@ -36,7 +46,7 @@ async fn get(sockets: &Path, path: &str, identity: Option<&str>) -> (u16, String
 }
 
 async fn read<T: serde::de::DeserializeOwned>(sockets: &Path, path: &str) -> T {
-    let (code, body) = get(sockets, path, Some(VIEWER)).await;
+    let (code, body) = call(sockets, "GET", path, Some(VIEWER)).await;
     assert_eq!(code, 200, "{path}: {body}");
     serde_json::from_str(&body).unwrap()
 }
@@ -174,7 +184,13 @@ async fn enrolled_it_names_its_subordinate_and_pages_the_issued_newest_first() {
     );
 
     for query in ["before=soon", "revoked=yes"] {
-        let (code, body) = get(sockets.path(), &format!("{ISSUED}?{query}"), Some(VIEWER)).await;
+        let (code, body) = call(
+            sockets.path(),
+            "GET",
+            &format!("{ISSUED}?{query}"),
+            Some(VIEWER),
+        )
+        .await;
         assert_eq!(code, 400, "{query}: {body}");
     }
 }
@@ -190,11 +206,11 @@ async fn without_the_consoles_identity_the_api_refuses_and_health_still_answers(
             (Some("v2; id=a1; user=someone; role=viewer"), 400),
             (Some("v1; id=a1"), 400),
         ] {
-            let (code, _) = get(sockets.path(), path, identity).await;
+            let (code, _) = call(sockets.path(), "GET", path, identity).await;
             assert_eq!(code, refused, "{path} as {identity:?}");
         }
     }
-    let (code, _) = get(sockets.path(), "/apps/opca-acme/healthz", None).await;
+    let (code, _) = call(sockets.path(), "GET", "/apps/opca-acme/healthz", None).await;
     assert_eq!(code, 200);
 }
 
@@ -203,14 +219,124 @@ async fn the_chassis_answers_the_session_and_branding_under_the_base() {
     let data = private_tempdir();
     let sockets = console(data.path(), Hooked::NeedsHost(data.path().join("state"))).await;
 
-    let (code, body) = get(sockets.path(), "/apps/opca-acme/api/session", Some(VIEWER)).await;
+    let (code, body) = call(
+        sockets.path(),
+        "GET",
+        "/apps/opca-acme/api/session",
+        Some(VIEWER),
+    )
+    .await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&body).unwrap(),
         serde_json::json!({"id": "a1", "username": "someone", "role": "viewer"})
     );
-    let (code, body) = get(sockets.path(), "/apps/opca-acme/api/branding", None).await;
+    let (code, body) = call(sockets.path(), "GET", "/apps/opca-acme/api/branding", None).await;
     assert_eq!(code, 200, "{body}");
     let branding: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(branding["app_name"], "opCA ACME broker");
+}
+
+async fn running_console() -> (Running, TempDir) {
+    let state = private_tempdir();
+    let (broker, uri) = Broker::start(&config(state.path(), DOMAINS)).await.unwrap();
+    let running = run(state, broker, uri).await;
+    let sockets = console(
+        private_tempdir().path(),
+        Hooked::Running(running.broker.clone()),
+    )
+    .await;
+    (running, sockets)
+}
+
+/// A new pairing URI from the page, as an admin, for the broker `running` serves.
+async fn new_pairing(sockets: &Path, running: &Running) -> Api {
+    let (code, body) = call(sockets, "POST", PAIRING, Some(ADMIN)).await;
+    assert_eq!(code, 200, "{body}");
+    let NewPairing { uri } = serde_json::from_str(&body).unwrap();
+    Api {
+        uri: PairingUri::parse(SCHEME, &uri).unwrap(),
+        address: running.address,
+    }
+}
+
+async fn refused_pairing(sockets: &Path, identity: &str) -> (u16, String) {
+    call(sockets, "POST", PAIRING, Some(identity)).await
+}
+
+#[tokio::test]
+async fn an_admin_issues_a_pairing_uri_whose_code_alone_redeems_until_enrolled() {
+    let (running, sockets) = running_console().await;
+    for identity in [VIEWER, OPERATOR] {
+        assert_eq!(
+            refused_pairing(sockets.path(), identity).await.0,
+            403,
+            "{identity}"
+        );
+    }
+    assert_eq!(running.remaining(), 5);
+
+    let paired = new_pairing(sockets.path(), &running).await;
+    assert_eq!(paired.uri.pin(), running.uri.pin());
+    let mut ca = TestCa::new();
+    let operator = ca.client("opCA operator");
+    let (chain, _, _) = ca.sign(running.broker.subordinate().csr_pem(), DOMAINS);
+    let (code, body) = running.post(&running.enrolment(&chain, DOMAINS)).await;
+    assert_eq!(
+        (code, error(&body)),
+        (403, ErrorKind::WrongCode { remaining: 4 })
+    );
+    let enrolment = Enrolment {
+        operator_pin: operator.key_pin(),
+        ..paired.enrolment(&chain, DOMAINS)
+    };
+    let (code, body) = paired.post(&enrolment).await;
+    assert_eq!(code, 200, "{body}");
+
+    let (code, body) = refused_pairing(sockets.path(), ADMIN).await;
+    assert_eq!(code, 409);
+    assert!(body.contains("the broker is enrolled"), "{body}");
+    let (code, _) = paired
+        .call(Some(&operator), "POST", path::REVOKE, "")
+        .await
+        .unwrap();
+    assert_eq!(code, 200);
+    let (code, body) = refused_pairing(sockets.path(), ADMIN).await;
+    assert_eq!(code, 409);
+    assert!(body.contains("the broker is revoked"), "{body}");
+    assert_eq!(refused_pairing(sockets.path(), VIEWER).await.0, 403);
+}
+
+#[tokio::test]
+async fn a_new_pairing_uri_replaces_a_code_locked_out_by_wrong_attempts() {
+    let (running, sockets) = running_console().await;
+    let mut ca = TestCa::new();
+    let (chain, _, _) = ca.sign(running.broker.subordinate().csr_pem(), DOMAINS);
+    let enrolment = running.enrolment(&chain, DOMAINS);
+    let guess = Enrolment {
+        code: wrong(&enrolment.code),
+        ..enrolment.clone()
+    };
+    for _ in 0..5 {
+        running.post(&guess).await;
+    }
+    assert_eq!(
+        running.broker.code_status().unwrap(),
+        Status::Spent(SpentBy::Lockout)
+    );
+
+    let paired = new_pairing(sockets.path(), &running).await;
+    assert_eq!(running.remaining(), 5);
+    let (code, body) = paired.post(&paired.enrolment(&chain, DOMAINS)).await;
+    assert_eq!(code, 200, "{body}");
+}
+
+#[tokio::test]
+async fn needing_a_host_there_is_no_pairing_code_to_issue() {
+    let data = private_tempdir();
+    let sockets = console(data.path(), Hooked::NeedsHost(data.path().join("state"))).await;
+    let (code, body) = refused_pairing(sockets.path(), ADMIN).await;
+    assert_eq!(code, 409);
+    assert!(body.contains("needs a host"), "{body}");
+    assert_eq!(refused_pairing(sockets.path(), OPERATOR).await.0, 403);
 }

@@ -46,7 +46,7 @@ pub struct Broker {
     pub(crate) code: Arc<OneTimeCode>,
     pub(crate) mode: RwLock<Mode>,
     pub(crate) host: String,
-    port: u16,
+    pub(crate) port: u16,
     pub(crate) domains: Vec<String>,
     pub(crate) state: PathBuf,
     pub(crate) acme_listener: AcmeListener,
