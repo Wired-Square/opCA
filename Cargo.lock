@@ -4227,7 +4227,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "opca-acme-api"
-version = "0.102.4"
+version = "0.103.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4235,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "opca-acme-broker"
-version = "0.102.4"
+version = "0.103.0"
 dependencies = [
  "axum",
  "flate2",
@@ -4279,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "opca-cli"
-version = "0.102.4"
+version = "0.103.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4295,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "opca-core"
-version = "0.102.4"
+version = "0.103.0"
 dependencies = [
  "aes-gcm",
  "aws-credential-types",
@@ -4342,7 +4342,7 @@ dependencies = [
 
 [[package]]
 name = "opca-tauri"
-version = "0.102.4"
+version = "0.103.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",

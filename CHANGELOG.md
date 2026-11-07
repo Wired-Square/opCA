@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.103.0] - 2026-11-07
 
 ### Added
 
@@ -137,7 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- A prerelease tag (`v0.102.5-dev.11`) builds the desktop app and the ACME
+- A prerelease tag (`v1.2.3-dev.4`) builds the desktop app and the ACME
   broker's `.deb`, not the `opca-acme` app archives, as a draft prerelease.
 - The `opca-acme` app serves its page, API and backup hooks through the
   appliance chassis (`wslib-appliance-server`), at the fixed base
