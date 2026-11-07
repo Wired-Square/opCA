@@ -39,10 +39,9 @@ jobs:
             --title "opCA $tag" \
             --notes "See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details."
 
-  # A prerelease tag (v1.2.3-dev.4) builds only the ACME broker and app.
   build:
     needs: [create-release]
-    if: always() && !contains(needs.create-release.outputs.tag, '-')
+    if: always()
     strategy:
       fail-fast: false
       matrix:
@@ -232,6 +231,8 @@ jobs:
   # wired-square source every image ships (26-5).
   acme-app:
     needs: [create-release]
+    # A prerelease tag (v1.2.3-dev.4) builds only the desktop app and the broker's .deb.
+    if: ${{ !contains(needs.create-release.outputs.tag, '-') }}
     strategy:
       fail-fast: false
       matrix:
