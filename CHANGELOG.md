@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   reason), filtered by revocation. It is read-only: revoke in opCA. It sits
   in the appliance shell: the console's masthead and brand, its app switcher,
   and the scheme the console chose.
+- While the broker is enrolling, an admin can issue a new pairing URI from
+  the `opca-acme` app's page, as `opca-acme pairing` does. It replaces the
+  code before it, a locked-out one included, and is shown masked, with Reveal
+  and Copy, until the page is reloaded. Other roles see that an admin can
+  issue one.
 - Each release carries the `opca-acme` app for arm64 and amd64, signed as the
   `wired-square` source every ApplianceOS image ships, so it installs from
   Apps › Install with no source to add. `scripts/build-acme-app.sh --source

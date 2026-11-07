@@ -55,20 +55,27 @@ pub fn become_owner(state: &Path, root_only: bool) -> Result<(), Error> {
 
 /// Issues a new pairing code, while enrolling only, and its URI.
 pub fn pairing(config: &Config) -> Result<PairingUri, Error> {
-    let state = &config.state_dir;
-    let _lock = lock_state(state)?;
+    let _lock = lock_state(&config.state_dir)?;
+    pairing_locked(&config.state_dir, &config.host, config.port())?.map_err(Error::from)
+}
+
+/// [`pairing`] under a lock already held; the inner `Err` says why the broker is not enrolling.
+pub(crate) fn pairing_locked(
+    state: &Path,
+    host: &str,
+    port: u16,
+) -> Result<Result<PairingUri, String>, Error> {
     if let Mode::Enrolled(enrolled) = enrolment::load(state)? {
         let now = if enrolled.revoked {
             "revoked"
         } else {
             "enrolled"
         };
-        return Err(format!(
+        return Ok(Err(format!(
             "the broker is {now}; `opca-acme enrol --reopen` pairs it again with a new subordinate key"
-        )
-        .into());
+        )));
     }
-    issue(config)
+    issue(state, host, port).map(Ok)
 }
 
 /// Archives the enrolment, deletes the subordinate key,
@@ -90,7 +97,7 @@ pub fn reopen(config: &Config) -> Result<PairingUri, Error> {
     }
     let provider = Arc::new(rustls_openssl::default_provider());
     Subordinate::load_or_generate(provider, state, &config.host)?;
-    issue(config)
+    issue(state, &config.host, config.port())
 }
 
 /// Asks a running daemon to reload; `false` when none is running.
@@ -147,8 +154,7 @@ pub fn status(config: &Config) -> Result<String, Error> {
     Ok(lines.join("\n"))
 }
 
-fn issue(config: &Config) -> Result<PairingUri, Error> {
-    let state = &config.state_dir;
+fn issue(state: &Path, host: &str, port: u16) -> Result<PairingUri, Error> {
     let api_crt = state.join("api.crt");
     let certificates = fs::read_to_string(&api_crt)
         .map_err(|e| format!("{}: {e}; start the broker once first", api_crt.display()))?;
@@ -157,8 +163,8 @@ fn issue(config: &Config) -> Result<PairingUri, Error> {
     let (_, code) = OneTimeCode::issue(code_path(state), ATTEMPTS)?;
     Ok(PairingUri::new(
         SCHEME,
-        &config.host,
-        config.port(),
+        host,
+        port,
         SpkiSha256::from(*fingerprint.0.as_bytes()),
         code,
     )?)
