@@ -120,6 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   branch, with no tag, push or prompt. Merging the PR makes `release.yml` tag
   the new version and build its draft release. `release:rebuild` runs on a
   clean `main` and only moves the current tag and pushes it.
+- The ACME broker's page shows issued certificates' serials in upper-case
+  hex, as `openssl x509 -serial` prints them, rather than as 39-digit
+  decimals. The subordinate's serial stays decimal, as opCA shows it.
 
 ### Fixed
 
