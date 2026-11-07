@@ -1266,6 +1266,10 @@ the holder's `Location` for a key change to a key in use, and 400 otherwise.
   0–6, 9 and 10 are taken (0 is stored as none); `Store::revoke` bumps the
   `changed` sequence, so opCA's next sync sees it.
 
+A server outside opCA can take its certificate from the broker with
+[contrib/acme-client/](../contrib/acme-client/README.md), a lego container
+configured from `.env` whose entrypoint also bakes into other images.
+
 ### State directory
 
 `/var/lib/opca-acme`, 0700, owned by `opca-acme`:
