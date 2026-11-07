@@ -1,0 +1,18 @@
+services:
+  acme-client:
+    build: .
+    image: opca-acme-client
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    # Only http-01 (80) and tls-alpn-01 (443) need a port; drop both for dns-01.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./ca.pem:/etc/acme/ca.pem:ro
+      - data:/data
+
+volumes:
+  data:
