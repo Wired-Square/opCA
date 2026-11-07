@@ -1,7 +1,8 @@
-import { Show, createEffect, onMount, type ParentProps } from "solid-js";
+import { Show, createEffect, on, onMount, type ParentProps } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
 import { DateModes, ScreenBoundary } from "@wired-square/kit";
 import { appState } from "./stores/app";
+import { syncBrokersInBackground } from "./stores/brokerSync";
 import { initOperationListener } from "./stores/operation";
 import { initQuitListener, quitPending } from "./stores/quit";
 import Sidebar from "./components/layout/Sidebar";
@@ -28,6 +29,13 @@ export default function App(props: ParentProps) {
   createEffect(() => {
     if (appState.connected && appState.vaultState === "database_unreadable") setRecoveryOpen(true);
   });
+
+  createEffect(
+    on(
+      () => appState.connected && appState.vaultState === "valid_ca" && appState.vault,
+      (vault) => vault && syncBrokersInBackground(),
+    ),
+  );
 
   // Redirect based on vault state
   createEffect(() => {

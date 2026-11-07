@@ -30,6 +30,7 @@ const STATES: Record<AppState, { label: string; tone: Tone }> = {
   needs_host: { label: "Needs a host", tone: "warn" },
   enrolling: { label: "Awaiting enrolment", tone: "neutral" },
   enrolled: { label: "Enrolled", tone: "good" },
+  paused: { label: "Paused", tone: "warn" },
   revoked: { label: "Revoked", tone: "bad" },
 };
 
@@ -98,6 +99,12 @@ function Status(props: { status: AppStatus }) {
         </Match>
         <Match when={props.status.state === "enrolling"}>
           <Pairing />
+        </Match>
+        <Match when={props.status.state === "paused"}>
+          <Notice tone="warn">
+            opCA paused issuance, so ACME clients can't order or renew certificates until it resumes. Revocation,
+            the CRL and the subordinate's renewal carry on.
+          </Notice>
         </Match>
         <Match when={props.status.state === "revoked"}>
           <Notice tone="bad">opCA revoked the broker's subordinate, so it issues nothing more.</Notice>

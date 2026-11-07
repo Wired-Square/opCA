@@ -19,6 +19,7 @@ use instant_acme::{
     Account, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeType, HttpClient,
     Identifier, NewOrder, Order, OrderStatus, RetryPolicy, RevocationReason, RevocationRequest,
 };
+use opca_acme_api::{ChainUpdate, IssuerState, Status, path};
 use opca_acme_broker::Broker;
 use opca_acme_broker::acme::base64url;
 use opca_acme_broker::acme::validate::{Ports, Validator};
@@ -316,6 +317,61 @@ impl Acme {
         order.finalize_csr(&key.csr(&[name])).await.unwrap();
         (order.poll_certificate(&retries()).await.unwrap(), key)
     }
+}
+
+impl Acme {
+    async fn state(&self, method: &str, route: &str) -> IssuerState {
+        let body = self.enrolled.as_operator(method, route, "").await;
+        serde_json::from_str::<Status>(&body).unwrap().state
+    }
+
+    /// A new-order for [`NAME`] sent without instant-acme: the status and the body.
+    async fn raw_new_order(&self, account: &Account, key: &Key) -> (StatusCode, Value) {
+        let base = self.base();
+        let url = format!("{base}/acme/new-order");
+        let header =
+            json!({"nonce": self.https.nonce(&base).await, "url": url, "kid": account.id()});
+        let payload = json!({"identifiers": [{"type": "dns", "value": NAME}]});
+        let (status, _, body) = self
+            .https
+            .post(&url, key.jws(header, payload.to_string().as_bytes()))
+            .await;
+        (status, body)
+    }
+}
+
+/// `acme`'s broker started again on its state, with the default validator.
+async fn restarted(acme: Acme) -> Acme {
+    let Acme {
+        enrolled, tokens, ..
+    } = acme;
+    let running = enrolled.running;
+    let running = start(running.state, &[], Some(running.api.uri)).await;
+    let mut address = None;
+    for _ in 0..200 {
+        address = running.broker.acme_address();
+        if address.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let address = address.expect("serving ACME again");
+    let enrolled = Enrolled {
+        running,
+        ..enrolled
+    };
+    Acme {
+        directory: format!("https://{HOST}:{}/acme/directory", address.port()),
+        https: Https::new(address, enrolled.root()),
+        enrolled,
+        tokens,
+    }
+}
+
+fn assert_paused((status, body): (StatusCode, Value)) {
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["type"], urn("serverInternal"));
+    assert_eq!(body["detail"], "the operator paused issuance");
 }
 
 fn kind(error: instant_acme::Error) -> String {
@@ -651,6 +707,87 @@ async fn an_expired_order_is_invalid() {
             authorisation.refresh().await.unwrap().status,
             AuthorizationStatus::Expired
         );
+    })
+    .await
+    .expect("the flow finishes");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_paused_broker_refuses_orders_while_revocation_renewal_and_the_crl_carry_on() {
+    let mut acme = acme(None).await;
+    tokio::time::timeout(WAIT, async {
+        let account_key = key();
+        let account = acme.account(&account_key).await;
+        let (earlier, _) = acme.issue(&account, NAME).await;
+        let mut ready = acme.validated(&account, &[OTHER]).await;
+
+        for _ in 0..2 {
+            assert_eq!(acme.state("POST", path::PAUSE).await, IssuerState::Paused);
+        }
+        assert_paused(acme.raw_new_order(&account, &account_key).await);
+        let csr = key().csr(&[OTHER]);
+        let Err(refused) = ready.finalize_csr(&csr).await else {
+            panic!("finalised while paused");
+        };
+        assert_eq!(kind(refused), urn("serverInternal"));
+
+        let certificate = leaf(&earlier);
+        let request = RevocationRequest {
+            certificate: &certificate,
+            reason: Some(RevocationReason::KeyCompromise),
+        };
+        account.revoke(&request).await.unwrap();
+        let pki = acme.enrolled.running.pki;
+        let mut crl = crl_after(pki, 0).await;
+        while crl.revoked.is_empty() {
+            crl = crl_after(pki, crl.number.unwrap()).await;
+        }
+
+        let fresh = acme
+            .enrolled
+            .running
+            .broker
+            .subordinate()
+            .fresh_csr()
+            .unwrap();
+        let (chain_pem, _) = acme.enrolled.ca.renew(acme.enrolled.id, &fresh);
+        let update = ChainUpdate {
+            chain_pem,
+            config: acme.enrolled.status.config.clone(),
+        };
+        let body = acme
+            .enrolled
+            .as_operator("PUT", path::CHAIN, &serde_json::to_string(&update).unwrap())
+            .await;
+        assert_eq!(
+            serde_json::from_str::<Status>(&body).unwrap().state,
+            IssuerState::Paused
+        );
+
+        for _ in 0..2 {
+            assert_eq!(acme.state("POST", path::RESUME).await, IssuerState::Issuing);
+        }
+        ready.finalize_csr(&csr).await.unwrap();
+        ready.poll_certificate(&retries()).await.unwrap();
+    })
+    .await
+    .expect("the flow finishes");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pause_survives_a_restart_until_resumed() {
+    let acme = acme(None).await;
+    assert_eq!(acme.state("POST", path::PAUSE).await, IssuerState::Paused);
+    let acme = restarted(acme).await;
+    tokio::time::timeout(WAIT, async {
+        let account_key = key();
+        let account = acme.account(&account_key).await;
+        assert_eq!(acme.state("GET", path::STATUS).await, IssuerState::Paused);
+        assert_paused(acme.raw_new_order(&account, &account_key).await);
+
+        assert_eq!(acme.state("POST", path::RESUME).await, IssuerState::Issuing);
+        let (status, body) = acme.raw_new_order(&account, &account_key).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
     })
     .await
     .expect("the flow finishes");

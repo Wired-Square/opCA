@@ -52,6 +52,7 @@ pub(crate) struct Server {
     pub(crate) validator: Arc<dyn Validate>,
     pub(crate) lifetime: Duration,
     issuer: RwLock<Option<Arc<Issuer>>>,
+    paused: AtomicBool,
     resumed: AtomicBool,
     pub(crate) published: Arc<Published>,
 }
@@ -70,6 +71,7 @@ impl Server {
             validator,
             lifetime: ORDER_LIFETIME,
             issuer: RwLock::default(),
+            paused: AtomicBool::new(false),
             resumed: AtomicBool::new(false),
             published,
         }
@@ -79,12 +81,22 @@ impl Server {
         *self.issuer.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(issuer));
     }
 
-    fn issuer(&self) -> Result<Arc<Issuer>, Problem> {
+    pub(crate) fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::SeqCst);
+    }
+
+    fn issuing(&self) -> Result<Arc<Issuer>, Refusal> {
+        if self.paused.load(Ordering::SeqCst) {
+            return Err(Refusal {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                ..Problem::new(ProblemType::ServerInternal, "the operator paused issuance").into()
+            });
+        }
         self.issuer
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
-            .ok_or_else(|| Problem::new(ProblemType::ServerInternal, "not issuing yet"))
+            .ok_or_else(|| Problem::new(ProblemType::ServerInternal, "not issuing yet").into())
     }
 
     /// Validates again, once a process, the challenges a restart left processing.
@@ -373,7 +385,7 @@ struct Identifier {
 async fn new_order(State(server): Shared, post: Post) -> Result<Response, Refusal> {
     let (account, _, payload) = post.by_account(&server).await?;
     let request: OrderRequest = parse(&payload)?;
-    let issuer = server.issuer()?;
+    let issuer = server.issuing()?;
     let config = issuer.config();
     let names = names(&request.identifiers, &config.permitted_domains)?;
     let expires = SystemTime::now() + server.lifetime;
@@ -500,7 +512,7 @@ async fn finalise(State(server): Shared, Id(id): Id, post: Post) -> Result<Respo
     let csr = from_base64url(&request.csr)
         .ok_or_else(|| Problem::new(ProblemType::BadCsr, "the CSR is not base64url"))?;
     server
-        .issuer()?
+        .issuing()?
         .finalise(&server.store, &order, &csr, &key.subject_public_key_info())
         .await?;
     let order = server.order_of(id, &account).await?;

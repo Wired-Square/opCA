@@ -27,6 +27,7 @@ export const routes: RouteDefinition[] = [
   { path: "/crl", component: CRL },
   { path: "/csr", component: lazy(() => import("./pages/CSR")) },
   { path: "/acme", component: lazy(() => import("./pages/AcmeServers")) },
+  { path: "/acme/:id", component: lazy(() => import("./pages/AcmeServer")) },
   { path: "/dkim", component: DKIM },
   { path: "/dkim/:domain/:selector", component: DkimKeyDetail },
   { path: "/openvpn", component: OpenVPN },

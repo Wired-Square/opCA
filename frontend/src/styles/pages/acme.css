@@ -60,10 +60,6 @@
   padding-left: 18px;
 }
 
-.broker-issued-row > td {
-  padding: 0 12px 12px 32px;
-}
-
 .broker-issued {
   width: 100%;
   border-collapse: collapse;

@@ -13,6 +13,9 @@ pub mod path {
     pub const CSR: &str = "/v1/csr";
     pub const CHAIN: &str = "/v1/chain";
     pub const REVOKE: &str = "/v1/revoke";
+    /// `POST`s with no body, each answered with the [`Status`](super::Status); both idempotent.
+    pub const PAUSE: &str = "/v1/pause";
+    pub const RESUME: &str = "/v1/resume";
     pub const ISSUED: &str = "/v1/issued";
     /// `POST`s a [`LeafRevocation`](super::LeafRevocation), answered with the [`IssuedCertificate`](super::IssuedCertificate).
     pub const REVOKE_ISSUED: &str = "/v1/issued/{serial}/revoke";
@@ -94,6 +97,8 @@ pub struct IssuedCounts {
 pub enum IssuerState {
     Issuing,
     AcmeDown,
+    /// The operator paused issuance: new orders and finalising are refused.
+    Paused,
     Revoked,
 }
 

@@ -35,6 +35,8 @@ fn router(broker: Arc<Broker>) -> Router {
         .route(path::CSR, post(fresh_csr))
         .route(path::CHAIN, put(chain))
         .route(path::REVOKE, post(revoke))
+        .route(path::PAUSE, post(pause))
+        .route(path::RESUME, post(resume))
         .route(path::ISSUED, get(issued))
         .route(path::REVOKE_ISSUED, post(revoke_issued))
         .with_state(broker)
@@ -80,6 +82,16 @@ async fn chain(State(broker): Shared, _: Operator, body: Bytes) -> Response {
 
 async fn revoke(State(broker): Shared, _: Operator) -> Response {
     let status = broker.clone().revoke().await;
+    reply(broker.counted(status).await)
+}
+
+async fn pause(State(broker): Shared, _: Operator) -> Response {
+    let status = broker.clone().pause(true).await;
+    reply(broker.counted(status).await)
+}
+
+async fn resume(State(broker): Shared, _: Operator) -> Response {
+    let status = broker.clone().pause(false).await;
     reply(broker.counted(status).await)
 }
 

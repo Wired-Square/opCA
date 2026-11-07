@@ -37,6 +37,11 @@ export async function brokerStatus(id: number): Promise<BrokerStatus> {
   return withLock("broker_status", () => tauriInvoke<BrokerStatus>("broker_status", { id }));
 }
 
+/** Asks every active broker for its status and what it issued, as Status does for one. */
+export async function syncBrokers(): Promise<void> {
+  return withLock("sync_brokers", () => tauriInvoke<void>("sync_brokers"));
+}
+
 export async function renewBroker(id: number, changeDomains = false): Promise<Renewal> {
   return withLock("renew_broker", () => tauriInvoke<Renewal>("renew_broker", { id, changeDomains }));
 }
@@ -47,6 +52,10 @@ export async function renewAllBrokers(): Promise<BrokerRenewal[]> {
 
 export async function revokeBroker(id: number): Promise<BrokerRevocation> {
   return withLock("revoke_broker", () => tauriInvoke<BrokerRevocation>("revoke_broker", { id }));
+}
+
+export async function pauseBroker(id: number, paused: boolean): Promise<BrokerStatus> {
+  return withLock("pause_broker", () => tauriInvoke<BrokerStatus>("pause_broker", { id, paused }));
 }
 
 export async function revokeBrokerCert(id: number, serial: string, reason: number): Promise<BrokerCert> {
@@ -68,14 +77,18 @@ export const REVOCATION_REASONS: [number, string][] = [
   [10, "AA compromise"],
 ];
 
+export const expiryText = (days: number) => (days < 0 ? `expired ${-days} days ago` : `expires in ${days} days`);
+
 export function concernText(c: Concern): string {
   switch (c.concern) {
     case "expiring":
-      return c.days < 0 ? `expired ${-c.days} days ago` : `expires in ${c.days} days`;
+      return expiryText(c.days);
     case "silent":
       return `not heard from in ${c.days} days`;
     case "not_delivered":
       return "signed, not delivered";
+    case "paused":
+      return "issuance paused";
   }
 }
 

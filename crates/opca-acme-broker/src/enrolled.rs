@@ -75,6 +75,8 @@ impl Broker {
         Status {
             state: if enrolled.revoked {
                 IssuerState::Revoked
+            } else if enrolled.paused {
+                IssuerState::Paused
             } else {
                 self.issuer_state()
             },
@@ -237,6 +239,24 @@ impl Broker {
         tracing::warn!("revoked by opCA");
         self.refresh_acme();
         self.status(&revoked)
+    }
+
+    /// Pauses or resumes issuance; renewal, revocation and the CRL carry on either way.
+    pub(crate) async fn pause(self: Arc<Self>, paused: bool) -> Result<Status, ErrorBody> {
+        self.locked(move |broker| broker.store_pause(paused)).await
+    }
+
+    fn store_pause(&self, paused: bool) -> Result<Status, ErrorBody> {
+        let current = self.enrolled()?;
+        refuse_if_revoked(&current)?;
+        if current.paused == paused {
+            return self.status(&current);
+        }
+        let changed = Enrolled { paused, ..current };
+        self.store(changed.clone())?;
+        tracing::warn!(paused, "issuance paused or resumed by opCA");
+        self.refresh_acme();
+        self.status(&changed)
     }
 
     /// From disk, not memory, so that a reopen the daemon has yet to reload is not undone.

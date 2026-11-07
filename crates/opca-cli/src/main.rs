@@ -695,6 +695,18 @@ pub enum BrokerAction {
         change_domains: bool,
     },
 
+    /// Pause a broker's issuance: ACME clients can't order until it resumes
+    Pause {
+        /// Broker ID, as `opca broker list` shows it
+        id: i64,
+    },
+
+    /// Resume a paused broker's issuance
+    Resume {
+        /// Broker ID, as `opca broker list` shows it
+        id: i64,
+    },
+
     /// Revoke a broker's subordinate CA, regenerate the CRL and tell the broker
     Revoke {
         /// Broker ID, as `opca broker list` shows it

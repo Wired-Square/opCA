@@ -197,6 +197,10 @@ async fn enrolled_it_names_its_subordinate_and_pages_the_issued_newest_first() {
         (vec!["3", "1"], None)
     );
 
+    enrolled.as_operator("POST", path::PAUSE, "").await;
+    let paused: AppStatus = read(sockets.path(), STATUS).await;
+    assert_eq!(paused.state, AppState::Paused);
+
     for query in ["before=soon", "revoked=yes"] {
         let (code, body) = call(
             sockets.path(),

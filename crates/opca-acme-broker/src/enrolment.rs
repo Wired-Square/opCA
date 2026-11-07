@@ -32,6 +32,9 @@ pub struct Enrolled {
     pub api_pin: String,
     #[serde(default)]
     pub revoked: bool,
+    /// opCA paused issuance: ACME new orders and finalising are refused until it resumes.
+    #[serde(default)]
+    pub paused: bool,
     /// The serials of each subordinate this enrolment has held, whose certificates opCA is told
     /// of; `None`, every certificate, for an enrolment from before they were kept.
     pub issuers: Option<Vec<String>>,
@@ -103,6 +106,7 @@ impl Broker {
             config: enrolment.config,
             api_pin: self.pin().to_string(),
             revoked: false,
+            paused: false,
             issuers: Some(vec![decimal(&subordinate.serial)]),
         };
         Ok(Checked {

@@ -181,6 +181,7 @@ impl Broker {
                 return true;
             }
         };
+        self.acme_listener.server.set_paused(enrolled.paused);
         match self.serve_acme_under(&enrolled, SystemTime::now()) {
             Ok(()) => true,
             Err(error) => {

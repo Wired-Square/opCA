@@ -117,12 +117,8 @@ impl<R: Runner> CertificateAuthority<R> {
         &mut self,
         operator: &Operator,
     ) -> Result<Vec<BrokerRenewal>, OpcaError> {
-        let brokers = self.list_subordinates()?;
         let mut renewals = Vec::new();
-        for broker in brokers
-            .iter()
-            .filter(|b| b.state == BrokerState::Active && b.url.is_some())
-        {
+        for broker in &self.watched_brokers()? {
             renewals.push(BrokerRenewal {
                 id: broker.id,
                 renewal: self.renew_at(operator, broker, false),
@@ -152,7 +148,7 @@ impl<R: Runner> CertificateAuthority<R> {
         let client = BrokerClient::new(Endpoint::of_broker(broker)?, Some(operator))?;
         let current = client.status()?;
         let fresh = client.fresh_csr()?;
-        self.contacted(broker.id)?;
+        self.reported(broker.id, &current)?;
         self.sync_issued(&client, broker.id);
 
         let domains = changed_domains(&broker.permitted_domains, &fresh.configured_domains)?;
@@ -181,7 +177,7 @@ impl<R: Runner> CertificateAuthority<R> {
             Ok(status) => status,
             Err(error) => return Ok(Renewal::NotDelivered { serial, error }),
         };
-        self.contacted(broker.id)?;
+        self.reported(broker.id, &status)?;
         Ok(Renewal::Renewed { serial, status })
     }
 
@@ -202,7 +198,7 @@ impl<R: Runner> CertificateAuthority<R> {
         };
         let notice = match client.revoke() {
             Ok(status) => {
-                self.contacted(id)?;
+                self.reported(id, &status)?;
                 self.sync_issued(&client, id);
                 self.store_ca_database()?;
                 BrokerNotice::Told { status }

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- opCA can pause an ACME broker and resume it, from its ⋮, its page or
+  `opca broker pause|resume <id>` (`POST /v1/pause` and `/v1/resume`). A
+  paused broker refuses new orders and finalising with a 503 until resumed,
+  across restarts, while revocation, the CRL and its subordinate's renewal
+  carry on, and its own page says it is paused. opCA records the state each
+  broker last reported (schema v21), and a paused broker needs attention on
+  the dashboard and in the Lambda.
 - The ACME broker serves its subordinate's certificate and its leaves' CRL,
   DER, at `/ca.crt` and `/crl` on a plain-HTTP `pki` listener (`pki_listen`,
   `[::]:80`, in `broker.toml`; 8080 in the app, its host port read from
@@ -22,14 +29,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Certificates the ACME broker issues point at its CRL and its CA certificate
   (`http://<host>:<pki port>/crl` and `/ca.crt`, the port left out when it
   is 80), on the port the console maps.
+- The dashboard's ACME Servers tile lists each issued certificate due for
+  renewal: past two-thirds of its life, with no later certificate for the same
+  names, until 14 days after it expires. Each shows its broker and the days
+  left, and opens the broker's page.
 - opCA can have a broker revoke one of its leaves:
   `POST /v1/issued/{serial}/revoke` with an RFC 5280 reason, answered with the
   revoked row once the CRL is signed afresh. A leaf of another subordinate is
   a 404, and one already revoked is answered as it stands.
+- Once connected, opCA syncs its ACME brokers in the background: each active
+  broker is asked for its status and what it issued, the database is stored
+  once if any answered, and the dashboard and ACME pages refresh. It is
+  skipped while the lock is held elsewhere, and a broker that doesn't answer
+  is only logged.
 - The ACME Servers page revokes an issued certificate from its right-click
   menu, or its ⋮, with a reason picker, and shows it revoked at once; an
   unreachable broker leaves the dialog open with the error and changes
   nothing. `opca broker revoke-cert <id> <serial> [--reason …]` does the same.
+- Clicking an ACME server opens its own page, with Back to list: its domains,
+  state, subordinate expiry, last contact and URL, its Status, Renew and
+  Revoke, and the certificates it issued, revoked from their right-click menu
+  or ⋮. It replaces the row that expanded on ACME Servers.
 - The `opca-acme` app's page shows the CA certificate and CRL URLs, and the
   CRL's last and next update.
 - `contrib/acme-client/` is a lego container, configured from `.env`, that

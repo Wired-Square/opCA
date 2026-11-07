@@ -1,6 +1,7 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { appState } from "../stores/app";
+import { onBrokersSynced } from "../stores/brokerSync";
 import { getDashboard } from "../api/dashboard";
 import { generateCrl, uploadCrl } from "../api/crl";
 import StatusBubble, { type StatusTone } from "../components/StatusBubble";
@@ -8,7 +9,7 @@ import { Notice, createAction } from "@wired-square/kit";
 import { ActionOutcome } from "../components/ResultBanner";
 import { failureOf, headed } from "../utils/acting";
 import { setRecoveryOpen } from "../components/DatabaseRecoveryDialog";
-import { concernText } from "../api/brokers";
+import { concernText, expiryText } from "../api/brokers";
 import type {
   ActionItem,
   ActionKind,
@@ -16,6 +17,7 @@ import type {
   CrlBatch,
   CrlInfo,
   DashboardData,
+  LeafDue,
 } from "../api/types";
 import "../styles/pages/dashboard.css";
 
@@ -49,6 +51,7 @@ export default function Dashboard() {
     () => appState.vaultState !== "database_unreadable" && appState.vaultState,
     getDashboard,
   );
+  onBrokersSynced(refetch);
   const [pending, setPending] = createSignal<string | null>(null);
   const action = createAction();
 
@@ -207,7 +210,13 @@ export default function Dashboard() {
               </div>
 
               <Show when={d().brokers > 0}>
-                <BrokersTile total={d().brokers} flagged={d().brokers_flagged} onClick={() => navigate("/acme")} />
+                <BrokersTile
+                  total={d().brokers}
+                  flagged={d().brokers_flagged}
+                  leaves={d().leaves_due}
+                  onClick={() => navigate("/acme")}
+                  onLeaf={(id) => navigate(`/acme/${id}`)}
+                />
               </Show>
             </div>
 
@@ -282,13 +291,23 @@ function CrlBatchTile(props: { batch: CrlBatch | null; onClick: () => void }) {
   );
 }
 
-function BrokersTile(props: { total: number; flagged: BrokerRow[]; onClick: () => void }) {
+function BrokersTile(props: {
+  total: number;
+  flagged: BrokerRow[];
+  leaves: LeafDue[];
+  onClick: () => void;
+  onLeaf: (brokerId: number) => void;
+}) {
   const count = () => props.flagged.length;
+  const openLeaf = (e: Event, leaf: LeafDue) => {
+    e.stopPropagation();
+    props.onLeaf(leaf.broker_id);
+  };
   return (
     <StatusBubble
       label="ACME Servers"
       status={count() === 0 ? `${props.total} healthy` : `${count()} of ${props.total} need attention`}
-      tone={count() === 0 ? "success" : "warning"}
+      tone={count() === 0 && props.leaves.length === 0 ? "success" : "warning"}
       onClick={props.onClick}
     >
       <Show when={count() > 0}>
@@ -297,6 +316,25 @@ function BrokersTile(props: { total: number; flagged: BrokerRow[]; onClick: () =
             {(b) => (
               <li>
                 <span class="mono">{b.cn ?? b.url}</span>: {b.concerns.map(concernText).join(", ")}
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+      <Show when={props.leaves.length > 0}>
+        <span class="stat-card-detail">{props.leaves.length} certificates need renewing</span>
+        <ul class="flagged-brokers" aria-label="Certificates to renew">
+          <For each={props.leaves}>
+            {(leaf) => (
+              <li>
+                <button
+                  type="button"
+                  class="leaf-due"
+                  onClick={(e) => openLeaf(e, leaf)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <span class="mono">{leaf.name}</span> on {leaf.broker}: {expiryText(leaf.days)}
+                </button>
               </li>
             )}
           </For>

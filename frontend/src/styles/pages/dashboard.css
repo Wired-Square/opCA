@@ -180,3 +180,14 @@
   font-size: 0.8125rem;
   color: var(--app-warn);
 }
+
+.leaf-due {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}

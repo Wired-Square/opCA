@@ -105,16 +105,19 @@ def openssl_time(at):
 
 
 def add_broker(db_path, now, serial, expires_in, contacted_ago, state='active',
-               url='https://acme.home.arpa:9443'):
+               url='https://acme.home.arpa:9443', issuer_state='issuing'):
     conn = sqlite3.connect(db_path)
+    v21 = ', issuer_state' if issuer_state is not None else ''
     conn.execute('CREATE TABLE IF NOT EXISTS brokers (id INTEGER PRIMARY KEY, subordinate_serial, url, '
-                 'pinned_key, permitted_domains, state, last_contact, created_at, updated_at)')
+                 f'pinned_key, permitted_domains, state, last_contact, created_at, updated_at{v21})')
     conn.execute('INSERT INTO certificate_authority VALUES (?, ?, ?, NULL, ?, NULL)',
                  (serial, f'acme-{serial}.home.arpa', openssl_time(now + timedelta(days=expires_in)),
                   openssl_time(now) if state == 'revoked' else None))
     last_contact = None if contacted_ago is None else openssl_time(now - timedelta(days=contacted_ago))
     conn.execute('INSERT INTO brokers (subordinate_serial, url, permitted_domains, state, last_contact) '
                  "VALUES (?, ?, '[]', ?, ?)", (serial, url, state, last_contact))
+    if issuer_state is not None:
+        conn.execute('UPDATE brokers SET issuer_state = ? WHERE subordinate_serial = ?', (issuer_state, serial))
     conn.commit()
     conn.close()
 
@@ -405,6 +408,22 @@ def test_stale_broker_alerts(aws_lambda, tmp_path, contacted_ago, concern):
 def test_fresh_broker_does_not_alert(aws_lambda, tmp_path):
     msg, warning = run_broker_checks(aws_lambda, tmp_path,
                                      dict(serial='12', expires_in=60, contacted_ago=35))
+
+    assert '1 ACME brokers are current' in msg
+    assert not warning
+
+
+def test_paused_broker_alerts(aws_lambda, tmp_path):
+    msg, warning = run_broker_checks(aws_lambda, tmp_path,
+                                     dict(serial='15', expires_in=60, contacted_ago=1, issuer_state='paused'))
+
+    assert '[15] acme-15.home.arpa - issuance paused' in msg
+    assert warning
+
+
+def test_dump_without_the_issuer_state_raises_nothing_for_it(aws_lambda, tmp_path):
+    msg, warning = run_broker_checks(aws_lambda, tmp_path,
+                                     dict(serial='16', expires_in=60, contacted_ago=1, issuer_state=None))
 
     assert '1 ACME brokers are current' in msg
     assert not warning

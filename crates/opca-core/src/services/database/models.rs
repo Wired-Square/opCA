@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Duration, Utc};
 
 use crate::constants::CSR_STALE_DAYS;
+use crate::services::acme_broker::api::IssuerState;
 use crate::services::cert::{CertType, KeyAlgorithm};
 use crate::utils::datetime::{self, DateTimeFormat};
 
@@ -394,6 +395,8 @@ pub struct Broker {
     /// From the subordinate's certificate row.
     pub cn: Option<String>,
     pub expiry_date: Option<String>,
+    /// What the broker last said of its issuing; `None` until it has answered a status.
+    pub issuer_state: Option<IssuerState>,
 }
 
 /// A certificate an ACME broker issued, as last synced from it; times are OpenSSL format.

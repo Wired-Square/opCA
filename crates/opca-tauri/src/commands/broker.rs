@@ -6,8 +6,8 @@ use tauri::State;
 
 use opca_core::services::acme_broker::api::Status;
 use opca_core::services::acme_broker::{
-    BrokerNotice, BrokerRenewal, BrokerRevocation, Endpoint, EnrolledBroker, Renewal, concerns,
-    fetch_offer, issuance, parse_pairing,
+    BrokerCall, BrokerNotice, BrokerRenewal, BrokerRevocation, Endpoint, EnrolledBroker, Renewal,
+    concerns, fetch_offer, issuance, parse_pairing,
 };
 use opca_core::services::ca::CertificateAuthority;
 use opca_core::services::ca::operator::Operator;
@@ -125,6 +125,39 @@ pub async fn list_broker_certs(state: State<'_, AppState>) -> Result<Vec<BrokerC
     ca.list_broker_certs().map_err(|e| e.to_string())
 }
 
+/// Asks each watched broker for its status and what it issued, holding the connection only
+/// to set the calls up and to record the answers.
+#[tauri::command]
+pub async fn sync_brokers(state: State<'_, AppState>) -> Result<(), String> {
+    let action = "sync_brokers";
+    let minted = |conn: &Connection| conn.operator.as_ref().map(|(minted, _)| *minted);
+    let (calls, session) = {
+        let mut conn = state.ensure_ca()?;
+        let ca = conn.ca.as_ref().ok_or("CA not available")?;
+        let watched = ca.watched_brokers().map_err(logged(&state, action))?;
+        if watched.is_empty() {
+            return Ok(());
+        }
+        let (ca, operator) = with_operator(&state, action, &mut conn)?;
+        let calls = ca
+            .broker_calls(operator, &watched)
+            .map_err(logged(&state, action))?;
+        (calls, minted(&conn))
+    };
+    let answers = calls.into_iter().map(BrokerCall::ask).collect();
+    let mut conn = state.ensure_ca()?;
+    // A reconnect while the brokers were asked drops the operator, and the answers are the old CA's.
+    if minted(&conn) != session {
+        return Ok(());
+    }
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+    let unanswered = ca.record_answers(answers).map_err(logged(&state, action))?;
+    for (id, error) in unanswered {
+        state.log_err(action, format!("Broker {id} did not answer: {error}"));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn broker_status(state: State<'_, AppState>, id: i64) -> Result<Status, String> {
     let action = "broker_status";
@@ -132,6 +165,24 @@ pub async fn broker_status(state: State<'_, AppState>, id: i64) -> Result<Status
     let (ca, operator) = with_operator(&state, action, &mut conn)?;
     ca.broker_status(operator, id)
         .map_err(logged(&state, action))
+}
+
+#[tauri::command]
+pub async fn pause_broker(
+    state: State<'_, AppState>,
+    id: i64,
+    paused: bool,
+) -> Result<Status, String> {
+    let action = "pause_broker";
+    info!("[tauri] {action}: id={id} paused={paused}");
+    let mut conn = state.ensure_ca()?;
+    let (ca, operator) = with_operator(&state, action, &mut conn)?;
+    let status = ca
+        .pause_broker(operator, id, paused)
+        .map_err(logged(&state, action))?;
+    let done = if paused { "Paused" } else { "Resumed" };
+    state.log_ok(action, format!("{done} broker {id}'s issuance"));
+    Ok(status)
 }
 
 #[tauri::command]

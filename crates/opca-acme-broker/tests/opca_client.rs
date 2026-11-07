@@ -8,7 +8,9 @@ use opca_acme_api::IssuerState;
 use opca_acme_broker::Broker as Daemon;
 use opca_acme_broker::{ATTEMPTS, Mode, SCHEME};
 use opca_core::error::OpcaError;
-use opca_core::services::acme_broker::{BrokerError, BrokerNotice, Renewal, fetch_offer, issuance};
+use opca_core::services::acme_broker::{
+    BrokerCall, BrokerError, BrokerNotice, Renewal, fetch_offer, issuance,
+};
 use opca_core::services::ca::operator::Operator;
 use opca_core::services::database::models::{Broker, BrokerState};
 use opca_core::testutil::{Output, created, item_json, not_found};
@@ -502,6 +504,41 @@ async fn enrolment_status_and_renewal_sync_the_issued_list_a_page_at_a_time() {
     assert!(ca.op.is_done());
 }
 
+/// The load sync: calls set up and answers recorded with the CA, asked without it.
+fn sync(ca: &mut TestCa, operator: &Operator) -> Vec<(i64, BrokerError)> {
+    let watched = ca.ca.watched_brokers().unwrap();
+    let calls = ca.ca.broker_calls(operator, &watched).unwrap();
+    let answers = calls.into_iter().map(BrokerCall::ask).collect();
+    ca.ca.record_answers(answers).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_load_sync_records_what_answered_and_stores_only_then() {
+    let Enrolled {
+        running,
+        mut ca,
+        operator,
+        id,
+    } = enrolled(&[]).await;
+    let issuer = row(&ca, id).subordinate_serial;
+    record_by(running.broker.acme(), &issuer, "11", "a.home.example").await;
+
+    stores(&ca, 1);
+    assert!(sync(&mut ca, &operator).is_empty());
+    assert_eq!(synced(&ca), serials(&[("11", false)]));
+    assert!(ca.op.is_done());
+
+    let pin = row(&ca, id).pinned_key.unwrap();
+    move_to_a_closed_port(&ca, id, &pin);
+    let unanswered = sync(&mut ca, &operator);
+
+    assert!(
+        matches!(&unanswered[..], [(unreachable, BrokerError::Unreachable { .. })] if *unreachable == id),
+        "{unanswered:?}"
+    );
+    assert!(ca.op.is_done(), "nothing stored");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_sync_leaves_the_status_standing() {
     let Enrolled {
@@ -584,4 +621,30 @@ async fn revoking_a_leaf_needs_the_broker_and_changes_nothing_without_it() {
     );
     assert_eq!(synced(&ca), serials(&[("11", false)]));
     assert!(ca.op.is_done(), "nothing stored");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pausing_and_resuming_record_the_state_the_broker_answers() {
+    let Enrolled {
+        running,
+        mut ca,
+        operator,
+        id,
+    } = enrolled(&[]).await;
+    assert_eq!(row(&ca, id).issuer_state, Some(IssuerState::Issuing));
+
+    for paused in [true, false] {
+        stores(&ca, 1);
+        let status = ca.ca.pause_broker(&operator, id, paused).unwrap();
+
+        let expected = if paused {
+            IssuerState::Paused
+        } else {
+            IssuerState::Issuing
+        };
+        assert_eq!(status.state, expected);
+        assert_eq!(row(&ca, id).issuer_state, Some(expected));
+        assert!(matches!(running.broker.mode(), Mode::Enrolled(e) if e.paused == paused));
+    }
+    assert!(ca.op.is_done());
 }

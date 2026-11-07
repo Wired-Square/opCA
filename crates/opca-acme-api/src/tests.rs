@@ -46,6 +46,8 @@ fn paths_carry_the_api_version() {
         path::CSR,
         path::CHAIN,
         path::REVOKE,
+        path::PAUSE,
+        path::RESUME,
         path::ISSUED,
         path::REVOKE_ISSUED,
     ] {
@@ -188,6 +190,7 @@ fn issued_page_wire_format() {
 fn issuer_state_wire_format() {
     pinned(IssuerState::Issuing, json!("issuing"));
     pinned(IssuerState::AcmeDown, json!("acme_down"));
+    pinned(IssuerState::Paused, json!("paused"));
     pinned(IssuerState::Revoked, json!("revoked"));
 }
 

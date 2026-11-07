@@ -54,7 +54,18 @@ export interface DashboardData {
   /** Active brokers, and those of them that need attention. */
   brokers: number;
   brokers_flagged: BrokerRow[];
+  /** Active brokers' leaves past two-thirds of their life with no renewal. */
+  leaves_due: LeafDue[];
   action_items: ActionItem[];
+}
+
+/** `days` is negative once expired. */
+export interface LeafDue {
+  broker_id: number;
+  broker: string;
+  serial: string;
+  name: string;
+  days: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,13 +432,18 @@ export interface Broker {
   updated_at: string;
   cn: string | null;
   expiry_date: string | null;
+  /** What the broker last said of its issuing; `null` until it has answered a status. */
+  issuer_state: IssuerState | null;
 }
+
+export type IssuerState = "issuing" | "acme_down" | "paused" | "revoked";
 
 /** Why an active broker wants attention; `days` is negative once expired. */
 export type Concern =
   | { concern: "expiring"; days: number }
   | { concern: "silent"; days: number }
-  | { concern: "not_delivered" };
+  | { concern: "not_delivered" }
+  | { concern: "paused" };
 
 export interface BrokerRow extends Broker {
   concerns: Concern[];
@@ -453,7 +469,7 @@ export interface BrokerOffer {
 }
 
 export interface BrokerStatus {
-  state: "issuing" | "acme_down" | "revoked";
+  state: IssuerState;
   subordinate_serial: string;
   subordinate_not_after: string;
   config: {
