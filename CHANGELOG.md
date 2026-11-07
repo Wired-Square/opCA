@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `contrib/acme-client/` is a lego container, configured from `.env`, that
+  orders a certificate from the ACME broker or any RFC 8555 server over
+  http-01, tls-alpn-01 or a lego DNS provider, renews it on an interval and
+  runs a hook after each issue. `ACME_ONCE=1` makes one pass for cron. Its
+  POSIX `sh` entrypoint can be copied into another app's image.
 - The CA's init and Configuration tabs set a default lifetime per
   certificate type (Web Server, VPN Server, VPN Client, Device), blank
   meaning Certificate Days, and the Database page lists them. New certificates
