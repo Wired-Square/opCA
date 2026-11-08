@@ -192,7 +192,7 @@ fn handle_import<R: Runner>(
     output::title("Importing Certificate");
 
     let cert_pem = std::fs::read(&cert_file)?;
-    let key_pem = key_file.as_ref().map(|f| std::fs::read(f)).transpose()?;
+    let key_pem = key_file.as_ref().map(std::fs::read).transpose()?;
 
     with_lock(app, "cert_import", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;

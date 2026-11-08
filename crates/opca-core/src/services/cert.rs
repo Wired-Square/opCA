@@ -935,8 +935,8 @@ impl CertificateBundle {
         // Check time validity
         let now = openssl::asn1::Asn1Time::days_from_now(0)
             .map_err(|e| OpcaError::Crypto(format!("Asn1Time: {e}")))?;
-        let before_start = cert.not_before() > &now;
-        let after_end = cert.not_after() < &now;
+        let before_start = cert.not_before() > now;
+        let after_end = cert.not_after() < now;
         if before_start || after_end {
             return Ok(false);
         }
@@ -982,17 +982,12 @@ impl CertificateBundle {
 pub(crate) fn asn1_time_to_openssl_str(asn1: &openssl::asn1::Asn1TimeRef) -> Option<String> {
     let printed = asn1.to_string(); // e.g. "Apr 15 05:13:36 2027 GMT"
     // Try parsing the OpenSSL print format → reformat as ASN1 GeneralizedTime
-    chrono::NaiveDateTime::parse_from_str(printed.trim_end_matches(" GMT"), "%b %e %H:%M:%S %Y")
-        .ok()
-        .map(|dt| dt.format("%Y%m%d%H%M%SZ").to_string())
-        // Fallback: if the string is already in ASN1 format, return it as-is
-        .or_else(|| {
-            if printed.len() == 15 && printed.ends_with('Z') {
-                Some(printed)
-            } else {
-                Some(printed)
-            }
-        })
+    let reformatted = chrono::NaiveDateTime::parse_from_str(
+        printed.trim_end_matches(" GMT"),
+        "%b %e %H:%M:%S %Y",
+    )
+    .map(|dt| dt.format("%Y%m%d%H%M%SZ").to_string());
+    Some(reformatted.unwrap_or(printed))
 }
 
 /// Extract a single subject entry by NID.

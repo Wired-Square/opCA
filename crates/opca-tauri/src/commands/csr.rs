@@ -240,7 +240,7 @@ pub async fn create_csr(
     let subject = bundle
         .csr
         .as_ref()
-        .map(|c| csr_subject_string(c))
+        .map(csr_subject_string)
         .unwrap_or_default();
 
     // Record in database
