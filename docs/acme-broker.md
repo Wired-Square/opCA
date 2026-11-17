@@ -323,7 +323,8 @@ signs and packs a tarball built before instead, beside it.
 **Release archives** are signed as source `wired-square`, which every ApplianceOS image ships, so
 nothing needs adding under **Apps › Sources**: download `opca-acme-<version>-<arch>-wired-square.tar`
 from the GitHub release and install it. `--source wired-square` reads the `WiredSquare-Codesigning`
-leaf from 1Password (`op`, which asks to approve), pipes its key to OpenSSL without writing it out,
+leaf from 1Password (`op`, which asks to approve), or from `WIRED_SQUARE_SIGNING_CERT` and
+`WIRED_SQUARE_SIGNING_KEY` (PEM) when set, as in CI, pipes its key to OpenSSL without writing it out,
 and refuses a leaf that isn't a code-signing leaf of the root ApplianceOS ships
 (`WIRED_SQUARE_ROOT` names another, for tests). With `--keys <dir>` it signs with that leaf instead,
 still checked.

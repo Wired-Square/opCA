@@ -268,12 +268,10 @@ jobs:
           cache: npm
           cache-dependency-path: crates/opca-acme-broker/ui/package-lock.json
 
-      - name: Install the 1Password CLI
-        uses: 1password/install-cli-action@v2
-
       - name: Build and sign the app archive
         env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          WIRED_SQUARE_SIGNING_CERT: ${{ secrets.WIRED_SQUARE_SIGNING_CERT }}
+          WIRED_SQUARE_SIGNING_KEY: ${{ secrets.WIRED_SQUARE_SIGNING_KEY }}
         run: scripts/build-acme-app.sh --source wired-square --platform ${{ matrix.platform }}
 
       - name: Upload release asset

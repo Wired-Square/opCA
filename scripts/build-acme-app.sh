@@ -5,7 +5,8 @@
 #
 # As source wired-square, which every image ships, it signs with the
 # WiredSquare-Codesigning leaf from 1Password, its key piped to openssl and
-# never written out, once the leaf is a code-signing leaf of the root
+# never written out, or with the PEM in WIRED_SQUARE_SIGNING_CERT and
+# WIRED_SQUARE_SIGNING_KEY when set (CI), once the leaf is a code-signing leaf of the root
 # ApplianceOS ships (WIRED_SQUARE_ROOT overrides it). With --keys, any source
 # signs with <dir>'s leaf.pem and leaf.key, made there by make-app-archive.sh
 # when it holds none. Without either, a test source (opca-test by default)
@@ -55,6 +56,9 @@ if [[ $keys ]]; then
     [[ -f $keys/leaf.key ]] || "$archiver" keys "$keys"
     cp "$keys/leaf.pem" "$work/signer.pem"
     signing_key() { cat "$keys/leaf.key"; }
+elif [[ $source == wired-square && -n ${WIRED_SQUARE_SIGNING_KEY:-} ]]; then
+    printf '%s\n' "${WIRED_SQUARE_SIGNING_CERT:?WIRED_SQUARE_SIGNING_KEY needs WIRED_SQUARE_SIGNING_CERT}" >"$work/signer.pem"
+    signing_key() { printf '%s\n' "$WIRED_SQUARE_SIGNING_KEY"; }
 elif [[ $source == wired-square ]]; then
     op read --account wiredsquare.1password.com "$codesigning/certificate" >"$work/signer.pem"
     signing_key() { op read --account wiredsquare.1password.com "$codesigning/private_key"; }

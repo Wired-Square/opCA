@@ -1564,14 +1564,15 @@ validator (its tests run under `cargo test`), writes a docker-load tarball to
 `app-index.sh` (`--image` packs a tarball built before). Source `opca-test`, the
 default, signs with throwaway keys. Source `wired-square`, which every image
 ships, signs with the `WiredSquare-Codesigning` leaf read from 1Password, its
-key piped to OpenSSL and never written out, once the leaf passes `openssl verify
+key piped to OpenSSL and never written out, or with the PEM in
+`WIRED_SQUARE_SIGNING_CERT` and `WIRED_SQUARE_SIGNING_KEY` when set, once the leaf passes `openssl verify
 -purpose codesign` against ApplianceOS's shipped `wired-square.pem`
 (`WIRED_SQUARE_ROOT` overrides it). [tests/app-signing.sh](../crates/opca-acme-broker/tests/app-signing.sh)
 checks both on a stand-in tarball with throwaway keys and a stand-in `op`. On a
 `v*` tag, the Build workflow's `acme-app` job builds both arches signed as
 `wired-square` and attaches them to the draft release, with an ApplianceOS
-checkout (`APPLIANCEOS_READ_TOKEN`) and a 1Password service account
-(`OP_SERVICE_ACCOUNT_TOKEN`). With `OPCA_ACME_APP_IMAGE` naming
+checkout (`APPLIANCEOS_READ_TOKEN`) and the leaf and its key as the
+`WIRED_SQUARE_SIGNING_CERT` and `WIRED_SQUARE_SIGNING_KEY` secrets. With `OPCA_ACME_APP_IMAGE` naming
 the tarball, `broker_docker.rs` runs the image as the console would (its own
 uid in group 0, no capabilities, the `data` and socket volumes, a mapped API
 port): healthy and refusing with no host, a uid that isn't the console's

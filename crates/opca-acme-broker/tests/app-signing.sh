@@ -78,6 +78,22 @@ signs_with_op() {
 check "wired-square signs with the leaf op reads, and verifies against its root alone" signs_with_op
 rm -f "$archive"
 
+signs_with_env() {
+    rm -f "$t/op.log"
+    WIRED_SQUARE_SIGNING_CERT=$(cat "$t/shipped/leaf.pem") WIRED_SQUARE_SIGNING_KEY=$(cat "$t/shipped/leaf.key") \
+        signs --source wired-square >/dev/null && verifies "$archive" wired-square "$t/shipped/root.pem" &&
+        [[ ! -e $t/op.log ]]
+}
+check "wired-square signs with the leaf in the environment, without op" signs_with_env
+rm -f "$archive"
+
+refuses_env() {
+    ! WIRED_SQUARE_SIGNING_CERT=$(cat "$t/other/leaf.pem") WIRED_SQUARE_SIGNING_KEY=$(cat "$t/other/leaf.key") \
+        signs --source wired-square 2>"$t/err" >/dev/null &&
+        grep -q "not a code-signing leaf" "$t/err" && [[ ! -e $archive ]]
+}
+check "wired-square refuses an environment leaf from another root" refuses_env
+
 signs_with_keys() {
     signs --source wired-square --keys "$t/shipped" >/dev/null && verifies "$archive" wired-square "$t/shipped/root.pem"
 }
