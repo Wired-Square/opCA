@@ -313,8 +313,8 @@ pub enum CertAction {
     /// Revoke a x509 certificate
     Revoke(CertRevokeArgs),
 
-    /// Delete a revoked or expired x509 certificate
-    Delete(CertIdentifier),
+    /// Delete a revoked or expired x509 certificate, or an external one in any status
+    Delete(CertDeleteArgs),
 
     /// Publish a certificate to the public store as certs/<CN>.pem for its server to fetch
     Publish {
@@ -436,6 +436,16 @@ pub struct CertRekeyArgs {
     /// Validity in days (default: the type's, else the CA's, capped at 825 for server certificates)
     #[arg(long)]
     pub days: Option<u32>,
+}
+
+#[derive(Args)]
+pub struct CertDeleteArgs {
+    #[command(flatten)]
+    pub id: CertIdentifier,
+
+    /// Delete an external certificate (not signed by this CA), by serial
+    #[arg(long, conflicts_with = "cn")]
+    pub external: bool,
 }
 
 #[derive(Args)]

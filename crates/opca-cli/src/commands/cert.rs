@@ -6,8 +6,8 @@ use opca_core::services::database::{CertLookup, CertificateAuthorityDB};
 use crate::app::{AppContext, with_lock};
 use crate::output;
 use crate::{
-    CertAction, CertArgs, CertCreateArgs, CertExportArgs, CertIdentifier, CertRekeyArgs,
-    CertRenewArgs, CertRevokeArgs,
+    CertAction, CertArgs, CertCreateArgs, CertDeleteArgs, CertExportArgs, CertIdentifier,
+    CertRekeyArgs, CertRenewArgs, CertRevokeArgs,
 };
 
 pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(), OpcaError> {
@@ -24,7 +24,7 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
         CertAction::Rekey(args) => handle_rekey(app, args),
         CertAction::Renew(args) => handle_renew(app, args),
         CertAction::Revoke(revoke_args) => handle_revoke(app, revoke_args),
-        CertAction::Delete(id) => handle_delete(app, id),
+        CertAction::Delete(args) => handle_delete(app, args),
         CertAction::Publish { id } => handle_publish(app, &id),
     }
 }
@@ -317,7 +317,10 @@ fn handle_revoke<R: Runner>(
     })
 }
 
-fn handle_delete<R: Runner>(app: &mut AppContext<R>, id: CertIdentifier) -> Result<(), OpcaError> {
+fn handle_delete<R: Runner>(
+    app: &mut AppContext<R>,
+    CertDeleteArgs { id, external }: CertDeleteArgs,
+) -> Result<(), OpcaError> {
     output::title("Deleting Certificate");
 
     with_lock(app, "cert_delete", |app| {
@@ -331,12 +334,16 @@ fn handle_delete<R: Runner>(app: &mut AppContext<R>, id: CertIdentifier) -> Resu
             }
         };
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
-        let cert = ca.delete_certificate(&serial)?;
+        let (kind, cn) = if external {
+            (
+                "external certificate",
+                ca.delete_external_certificate(&serial)?.cn,
+            )
+        } else {
+            ("certificate", ca.delete_certificate(&serial)?.cn)
+        };
         output::print_result(
-            &format!(
-                "Deleted certificate {serial} ({})",
-                cert.cn.as_deref().unwrap_or("-")
-            ),
+            &format!("Deleted {kind} {serial} ({})", cn.as_deref().unwrap_or("-")),
             true,
         );
         Ok(())
@@ -493,6 +500,20 @@ mod tests {
             }) if id == "*.example.com"
         ));
         assert!(Cli::try_parse_from(["opca", "-v", "CA", "cert", "publish"]).is_err());
+    }
+
+    #[test]
+    fn an_external_delete_is_by_serial() {
+        let delete = |args: &[&str]| {
+            Cli::try_parse_from([&["opca", "-v", "CA", "cert", "delete"], args].concat())
+        };
+        assert!(matches!(
+            delete(&["--external", "-s", "ABC123"]).unwrap().command,
+            Commands::Cert(CertArgs {
+                action: CertAction::Delete(CertDeleteArgs { external: true, .. })
+            })
+        ));
+        assert!(delete(&["--external", "-n", "ext.example.com"]).is_err());
     }
 
     #[test]

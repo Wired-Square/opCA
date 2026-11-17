@@ -100,7 +100,7 @@ impl IgnoreReason {
 }
 
 /// An external (third-party signed) certificate record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExternalCertRecord {
     pub serial: String,
     pub cn: Option<String>,

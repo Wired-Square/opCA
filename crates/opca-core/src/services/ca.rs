@@ -1407,6 +1407,31 @@ impl<R: Runner> CertificateAuthority<R> {
         Ok(cert)
     }
 
+    /// Delete an external certificate in any status: archive its item and
+    /// remove its row. We did not issue it, so there is no CRL to keep.
+    pub fn delete_external_certificate(
+        &mut self,
+        serial: &str,
+    ) -> Result<ExternalCertRecord, OpcaError> {
+        info!("[ca] deleting external certificate {serial}");
+        let db = self.ca_database.as_mut().ok_or(OpcaError::CaNotFound)?;
+        let cert = db
+            .query_external_cert(&CertLookup::Serial(serial.to_string()), false)?
+            .ok_or_else(|| OpcaError::CertificateNotFound(serial.to_string()))?;
+
+        if let Some(title) = cert.title.as_deref().or(cert.cn.as_deref()) {
+            let item_title = format!("EXT_{}", title.strip_prefix("EXT_").unwrap_or(title));
+            match self.vault.delete_item(&ItemRef::title(&item_title)) {
+                Ok(()) | Err(Error::ItemNotFound(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        db.delete_external_cert(serial)?;
+        self.store_ca_database()?;
+        Ok(cert)
+    }
+
     // -----------------------------------------------------------------------
     // Storage — database
     // -----------------------------------------------------------------------
@@ -2927,6 +2952,76 @@ mod tests {
             ca.delete_certificate("3"),
             Err(OpcaError::CertificateNotFound(_))
         ));
+    }
+
+    fn ca_with_external_cert(title: &str) -> CertificateAuthority<FakeRunner> {
+        let mut ca = ca_with_key(KeyAlgorithm::EcP256);
+        ca.ca_database
+            .as_mut()
+            .unwrap()
+            .add_external_cert(&ExternalCertRecord {
+                serial: "ABC123".to_string(),
+                cn: Some("ext.example.com".to_string()),
+                title: Some(title.to_string()),
+                status: Some("Valid".to_string()),
+                expiry_date: Some("20351231235959Z".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        ca
+    }
+
+    fn archived_items(ca: &CertificateAuthority<FakeRunner>) -> Vec<String> {
+        calls(ca)
+            .into_iter()
+            .filter(|c| c[..2] == ["item", "delete"])
+            .inspect(|c| assert!(c.contains(&"--archive".to_string())))
+            .map(|c| c[2].clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_valid_external_certificate_is_archived_and_its_row_removed() {
+        let mut ca = ca_with_external_cert("ext.example.com");
+        answer_writes(&ca, 4);
+
+        let deleted = ca.delete_external_certificate("ABC123").unwrap();
+
+        assert_eq!(deleted.cn.as_deref(), Some("ext.example.com"));
+        assert_eq!(archived_items(&ca), ["EXT_ext.example.com"]);
+        let db = ca.ca_database.as_ref().unwrap();
+        assert_eq!(db.count_external_certs().unwrap(), 0);
+        assert!(
+            calls(&ca)
+                .last()
+                .is_some_and(|c| c[..3] == ["document", "edit", "CA_Database"])
+        );
+    }
+
+    #[test]
+    fn a_migrated_external_title_is_not_prefixed_twice() {
+        let mut ca = ca_with_external_cert("EXT_ext.example.com");
+        answer_writes(&ca, 4);
+        ca.delete_external_certificate("ABC123").unwrap();
+        assert_eq!(archived_items(&ca), ["EXT_ext.example.com"]);
+    }
+
+    #[test]
+    fn deleting_an_unknown_external_certificate_is_not_found() {
+        let mut ca = ca_with_external_cert("ext.example.com");
+        assert!(matches!(
+            ca.delete_external_certificate("NOPE"),
+            Err(OpcaError::CertificateNotFound(_))
+        ));
+        assert!(calls(&ca).is_empty());
+        assert_eq!(
+            ca.ca_database
+                .as_ref()
+                .unwrap()
+                .count_external_certs()
+                .unwrap(),
+            1
+        );
     }
 
     fn crl_serials(pem: &str) -> Vec<String> {

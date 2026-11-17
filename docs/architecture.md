@@ -186,7 +186,7 @@ OPCA stores eleven logical kinds of item. Titles and field labels are fixed in
 | CRL | `CRL` | Document | Latest Certificate Revocation List; in batch mode, the first CRL of the current batch |
 | OpenVPN | `OpenVPN` | Secure Note | DH params, TLS-auth static key and server config. Templates live in the `openvpn_template` table; older versions kept them here as `template.<name>` fields (see *OpenVPN templates*) |
 | Certificate | `CRT_<serial>_<cn>` | Secure Note | One item per issued cert (key + cert + chain + type). Deleting a revoked or expired cert (`CertificateAuthority::delete_certificate`) archives it; see [Deleted certificates](#deleted-certificates) |
-| External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA |
+| External cert | `EXT_<cn>` | Secure Note | Imported certificates not signed by this CA. Deleting one (`CertificateAuthority::delete_external_certificate`) archives it |
 | CSR | `CSR_<cn>` | Secure Note | Unsigned or awaiting-sign requests, with their private key. Deleting a pending CSR (`CertificateAuthority::delete_csr`) archives it |
 | VPN profile | `VPN_<serial>_<cn>` | Document | Generated OpenVPN profile (`.ovpn`) — the template injected with the chosen cert's key/cert + CA + TLS-auth. The profile *record* (CN, title, template, serial, `generated`) is also written to the `openvpn_profile` table and persisted, so the Profiles list survives a restart. Serial pins it to a specific cert so a renewal (new serial) yields a distinct profile. A profile can be **registered without generating** (`generated = 0`, no document yet) and produced later via Regenerate; such rows surface as Needs Regen. Legacy profiles may still be titled `VPN_<cn>`. |
 | DKIM | `DKIM_<domain>_<selector>` | Secure Note | DKIM key pair and metadata; the public key is published at `<selector>._domainkey.<domain>` |
@@ -335,6 +335,12 @@ In the app, `canDeleteCert` in
 `api/certActions.ts` gates the kebab and bulk Delete; the CLI has
 `opca cert delete -s <serial>`, or `-n <cn>` when exactly one of that CN's
 certs is revoked or expired.
+
+An external certificate is deleted outright, in any status: we did not issue
+it, so there is no CRL to keep. `delete_external_certificate` archives its
+`EXT_` item and removes its `external_certificate` row. The app's
+`delete_external_cert` command backs Delete on the External tab and the
+external detail page; the CLI has `opca cert delete --external -s <serial>`.
 
 On the certs list (which defaults to the `Valid` filter), status-axis filters
 match the true status: `Valid` includes valid-but-ignored certs, and an

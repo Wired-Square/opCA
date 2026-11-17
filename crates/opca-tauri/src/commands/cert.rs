@@ -484,6 +484,28 @@ pub async fn delete_cert(state: State<'_, AppState>, serial: String) -> Result<(
 }
 
 #[tauri::command]
+pub async fn delete_external_cert(
+    state: State<'_, AppState>,
+    serial: String,
+) -> Result<(), String> {
+    let mut conn = state.ensure_ca()?;
+    let ca = conn.ca.as_mut().ok_or("CA not available")?;
+
+    info!("[tauri] delete_external_cert: serial={serial}");
+    ca.delete_external_certificate(&serial).map_err(|e| {
+        warn!("[tauri] delete_external_cert failed: {e}");
+        state.log_err("delete_external_cert", Some(e.to_string()));
+        e.to_string()
+    })?;
+
+    state.log_ok(
+        "delete_external_cert",
+        Some(format!("Deleted external certificate {serial}")),
+    );
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn renew_cert(
     state: State<'_, AppState>,
     serial: String,
