@@ -28,11 +28,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      # A rebuild keeps the existing draft, and with it the notes written there.
       - name: Create draft release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
+          gh release view "$tag" >/dev/null 2>&1 && exit 0
           gh release create "$tag" \
             --draft \
             $([[ "$tag" == *-* ]] && echo --prerelease) \

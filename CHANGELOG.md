@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `scripts/build-acme-app.sh` signs and packs the app archive with
   `wslib-appliance-xtask` 0.2.8 instead of ApplianceOS's scripts, so it no
   longer needs an ApplianceOS checkout, OpenSSL or `jq`.
+- `npm run release:rebuild` keeps the existing draft release and its notes
+  instead of creating another draft.
 
 ### Fixed
 
