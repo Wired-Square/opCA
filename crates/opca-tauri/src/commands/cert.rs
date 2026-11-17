@@ -13,7 +13,7 @@ use opca_core::services::database::{CertLookup, CertRecord, ExternalCertRecord, 
 use opca_core::services::san;
 use zeroize::Zeroizing;
 
-use crate::commands::inspect_helpers::{key_type, spki_fingerprint};
+use crate::commands::inspect_helpers::{key_type, spki_fingerprint, strip_line_indentation};
 
 /// 1Password title for an external cert is always `EXT_<cn>` ([ca.rs] convention),
 /// even though the DB row stores the un-prefixed CN in `title`. Compute the
@@ -1190,7 +1190,7 @@ pub async fn get_external_cert_private_key(
 
 #[tauri::command]
 pub async fn inspect_certificate(cert_pem: String) -> Result<InspectCertificateResult, String> {
-    let cert = X509::from_pem(cert_pem.as_bytes())
+    let cert = X509::from_pem(strip_line_indentation(&cert_pem).as_bytes())
         .map_err(|e| format!("Failed to parse certificate PEM: {e}"))?;
 
     let text_bytes = cert

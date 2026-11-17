@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CI reads the `mirror.wiredsquare.com` cargo and npm mirror without a
   token: it is public.
 
+### Fixed
+
+- Inspect on the Certificates, CSR and CRL pages accepts pasted PEM whose
+  lines are indented.
+
 ## [0.103.0] - 2026-11-07
 
 ### Added

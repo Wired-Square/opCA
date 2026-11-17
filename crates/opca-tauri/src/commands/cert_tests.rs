@@ -445,6 +445,16 @@ fn inspecting_a_certificate_reports_its_key_signature_and_decimal_serial() {
 }
 
 #[test]
+fn inspecting_an_indented_certificate_ignores_the_leading_whitespace() {
+    let pem = inspected_bundle(KeyAlgorithm::EcP256)
+        .certificate_pem()
+        .unwrap();
+    let indented: String = pem.lines().map(|line| format!("    \t{line}\n")).collect();
+
+    assert_eq!(inspect(indented).serial, inspect(pem).serial);
+}
+
+#[test]
 fn an_inspected_subject_is_rfc_4514_with_upper_case_short_names() {
     let bundle = inspected_bundle(KeyAlgorithm::EcP256);
     let result = inspect(bundle.certificate_pem().unwrap());

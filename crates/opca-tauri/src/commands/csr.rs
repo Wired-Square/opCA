@@ -19,7 +19,7 @@ use crate::commands::dto::{
     GenerateCsrFromCertRequest, ImportCsrCertRequest, InspectCsrResult, SignCsrRequest,
     SignCsrResult,
 };
-use crate::commands::inspect_helpers::{key_type, spki_fingerprint};
+use crate::commands::inspect_helpers::{key_type, spki_fingerprint, strip_line_indentation};
 use crate::state::AppState;
 
 fn record_to_list_item(r: &CsrRecord) -> CsrListItem {
@@ -508,7 +508,7 @@ pub async fn import_csr_cert(
 
 #[tauri::command]
 pub async fn inspect_csr(csr_pem: String) -> Result<InspectCsrResult, String> {
-    let csr = X509Req::from_pem(csr_pem.as_bytes())
+    let csr = X509Req::from_pem(strip_line_indentation(&csr_pem).as_bytes())
         .map_err(|e| format!("Failed to parse CSR PEM: {e}"))?;
 
     let text_bytes = csr
