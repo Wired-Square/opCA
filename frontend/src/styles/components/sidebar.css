@@ -115,11 +115,7 @@
 .sidebar-icon svg {
   width: 18px;
   height: 18px;
-  stroke: currentColor;
-  fill: none;
   stroke-width: 1.75;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .sidebar-label {
@@ -207,9 +203,4 @@
 .update-icon svg {
   width: 14px;
   height: 14px;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }

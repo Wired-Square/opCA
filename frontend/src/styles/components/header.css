@@ -65,11 +65,7 @@
 .disconnect-btn svg {
   width: 16px;
   height: 16px;
-  stroke: currentColor;
-  fill: none;
   stroke-width: 1.75;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .disconnect-btn:hover {

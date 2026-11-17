@@ -1,5 +1,5 @@
 import { Match, Show, Switch } from "solid-js";
-import CopyIcon from "./CopyIcon";
+import { copy, lock } from "@wired-square/icons/solid";
 import "../styles/components/availability.css";
 
 interface AvailabilityProps {
@@ -44,7 +44,7 @@ export default function Availability(props: AvailabilityProps) {
     return (
       <button type="button" class={cls()} disabled title={props.blocked}>
         <span>{props.label}</span>
-        <LockIcon />
+        {lock({ class: "stored-copy-icon" })}
       </button>
     );
   }
@@ -70,7 +70,7 @@ export default function Availability(props: AvailabilityProps) {
         <>
           <span>{props.label}</span>
           <Show when={props.available === true}>
-            <CopyIcon />
+            {copy({ class: "stored-copy-icon" })}
           </Show>
         </>
       }>
@@ -82,25 +82,5 @@ export default function Availability(props: AvailabilityProps) {
         </Match>
       </Switch>
     </button>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-      class="stored-copy-icon"
-    >
-      <rect x="3" y="7" width="10" height="7" rx="1" />
-      <path d="M5 7V5a3 3 0 0 1 6 0v2" />
-    </svg>
   );
 }
