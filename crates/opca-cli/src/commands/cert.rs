@@ -1,3 +1,5 @@
+use openssl::x509::X509;
+
 use opca_core::error::OpcaError;
 use opca_core::op::{Runner, ShellRunner};
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle};
@@ -19,8 +21,8 @@ pub fn dispatch(args: CertArgs, app: &mut AppContext<ShellRunner>) -> Result<(),
             cert_file,
             key_file,
             cn,
-            external: _,
-        } => handle_import(app, cert_file, key_file, cn),
+            external,
+        } => handle_import(app, cert_file, key_file, cn, external),
         CertAction::Rekey(args) => handle_rekey(app, args),
         CertAction::Renew(args) => handle_renew(app, args),
         CertAction::Revoke(revoke_args) => handle_revoke(app, revoke_args),
@@ -188,6 +190,7 @@ fn handle_import<R: Runner>(
     cert_file: String,
     key_file: Option<String>,
     cn: Option<String>,
+    external: bool,
 ) -> Result<(), OpcaError> {
     output::title("Importing Certificate");
 
@@ -196,6 +199,14 @@ fn handle_import<R: Runner>(
 
     with_lock(app, "cert_import", |app| {
         let ca = app.ca.as_mut().ok_or(OpcaError::CaNotFound)?;
+        if external
+            && let Ok(cert) = X509::from_pem(&cert_pem)
+            && ca.is_cert_valid(&cert)?
+        {
+            return Err(OpcaError::InvalidCertificate(
+                "it was signed by this CA; import it without --external".into(),
+            ));
+        }
         let bundle =
             ca.import_certificate_bundle(&cert_pem, key_pem.as_deref(), None, None, cn.as_deref())?;
 
@@ -514,6 +525,78 @@ mod tests {
             })
         ));
         assert!(delete(&["--external", "-n", "ext.example.com"]).is_err());
+    }
+
+    #[test]
+    fn an_external_import_refuses_a_certificate_this_ca_signed() {
+        use opca_core::constants::DEFAULT_OP_CONF;
+        use opca_core::services::ca::CertificateAuthority;
+        use opca_core::services::cert::KeyAlgorithm;
+        use opca_core::testutil::{FakeRunner, Output, created, fake_vault};
+
+        let mut ca_bundle = CertificateBundle::generate(
+            CertType::Ca,
+            "CA",
+            CertBundleConfig {
+                cn: Some("Test CA".into()),
+                key_algorithm: Some(KeyAlgorithm::EcP256),
+                ca_days: Some(3650),
+                ..CertBundleConfig::default()
+            },
+        )
+        .unwrap();
+        ca_bundle.self_sign_ca().unwrap();
+        let runner = FakeRunner::new();
+        let mut ca = CertificateAuthority {
+            vault: fake_vault(&runner),
+            op_config: DEFAULT_OP_CONF,
+            ca_bundle: Some(ca_bundle),
+            ca_database: Some(CertificateAuthorityDB::new(&CaConfig::default()).unwrap()),
+            crl: None,
+            local_backup: None,
+        };
+        let leaf = CertificateBundle::generate(
+            CertType::WebServer,
+            "www.example.com",
+            CertBundleConfig {
+                cn: Some("www.example.com".into()),
+                ..CertBundleConfig::default()
+            },
+        )
+        .unwrap();
+        let (signed, _) = ca
+            .issue_certificate(leaf.csr.as_ref().unwrap(), &CertType::WebServer, Some(30))
+            .unwrap();
+        let cert_file =
+            std::env::temp_dir().join(format!("opca-ext-import-{}.pem", std::process::id()));
+        std::fs::write(&cert_file, signed.to_pem().unwrap()).unwrap();
+        for response in [
+            Output::fail(""),
+            created("CA_Lock"),
+            Output::ok("[]"),
+            created("www.example.com"),
+            Output::ok(""),
+            Output::ok(""),
+        ] {
+            runner.respond(response);
+        }
+        let mut app = AppContext::with_ca(ca);
+
+        let result = handle_import(
+            &mut app,
+            cert_file.to_string_lossy().into_owned(),
+            None,
+            None,
+            true,
+        );
+        std::fs::remove_file(&cert_file).unwrap();
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("signed by this CA"), "{err}");
+        assert_eq!(
+            app.ca.unwrap().ca_database.unwrap().count_certs().unwrap(),
+            0
+        );
     }
 
     #[test]

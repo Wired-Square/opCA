@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - An external certificate imported under a title other than its CN opens
   in the app: its page, private key and CSR generation look up the item by
   that title, and `opca cert list` shows that title.
+- `opca cert import --external` refuses a certificate this CA signed instead
+  of importing it as one of its own.
 
 ## [0.103.0] - 2026-11-07
 
