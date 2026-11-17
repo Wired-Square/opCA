@@ -15,15 +15,10 @@ use zeroize::Zeroizing;
 
 use crate::commands::inspect_helpers::{key_type, spki_fingerprint, strip_line_indentation};
 
-/// 1Password title for an external cert is always `EXT_<cn>` ([ca.rs] convention),
-/// even though the DB row stores the un-prefixed CN in `title`. Compute the
-/// real vault title from the CN so legacy DB rows still resolve correctly.
-fn external_item_title(record: &ExternalCertRecord) -> Result<String, String> {
-    let cn = record
-        .cn
-        .as_deref()
-        .ok_or("External certificate has no CN")?;
-    Ok(format!("EXT_{cn}"))
+pub(crate) fn external_item_title(record: &ExternalCertRecord) -> Result<String, String> {
+    record
+        .item_title()
+        .ok_or_else(|| "External certificate has no title or CN".into())
 }
 
 use crate::commands::dto::{

@@ -18,6 +18,7 @@ fn handler() -> impl Handler {
         revoke_cert,
         delete_cert,
         delete_external_cert,
+        backfill_external_cert,
         bulk_revoke_certs,
         bulk_delete_certs,
         get_ca_config,
@@ -290,7 +291,7 @@ fn delete_cert_refuses_a_valid_cert_and_leaves_1password_alone() {
     assert!(!h.last_log().success);
 }
 
-fn add_external(h: &Harness, cn: &str) {
+fn add_external(h: &Harness, cn: &str, title: &str) {
     let state = h.state();
     let mut conn = state.conn.lock().unwrap();
     conn.ca
@@ -302,7 +303,7 @@ fn add_external(h: &Harness, cn: &str) {
         .add_external_cert(&ExternalCertRecord {
             serial: "ABC123".into(),
             cn: Some(cn.into()),
-            title: Some(cn.into()),
+            title: Some(title.into()),
             status: Some("Valid".into()),
             ..Default::default()
         })
@@ -312,7 +313,7 @@ fn add_external(h: &Harness, cn: &str) {
 #[test]
 fn delete_external_cert_archives_a_valid_cert_and_drops_its_row() {
     let h = Harness::with_ca(vec![], handler());
-    add_external(&h, "ext.example.com");
+    add_external(&h, "ext.example.com", "ext.example.com");
     h.answer_writes(2);
 
     assert_eq!(
@@ -338,6 +339,18 @@ fn delete_external_cert_archives_a_valid_cert_and_drops_its_row() {
         (log.action.as_str(), log.success),
         ("delete_external_cert", true)
     );
+}
+
+#[test]
+fn an_external_cert_imported_under_a_title_override_is_fetched_by_that_title() {
+    let h = Harness::with_ca(vec![], handler());
+    add_external(&h, "ext.example.com", "my-override");
+
+    h.invoke("backfill_external_cert", json!({ "serial": "ABC123" }))
+        .unwrap();
+
+    let gets = h.op_calls(&["item", "get"]);
+    assert_eq!(gets[0][2], "EXT_my-override");
 }
 
 #[test]

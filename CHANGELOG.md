@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Inspect on the Certificates, CSR and CRL pages accepts pasted PEM whose
   lines are indented.
+- An external certificate imported under a title other than its CN opens
+  in the app: its page, private key and CSR generation look up the item by
+  that title, and `opca cert list` shows that title.
 
 ## [0.103.0] - 2026-11-07
 

@@ -344,6 +344,32 @@ fn only_the_including_deleted_query_returns_a_deleted_cert() {
 // External certificates
 // -----------------------------------------------------------------------
 
+#[test]
+fn an_external_cert_item_is_titled_ext_and_its_row_title_else_its_cn() {
+    let record = |cn: Option<&str>, title: Option<&str>| ExternalCertRecord {
+        cn: cn.map(Into::into),
+        title: title.map(Into::into),
+        ..Default::default()
+    };
+    let cn = Some("ext.example.com");
+
+    assert_eq!(
+        record(cn, Some("my-override")).item_title().as_deref(),
+        Some("EXT_my-override")
+    );
+    assert_eq!(
+        record(cn, Some("EXT_ext.example.com"))
+            .item_title()
+            .as_deref(),
+        Some("EXT_ext.example.com")
+    );
+    assert_eq!(
+        record(cn, None).item_title().as_deref(),
+        Some("EXT_ext.example.com")
+    );
+    assert_eq!(record(None, None).item_title(), None);
+}
+
 fn make_ext_cert(serial: &str, cn: &str, expiry: &str) -> ExternalCertRecord {
     ExternalCertRecord {
         serial: serial.to_string(),
