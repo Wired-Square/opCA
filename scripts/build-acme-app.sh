@@ -4,21 +4,20 @@
 # Apps › Install takes. --image packs a tarball built before instead.
 #
 # As source wired-square, which every image ships, it signs with the
-# WiredSquare-Codesigning leaf from 1Password, its key piped to openssl and
+# WiredSquare-Codesigning leaf from 1Password, its key piped to the signer and
 # never written out, or with the PEM in WIRED_SQUARE_SIGNING_CERT and
-# WIRED_SQUARE_SIGNING_KEY when set (CI), once the leaf is a code-signing leaf of the root
-# ApplianceOS ships (WIRED_SQUARE_ROOT overrides it). With --keys, any source
-# signs with <dir>'s leaf.pem and leaf.key, made there by make-app-archive.sh
-# when it holds none. Without either, a test source (opca-test by default)
-# signs with OPCA_TEST_SIGNING_CERT and OPCA_TEST_SIGNING_KEY from .env (base64
-# of leaf.pem and leaf.key), so a box's source keeps verifying across builds.
+# WIRED_SQUARE_SIGNING_KEY when set (CI), once the leaf is a code-signing leaf
+# of the Wired Square Apps root, whose PEM is in WIRED_SQUARE_APPS_ROOT. With
+# --keys, any source signs with <dir>'s leaf.pem and leaf.key, made there when
+# it holds none. Without either, a test source (opca-test by default) signs
+# with OPCA_TEST_SIGNING_CERT and OPCA_TEST_SIGNING_KEY from .env (base64 of
+# leaf.pem and leaf.key), so a box's source keeps verifying across builds.
 #
 # usage: scripts/build-acme-app.sh [--keys <dir>] [--platform linux/arm64|linux/amd64] [--source <name>] [--image <image.tar>]
 #
-# APPLIANCEOS names an ApplianceOS checkout (default: ../ApplianceOS beside
-# this repository). An arm64 build needs wslib-appliance-xtask for its
-# erratum check, and the page needs npm and the Wired Square mirror. Output
-# lands in target/acme-app, or beside --image.
+# Signing and an arm64 build's erratum check need wslib-appliance-xtask 0.2.8
+# or later, and the page needs npm and the Wired Square mirror. Output lands
+# in target/acme-app, or beside --image.
 set -euo pipefail
 usage="usage: $0 [--keys <dir>] [--platform linux/arm64|linux/amd64] [--source <name>] [--image <image.tar>]"
 platform=linux/arm64
@@ -42,18 +41,12 @@ case $platform in
 esac
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-appliance=${APPLIANCEOS:-$root/../ApplianceOS}
-archiver=$appliance/scripts/make-app-archive.sh
-[[ -x $archiver ]] || { echo "no $archiver; set APPLIANCEOS" >&2; exit 1; }
-# shellcheck source=SCRIPTDIR/../../ApplianceOS/scripts/app-index.sh
-. "$appliance/scripts/app-index.sh"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-mkdir "$work/images"
 codesigning="op://Software Development/WiredSquare-Codesigning"
 if [[ $keys ]]; then
-    [[ -f $keys/leaf.key ]] || "$archiver" keys "$keys"
+    [[ -f $keys/leaf.key ]] || wslib-appliance-xtask app-archive keys "$keys"
     cp "$keys/leaf.pem" "$work/signer.pem"
     signing_key() { cat "$keys/leaf.key"; }
 elif [[ $source == wired-square && -n ${WIRED_SQUARE_SIGNING_KEY:-} ]]; then
@@ -76,11 +69,7 @@ else
     printf %s "$OPCA_TEST_SIGNING_CERT" | base64 -d >"$work/signer.pem"
     signing_key() { printf %s "$OPCA_TEST_SIGNING_KEY" | base64 -d; }
 fi
-if [[ $source == wired-square ]]; then
-    shipped=${WIRED_SQUARE_ROOT:-$appliance/layers/meta-applianceos/recipes-apps/applianceos-app-sources/files/wired-square.pem}
-    "$openssl" verify -CAfile "$shipped" -untrusted "$work/signer.pem" -purpose codesign "$work/signer.pem" >/dev/null ||
-        { echo "the signer is not a code-signing leaf of $shipped" >&2; exit 1; }
-fi
+[[ $source != wired-square ]] || wslib-appliance-xtask app-archive verify "$work/signer.pem"
 
 if [[ -z $image ]]; then
     out=$root/target/acme-app
@@ -111,9 +100,5 @@ if [[ -z $image ]]; then
     echo "image: $image"
 fi
 
-archive=${image%.tar}-$source.tar
-entry "$image" >"$work/entries"
-digest=$(jq -r '.manifest.image.digest' "$work/entries")
-cp "$image" "$work/images/${digest/:/-}.tar"
-signing_key | sign "$source" "$work" "$work/signer.pem" /dev/stdin
-archive "$archive" "$work" "$source"
+signing_key | wslib-appliance-xtask app-archive pack --source "$source" --cert "$work/signer.pem" --key - \
+    "${image%.tar}-$source.tar" "$image"

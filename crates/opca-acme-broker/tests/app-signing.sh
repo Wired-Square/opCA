@@ -3,13 +3,11 @@
 # and a stand-in op: wired-square signs only with a code-signing leaf of its
 # root, and its index verifies against that root.
 #
-# usage: tests/app-signing.sh (APPLIANCEOS as for build-acme-app.sh)
+# usage: tests/app-signing.sh (OPENSSL names one that knows -purpose codesign)
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
 build=$repo/scripts/build-acme-app.sh
-appliance=${APPLIANCEOS:-$repo/../ApplianceOS}
-# shellcheck source=SCRIPTDIR/../../../../ApplianceOS/scripts/app-index.sh
-. "$appliance/scripts/app-index.sh"
+openssl=${OPENSSL:-$(command -v /opt/homebrew/opt/openssl@3/bin/openssl || command -v openssl)}
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 failures=0
@@ -35,8 +33,8 @@ jq -n --arg manifest "$(blob "$t/manifest")" '{manifests: [{digest: $manifest,
     annotations: {"io.containerd.image.name": "ghcr.io/wired-square/opca-acme:0.0.1"}}]}' >"$t/image/index.json"
 tar -cf "$t/opca-acme.tar" -C "$t/image" index.json blobs
 
-"$appliance/scripts/make-app-archive.sh" keys "$t/shipped" >/dev/null
-"$appliance/scripts/make-app-archive.sh" keys "$t/other" >/dev/null
+wslib-appliance-xtask app-archive keys "$t/shipped" >/dev/null
+wslib-appliance-xtask app-archive keys "$t/other" >/dev/null
 shipped_leaf() {
     local dir=$t/$1 extensions=$2
     mkdir "$dir"
@@ -60,7 +58,7 @@ esac
 EOF
 chmod +x "$t/bin/op"
 
-signs() { WIRED_SQUARE_ROOT=$t/shipped/root.pem PATH=$t/bin:$PATH "$build" --image "$t/opca-acme.tar" "$@"; }
+signs() { WIRED_SQUARE_APPS_ROOT=$(cat "$t/shipped/root.pem") PATH=$t/bin:$PATH "$build" --image "$t/opca-acme.tar" "$@"; }
 verifies() {
     local archive=$1 source=$2 root=$3
     rm -rf "$t/out" && mkdir "$t/out" && tar -xf "$archive" -C "$t/out"

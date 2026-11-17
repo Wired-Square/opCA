@@ -230,24 +230,11 @@ jobs:
             platform: linux/amd64
     runs-on: ${{ matrix.runner }}
 
-    env:
-      APPLIANCEOS: ${{ github.workspace }}/ApplianceOS
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           ref: ${{ needs.create-release.outputs.tag }}
-
-      - name: Checkout ApplianceOS's app signing scripts and shipped roots
-        uses: actions/checkout@v5
-        with:
-          repository: Wired-Square/ApplianceOS
-          token: ${{ secrets.APPLIANCEOS_READ_TOKEN }}
-          path: ApplianceOS
-          sparse-checkout: |
-            scripts
-            layers/meta-applianceos/recipes-apps/applianceos-app-sources/files
 
       - name: Read the wslib crates from the registry mirror
         run: |
@@ -257,8 +244,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.99
 
-      - name: Install the erratum checker
-        if: matrix.platform == 'linux/arm64'
+      - name: Install the archive signer and erratum checker
         run: cargo install wslib-appliance-xtask --registry wired-square --locked
 
       - name: Setup Node.js
@@ -272,6 +258,7 @@ jobs:
         env:
           WIRED_SQUARE_SIGNING_CERT: ${{ secrets.WIRED_SQUARE_SIGNING_CERT }}
           WIRED_SQUARE_SIGNING_KEY: ${{ secrets.WIRED_SQUARE_SIGNING_KEY }}
+          WIRED_SQUARE_APPS_ROOT: ${{ vars.WIRED_SQUARE_APPS_ROOT }}
         run: scripts/build-acme-app.sh --source wired-square --platform ${{ matrix.platform }}
 
       - name: Upload release asset
