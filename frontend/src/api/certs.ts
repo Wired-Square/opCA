@@ -83,6 +83,12 @@ export async function deleteCert(serial: string): Promise<void> {
   );
 }
 
+export async function deleteExternalCert(serial: string): Promise<void> {
+  return withLock("delete_external_cert", () =>
+    tauriInvoke<void>("delete_external_cert", { serial }),
+  );
+}
+
 export async function renewCert(serial: string): Promise<RenewRekeyResult> {
   return withLock("renew_cert", () =>
     tauriInvoke<RenewRekeyResult>("renew_cert", { serial }),

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- An external certificate can be deleted, in any status, from its row on the
+  External tab, its page or `opca cert delete --external -s <serial>`. Its
+  1Password item is archived.
+
 ### Changed
 
 - The interface icons come from `@wired-square/icons`, Wired Square's own

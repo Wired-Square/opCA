@@ -143,6 +143,7 @@ fn main() {
             commands::cert::create_cert,
             commands::cert::revoke_cert,
             commands::cert::delete_cert,
+            commands::cert::delete_external_cert,
             commands::cert::renew_cert,
             commands::cert::rekey_cert,
             commands::cert::publish_cert,

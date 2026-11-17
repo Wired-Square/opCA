@@ -860,6 +860,15 @@ impl CertificateAuthorityDB {
         Ok(results)
     }
 
+    pub fn delete_external_cert(&mut self, serial: &str) -> Result<bool, OpcaError> {
+        let rows = self.conn.execute(
+            "DELETE FROM external_certificate WHERE serial = ?1",
+            [serial],
+        )?;
+        self.dirty |= rows > 0;
+        Ok(rows > 0)
+    }
+
     /// Count external certificates.
     pub fn count_external_certs(&self) -> Result<i64, OpcaError> {
         let count: i64 =

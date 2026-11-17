@@ -11,11 +11,13 @@ import RekeyDialog from "../components/RekeyDialog";
 const revokeCert = vi.hoisted(() => vi.fn());
 const ignoreCert = vi.hoisted(() => vi.fn());
 const deleteCert = vi.hoisted(() => vi.fn());
+const deleteExternalCert = vi.hoisted(() => vi.fn());
 vi.mock("../api/certs", async (actual) => ({
   ...(await actual<object>()),
   revokeCert,
   ignoreCert,
   deleteCert,
+  deleteExternalCert,
 }));
 
 const CERT = { serial: "131", cn: "vpn.example.com" };
@@ -58,6 +60,29 @@ describe("DeleteCertDialog", () => {
 
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(deleteCert).toHaveBeenCalledWith("131");
+    expect(onDone).toHaveBeenCalled();
+  });
+});
+
+describe("DeleteCertDialog for an external certificate", () => {
+  it("says nothing of the CRL", () => {
+    render(() => <DeleteCertDialog open external {...CERT} onClose={() => {}} onDone={() => {}} />);
+    expect(screen.getByText("vpn.example.com")).toBeInTheDocument();
+    expect(screen.queryByText(/CRL/)).not.toBeInTheDocument();
+  });
+
+  it("deletes through the external command", async () => {
+    deleteExternalCert.mockImplementation(() => Promise.resolve());
+    deleteCert.mockClear();
+    const onDone = vi.fn();
+    const onClose = vi.fn();
+    render(() => <DeleteCertDialog open external {...CERT} onClose={onClose} onDone={onDone} />);
+
+    screen.getByRole("button", { name: /^Delete/ }).click();
+
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(deleteExternalCert).toHaveBeenCalledWith("131");
+    expect(deleteCert).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalled();
   });
 });

@@ -15,6 +15,8 @@ import type { ExternalCertDetail } from "../api/types";
 import Spinner from "../components/Spinner";
 import Availability from "../components/Availability";
 import CopyPrivateKeyDialog from "../components/CopyPrivateKeyDialog";
+import ActionMenu from "../components/ActionMenu";
+import DeleteCertDialog from "../components/DeleteCertDialog";
 import "../styles/pages/cert-info.css";
 
 export default function ExternalCertInfo() {
@@ -29,6 +31,7 @@ export default function ExternalCertInfo() {
   const [copiedChain, flashChainAfter] = createFlash();
   const [copiedKey, flashKeyAfter] = createFlash();
   const [showKeyCopy, setShowKeyCopy] = createSignal(false);
+  const [showDelete, setShowDelete] = createSignal(false);
   onCleanup(() => void forgetPreloadedKey());
   const [backfilling, setBackfilling] = createSignal(false);
 
@@ -79,9 +82,17 @@ export default function ExternalCertInfo() {
     <div class="page-cert-info">
       <div class="page-header">
         <h2>External Certificate Detail</h2>
-        <button class="btn-ghost" onClick={() => navigate("/certs?tab=external")}>
-          Back to list
-        </button>
+        <div class="header-actions">
+          <button class="btn-ghost" onClick={() => navigate("/certs?tab=external")}>
+            Back to list
+          </button>
+          <Show when={detail()}>
+            <ActionMenu
+              items={[{ label: "Delete", danger: true, onSelect: () => setShowDelete(true) }]}
+              aria-label="Certificate actions"
+            />
+          </Show>
+        </div>
       </div>
 
       <div class="cert-info-scroll">
@@ -178,6 +189,15 @@ export default function ExternalCertInfo() {
                 label={d().cn ?? d().serial ?? ""}
                 onClose={() => setShowKeyCopy(false)}
                 onCopy={copyPrivateKey}
+              />
+
+              <DeleteCertDialog
+                external
+                open={showDelete()}
+                serial={d().serial ?? null}
+                cn={d().cn ?? null}
+                onClose={() => setShowDelete(false)}
+                onDone={() => navigate("/certs?tab=external")}
               />
             </>
           )}

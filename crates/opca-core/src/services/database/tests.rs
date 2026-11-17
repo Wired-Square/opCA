@@ -422,6 +422,24 @@ fn test_count_external_certs() {
     assert_eq!(db.count_external_certs().unwrap(), 1);
 }
 
+#[test]
+fn delete_external_cert_removes_only_that_row() {
+    let mut db = test_db();
+    for (serial, cn) in [("200", "a.example.com"), ("201", "b.example.com")] {
+        db.add_external_cert(&make_ext_cert(serial, cn, "20301231235959Z"))
+            .unwrap();
+    }
+    assert!(db.delete_external_cert("200").unwrap());
+    assert!(!db.delete_external_cert("200").unwrap());
+    let left: Vec<_> = db
+        .query_all_external_certs(None)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.serial)
+        .collect();
+    assert_eq!(left, ["201"]);
+}
+
 // -----------------------------------------------------------------------
 // CSRs
 // -----------------------------------------------------------------------

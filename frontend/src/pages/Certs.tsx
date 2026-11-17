@@ -127,6 +127,7 @@ export default function Certs() {
   const [ignoreTarget, setIgnoreTarget] = createSignal<CertListItem | null>(null);
   const [revokeTarget, setRevokeTarget] = createSignal<CertListItem | null>(null);
   const [deleteTarget, setDeleteTarget] = createSignal<CertListItem | null>(null);
+  const [deleteExternalTarget, setDeleteExternalTarget] = createSignal<ExternalCertListItem | null>(null);
   const [rekeyTarget, setRekeyTarget] = createSignal<CertListItem | null>(null);
 
   // --- Bulk multi-select (Local tab) ---------------------------------------
@@ -450,6 +451,8 @@ export default function Certs() {
 
       {/* External certificates tab */}
       <Show when={tab() === "external"}>
+        <ActionOutcome action={action} />
+
         <Show when={!externalCerts.loading && filteredExternal().length === 0}>
           <p class="text-muted mt-3">
             No external certificates found.
@@ -470,6 +473,7 @@ export default function Certs() {
                   <th>Expiry <DateModeToggle /></th>
                   <th>Imported</th>
                   <th>Actions</th>
+                  <th class="kebab-col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -493,6 +497,9 @@ export default function Certs() {
                         >
                           {generatingSerial() === cert.serial ? "Generating\u2026" : "Generate CSR"}
                         </button>
+                      </td>
+                      <td class="kebab-col" onClick={(e) => e.stopPropagation()}>
+                        <ActionMenu items={[{ label: "Delete", danger: true, onSelect: () => setDeleteExternalTarget(cert) }]} />
                       </td>
                     </tr>
                   )}
@@ -630,6 +637,15 @@ export default function Certs() {
         cn={deleteTarget()?.cn ?? null}
         onClose={() => setDeleteTarget(null)}
         onDone={() => { const c = deleteTarget(); if (c) { action.succeed(`Deleted ${certLabel(c)}`); refetchLocal(); } }}
+      />
+
+      <DeleteCertDialog
+        external
+        open={!!deleteExternalTarget()}
+        serial={deleteExternalTarget()?.serial ?? null}
+        cn={deleteExternalTarget()?.cn ?? null}
+        onClose={() => setDeleteExternalTarget(null)}
+        onDone={() => { const c = deleteExternalTarget(); if (c) { action.succeed(`Deleted ${certLabel(c)}`); refetchExternal(); } }}
       />
 
       <RekeyDialog

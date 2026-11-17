@@ -1,5 +1,5 @@
 use opca_core::services::cert::{CertBundleConfig, CertType, CertificateBundle, KeyAlgorithm};
-use opca_core::services::database::{CaConfig, CertLookup};
+use opca_core::services::database::{CaConfig, CertLookup, ExternalCertRecord};
 use opca_core::testutil::{Output, created, item_json};
 use serde_json::{Value, json};
 
@@ -17,6 +17,7 @@ fn handler() -> impl Handler {
         renew_cert,
         revoke_cert,
         delete_cert,
+        delete_external_cert,
         bulk_revoke_certs,
         bulk_delete_certs,
         get_ca_config,
@@ -285,6 +286,68 @@ fn delete_cert_refuses_a_valid_cert_and_leaves_1password_alone() {
         err.as_str().unwrap().contains("revoke it before deleting"),
         "{err}"
     );
+    assert!(h.op_calls(&["item", "delete"]).is_empty());
+    assert!(!h.last_log().success);
+}
+
+fn add_external(h: &Harness, cn: &str) {
+    let state = h.state();
+    let mut conn = state.conn.lock().unwrap();
+    conn.ca
+        .as_mut()
+        .unwrap()
+        .ca_database
+        .as_mut()
+        .unwrap()
+        .add_external_cert(&ExternalCertRecord {
+            serial: "ABC123".into(),
+            cn: Some(cn.into()),
+            title: Some(cn.into()),
+            status: Some("Valid".into()),
+            ..Default::default()
+        })
+        .unwrap();
+}
+
+#[test]
+fn delete_external_cert_archives_a_valid_cert_and_drops_its_row() {
+    let h = Harness::with_ca(vec![], handler());
+    add_external(&h, "ext.example.com");
+    h.answer_writes(2);
+
+    assert_eq!(
+        h.invoke("delete_external_cert", json!({ "serial": "ABC123" })),
+        Ok(Value::Null)
+    );
+    let deletes = h.op_calls(&["item", "delete"]);
+    assert_eq!(deletes.len(), 1);
+    assert_eq!(deletes[0][2], "EXT_ext.example.com");
+    assert_eq!(
+        h.state()
+            .conn
+            .lock()
+            .unwrap()
+            .db()
+            .unwrap()
+            .count_external_certs()
+            .unwrap(),
+        0
+    );
+    let log = h.last_log();
+    assert_eq!(
+        (log.action.as_str(), log.success),
+        ("delete_external_cert", true)
+    );
+}
+
+#[test]
+fn delete_external_cert_reports_an_unknown_serial() {
+    let h = Harness::with_ca(vec![], handler());
+
+    let err = h
+        .invoke("delete_external_cert", json!({ "serial": "NOPE" }))
+        .unwrap_err();
+    assert!(err.as_str().unwrap().contains("NOPE"), "{err}");
     assert!(h.op_calls(&["item", "delete"]).is_empty());
     assert!(!h.last_log().success);
 }
