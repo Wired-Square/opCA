@@ -247,7 +247,7 @@ jobs:
         uses: dtolnay/rust-toolchain@1.99
 
       - name: Install the archive signer and erratum checker
-        run: cargo install wslib-appliance-xtask --registry wired-square --locked
+        run: cargo install wslib-appliance-xtask --registry wired-square-mirror --locked
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
