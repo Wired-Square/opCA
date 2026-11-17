@@ -8,7 +8,7 @@ import { createVault, listVaults } from "../api/vaults";
 import type { AccountInfo, VaultInfo } from "../api/types";
 import { setAppState, type VaultState } from "../stores/app";
 import { availableUpdate, fetchUpdate } from "../stores/update";
-import Icon from "../components/Icon";
+import { arrowDownCircle } from "@wired-square/icons/solid";
 import Spinner from "../components/Spinner";
 import { Popover, PopoverOption, SchemePicker } from "@wired-square/kit";
 import "../styles/pages/connect.css";
@@ -408,7 +408,7 @@ export default function Connect() {
               onClick={() => open(update().url)}
               title={`Update available: ${update().version}`}
             >
-              <span class="connect-update-icon"><Icon name="update" /></span>
+              <span class="connect-update-icon">{arrowDownCircle()}</span>
               Update available: {update().version}
             </button>
           )}

@@ -1,33 +1,37 @@
 import { For, Show, createSignal, onMount } from "solid-js";
+import type { JSX } from "solid-js";
 import { A, useLocation, useNavigate } from "@solidjs/router";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-shell";
 import { appState, disconnect, hasCA } from "../../stores/app";
 import { availableUpdate, fetchUpdate } from "../../stores/update";
 import { operationLabel } from "../../stores/operation";
-import Icon from "../Icon";
+import {
+  arrowDownCircle, certificate, certificatePen, certificateStruck, database, envelopeKey, exit,
+  gauge, ledger, safe, seal, server, tunnel,
+} from "@wired-square/icons/solid";
 import "../../styles/components/sidebar.css";
 
 interface NavItem {
   label: string;
   path: string;
-  icon: string;
+  icon: () => JSX.Element;
   /** When true, this item requires an initialised CA. */
   gated?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", path: "/dashboard", icon: "dashboard", gated: true },
-  { label: "ACME Servers", path: "/acme", icon: "acme", gated: true },
-  { label: "CA", path: "/ca", icon: "ca" },
-  { label: "Certificates", path: "/certs", icon: "cert", gated: true },
-  { label: "CRL", path: "/crl", icon: "crl", gated: true },
-  { label: "CSR", path: "/csr", icon: "csr", gated: true },
-  { label: "DKIM", path: "/dkim", icon: "dkim", gated: true },
-  { label: "OpenVPN", path: "/openvpn", icon: "vpn", gated: true },
-  { label: "Database", path: "/database", icon: "database", gated: true },
-  { label: "Vault", path: "/vault", icon: "vault" },
-  { label: "Log", path: "/log", icon: "log" },
+  { label: "Dashboard", path: "/dashboard", icon: gauge, gated: true },
+  { label: "ACME Servers", path: "/acme", icon: server, gated: true },
+  { label: "CA", path: "/ca", icon: seal },
+  { label: "Certificates", path: "/certs", icon: certificate, gated: true },
+  { label: "CRL", path: "/crl", icon: certificateStruck, gated: true },
+  { label: "CSR", path: "/csr", icon: certificatePen, gated: true },
+  { label: "DKIM", path: "/dkim", icon: envelopeKey, gated: true },
+  { label: "OpenVPN", path: "/openvpn", icon: tunnel, gated: true },
+  { label: "Database", path: "/database", icon: database, gated: true },
+  { label: "Vault", path: "/vault", icon: safe },
+  { label: "Log", path: "/log", icon: ledger },
 ];
 
 export default function Sidebar() {
@@ -68,7 +72,7 @@ export default function Sidebar() {
               onClick={() => open(update().url)}
               title={`Update available: ${update().version}`}
             >
-              <span class="update-icon"><Icon name="update" /></span>
+              <span class="update-icon">{arrowDownCircle()}</span>
               Update available
             </button>
           )}
@@ -93,7 +97,7 @@ export default function Sidebar() {
                   if (disabled()) e.preventDefault();
                 }}
               >
-                <span class="sidebar-icon" aria-hidden="true"><Icon name={item.icon} /></span>
+                <span class="sidebar-icon" aria-hidden="true">{item.icon()}</span>
                 <span class="sidebar-label">{item.label}</span>
               </A>
             );
@@ -110,7 +114,7 @@ export default function Sidebar() {
           )}
         </Show>
         <button class="sidebar-link logout-btn" onClick={handleLogout}>
-          <span class="sidebar-icon"><Icon name="logout" /></span>
+          <span class="sidebar-icon">{exit()}</span>
           <span class="sidebar-label">Disconnect</span>
         </button>
       </div>

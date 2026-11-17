@@ -2,7 +2,7 @@ import { Show, Switch, Match } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { appState, disconnect } from "../../stores/app";
 import { SchemePicker } from "@wired-square/kit";
-import Icon from "../Icon";
+import { exit } from "@wired-square/icons/solid";
 import "../../styles/components/header.css";
 
 export default function Header() {
@@ -46,7 +46,7 @@ export default function Header() {
       <div class="header-actions">
         <SchemePicker />
         <button class="btn-ghost disconnect-btn" onClick={handleLogout} aria-label="Disconnect" title="Disconnect">
-          <Icon name="logout" />
+          {exit()}
         </button>
       </div>
     </header>

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The interface icons come from `@wired-square/icons`, Wired Square's own
+  set, replacing glyphs adapted from Feather and Lucide. The kit's copy,
+  clear and colour-scheme glyphs are replaced the same way.
 - CI reads the `mirror.wiredsquare.com` cargo and npm mirror without a
   token: it is public.
 
