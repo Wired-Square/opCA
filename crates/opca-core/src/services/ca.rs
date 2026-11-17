@@ -1419,8 +1419,7 @@ impl<R: Runner> CertificateAuthority<R> {
             .query_external_cert(&CertLookup::Serial(serial.to_string()), false)?
             .ok_or_else(|| OpcaError::CertificateNotFound(serial.to_string()))?;
 
-        if let Some(title) = cert.title.as_deref().or(cert.cn.as_deref()) {
-            let item_title = format!("EXT_{}", title.strip_prefix("EXT_").unwrap_or(title));
+        if let Some(item_title) = cert.item_title() {
             match self.vault.delete_item(&ItemRef::title(&item_title)) {
                 Ok(()) | Err(Error::ItemNotFound(_)) => {}
                 Err(e) => return Err(e.into()),

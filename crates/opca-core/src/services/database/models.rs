@@ -124,6 +124,18 @@ pub struct ExternalCertRecord {
     pub has_chain: Option<bool>,
 }
 
+impl ExternalCertRecord {
+    /// The 1Password item title: `EXT_` and the row title (v5→v6 migrated rows
+    /// already carry the prefix), else `EXT_<cn>`.
+    pub fn item_title(&self) -> Option<String> {
+        let title = self.title.as_deref().or(self.cn.as_deref())?;
+        Some(format!(
+            "EXT_{}",
+            title.strip_prefix("EXT_").unwrap_or(title)
+        ))
+    }
+}
+
 /// A certificate signing request record.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CsrRecord {

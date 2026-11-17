@@ -343,7 +343,7 @@ fn handle_list<R: Runner>(
             rows.push(vec![
                 ext.serial.clone(),
                 ext.cn.clone().unwrap_or_default(),
-                format!("EXT_{}", ext.cn.clone().unwrap_or_default()),
+                ext.item_title().unwrap_or_default(),
                 ext.cert_type
                     .clone()
                     .unwrap_or_else(|| "external".to_string()),

@@ -14,6 +14,7 @@ use opca_core::services::san;
 use opca_core::utils::datetime::{DateTimeFormat, now_utc_str};
 use wslib_crypto_ca::CsrView;
 
+use crate::commands::cert::external_item_title;
 use crate::commands::dto::{
     CertListItem, CreateCsrRequest, CreateCsrResult, CsrListItem, DecodeCsrResult,
     GenerateCsrFromCertRequest, ImportCsrCertRequest, InspectCsrResult, SignCsrRequest,
@@ -553,9 +554,7 @@ pub async fn generate_csr_from_cert(
         .ok_or("External certificate not found")?;
 
     let cn = record.cn.clone().ok_or("External certificate has no CN")?;
-    // 1Password title is always EXT_<cn>; the DB `title` may legacy-store the
-    // un-prefixed CN.
-    let title = format!("EXT_{cn}");
+    let title = external_item_title(&record)?;
 
     let csr_title = format!("CSR_{}", cn);
     if ca
