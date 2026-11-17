@@ -261,4 +261,25 @@ mod tests {
         );
         assert!(parse(&["device_days=soon"]).is_err());
     }
+
+    #[test]
+    fn config_set_refuses_crl_batches_without_a_private_store() {
+        use opca_core::constants::DEFAULT_OP_CONF;
+        use opca_core::services::database::CertificateAuthorityDB;
+        use opca_core::testutil::{FakeRunner, fake_vault};
+
+        let mut app = AppContext::with_ca(CertificateAuthority {
+            vault: fake_vault(&FakeRunner::new()),
+            op_config: DEFAULT_OP_CONF,
+            ca_bundle: None,
+            ca_database: Some(CertificateAuthorityDB::new(&CaConfig::default()).unwrap()),
+            crl: None,
+            local_backup: None,
+        });
+
+        let err = handle_config_set(&mut app, vec!["crl_batch_enabled=true".into()]).unwrap_err();
+        assert!(err.to_string().contains("need a private store"), "{err}");
+        let config = app.ca.unwrap().ca_database.unwrap().get_config().unwrap();
+        assert_eq!(config.crl_batch_enabled, None);
+    }
 }

@@ -23,5 +23,8 @@ pub fn spki_fingerprint(spki: &[u8]) -> String {
 
 /// Pasted PEM often arrives indented (from an email, a YAML file or a terminal); OpenSSL rejects that.
 pub fn strip_line_indentation(pem: &str) -> String {
-    pem.lines().map(str::trim_start).collect::<Vec<_>>().join("\n")
+    pem.lines()
+        .map(str::trim_start)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
