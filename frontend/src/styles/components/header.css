@@ -65,7 +65,7 @@
 .disconnect-btn svg {
   width: 16px;
   height: 16px;
-  --icon-stroke: 1.75;
+  stroke-width: 1.75;
 }
 
 .disconnect-btn:hover {

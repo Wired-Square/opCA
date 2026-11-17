@@ -115,7 +115,7 @@
 .sidebar-icon svg {
   width: 18px;
   height: 18px;
-  --icon-stroke: 1.75;
+  stroke-width: 1.75;
 }
 
 .sidebar-label {

@@ -58,5 +58,5 @@ button.stored-tag.stored-blocked:disabled {
   flex-shrink: 0;
   width: 11px;
   height: 11px;
-  --icon-stroke: 2.25;
+  stroke-width: 2.25;
 }
