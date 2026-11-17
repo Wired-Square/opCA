@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   clear and colour-scheme glyphs are replaced the same way.
 - CI reads the `mirror.wiredsquare.com` cargo and npm mirror without a
   token: it is public.
+- The release build signs the opca-acme app with the Wired Square
+  code-signing leaf from organisation secrets instead of 1Password.
+  `scripts/build-acme-app.sh` reads it from `WIRED_SQUARE_SIGNING_CERT` and
+  `WIRED_SQUARE_SIGNING_KEY` when set.
 
 ### Fixed
 
