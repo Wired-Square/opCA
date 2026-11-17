@@ -315,8 +315,8 @@ To build it and pack it into an archive the console's **Apps › Install** takes
 scripts/build-acme-app.sh [--keys <dir>] [--source <name>] --platform linux/arm64
 ```
 
-It needs Docker with buildx, OpenSSL 3, `jq`, npm, `wslib-appliance-xtask` for arm64, and an ApplianceOS checkout (`APPLIANCEOS`, by
-default `../ApplianceOS`). The page is built first, with npm from the Wired Square mirror
+It needs Docker with buildx, npm and `wslib-appliance-xtask` 0.2.8 or later, which signs and packs
+the archive and checks an arm64 binary for the erratum. The page is built first, with npm from the Wired Square mirror
 (`ui/.npmrc`). The image and the archive land in `target/acme-app/`; `--image <image.tar>`
 signs and packs a tarball built before instead, beside it.
 
@@ -324,9 +324,9 @@ signs and packs a tarball built before instead, beside it.
 nothing needs adding under **Apps › Sources**: download `opca-acme-<version>-<arch>-wired-square.tar`
 from the GitHub release and install it. `--source wired-square` reads the `WiredSquare-Codesigning`
 leaf from 1Password (`op`, which asks to approve), or from `WIRED_SQUARE_SIGNING_CERT` and
-`WIRED_SQUARE_SIGNING_KEY` (PEM) when set, as in CI, pipes its key to OpenSSL without writing it out,
-and refuses a leaf that isn't a code-signing leaf of the root ApplianceOS ships
-(the PEM in `WIRED_SQUARE_APPS_ROOT` replaces it, as in CI and the tests). With `--keys <dir>` it signs with that leaf instead,
+`WIRED_SQUARE_SIGNING_KEY` (PEM) when set, as in CI, pipes its key to the xtask without writing it out,
+and refuses a leaf that isn't a code-signing leaf of the Wired Square Apps root, whose PEM it takes
+from `WIRED_SQUARE_APPS_ROOT`. With `--keys <dir>` it signs with that leaf instead,
 still checked.
 
 **Test archives** sign as source `opca-test` (the default; `--source` names another) with the

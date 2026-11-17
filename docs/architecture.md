@@ -1560,18 +1560,17 @@ the Dockerfile copies that `dist`, its `.gz` files included, into
 [examples/appliance-label.rs](../crates/opca-acme-broker/examples/appliance-label.rs)
 builds from `wslib-appliance-types`' `AppManifest` and checks with its
 validator (its tests run under `cargo test`), writes a docker-load tarball to
-`target/acme-app/`, and packs it with a signed index using ApplianceOS's
-`app-index.sh` (`--image` packs a tarball built before). Source `opca-test`, the
+`target/acme-app/`, and packs it with a signed index using `wslib-appliance-xtask
+app-archive pack` (`--image` packs a tarball built before). Source `opca-test`, the
 default, signs with throwaway keys. Source `wired-square`, which every image
 ships, signs with the `WiredSquare-Codesigning` leaf read from 1Password, its
-key piped to OpenSSL and never written out, or with the PEM in
-`WIRED_SQUARE_SIGNING_CERT` and `WIRED_SQUARE_SIGNING_KEY` when set, once the leaf passes `openssl verify
--purpose codesign` against ApplianceOS's shipped `wired-square.pem`
-(the PEM in `WIRED_SQUARE_APPS_ROOT` overrides it). [tests/app-signing.sh](../crates/opca-acme-broker/tests/app-signing.sh)
+key piped to the xtask and never written out, or with the PEM in
+`WIRED_SQUARE_SIGNING_CERT` and `WIRED_SQUARE_SIGNING_KEY` when set, once
+`app-archive verify` passes the leaf against the Wired Square Apps root in
+`WIRED_SQUARE_APPS_ROOT`, as the console's chain check would. [tests/app-signing.sh](../crates/opca-acme-broker/tests/app-signing.sh)
 checks both on a stand-in tarball with throwaway keys and a stand-in `op`. On a
 `v*` tag, the Build workflow's `acme-app` job builds both arches signed as
-`wired-square` and attaches them to the draft release, with an ApplianceOS
-checkout of its archive scripts (`APPLIANCEOS_READ_TOKEN`), the leaf and its key as the
+`wired-square` and attaches them to the draft release, with the leaf and its key as the
 `WIRED_SQUARE_SIGNING_CERT` and `WIRED_SQUARE_SIGNING_KEY` secrets, and the root as the
 `WIRED_SQUARE_APPS_ROOT` variable. With `OPCA_ACME_APP_IMAGE` naming
 the tarball, `broker_docker.rs` runs the image as the console would (its own

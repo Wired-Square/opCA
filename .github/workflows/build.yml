@@ -230,22 +230,11 @@ jobs:
             platform: linux/amd64
     runs-on: ${{ matrix.runner }}
 
-    env:
-      APPLIANCEOS: ${{ github.workspace }}/ApplianceOS
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           ref: ${{ needs.create-release.outputs.tag }}
-
-      - name: Checkout ApplianceOS's app archive scripts
-        uses: actions/checkout@v5
-        with:
-          repository: Wired-Square/ApplianceOS
-          token: ${{ secrets.APPLIANCEOS_READ_TOKEN }}
-          path: ApplianceOS
-          sparse-checkout: scripts
 
       - name: Read the wslib crates from the registry mirror
         run: |
@@ -255,8 +244,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.99
 
-      - name: Install the erratum checker
-        if: matrix.platform == 'linux/arm64'
+      - name: Install the archive signer and erratum checker
         run: cargo install wslib-appliance-xtask --registry wired-square --locked
 
       - name: Setup Node.js

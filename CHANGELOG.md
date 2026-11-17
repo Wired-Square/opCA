@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `scripts/build-acme-app.sh` reads it from `WIRED_SQUARE_SIGNING_CERT` and
   `WIRED_SQUARE_SIGNING_KEY` when set, and the root from
   `WIRED_SQUARE_APPS_ROOT`.
+- `scripts/build-acme-app.sh` signs and packs the app archive with
+  `wslib-appliance-xtask` 0.2.8 instead of ApplianceOS's scripts, so it no
+  longer needs an ApplianceOS checkout, OpenSSL or `jq`.
 
 ### Fixed
 
