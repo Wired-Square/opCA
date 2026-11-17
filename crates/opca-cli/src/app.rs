@@ -100,6 +100,15 @@ impl<R: Runner> AppContext<R> {
         };
         self.vault_lock.release(vault)
     }
+
+    #[cfg(test)]
+    pub fn with_ca(ca: CertificateAuthority<R>) -> Self {
+        Self {
+            standalone_vault: None,
+            ca: Some(ca),
+            vault_lock: VaultLock::new(None),
+        }
+    }
 }
 
 /// Execute a closure while holding the vault lock, ensuring the lock
