@@ -10,6 +10,7 @@ use opca_core::services::database::{CertificateAuthorityDB, CrlMetadata};
 use opca_core::utils::datetime::{DateTimeFormat, format_datetime};
 
 use crate::commands::dto::{CrlBatchDto, CrlInfo, InspectCrlResult};
+use crate::commands::inspect_helpers::strip_line_indentation;
 use crate::state::AppState;
 
 /// Project the database CRL metadata (and optionally the just-fetched PEM)
@@ -112,7 +113,7 @@ pub async fn backfill_crl(state: State<'_, AppState>) -> Result<CrlInfo, String>
 
 #[tauri::command]
 pub async fn inspect_crl(crl_pem: String) -> Result<InspectCrlResult, String> {
-    let crl = X509Crl::from_pem(crl_pem.as_bytes())
+    let crl = X509Crl::from_pem(strip_line_indentation(&crl_pem).as_bytes())
         .map_err(|e| format!("Failed to parse CRL PEM: {e}"))?;
 
     let text_dump = crl_to_text(&crl).map_err(|e| format!("Failed to render CRL text: {e}"))?;
