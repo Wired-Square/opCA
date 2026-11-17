@@ -239,15 +239,13 @@ jobs:
         with:
           ref: ${{ needs.create-release.outputs.tag }}
 
-      - name: Checkout ApplianceOS's app signing scripts and shipped roots
+      - name: Checkout ApplianceOS's app archive scripts
         uses: actions/checkout@v5
         with:
           repository: Wired-Square/ApplianceOS
           token: ${{ secrets.APPLIANCEOS_READ_TOKEN }}
           path: ApplianceOS
-          sparse-checkout: |
-            scripts
-            layers/meta-applianceos/recipes-apps/applianceos-app-sources/files
+          sparse-checkout: scripts
 
       - name: Read the wslib crates from the registry mirror
         run: |
@@ -272,6 +270,7 @@ jobs:
         env:
           WIRED_SQUARE_SIGNING_CERT: ${{ secrets.WIRED_SQUARE_SIGNING_CERT }}
           WIRED_SQUARE_SIGNING_KEY: ${{ secrets.WIRED_SQUARE_SIGNING_KEY }}
+          WIRED_SQUARE_APPS_ROOT: ${{ vars.WIRED_SQUARE_APPS_ROOT }}
         run: scripts/build-acme-app.sh --source wired-square --platform ${{ matrix.platform }}
 
       - name: Upload release asset

@@ -60,7 +60,7 @@ esac
 EOF
 chmod +x "$t/bin/op"
 
-signs() { WIRED_SQUARE_ROOT=$t/shipped/root.pem PATH=$t/bin:$PATH "$build" --image "$t/opca-acme.tar" "$@"; }
+signs() { WIRED_SQUARE_APPS_ROOT=$(cat "$t/shipped/root.pem") PATH=$t/bin:$PATH "$build" --image "$t/opca-acme.tar" "$@"; }
 verifies() {
     local archive=$1 source=$2 root=$3
     rm -rf "$t/out" && mkdir "$t/out" && tar -xf "$archive" -C "$t/out"

@@ -326,7 +326,7 @@ from the GitHub release and install it. `--source wired-square` reads the `Wired
 leaf from 1Password (`op`, which asks to approve), or from `WIRED_SQUARE_SIGNING_CERT` and
 `WIRED_SQUARE_SIGNING_KEY` (PEM) when set, as in CI, pipes its key to OpenSSL without writing it out,
 and refuses a leaf that isn't a code-signing leaf of the root ApplianceOS ships
-(`WIRED_SQUARE_ROOT` names another, for tests). With `--keys <dir>` it signs with that leaf instead,
+(the PEM in `WIRED_SQUARE_APPS_ROOT` replaces it, as in CI and the tests). With `--keys <dir>` it signs with that leaf instead,
 still checked.
 
 **Test archives** sign as source `opca-test` (the default; `--source` names another) with the

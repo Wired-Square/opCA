@@ -7,7 +7,7 @@
 # WiredSquare-Codesigning leaf from 1Password, its key piped to openssl and
 # never written out, or with the PEM in WIRED_SQUARE_SIGNING_CERT and
 # WIRED_SQUARE_SIGNING_KEY when set (CI), once the leaf is a code-signing leaf of the root
-# ApplianceOS ships (WIRED_SQUARE_ROOT overrides it). With --keys, any source
+# ApplianceOS ships (the PEM in WIRED_SQUARE_APPS_ROOT overrides it). With --keys, any source
 # signs with <dir>'s leaf.pem and leaf.key, made there by make-app-archive.sh
 # when it holds none. Without either, a test source (opca-test by default)
 # signs with OPCA_TEST_SIGNING_CERT and OPCA_TEST_SIGNING_KEY from .env (base64
@@ -77,9 +77,14 @@ else
     signing_key() { printf %s "$OPCA_TEST_SIGNING_KEY" | base64 -d; }
 fi
 if [[ $source == wired-square ]]; then
-    shipped=${WIRED_SQUARE_ROOT:-$appliance/layers/meta-applianceos/recipes-apps/applianceos-app-sources/files/wired-square.pem}
+    shipped=$work/root.pem
+    if [[ -n ${WIRED_SQUARE_APPS_ROOT:-} ]]; then
+        printf '%s\n' "$WIRED_SQUARE_APPS_ROOT" >"$shipped"
+    else
+        cp "$appliance/layers/meta-applianceos/recipes-apps/applianceos-app-sources/files/wired-square.pem" "$shipped"
+    fi
     "$openssl" verify -CAfile "$shipped" -untrusted "$work/signer.pem" -purpose codesign "$work/signer.pem" >/dev/null ||
-        { echo "the signer is not a code-signing leaf of $shipped" >&2; exit 1; }
+        { echo "the signer is not a code-signing leaf of the Wired Square Apps root" >&2; exit 1; }
 fi
 
 if [[ -z $image ]]; then
